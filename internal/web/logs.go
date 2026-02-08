@@ -2,12 +2,15 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 
+	"github.com/opentrace/opentrace/internal/connector"
 	"github.com/opentrace/opentrace/internal/store"
 )
 
@@ -71,9 +74,67 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if count > 0 {
+		s.ensureLogsConnector(r.Context())
+	}
+
 	status := http.StatusCreated
 	if count == 0 {
 		status = http.StatusOK
 	}
 	writeJSON(w, status, map[string]int{"count": count})
+}
+
+// ensureLogsConnector auto-creates and registers a logs connector if one
+// doesn't already exist. Called once (via sync.Once) after the first
+// successful log ingestion so the AI agent can use the log_search tool.
+func (s *Server) ensureLogsConnector(ctx context.Context) {
+	s.logsConnectorOnce.Do(func() {
+		// Fast path: already registered in memory
+		if s.registry.Get(connector.ConnectorLogs) != nil {
+			return
+		}
+
+		// Check if a logs data source row already exists in the DB
+		sources, err := s.dsStore.List(ctx)
+		if err != nil {
+			log.Printf("WARN: ensureLogsConnector: failed to list data sources: %v", err)
+			return
+		}
+		var dsID *store.DataSource
+		for i := range sources {
+			if sources[i].Type == store.ConnectorLogs {
+				dsID = &sources[i]
+				break
+			}
+		}
+
+		// Create DB row if it doesn't exist
+		if dsID == nil {
+			created, err := s.dsStore.Create(ctx, store.CreateDataSourceParams{
+				Type:   store.ConnectorLogs,
+				Name:   "Log Ingestion",
+				Config: map[string]any{},
+			})
+			if err != nil {
+				log.Printf("WARN: ensureLogsConnector: failed to create data source: %v", err)
+				return
+			}
+			dsID = created
+		}
+
+		// Create and register the runtime connector
+		lc := connector.NewLogsConnector(s.logStore)
+		s.registry.Register(lc)
+
+		// Update DB status to connected
+		connected := store.StatusConnected
+		if _, err := s.dsStore.Update(ctx, dsID.ID, store.UpdateDataSourceParams{
+			Status: &connected,
+		}); err != nil {
+			log.Printf("WARN: ensureLogsConnector: failed to update status: %v", err)
+		}
+
+		log.Printf("INFO: auto-registered logs connector (data source %s)", dsID.ID)
+	})
 }

@@ -3,6 +3,7 @@ package web
 import (
 	"io/fs"
 	"net/http"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -15,14 +16,15 @@ import (
 
 // Server holds the HTTP server and its dependencies.
 type Server struct {
-	Router      chi.Router
-	dsStore     store.DataSourceStore
-	logStore    store.LogStore
-	embStore    store.EmbeddingStore
-	registry    *connector.Registry
-	cfg         *config.Config
-	embedder    llm.EmbeddingProvider
-	llmProvider llm.LLMProvider
+	Router            chi.Router
+	dsStore           store.DataSourceStore
+	logStore          store.LogStore
+	embStore          store.EmbeddingStore
+	registry          *connector.Registry
+	cfg               *config.Config
+	embedder          llm.EmbeddingProvider
+	llmProvider       llm.LLMProvider
+	logsConnectorOnce sync.Once
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.

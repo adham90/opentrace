@@ -23,6 +23,15 @@ func setupTestServerWithLogStore() (*Server, *mockLogStore) {
 	return srv, ls
 }
 
+func setupTestServerFull() (*Server, *mockDataSourceStore, *mockLogStore, *connector.Registry) {
+	ms := newMockStore()
+	ls := newMockLogStore()
+	es := newMockEmbeddingStore()
+	reg := connector.NewRegistry()
+	srv := NewServer(ms, ls, es, reg, nil, nil)
+	return srv, ms, ls, reg
+}
+
 func setupTestServerWithAPIKey(apiKey string) (*Server, *mockLogStore) {
 	ms := newMockStore()
 	ls := newMockLogStore()
@@ -289,6 +298,79 @@ func TestLogsPage_WithFilters(t *testing.T) {
 	}
 	if params.Limit != 100 {
 		t.Errorf("limit = %d, want %d", params.Limit, 100)
+	}
+}
+
+func TestIngestLogs_AutoCreatesLogsConnector(t *testing.T) {
+	srv, ms, _, reg := setupTestServerFull()
+
+	body := `{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","message":"auto-register test"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	// Verify connector is registered in the registry
+	if reg.Get(connector.ConnectorLogs) == nil {
+		t.Fatal("expected logs connector to be registered in registry")
+	}
+
+	// Verify data source row was created in the store
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	var found bool
+	for _, ds := range ms.sources {
+		if ds.Type == store.ConnectorLogs {
+			found = true
+			if ds.Name != "Log Ingestion" {
+				t.Errorf("data source name = %q, want %q", ds.Name, "Log Ingestion")
+			}
+			if ds.Status != store.StatusConnected {
+				t.Errorf("data source status = %q, want %q", ds.Status, store.StatusConnected)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected logs data source row in store")
+	}
+}
+
+func TestIngestLogs_AutoCreate_AlreadyExists(t *testing.T) {
+	srv, ms, _, reg := setupTestServerFull()
+
+	// Pre-register a logs connector
+	preExisting := connector.NewLogsConnector(newMockLogStore())
+	reg.Register(preExisting)
+
+	body := `{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","message":"already exists test"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	// Registry should still have the connector
+	if reg.Get(connector.ConnectorLogs) == nil {
+		t.Fatal("expected logs connector to remain registered")
+	}
+
+	// No data source row should have been created (fast path: already registered)
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	for _, ds := range ms.sources {
+		if ds.Type == store.ConnectorLogs {
+			t.Fatal("expected no new data source row when connector already registered")
+		}
 	}
 }
 
