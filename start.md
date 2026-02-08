@@ -530,12 +530,12 @@ OPENTRACE_MAX_OBSERVATION_BYTES=8192
 
 ### Phase 3 -- Agent Core
 
-1. Agent loop with echo tool
-2. JSON-mode responses with repair/retry
-3. Tool argument validation
-4. Observation truncation
-5. Dynamic tool registration from connector registry
-6. Dynamic system prompt builder
+1. ✅ Agent loop with echo tool
+2. ✅ JSON-mode responses with repair/retry
+3. ✅ Tool argument validation
+4. ✅ Observation truncation
+5. ✅ Dynamic tool registration from connector registry
+6. ✅ Dynamic system prompt builder
 
 ### Phase 4 -- Connectors & Tools
 
