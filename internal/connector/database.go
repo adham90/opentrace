@@ -4,16 +4,27 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/opentrace/opentrace/internal/agent"
 	"github.com/opentrace/opentrace/internal/guardrail"
 )
 
+// schemaCacheEntry holds a cached schema query result with its fetch time.
+type schemaCacheEntry struct {
+	content   string
+	fetchedAt time.Time
+}
+
 // DatabaseConnector implements DataSource for querying a target PostgreSQL database.
 type DatabaseConnector struct {
-	pool    *pgxpool.Pool
-	maxRows int
+	pool        *pgxpool.Pool
+	maxRows     int
+	cacheMu     sync.RWMutex
+	schemaCache map[string]schemaCacheEntry // key: "" for table list, "tablename" for columns
+	cacheTTL    time.Duration
 }
 
 // NewDatabaseConnector creates a new DatabaseConnector with a connection to the target DB.
@@ -41,8 +52,10 @@ func NewDatabaseConnector(ctx context.Context, connStr string, maxRows, stmtTime
 	}
 
 	return &DatabaseConnector{
-		pool:    pool,
-		maxRows: maxRows,
+		pool:        pool,
+		maxRows:     maxRows,
+		schemaCache: make(map[string]schemaCacheEntry),
+		cacheTTL:    5 * time.Minute,
 	}, nil
 }
 
@@ -149,32 +162,65 @@ func (c *DatabaseConnector) handleDbSearch(ctx context.Context, args map[string]
 
 func (c *DatabaseConnector) handleDbSchema(ctx context.Context, args map[string]any) (string, error) {
 	table, _ := args["table"].(string)
+	cacheKey := table // "" for table list
 
-	if table == "" {
-		// List all tables
-		rows, err := c.pool.Query(ctx,
-			`SELECT table_schema, table_name, table_type
-			 FROM information_schema.tables
-			 WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-			 ORDER BY table_schema, table_name`)
-		if err != nil {
-			return "", fmt.Errorf("listing tables: %w", err)
+	// Check cache (nil-safe for zero-value structs in tests)
+	if c.schemaCache != nil {
+		c.cacheMu.RLock()
+		if entry, ok := c.schemaCache[cacheKey]; ok && time.Since(entry.fetchedAt) < c.cacheTTL {
+			c.cacheMu.RUnlock()
+			return entry.content, nil
 		}
-		defer rows.Close()
-
-		var sb strings.Builder
-		sb.WriteString("Tables:\n")
-		for rows.Next() {
-			var schema, name, ttype string
-			if err := rows.Scan(&schema, &name, &ttype); err != nil {
-				return "", fmt.Errorf("scanning table row: %w", err)
-			}
-			sb.WriteString(fmt.Sprintf("  %s.%s (%s)\n", schema, name, ttype))
-		}
-		return sb.String(), rows.Err()
+		c.cacheMu.RUnlock()
 	}
 
-	// Columns for a specific table
+	// Cache miss — query the database
+	result, err := c.querySchema(ctx, table)
+	if err != nil {
+		return "", err
+	}
+
+	// Store in cache
+	if c.schemaCache != nil {
+		c.cacheMu.Lock()
+		c.schemaCache[cacheKey] = schemaCacheEntry{content: result, fetchedAt: time.Now()}
+		c.cacheMu.Unlock()
+	}
+
+	return result, nil
+}
+
+func (c *DatabaseConnector) querySchema(ctx context.Context, table string) (string, error) {
+	if table == "" {
+		return c.queryTableList(ctx)
+	}
+	return c.queryTableColumns(ctx, table)
+}
+
+func (c *DatabaseConnector) queryTableList(ctx context.Context) (string, error) {
+	rows, err := c.pool.Query(ctx,
+		`SELECT table_schema, table_name, table_type
+		 FROM information_schema.tables
+		 WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+		 ORDER BY table_schema, table_name`)
+	if err != nil {
+		return "", fmt.Errorf("listing tables: %w", err)
+	}
+	defer rows.Close()
+
+	var sb strings.Builder
+	sb.WriteString("Tables:\n")
+	for rows.Next() {
+		var schema, name, ttype string
+		if err := rows.Scan(&schema, &name, &ttype); err != nil {
+			return "", fmt.Errorf("scanning table row: %w", err)
+		}
+		sb.WriteString(fmt.Sprintf("  %s.%s (%s)\n", schema, name, ttype))
+	}
+	return sb.String(), rows.Err()
+}
+
+func (c *DatabaseConnector) queryTableColumns(ctx context.Context, table string) (string, error) {
 	rows, err := c.pool.Query(ctx,
 		`SELECT column_name, data_type, is_nullable, column_default
 		 FROM information_schema.columns
