@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/opentrace/opentrace/internal/agent"
-	"github.com/opentrace/opentrace/internal/llm"
 )
 
 func (s *Server) handleInvestigateSSE(w http.ResponseWriter, r *http.Request) {
@@ -38,22 +37,17 @@ func (s *Server) handleInvestigateSSE(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
-	// Check if LLM provider is available
-	var llmProvider llm.LLMProvider
-	if s.embedder != nil {
-		// Try to get the LLM provider from the same backend
-		if op, ok := s.embedder.(llm.LLMProvider); ok {
-			llmProvider = op
-		}
-	}
-
-	if llmProvider == nil {
+	if s.llmProvider == nil {
 		sendEvent("error", "No LLM provider configured. Set OPENTRACE_OLLAMA_URL and ensure Ollama is running.", "")
 		return
 	}
 
 	// Get tools from registry
 	tools := s.registry.AllTools()
+	if len(tools) == 0 {
+		sendEvent("error", "No connectors configured. Add and test a connector first.", "")
+		return
+	}
 
 	// Build agent config
 	cfg := agent.RunConfig{
@@ -67,7 +61,7 @@ func (s *Server) handleInvestigateSSE(w http.ResponseWriter, r *http.Request) {
 		cfg.MaxObservationBytes = s.cfg.MaxObservationBytes
 	}
 
-	ag := agent.New(llmProvider, cfg)
+	ag := agent.New(s.llmProvider, cfg)
 
 	// Run with callback for SSE events
 	_, err := ag.RunWithCallback(r.Context(), query, tools, func(evt agent.Event) {

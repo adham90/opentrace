@@ -60,7 +60,7 @@ func TestAppStartup(t *testing.T) {
 		t.Fatalf("healthz status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
 
-	var health map[string]string
+	var health map[string]any
 	json.NewDecoder(resp.Body).Decode(&health)
 	if health["status"] != "ok" {
 		t.Errorf("health status = %q, want %q", health["status"], "ok")

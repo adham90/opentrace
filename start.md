@@ -564,11 +564,11 @@ OPENTRACE_MAX_OBSERVATION_BYTES=8192
 
 ### Phase 6 -- Integration & Polish
 
-1. End-to-end investigation flow
-2. Agent prompt tuning
-3. Error handling / graceful degradation
-4. Docker Compose with all services
-5. README
+1. ✅ End-to-end investigation flow (SSE agent loop via /api/investigate)
+2. ✅ Agent prompt tuning (120s Ollama timeout, graceful LLM detection)
+3. ✅ Error handling / graceful degradation (no-LLM and no-connector messages)
+4. ✅ Docker Compose with all services (CGO-enabled build, env vars inline)
+5. README (deferred)
 
 ### Post-MVP -- Deferred (designed, not implemented)
 

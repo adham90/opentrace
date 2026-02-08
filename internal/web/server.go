@@ -15,13 +15,14 @@ import (
 
 // Server holds the HTTP server and its dependencies.
 type Server struct {
-	Router   chi.Router
-	dsStore  store.DataSourceStore
-	logStore store.LogStore
-	embStore store.EmbeddingStore
-	registry *connector.Registry
-	cfg      *config.Config
-	embedder llm.EmbeddingProvider
+	Router      chi.Router
+	dsStore     store.DataSourceStore
+	logStore    store.LogStore
+	embStore    store.EmbeddingStore
+	registry    *connector.Registry
+	cfg         *config.Config
+	embedder    llm.EmbeddingProvider
+	llmProvider llm.LLMProvider
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
@@ -33,6 +34,10 @@ func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore 
 		registry: registry,
 		cfg:      cfg,
 		embedder: embedder,
+	}
+	// If the embedder also implements LLMProvider (e.g. OllamaProvider), use it
+	if lp, ok := embedder.(llm.LLMProvider); ok {
+		srv.llmProvider = lp
 	}
 
 	router := chi.NewRouter()
@@ -66,5 +71,9 @@ func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore 
 }
 
 func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	resp := map[string]any{
+		"status": "ok",
+		"llm":    s.llmProvider != nil,
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

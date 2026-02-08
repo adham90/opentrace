@@ -26,8 +26,20 @@ services:
     build: .
     ports:
       - "8080:8080"
-    env_file:
-      - .env
+    environment:
+      OPENTRACE_APP_DATABASE_URL: postgres://opentrace:opentrace@db:5432/opentrace?sslmode=disable
+      OPENTRACE_LLM_PROVIDER: ollama
+      OPENTRACE_OLLAMA_URL: http://ollama:11434
+      OPENTRACE_OLLAMA_MODEL: llama3.2
+      OPENTRACE_EMBEDDING_PROVIDER: ollama
+      OPENTRACE_EMBEDDING_MODEL: nomic-embed-text
+      OPENTRACE_EMBEDDING_DIMENSION: "768"
+      OPENTRACE_LISTEN_ADDR: ":8080"
+      OPENTRACE_MAX_QUERY_ROWS: "500"
+      OPENTRACE_STATEMENT_TIMEOUT_MS: "5000"
+      OPENTRACE_MAX_AGENT_STEPS: "12"
+      OPENTRACE_MAX_TOOL_CALLS: "8"
+      OPENTRACE_MAX_OBSERVATION_BYTES: "8192"
     depends_on:
       db:
         condition: service_healthy

@@ -25,7 +25,7 @@ func NewOllamaProvider(baseURL, chatModel, embeddingModel string, dimension int)
 		model:          chatModel,
 		embeddingModel: embeddingModel,
 		dimension:      dimension,
-		client:         &http.Client{Timeout: 30 * time.Second},
+		client:         &http.Client{Timeout: 120 * time.Second},
 	}
 }
 
