@@ -69,8 +69,9 @@ func run() error {
 		embedder = ep
 	}
 
-	// Initialize registry
+	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
+	reconnectConnectors(ctx, dsStore, logStore, embStore, registry, cfg, embedder)
 
 	// Create server
 	srv := web.NewServer(dsStore, logStore, embStore, registry, cfg, embedder)
@@ -100,6 +101,46 @@ func run() error {
 	defer cancel()
 
 	return httpServer.Shutdown(shutdownCtx)
+}
+
+// reconnectConnectors re-registers connectors that were previously connected.
+func reconnectConnectors(ctx context.Context, dsStore store.DataSourceStore, logStore store.LogStore, embStore store.EmbeddingStore, registry *connector.Registry, cfg *config.Config, embedder llm.EmbeddingProvider) {
+	dataSources, err := dsStore.List(ctx)
+	if err != nil {
+		log.Printf("warning: failed to list connectors for reconnect: %v", err)
+		return
+	}
+
+	for _, ds := range dataSources {
+		if ds.Status != store.StatusConnected {
+			continue
+		}
+
+		c, err := connector.CreateConnector(ctx, ds, logStore, embStore, embedder, cfg)
+		if err != nil {
+			log.Printf("warning: failed to recreate connector %q (%s): %v", ds.Name, ds.Type, err)
+			status := store.StatusError
+			msg := fmt.Sprintf("failed to reconnect on startup: %v", err)
+			dsStore.Update(ctx, ds.ID, store.UpdateDataSourceParams{
+				Status: &status, StatusMessage: &msg,
+			})
+			continue
+		}
+
+		if err := c.TestConnection(ctx); err != nil {
+			c.Close()
+			log.Printf("warning: connector %q (%s) failed reconnect test: %v", ds.Name, ds.Type, err)
+			status := store.StatusError
+			msg := fmt.Sprintf("failed to reconnect on startup: %v", err)
+			dsStore.Update(ctx, ds.ID, store.UpdateDataSourceParams{
+				Status: &status, StatusMessage: &msg,
+			})
+			continue
+		}
+
+		registry.Register(c)
+		log.Printf("reconnected connector %q (%s)", ds.Name, ds.Type)
+	}
 }
 
 func defaultMigrationsPath() string {
