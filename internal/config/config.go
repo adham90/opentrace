@@ -17,6 +17,7 @@ type Config struct {
 	EmbeddingModel     string
 	EmbeddingDimension int
 	ListenAddr         string
+	APIKey             string
 
 	MaxQueryRows        int
 	StatementTimeoutMS  int
@@ -98,6 +99,7 @@ func Load() (*Config, error) {
 		EmbeddingModel:      envOrDefault("OPENTRACE_EMBEDDING_MODEL", "nomic-embed-text"),
 		EmbeddingDimension:  embDim,
 		ListenAddr:          envOrDefault("OPENTRACE_LISTEN_ADDR", ":8080"),
+		APIKey:              os.Getenv("OPENTRACE_API_KEY"),
 		MaxQueryRows:        maxQueryRows,
 		StatementTimeoutMS:  stmtTimeout,
 		MaxAgentSteps:       maxSteps,

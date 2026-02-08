@@ -49,25 +49,27 @@ type UpdateDataSourceParams struct {
 
 // LogEntry represents an ingested log line.
 type LogEntry struct {
-	ID        int64          `json:"id"`
-	Timestamp time.Time      `json:"timestamp"`
-	Level     string         `json:"level"`
-	Service   string         `json:"service,omitempty"`
-	TraceID   string         `json:"trace_id,omitempty"`
-	Message   string         `json:"message"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
-	CreatedAt time.Time      `json:"created_at"`
+	ID          int64          `json:"id"`
+	Timestamp   time.Time      `json:"timestamp"`
+	Level       string         `json:"level"`
+	Service     string         `json:"service,omitempty"`
+	TraceID     string         `json:"trace_id,omitempty"`
+	Message     string         `json:"message"`
+	Environment string         `json:"environment,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
 }
 
 // LogSearchParams defines filters for log search.
 type LogSearchParams struct {
-	Query   string     `json:"query,omitempty"`
-	Service string     `json:"service,omitempty"`
-	Level   string     `json:"level,omitempty"`
-	TraceID string     `json:"trace_id,omitempty"`
-	Start   *time.Time `json:"start,omitempty"`
-	End     *time.Time `json:"end,omitempty"`
-	Limit   int        `json:"limit,omitempty"`
+	Query       string     `json:"query,omitempty"`
+	Service     string     `json:"service,omitempty"`
+	Level       string     `json:"level,omitempty"`
+	TraceID     string     `json:"trace_id,omitempty"`
+	Environment string     `json:"environment,omitempty"`
+	Start       *time.Time `json:"start,omitempty"`
+	End         *time.Time `json:"end,omitempty"`
+	Limit       int        `json:"limit,omitempty"`
 }
 
 // CodeChunk represents a chunk of source code with its embedding.

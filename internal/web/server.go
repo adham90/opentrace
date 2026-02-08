@@ -61,7 +61,14 @@ func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore 
 		r.Get("/connectors", srv.handleListConnectors)
 		r.Post("/connectors/{id}/test", srv.handleTestConnectorAPI)
 		r.Delete("/connectors/{id}", srv.handleDeleteConnectorAPI)
-		r.Post("/logs", srv.handleIngestLogs)
+
+		// Log ingestion with optional API key auth
+		apiKey := ""
+		if cfg != nil {
+			apiKey = cfg.APIKey
+		}
+		r.With(APIKeyAuth(apiKey)).Post("/logs", srv.handleIngestLogs)
+
 		r.Get("/investigate", srv.handleInvestigateSSE)
 		r.Get("/sse/demo", srv.handleSSEDemo)
 	})

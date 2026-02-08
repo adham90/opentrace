@@ -1,8 +1,10 @@
 package web
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -10,19 +12,36 @@ import (
 )
 
 type ingestLogEntry struct {
-	Timestamp time.Time      `json:"timestamp"`
-	Level     string         `json:"level"`
-	Service   string         `json:"service"`
-	TraceID   string         `json:"trace_id"`
-	Message   string         `json:"message"`
-	Metadata  map[string]any `json:"metadata"`
+	Timestamp   time.Time      `json:"timestamp"`
+	Level       string         `json:"level"`
+	Service     string         `json:"service"`
+	TraceID     string         `json:"trace_id"`
+	Message     string         `json:"message"`
+	Environment string         `json:"environment"`
+	Metadata    map[string]any `json:"metadata"`
 }
 
 func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
-	var entries []ingestLogEntry
-	if err := json.NewDecoder(r.Body).Decode(&entries); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read request body")
 		return
+	}
+
+	var entries []ingestLogEntry
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
+		var single ingestLogEntry
+		if err := json.Unmarshal(trimmed, &single); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		entries = []ingestLogEntry{single}
+	} else {
+		if err := json.Unmarshal(trimmed, &entries); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
 	}
 
 	// Validate required fields
@@ -36,12 +55,13 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 	logEntries := make([]store.LogEntry, len(entries))
 	for i, e := range entries {
 		logEntries[i] = store.LogEntry{
-			Timestamp: e.Timestamp,
-			Level:     e.Level,
-			Service:   e.Service,
-			TraceID:   e.TraceID,
-			Message:   e.Message,
-			Metadata:  e.Metadata,
+			Timestamp:   e.Timestamp,
+			Level:       e.Level,
+			Service:     e.Service,
+			TraceID:     e.TraceID,
+			Message:     e.Message,
+			Environment: e.Environment,
+			Metadata:    e.Metadata,
 		}
 	}
 

@@ -31,12 +31,12 @@ func (s *PgLogStore) BatchInsert(ctx context.Context, entries []LogEntry) (int, 
 		if err != nil {
 			return 0, fmt.Errorf("marshaling metadata: %w", err)
 		}
-		rows[i] = []any{e.Timestamp, e.Level, e.Service, e.TraceID, e.Message, meta}
+		rows[i] = []any{e.Timestamp, e.Level, e.Service, e.TraceID, e.Message, e.Environment, meta}
 	}
 
 	count, err := s.pool.CopyFrom(ctx,
 		pgx.Identifier{"logs"},
-		[]string{"timestamp", "level", "service", "trace_id", "message", "metadata"},
+		[]string{"timestamp", "level", "service", "trace_id", "message", "environment", "metadata"},
 		pgx.CopyFromRows(rows),
 	)
 	if err != nil {
@@ -71,6 +71,11 @@ func (s *PgLogStore) Search(ctx context.Context, params LogSearchParams) ([]LogE
 		args = append(args, params.TraceID)
 		argN++
 	}
+	if params.Environment != "" {
+		conditions = append(conditions, fmt.Sprintf("environment = $%d", argN))
+		args = append(args, params.Environment)
+		argN++
+	}
 	if params.Start != nil {
 		conditions = append(conditions, fmt.Sprintf("timestamp >= $%d", argN))
 		args = append(args, *params.Start)
@@ -82,7 +87,7 @@ func (s *PgLogStore) Search(ctx context.Context, params LogSearchParams) ([]LogE
 		argN++
 	}
 
-	query := "SELECT id, timestamp, level, service, trace_id, message, metadata, created_at FROM logs"
+	query := "SELECT id, timestamp, level, service, trace_id, message, environment, metadata, created_at FROM logs"
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
@@ -107,7 +112,7 @@ func (s *PgLogStore) Search(ctx context.Context, params LogSearchParams) ([]LogE
 		var metaJSON []byte
 		if err := rows.Scan(
 			&entry.ID, &entry.Timestamp, &entry.Level, &entry.Service,
-			&entry.TraceID, &entry.Message, &metaJSON, &entry.CreatedAt,
+			&entry.TraceID, &entry.Message, &entry.Environment, &metaJSON, &entry.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning log entry: %w", err)
 		}
