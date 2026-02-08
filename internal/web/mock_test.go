@@ -158,3 +158,80 @@ func (m *mockEmbeddingStore) DeleteByPath(ctx context.Context, filePath string) 
 func (m *mockEmbeddingStore) DeleteAll(ctx context.Context) error {
 	return m.err
 }
+
+// mockChatStore implements store.ChatStore for testing.
+type mockChatStore struct {
+	mu       sync.Mutex
+	chats    map[uuid.UUID]*store.Chat
+	messages map[uuid.UUID][]store.Message
+}
+
+func newMockChatStore() *mockChatStore {
+	return &mockChatStore{
+		chats:    make(map[uuid.UUID]*store.Chat),
+		messages: make(map[uuid.UUID][]store.Message),
+	}
+}
+
+func (m *mockChatStore) CreateChat(ctx context.Context, title string) (*store.Chat, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c := &store.Chat{ID: uuid.New(), Title: title}
+	m.chats[c.ID] = c
+	return c, nil
+}
+
+func (m *mockChatStore) GetChat(ctx context.Context, id uuid.UUID) (*store.Chat, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.chats[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return c, nil
+}
+
+func (m *mockChatStore) ListChats(ctx context.Context) ([]store.Chat, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]store.Chat, 0, len(m.chats))
+	for _, c := range m.chats {
+		result = append(result, *c)
+	}
+	return result, nil
+}
+
+func (m *mockChatStore) DeleteChat(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.chats[id]; !ok {
+		return store.ErrNotFound
+	}
+	delete(m.chats, id)
+	delete(m.messages, id)
+	return nil
+}
+
+func (m *mockChatStore) UpdateChatTitle(ctx context.Context, id uuid.UUID, title string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.chats[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	c.Title = title
+	return nil
+}
+
+func (m *mockChatStore) AddMessage(ctx context.Context, msg store.Message) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.messages[msg.ChatID] = append(m.messages[msg.ChatID], msg)
+	return nil
+}
+
+func (m *mockChatStore) GetMessages(ctx context.Context, chatID uuid.UUID) ([]store.Message, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.messages[chatID], nil
+}

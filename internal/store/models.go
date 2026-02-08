@@ -72,6 +72,24 @@ type LogSearchParams struct {
 	Limit       int        `json:"limit,omitempty"`
 }
 
+// Chat represents a conversation session.
+type Chat struct {
+	ID        uuid.UUID `json:"id"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Message represents a single message within a chat.
+type Message struct {
+	ID        uuid.UUID `json:"id"`
+	ChatID    uuid.UUID `json:"chat_id"`
+	Role      string    `json:"role"` // "user", "assistant", "tool_call", "observation"
+	Content   string    `json:"content"`
+	ToolName  string    `json:"tool_name,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // CodeChunk represents a chunk of source code with its embedding.
 type CodeChunk struct {
 	FilePath   string    `json:"file_path"`

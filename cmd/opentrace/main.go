@@ -59,6 +59,7 @@ func run() error {
 	dsStore := store.NewPgDataSourceStore(pool)
 	logStore := store.NewPgLogStore(pool)
 	embStore := store.NewPgEmbeddingStore(pool)
+	chatStore := store.NewPgChatStore(pool)
 
 	// Initialize embedding provider (may be nil if not configured)
 	var embedder llm.EmbeddingProvider
@@ -74,7 +75,7 @@ func run() error {
 	reconnectConnectors(ctx, dsStore, logStore, embStore, registry, cfg, embedder)
 
 	// Create server
-	srv := web.NewServer(dsStore, logStore, embStore, registry, cfg, embedder)
+	srv := web.NewServer(dsStore, logStore, embStore, chatStore, registry, cfg, embedder)
 
 	httpServer := &http.Server{
 		Addr:    cfg.ListenAddr,

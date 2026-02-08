@@ -39,11 +39,12 @@ func New(provider llm.LLMProvider, cfg RunConfig) *Agent {
 // Run executes the agent loop: calls the LLM, parses responses, executes tools,
 // and returns the final answer.
 func (a *Agent) Run(ctx context.Context, query string, tools []Tool) (string, error) {
-	return a.RunWithCallback(ctx, query, tools, nil)
+	return a.RunWithCallback(ctx, query, tools, nil, nil)
 }
 
 // RunWithCallback is like Run but emits events via the callback for observability.
-func (a *Agent) RunWithCallback(ctx context.Context, query string, tools []Tool, cb EventCallback) (string, error) {
+// If history is non-nil, prior conversation messages are prepended before the current query.
+func (a *Agent) RunWithCallback(ctx context.Context, query string, tools []Tool, cb EventCallback, history []llm.ChatMessage) (string, error) {
 	emit := func(e Event) {
 		if cb != nil {
 			cb(e)
@@ -60,8 +61,12 @@ func (a *Agent) RunWithCallback(ctx context.Context, query string, tools []Tool,
 	systemPrompt := BuildSystemPrompt(tools)
 	messages := []llm.ChatMessage{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: query},
 	}
+	// Append prior conversation history if available
+	if len(history) > 0 {
+		messages = append(messages, history...)
+	}
+	messages = append(messages, llm.ChatMessage{Role: "user", Content: query})
 
 	toolCallCount := 0
 

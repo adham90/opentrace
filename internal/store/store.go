@@ -25,6 +25,17 @@ type LogStore interface {
 	Search(ctx context.Context, params LogSearchParams) ([]LogEntry, error)
 }
 
+// ChatStore defines operations for chat persistence.
+type ChatStore interface {
+	CreateChat(ctx context.Context, title string) (*Chat, error)
+	GetChat(ctx context.Context, id uuid.UUID) (*Chat, error)
+	ListChats(ctx context.Context) ([]Chat, error)
+	DeleteChat(ctx context.Context, id uuid.UUID) error
+	UpdateChatTitle(ctx context.Context, id uuid.UUID, title string) error
+	AddMessage(ctx context.Context, msg Message) error
+	GetMessages(ctx context.Context, chatID uuid.UUID) ([]Message, error)
+}
+
 // EmbeddingStore defines operations for code embedding storage and search.
 type EmbeddingStore interface {
 	UpsertChunks(ctx context.Context, chunks []CodeChunk) error

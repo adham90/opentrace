@@ -75,7 +75,7 @@ func TestRun_EchoTool(t *testing.T) {
 	var events []Event
 	cb := func(e Event) { events = append(events, e) }
 
-	result, err := a.RunWithCallback(context.Background(), "echo test", tools, cb)
+	result, err := a.RunWithCallback(context.Background(), "echo test", tools, cb, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestRun_ObservationTruncated(t *testing.T) {
 	var events []Event
 	cb := func(e Event) { events = append(events, e) }
 
-	_, err := a.RunWithCallback(context.Background(), "test truncate", tools, cb)
+	_, err := a.RunWithCallback(context.Background(), "test truncate", tools, cb, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

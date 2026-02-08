@@ -14,7 +14,7 @@ import (
 )
 
 func TestSSEEndpoint_Headers(t *testing.T) {
-	srv := NewServer(nil, nil, nil, connector.NewRegistry(), nil, nil)
+	srv := NewServer(nil, nil, nil, nil, connector.NewRegistry(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sse/demo", nil)
 	w := httptest.NewRecorder()
@@ -38,7 +38,7 @@ func TestSSEEndpoint_Headers(t *testing.T) {
 }
 
 func TestSSEEndpoint_EventFormat(t *testing.T) {
-	srv := NewServer(nil, nil, nil, connector.NewRegistry(), nil, nil)
+	srv := NewServer(nil, nil, nil, nil, connector.NewRegistry(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sse/demo", nil)
 	w := httptest.NewRecorder()
@@ -69,7 +69,7 @@ func TestSSEEndpoint_EventFormat(t *testing.T) {
 }
 
 func TestSSEEndpoint_EventSequence(t *testing.T) {
-	srv := NewServer(nil, nil, nil, connector.NewRegistry(), nil, nil)
+	srv := NewServer(nil, nil, nil, nil, connector.NewRegistry(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sse/demo", nil)
 	w := httptest.NewRecorder()
@@ -103,7 +103,7 @@ func TestSSEEndpoint_EventSequence(t *testing.T) {
 }
 
 func TestSSEEndpoint_ClientDisconnect(t *testing.T) {
-	srv := NewServer(nil, nil, nil, connector.NewRegistry(), nil, nil)
+	srv := NewServer(nil, nil, nil, nil, connector.NewRegistry(), nil, nil)
 
 	// Create a context that we cancel immediately
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
