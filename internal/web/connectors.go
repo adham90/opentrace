@@ -18,32 +18,68 @@ type createConnectorRequest struct {
 	Config map[string]any      `json:"config"`
 }
 
-func (s *Server) handleCreateConnector(w http.ResponseWriter, r *http.Request) {
+func isHTMX(r *http.Request) bool {
+	return r.Header.Get("HX-Request") == "true"
+}
+
+// renderConnectorList sends an HTML fragment of the connector list (for HTMX swaps).
+func (s *Server) renderConnectorList(w http.ResponseWriter, r *http.Request) {
+	connectors, err := s.dsStore.List(r.Context())
+	if err != nil {
+		http.Error(w, "failed to list connectors", http.StatusInternalServerError)
+		return
+	}
+	data := pageData{Connectors: connectors}
+	w.Header().Set("Content-Type", "text/html")
+	templates.ExecuteTemplate(w, "connector-list", data)
+}
+
+func (s *Server) handleCreateConnectorAPI(w http.ResponseWriter, r *http.Request) {
+	// HTMX form sends form-encoded data
+	if isHTMX(r) {
+		r.ParseForm()
+		configStr := r.FormValue("config")
+		cfg := map[string]any{}
+		if configStr != "" {
+			json.Unmarshal([]byte(configStr), &cfg)
+		}
+		connType := store.ConnectorType(r.FormValue("type"))
+		name := r.FormValue("name")
+		if connType == "" || name == "" {
+			http.Error(w, "type and name required", http.StatusBadRequest)
+			return
+		}
+		_, err := s.dsStore.Create(r.Context(), store.CreateDataSourceParams{
+			Type: connType, Name: name, Config: cfg,
+		})
+		if err != nil {
+			http.Error(w, "failed to create", http.StatusInternalServerError)
+			return
+		}
+		s.renderConnectorList(w, r)
+		return
+	}
+
+	// JSON API
 	var req createConnectorRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
 	if req.Type == "" || req.Name == "" {
 		writeError(w, http.StatusBadRequest, "type and name are required")
 		return
 	}
-
 	if req.Config == nil {
 		req.Config = map[string]any{}
 	}
-
 	ds, err := s.dsStore.Create(r.Context(), store.CreateDataSourceParams{
-		Type:   req.Type,
-		Name:   req.Name,
-		Config: req.Config,
+		Type: req.Type, Name: req.Name, Config: req.Config,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create connector")
 		return
 	}
-
 	writeJSON(w, http.StatusCreated, ds)
 }
 
@@ -53,11 +89,10 @@ func (s *Server) handleListConnectors(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list connectors")
 		return
 	}
-
 	writeJSON(w, http.StatusOK, list)
 }
 
-func (s *Server) handleTestConnector(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleTestConnectorAPI(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -82,10 +117,12 @@ func (s *Server) handleTestConnector(w http.ResponseWriter, r *http.Request) {
 		status := store.StatusError
 		msg := err.Error()
 		s.dsStore.Update(r.Context(), ds.ID, store.UpdateDataSourceParams{
-			Status:        &status,
-			StatusMessage: &msg,
-			LastTestedAt:  &now,
+			Status: &status, StatusMessage: &msg, LastTestedAt: &now,
 		})
+		if isHTMX(r) {
+			s.renderConnectorList(w, r)
+			return
+		}
 		writeError(w, http.StatusUnprocessableEntity, "connector test failed: "+err.Error())
 		return
 	}
@@ -95,10 +132,12 @@ func (s *Server) handleTestConnector(w http.ResponseWriter, r *http.Request) {
 		status := store.StatusError
 		msg := err.Error()
 		s.dsStore.Update(r.Context(), ds.ID, store.UpdateDataSourceParams{
-			Status:        &status,
-			StatusMessage: &msg,
-			LastTestedAt:  &now,
+			Status: &status, StatusMessage: &msg, LastTestedAt: &now,
 		})
+		if isHTMX(r) {
+			s.renderConnectorList(w, r)
+			return
+		}
 		writeError(w, http.StatusUnprocessableEntity, "connector test failed: "+err.Error())
 		return
 	}
@@ -109,19 +148,21 @@ func (s *Server) handleTestConnector(w http.ResponseWriter, r *http.Request) {
 	status := store.StatusConnected
 	msg := "connection successful"
 	updated, err := s.dsStore.Update(r.Context(), ds.ID, store.UpdateDataSourceParams{
-		Status:        &status,
-		StatusMessage: &msg,
-		LastTestedAt:  &now,
+		Status: &status, StatusMessage: &msg, LastTestedAt: &now,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update connector status")
 		return
 	}
 
+	if isHTMX(r) {
+		s.renderConnectorList(w, r)
+		return
+	}
 	writeJSON(w, http.StatusOK, updated)
 }
 
-func (s *Server) handleDeleteConnector(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDeleteConnectorAPI(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -129,7 +170,6 @@ func (s *Server) handleDeleteConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up the data source to know its type for unregistration
 	ds, err := s.dsStore.GetByID(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -140,7 +180,6 @@ func (s *Server) handleDeleteConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Unregister from registry before deleting
 	s.registry.Unregister(connector.ConnectorType(ds.Type))
 
 	if err := s.dsStore.Delete(r.Context(), id); err != nil {
@@ -148,5 +187,9 @@ func (s *Server) handleDeleteConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if isHTMX(r) {
+		s.renderConnectorList(w, r)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

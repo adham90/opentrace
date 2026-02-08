@@ -1,0 +1,82 @@
+{{define "content"}}
+<div class="flex-between mb-8">
+  <h1><span class="prompt-prefix">$</span> connectors</h1>
+  <button class="btn btn-primary btn-sm" onclick="document.getElementById('add-panel').style.display='block'">+ add</button>
+</div>
+
+<!-- Add connector panel -->
+<div id="add-panel" class="panel" style="display:none;">
+  <div class="panel-header">
+    <span class="text-xs text-dim">NEW CONNECTOR</span>
+    <button class="btn btn-sm" onclick="this.closest('.panel').style.display='none'">&times;</button>
+  </div>
+  <form hx-post="/api/connectors" hx-target="#connector-list" hx-swap="innerHTML" hx-on::after-request="if(event.detail.successful) { this.reset(); this.closest('.panel').style.display='none'; }">
+    <div class="form-group">
+      <label for="conn-type">type</label>
+      <select name="type" id="conn-type" required>
+        <option value="logs">logs</option>
+        <option value="database">database</option>
+        <option value="codebase">codebase</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="conn-name">name</label>
+      <input type="text" name="name" id="conn-name" placeholder="e.g. Production Logs" required>
+    </div>
+    <div class="form-group">
+      <label for="conn-config">config (json)</label>
+      <textarea name="config" id="conn-config" placeholder='{"connection_string":"postgres://..."}'>{}</textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">create</button>
+  </form>
+</div>
+
+<div id="connector-list">
+{{template "connector-list" .}}
+</div>
+{{end}}
+
+{{define "connector-list"}}
+{{if .Connectors}}
+<table>
+  <thead>
+    <tr>
+      <th>name</th>
+      <th>type</th>
+      <th>status</th>
+      <th>last tested</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {{range .Connectors}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td class="text-dim">{{.Type}}</td>
+      <td>
+        <span class="badge badge-{{.Status}}">{{.Status}}</span>
+      </td>
+      <td class="text-dim text-xs">
+        {{if .LastTestedAt}}{{.LastTestedAt.Format "2006-01-02 15:04:05"}}{{else}}never{{end}}
+      </td>
+      <td>
+        <div class="actions">
+          <button class="btn btn-sm"
+            hx-post="/api/connectors/{{.ID}}/test"
+            hx-target="#connector-list"
+            hx-swap="innerHTML">test</button>
+          <button class="btn btn-sm btn-danger"
+            hx-delete="/api/connectors/{{.ID}}"
+            hx-target="#connector-list"
+            hx-swap="innerHTML"
+            hx-confirm="Delete connector '{{.Name}}'?">delete</button>
+        </div>
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<div class="empty">no connectors configured<br><span class="text-xs">click + add to connect a data source</span></div>
+{{end}}
+{{end}}

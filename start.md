@@ -557,10 +557,10 @@ OPENTRACE_MAX_OBSERVATION_BYTES=8192
 
 ### Phase 5 -- UI
 
-1. Layout (Tailwind + HTMX)
-2. Connector management page (configure/test/remove sources)
-3. Investigation page (query + SSE trace stream)
-4. Trace rendering (thinking -> tool_call -> observation -> final)
+1. ✅ Layout (terminal-style monospace + HTMX)
+2. ✅ Connector management page (configure/test/remove sources)
+3. ✅ Investigation page (query + SSE trace stream)
+4. ✅ Trace rendering (thinking -> tool_call -> observation -> final)
 
 ### Phase 6 -- Integration & Polish
 

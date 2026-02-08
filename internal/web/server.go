@@ -1,6 +1,7 @@
 package web
 
 import (
+	"io/fs"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -41,12 +42,22 @@ func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore 
 
 	router.Get("/healthz", srv.handleHealthCheck)
 
+	// Static files
+	staticSub, _ := fs.Sub(staticFS, "static")
+	router.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+
+	// Pages
+	router.Get("/", srv.handleInvestigatePage)
+	router.Get("/connectors", srv.handleConnectorsPage)
+
+	// API
 	router.Route("/api", func(r chi.Router) {
-		r.Post("/connectors", srv.handleCreateConnector)
+		r.Post("/connectors", srv.handleCreateConnectorAPI)
 		r.Get("/connectors", srv.handleListConnectors)
-		r.Post("/connectors/{id}/test", srv.handleTestConnector)
-		r.Delete("/connectors/{id}", srv.handleDeleteConnector)
+		r.Post("/connectors/{id}/test", srv.handleTestConnectorAPI)
+		r.Delete("/connectors/{id}", srv.handleDeleteConnectorAPI)
 		r.Post("/logs", srv.handleIngestLogs)
+		r.Get("/investigate", srv.handleInvestigateSSE)
 		r.Get("/sse/demo", srv.handleSSEDemo)
 	})
 

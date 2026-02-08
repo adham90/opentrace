@@ -1,0 +1,26 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenTrace{{if .Title}} — {{.Title}}{{end}}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <span class="logo">OPENTRACE</span>
+      <nav>
+        <a href="/" {{if eq .Nav "investigate"}}class="active"{{end}}>investigate</a>
+        <a href="/connectors" {{if eq .Nav "connectors"}}class="active"{{end}}>connectors</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <div class="container">
+      {{template "content" .}}
+    </div>
+  </main>
+</body>
+</html>{{end}}

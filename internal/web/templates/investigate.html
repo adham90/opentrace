@@ -1,0 +1,58 @@
+{{define "content"}}
+<h1><span class="prompt-prefix">$</span> investigate</h1>
+
+<form id="query-form" class="query-form" onsubmit="startInvestigation(event)">
+  <span class="prompt-prefix" style="line-height:34px;">>&nbsp;</span>
+  <input type="text" name="query" id="query-input" placeholder="describe the issue to investigate..." autofocus autocomplete="off">
+  <button type="submit" class="btn btn-primary" id="submit-btn">run</button>
+</form>
+
+<div id="trace-output"></div>
+
+<script>
+function startInvestigation(e) {
+  e.preventDefault();
+  const query = document.getElementById('query-input').value.trim();
+  if (!query) return;
+
+  const output = document.getElementById('trace-output');
+  const btn = document.getElementById('submit-btn');
+  const input = document.getElementById('query-input');
+
+  output.innerHTML = '';
+  btn.disabled = true;
+  btn.textContent = 'running';
+  btn.classList.add('spinner');
+  input.disabled = true;
+
+  const es = new EventSource('/api/investigate?query=' + encodeURIComponent(query));
+
+  es.onmessage = function(event) {
+    const data = JSON.parse(event.data);
+    const step = document.createElement('div');
+    step.className = 'trace-step ' + data.step_type;
+
+    let label = data.step_type;
+    if (data.tool_name) label += ' → ' + data.tool_name;
+
+    step.innerHTML = '<div class="step-label">' + escapeHtml(label) + '</div><pre>' + escapeHtml(data.content) + '</pre>';
+    output.appendChild(step);
+    step.scrollIntoView({behavior: 'smooth', block: 'end'});
+  };
+
+  es.onerror = function() {
+    es.close();
+    btn.disabled = false;
+    btn.textContent = 'run';
+    btn.classList.remove('spinner');
+    input.disabled = false;
+  };
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+</script>
+{{end}}
