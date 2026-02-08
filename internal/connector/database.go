@@ -221,6 +221,27 @@ func (c *DatabaseConnector) queryTableList(ctx context.Context) (string, error) 
 }
 
 func (c *DatabaseConnector) queryTableColumns(ctx context.Context, table string) (string, error) {
+	// 1. Get foreign keys for this table
+	fkMap, err := c.queryForeignKeys(ctx, table)
+	if err != nil {
+		// Non-fatal: proceed without FK info
+		fkMap = map[string]string{}
+	}
+
+	// 2. Get sample values for low-cardinality columns
+	sampleMap, err := c.querySampleValues(ctx, table)
+	if err != nil {
+		// Non-fatal: proceed without samples
+		sampleMap = map[string]string{}
+	}
+
+	// 3. Get column comments
+	commentMap, err := c.queryColumnComments(ctx, table)
+	if err != nil {
+		commentMap = map[string]string{}
+	}
+
+	// 4. Get columns
 	rows, err := c.pool.Query(ctx,
 		`SELECT column_name, data_type, is_nullable, column_default
 		 FROM information_schema.columns
@@ -231,8 +252,15 @@ func (c *DatabaseConnector) queryTableColumns(ctx context.Context, table string)
 	}
 	defer rows.Close()
 
+	// 5. Get table comment
+	tableComment, _ := c.queryTableComment(ctx, table)
+
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Columns for %s:\n", table))
+	if tableComment != "" {
+		sb.WriteString(fmt.Sprintf("  -- %s\n", tableComment))
+	}
+
 	for rows.Next() {
 		var name, dtype, nullable string
 		var def *string
@@ -246,7 +274,164 @@ func (c *DatabaseConnector) queryTableColumns(ctx context.Context, table string)
 		if def != nil {
 			sb.WriteString(fmt.Sprintf(" DEFAULT %s", *def))
 		}
+		if fk, ok := fkMap[name]; ok {
+			sb.WriteString(fmt.Sprintf("  -> %s", fk))
+		}
+		if sv, ok := sampleMap[name]; ok {
+			sb.WriteString(fmt.Sprintf("  [values: %s]", sv))
+		}
+		if cm, ok := commentMap[name]; ok {
+			sb.WriteString(fmt.Sprintf("  -- %s", cm))
+		}
 		sb.WriteString("\n")
 	}
-	return sb.String(), rows.Err()
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("iterating columns: %w", err)
+	}
+
+	// 6. Row count estimate
+	rowEstimate, err := c.queryRowEstimate(ctx, table)
+	if err == nil && rowEstimate >= 0 {
+		sb.WriteString(fmt.Sprintf("\nRow count (estimate): ~%d\n", rowEstimate))
+	}
+
+	return sb.String(), nil
+}
+
+// queryForeignKeys returns a map of column_name -> "schema.table(column)" for FK columns.
+func (c *DatabaseConnector) queryForeignKeys(ctx context.Context, table string) (map[string]string, error) {
+	rows, err := c.pool.Query(ctx,
+		`SELECT
+			kcu.column_name,
+			ccu.table_schema || '.' || ccu.table_name AS foreign_table,
+			ccu.column_name AS foreign_column
+		 FROM information_schema.table_constraints tc
+		 JOIN information_schema.key_column_usage kcu
+			ON tc.constraint_name = kcu.constraint_name
+			AND tc.table_schema = kcu.table_schema
+		 JOIN information_schema.constraint_column_usage ccu
+			ON tc.constraint_name = ccu.constraint_name
+			AND tc.table_schema = ccu.table_schema
+		 WHERE tc.constraint_type = 'FOREIGN KEY'
+			AND tc.table_name = $1`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	fkMap := make(map[string]string)
+	for rows.Next() {
+		var col, fTable, fCol string
+		if err := rows.Scan(&col, &fTable, &fCol); err != nil {
+			return nil, err
+		}
+		fkMap[col] = fmt.Sprintf("%s(%s)", fTable, fCol)
+	}
+	return fkMap, rows.Err()
+}
+
+// queryRowEstimate returns the estimated row count from pg_class.
+func (c *DatabaseConnector) queryRowEstimate(ctx context.Context, table string) (int64, error) {
+	var estimate int64
+	err := c.pool.QueryRow(ctx,
+		`SELECT reltuples::bigint FROM pg_class WHERE relname = $1`, table).Scan(&estimate)
+	return estimate, err
+}
+
+// querySampleValues returns sample values for low-cardinality columns (< 50 distinct values).
+func (c *DatabaseConnector) querySampleValues(ctx context.Context, table string) (map[string]string, error) {
+	// Find columns with low cardinality from pg_stats
+	rows, err := c.pool.Query(ctx,
+		`SELECT attname, n_distinct
+		 FROM pg_stats
+		 WHERE tablename = $1
+			AND n_distinct > 0 AND n_distinct < 50`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var lowCardCols []string
+	for rows.Next() {
+		var col string
+		var ndistinct float64
+		if err := rows.Scan(&col, &ndistinct); err != nil {
+			return nil, err
+		}
+		lowCardCols = append(lowCardCols, col)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	sampleMap := make(map[string]string)
+	for _, col := range lowCardCols {
+		// Use quote_ident to prevent SQL injection on column/table names
+		sampleRows, err := c.pool.Query(ctx,
+			fmt.Sprintf(`SELECT DISTINCT %s::text FROM %s WHERE %s IS NOT NULL LIMIT 5`,
+				quoteIdent(col), quoteIdent(table), quoteIdent(col)))
+		if err != nil {
+			continue
+		}
+		var vals []string
+		for sampleRows.Next() {
+			var v string
+			if err := sampleRows.Scan(&v); err != nil {
+				break
+			}
+			vals = append(vals, v)
+		}
+		sampleRows.Close()
+		if len(vals) > 0 {
+			sampleMap[col] = strings.Join(vals, ", ")
+		}
+	}
+	return sampleMap, nil
+}
+
+// queryTableComment returns the table-level comment (COMMENT ON TABLE), if any.
+func (c *DatabaseConnector) queryTableComment(ctx context.Context, table string) (string, error) {
+	var comment *string
+	err := c.pool.QueryRow(ctx,
+		`SELECT obj_description(c.oid)
+		 FROM pg_class c
+		 JOIN pg_namespace n ON n.oid = c.relnamespace
+		 WHERE c.relname = $1
+			AND n.nspname NOT IN ('pg_catalog', 'information_schema')`, table).Scan(&comment)
+	if err != nil || comment == nil {
+		return "", err
+	}
+	return *comment, nil
+}
+
+// queryColumnComments returns a map of column_name -> comment for columns with COMMENT ON COLUMN.
+func (c *DatabaseConnector) queryColumnComments(ctx context.Context, table string) (map[string]string, error) {
+	rows, err := c.pool.Query(ctx,
+		`SELECT a.attname, d.description
+		 FROM pg_description d
+		 JOIN pg_attribute a ON d.objsubid = a.attnum AND d.objoid = a.attrelid
+		 JOIN pg_class c ON c.oid = a.attrelid
+		 JOIN pg_namespace n ON n.oid = c.relnamespace
+		 WHERE c.relname = $1
+			AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+			AND a.attnum > 0`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	commentMap := make(map[string]string)
+	for rows.Next() {
+		var col, desc string
+		if err := rows.Scan(&col, &desc); err != nil {
+			return nil, err
+		}
+		commentMap[col] = desc
+	}
+	return commentMap, rows.Err()
+}
+
+// quoteIdent quotes a SQL identifier to prevent injection.
+func quoteIdent(s string) string {
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }
