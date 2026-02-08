@@ -14,6 +14,7 @@ const (
 	ConnectorDatabase   ConnectorType = "database"
 	ConnectorCodebase   ConnectorType = "codebase"
 	ConnectorMonitoring ConnectorType = "monitoring"
+	ConnectorSystem     ConnectorType = "system"
 )
 
 // DataSource is the interface that all connectors must implement.

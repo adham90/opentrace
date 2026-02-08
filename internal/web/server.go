@@ -21,6 +21,7 @@ type Server struct {
 	logStore          store.LogStore
 	embStore          store.EmbeddingStore
 	chatStore         store.ChatStore
+	memoryStore       store.MemoryStore
 	registry          *connector.Registry
 	cfg               *config.Config
 	embedder          llm.EmbeddingProvider
@@ -29,15 +30,16 @@ type Server struct {
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
-func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore store.EmbeddingStore, chatStore store.ChatStore, registry *connector.Registry, cfg *config.Config, embedder llm.EmbeddingProvider) *Server {
+func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore store.EmbeddingStore, chatStore store.ChatStore, memoryStore store.MemoryStore, registry *connector.Registry, cfg *config.Config, embedder llm.EmbeddingProvider) *Server {
 	srv := &Server{
-		dsStore:   dsStore,
-		logStore:  logStore,
-		embStore:  embStore,
-		chatStore: chatStore,
-		registry:  registry,
-		cfg:       cfg,
-		embedder:  embedder,
+		dsStore:     dsStore,
+		logStore:    logStore,
+		embStore:    embStore,
+		chatStore:   chatStore,
+		memoryStore: memoryStore,
+		registry:    registry,
+		cfg:         cfg,
+		embedder:    embedder,
 	}
 	// If the embedder also implements LLMProvider (e.g. OllamaProvider), use it
 	if lp, ok := embedder.(llm.LLMProvider); ok {
@@ -81,6 +83,10 @@ func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore 
 		r.Get("/chats", srv.handleListChats)
 		r.Get("/chats/{id}", srv.handleGetChat)
 		r.Delete("/chats/{id}", srv.handleDeleteChat)
+
+		// Memory API
+		r.Get("/memory", srv.handleListMemories)
+		r.Delete("/memory/{id}", srv.handleDeleteMemory)
 	})
 
 	srv.Router = router

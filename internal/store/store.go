@@ -36,6 +36,14 @@ type ChatStore interface {
 	GetMessages(ctx context.Context, chatID uuid.UUID) ([]Message, error)
 }
 
+// MemoryStore defines operations for the agent's cross-conversation knowledge base.
+type MemoryStore interface {
+	AddMemory(ctx context.Context, category, content, source string) error
+	ListMemories(ctx context.Context, category string) ([]MemoryEntry, error)
+	SearchMemories(ctx context.Context, query string) ([]MemoryEntry, error)
+	DeleteMemory(ctx context.Context, id uuid.UUID) error
+}
+
 // EmbeddingStore defines operations for code embedding storage and search.
 type EmbeddingStore interface {
 	UpsertChunks(ctx context.Context, chunks []CodeChunk) error

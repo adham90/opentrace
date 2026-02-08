@@ -90,6 +90,16 @@ type Message struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// MemoryEntry represents a fact in the agent's cross-conversation knowledge base.
+type MemoryEntry struct {
+	ID        uuid.UUID `json:"id"`
+	Category  string    `json:"category"` // "schema", "pattern", "error", "data", "query"
+	Content   string    `json:"content"`
+	Source    string    `json:"source,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // CodeChunk represents a chunk of source code with its embedding.
 type CodeChunk struct {
 	FilePath   string    `json:"file_path"`

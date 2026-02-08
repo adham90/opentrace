@@ -60,6 +60,7 @@ func run() error {
 	logStore := store.NewPgLogStore(pool)
 	embStore := store.NewPgEmbeddingStore(pool)
 	chatStore := store.NewPgChatStore(pool)
+	memoryStore := store.NewPgMemoryStore(pool)
 
 	// Initialize embedding provider (may be nil if not configured)
 	var embedder llm.EmbeddingProvider
@@ -74,8 +75,11 @@ func run() error {
 	registry := connector.NewRegistry()
 	reconnectConnectors(ctx, dsStore, logStore, embStore, registry, cfg, embedder)
 
+	// Auto-register system connector (memory tools)
+	registry.Register(connector.NewSystemConnector(memoryStore))
+
 	// Create server
-	srv := web.NewServer(dsStore, logStore, embStore, chatStore, registry, cfg, embedder)
+	srv := web.NewServer(dsStore, logStore, embStore, chatStore, memoryStore, registry, cfg, embedder)
 
 	httpServer := &http.Server{
 		Addr:    cfg.ListenAddr,

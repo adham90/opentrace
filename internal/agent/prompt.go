@@ -49,6 +49,8 @@ Step 2 (after seeing result): {"type":"final_answer","content":"The orders table
 - To trace a request: find the trace_id in logs, then use it to find all related log entries.
 - For complex questions: break them into steps. Schema first, then targeted queries.
 - If you already have schema information or query results from earlier in this conversation, use them directly instead of calling tools again.
+- If memory_read is available, check it at the start to see what you already know about the database or common patterns.
+- After discovering useful facts (table relationships, data patterns, common errors), save them with memory_write so future investigations benefit. Don't save trivial facts or raw query results — save insights and patterns.
 - Always provide specific numbers and data in your final answer, not vague statements.
 - If a query returns an error, read the error message carefully and fix your SQL.
 - NEVER mention tools, errors, or internal steps in your final answer. Only include the actual data the user asked for.`)

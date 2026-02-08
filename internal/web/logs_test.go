@@ -19,7 +19,7 @@ func setupTestServerWithLogStore() (*Server, *mockLogStore) {
 	ls := newMockLogStore()
 	es := newMockEmbeddingStore()
 	reg := connector.NewRegistry()
-	srv := NewServer(ms, ls, es, nil, reg, nil, nil)
+	srv := NewServer(ms, ls, es, nil, nil, reg, nil, nil)
 	return srv, ls
 }
 
@@ -28,7 +28,7 @@ func setupTestServerFull() (*Server, *mockDataSourceStore, *mockLogStore, *conne
 	ls := newMockLogStore()
 	es := newMockEmbeddingStore()
 	reg := connector.NewRegistry()
-	srv := NewServer(ms, ls, es, nil, reg, nil, nil)
+	srv := NewServer(ms, ls, es, nil, nil, reg, nil, nil)
 	return srv, ms, ls, reg
 }
 
@@ -38,7 +38,7 @@ func setupTestServerWithAPIKey(apiKey string) (*Server, *mockLogStore) {
 	es := newMockEmbeddingStore()
 	reg := connector.NewRegistry()
 	cfg := &config.Config{APIKey: apiKey}
-	srv := NewServer(ms, ls, es, nil, reg, cfg, nil)
+	srv := NewServer(ms, ls, es, nil, nil, reg, cfg, nil)
 	return srv, ls
 }
 

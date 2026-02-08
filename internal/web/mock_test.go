@@ -235,3 +235,58 @@ func (m *mockChatStore) GetMessages(ctx context.Context, chatID uuid.UUID) ([]st
 	defer m.mu.Unlock()
 	return m.messages[chatID], nil
 }
+
+// mockMemoryStore implements store.MemoryStore for testing.
+type mockMemoryStore struct {
+	mu      sync.Mutex
+	entries []store.MemoryEntry
+}
+
+func newMockMemoryStore() *mockMemoryStore {
+	return &mockMemoryStore{}
+}
+
+func (m *mockMemoryStore) AddMemory(ctx context.Context, category, content, source string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.entries = append(m.entries, store.MemoryEntry{
+		ID:       uuid.New(),
+		Category: category,
+		Content:  content,
+		Source:   source,
+	})
+	return nil
+}
+
+func (m *mockMemoryStore) ListMemories(ctx context.Context, category string) ([]store.MemoryEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if category == "" {
+		return m.entries, nil
+	}
+	var filtered []store.MemoryEntry
+	for _, e := range m.entries {
+		if e.Category == category {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered, nil
+}
+
+func (m *mockMemoryStore) SearchMemories(ctx context.Context, query string) ([]store.MemoryEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.entries, nil
+}
+
+func (m *mockMemoryStore) DeleteMemory(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, e := range m.entries {
+		if e.ID == id {
+			m.entries = append(m.entries[:i], m.entries[i+1:]...)
+			return nil
+		}
+	}
+	return store.ErrNotFound
+}
