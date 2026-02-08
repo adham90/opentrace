@@ -9,15 +9,17 @@ import (
 type Config struct {
 	AppDatabaseURL    string
 	LLMProvider       string
-	OllamaURL        string
-	EmbeddingProvider string
-	EmbeddingModel   string
-	ListenAddr       string
+	OllamaURL         string
+	OllamaModel       string
+	EmbeddingProvider  string
+	EmbeddingModel     string
+	EmbeddingDimension int
+	ListenAddr         string
 
-	MaxQueryRows       int
-	StatementTimeoutMS int
-	MaxAgentSteps      int
-	MaxToolCalls       int
+	MaxQueryRows        int
+	StatementTimeoutMS  int
+	MaxAgentSteps       int
+	MaxToolCalls        int
 	MaxObservationBytes int
 }
 
@@ -52,12 +54,19 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	embDim, err := envOrDefaultInt("OPENTRACE_EMBEDDING_DIMENSION", 768)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Config{
 		AppDatabaseURL:      dbURL,
 		LLMProvider:         envOrDefault("OPENTRACE_LLM_PROVIDER", "ollama"),
 		OllamaURL:           envOrDefault("OPENTRACE_OLLAMA_URL", "http://localhost:11434"),
+		OllamaModel:         envOrDefault("OPENTRACE_OLLAMA_MODEL", "llama3.2"),
 		EmbeddingProvider:   envOrDefault("OPENTRACE_EMBEDDING_PROVIDER", "ollama"),
 		EmbeddingModel:      envOrDefault("OPENTRACE_EMBEDDING_MODEL", "nomic-embed-text"),
+		EmbeddingDimension:  embDim,
 		ListenAddr:          envOrDefault("OPENTRACE_LISTEN_ADDR", ":8080"),
 		MaxQueryRows:        maxQueryRows,
 		StatementTimeoutMS:  stmtTimeout,
