@@ -86,3 +86,73 @@ func (m *mockDataSourceStore) Delete(ctx context.Context, id uuid.UUID) error {
 	delete(m.sources, id)
 	return nil
 }
+
+// mockLogStore implements store.LogStore for testing.
+type mockLogStore struct {
+	mu      sync.Mutex
+	entries []store.LogEntry
+	err     error
+}
+
+func newMockLogStore() *mockLogStore {
+	return &mockLogStore{}
+}
+
+func (m *mockLogStore) BatchInsert(ctx context.Context, entries []store.LogEntry) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.err != nil {
+		return 0, m.err
+	}
+	m.entries = append(m.entries, entries...)
+	return len(entries), nil
+}
+
+func (m *mockLogStore) Search(ctx context.Context, params store.LogSearchParams) ([]store.LogEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.entries, nil
+}
+
+// mockEmbeddingStore implements store.EmbeddingStore for testing.
+type mockEmbeddingStore struct {
+	mu     sync.Mutex
+	chunks []store.CodeChunk
+	err    error
+}
+
+func newMockEmbeddingStore() *mockEmbeddingStore {
+	return &mockEmbeddingStore{}
+}
+
+func (m *mockEmbeddingStore) UpsertChunks(ctx context.Context, chunks []store.CodeChunk) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.err != nil {
+		return m.err
+	}
+	m.chunks = append(m.chunks, chunks...)
+	return nil
+}
+
+func (m *mockEmbeddingStore) Search(ctx context.Context, embedding []float64, limit int) ([]store.CodeSearchResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.err != nil {
+		return nil, m.err
+	}
+	return nil, nil
+}
+
+func (m *mockEmbeddingStore) DeleteByPath(ctx context.Context, filePath string) error {
+	return m.err
+}
+
+func (m *mockEmbeddingStore) DeleteAll(ctx context.Context) error {
+	return m.err
+}

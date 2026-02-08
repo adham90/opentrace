@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/opentrace/opentrace/internal/config"
 	"github.com/opentrace/opentrace/internal/connector"
+	"github.com/opentrace/opentrace/internal/llm"
 	"github.com/opentrace/opentrace/internal/store"
 	"github.com/opentrace/opentrace/internal/web"
 )
@@ -52,12 +53,25 @@ func run() error {
 	}
 	log.Println("connected to database")
 
-	// Initialize store and registry
+	// Initialize stores
 	dsStore := store.NewPgDataSourceStore(pool)
+	logStore := store.NewPgLogStore(pool)
+	embStore := store.NewPgEmbeddingStore(pool)
+
+	// Initialize embedding provider (may be nil if not configured)
+	var embedder llm.EmbeddingProvider
+	ep, err := llm.NewEmbeddingProvider(cfg)
+	if err != nil {
+		log.Printf("warning: embedding provider not available: %v", err)
+	} else {
+		embedder = ep
+	}
+
+	// Initialize registry
 	registry := connector.NewRegistry()
 
 	// Create server
-	srv := web.NewServer(dsStore, registry)
+	srv := web.NewServer(dsStore, logStore, embStore, registry, cfg, embedder)
 
 	httpServer := &http.Server{
 		Addr:    cfg.ListenAddr,
@@ -77,6 +91,8 @@ func run() error {
 
 	<-done
 	log.Println("shutting down...")
+
+	registry.CloseAll()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

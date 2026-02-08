@@ -6,22 +6,32 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/opentrace/opentrace/internal/config"
 	"github.com/opentrace/opentrace/internal/connector"
+	"github.com/opentrace/opentrace/internal/llm"
 	"github.com/opentrace/opentrace/internal/store"
 )
 
 // Server holds the HTTP server and its dependencies.
 type Server struct {
 	Router   chi.Router
-	store    store.DataSourceStore
+	dsStore  store.DataSourceStore
+	logStore store.LogStore
+	embStore store.EmbeddingStore
 	registry *connector.Registry
+	cfg      *config.Config
+	embedder llm.EmbeddingProvider
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
-func NewServer(s store.DataSourceStore, r *connector.Registry) *Server {
+func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore store.EmbeddingStore, registry *connector.Registry, cfg *config.Config, embedder llm.EmbeddingProvider) *Server {
 	srv := &Server{
-		store:    s,
-		registry: r,
+		dsStore:  dsStore,
+		logStore: logStore,
+		embStore: embStore,
+		registry: registry,
+		cfg:      cfg,
+		embedder: embedder,
 	}
 
 	router := chi.NewRouter()
@@ -36,6 +46,7 @@ func NewServer(s store.DataSourceStore, r *connector.Registry) *Server {
 		r.Get("/connectors", srv.handleListConnectors)
 		r.Post("/connectors/{id}/test", srv.handleTestConnector)
 		r.Delete("/connectors/{id}", srv.handleDeleteConnector)
+		r.Post("/logs", srv.handleIngestLogs)
 		r.Get("/sse/demo", srv.handleSSEDemo)
 	})
 

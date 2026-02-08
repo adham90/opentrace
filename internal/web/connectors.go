@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/opentrace/opentrace/internal/connector"
 	"github.com/opentrace/opentrace/internal/store"
 )
 
@@ -33,7 +34,7 @@ func (s *Server) handleCreateConnector(w http.ResponseWriter, r *http.Request) {
 		req.Config = map[string]any{}
 	}
 
-	ds, err := s.store.Create(r.Context(), store.CreateDataSourceParams{
+	ds, err := s.dsStore.Create(r.Context(), store.CreateDataSourceParams{
 		Type:   req.Type,
 		Name:   req.Name,
 		Config: req.Config,
@@ -47,7 +48,7 @@ func (s *Server) handleCreateConnector(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListConnectors(w http.ResponseWriter, r *http.Request) {
-	list, err := s.store.List(r.Context())
+	list, err := s.dsStore.List(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list connectors")
 		return
@@ -64,7 +65,7 @@ func (s *Server) handleTestConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ds, err := s.store.GetByID(r.Context(), id)
+	ds, err := s.dsStore.GetByID(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "connector not found")
@@ -74,11 +75,40 @@ func (s *Server) handleTestConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For now, just update status to connected (actual connector test comes later)
-	status := store.StatusConnected
+	// Create connector and test connection
+	c, err := connector.CreateConnector(r.Context(), *ds, s.logStore, s.embStore, s.embedder, s.cfg)
 	now := time.Now()
+	if err != nil {
+		status := store.StatusError
+		msg := err.Error()
+		s.dsStore.Update(r.Context(), ds.ID, store.UpdateDataSourceParams{
+			Status:        &status,
+			StatusMessage: &msg,
+			LastTestedAt:  &now,
+		})
+		writeError(w, http.StatusUnprocessableEntity, "connector test failed: "+err.Error())
+		return
+	}
+
+	if err := c.TestConnection(r.Context()); err != nil {
+		c.Close()
+		status := store.StatusError
+		msg := err.Error()
+		s.dsStore.Update(r.Context(), ds.ID, store.UpdateDataSourceParams{
+			Status:        &status,
+			StatusMessage: &msg,
+			LastTestedAt:  &now,
+		})
+		writeError(w, http.StatusUnprocessableEntity, "connector test failed: "+err.Error())
+		return
+	}
+
+	// Register in registry on success
+	s.registry.Register(c)
+
+	status := store.StatusConnected
 	msg := "connection successful"
-	updated, err := s.store.Update(r.Context(), ds.ID, store.UpdateDataSourceParams{
+	updated, err := s.dsStore.Update(r.Context(), ds.ID, store.UpdateDataSourceParams{
 		Status:        &status,
 		StatusMessage: &msg,
 		LastTestedAt:  &now,
@@ -99,11 +129,21 @@ func (s *Server) handleDeleteConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.store.Delete(r.Context(), id); err != nil {
+	// Look up the data source to know its type for unregistration
+	ds, err := s.dsStore.GetByID(r.Context(), id)
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "connector not found")
 			return
 		}
+		writeError(w, http.StatusInternalServerError, "failed to get connector")
+		return
+	}
+
+	// Unregister from registry before deleting
+	s.registry.Unregister(connector.ConnectorType(ds.Type))
+
+	if err := s.dsStore.Delete(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete connector")
 		return
 	}

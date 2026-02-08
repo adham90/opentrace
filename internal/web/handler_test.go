@@ -10,7 +10,7 @@ import (
 )
 
 func TestHealthCheck(t *testing.T) {
-	srv := NewServer(nil, connector.NewRegistry())
+	srv := NewServer(nil, nil, nil, connector.NewRegistry(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -35,7 +35,7 @@ func TestHealthCheck(t *testing.T) {
 }
 
 func TestNotFound(t *testing.T) {
-	srv := NewServer(nil, connector.NewRegistry())
+	srv := NewServer(nil, nil, nil, connector.NewRegistry(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
 	w := httptest.NewRecorder()

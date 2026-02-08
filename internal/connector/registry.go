@@ -53,6 +53,17 @@ func (r *Registry) Unregister(ct ConnectorType) bool {
 	return true
 }
 
+// CloseAll closes and removes all registered connectors.
+func (r *Registry) CloseAll() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for ct, ds := range r.connectors {
+		ds.Close()
+		delete(r.connectors, ct)
+	}
+}
+
 // AllTools aggregates tools from all registered connectors.
 // Returns an empty slice (not nil) if no connectors are registered.
 func (r *Registry) AllTools() []agent.Tool {

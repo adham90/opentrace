@@ -540,20 +540,20 @@ OPENTRACE_MAX_OBSERVATION_BYTES=8192
 ### Phase 4 -- Connectors & Tools
 
 **4a. Logs:**
-* Ingestion endpoint (`POST /api/logs`)
-* Batch insert into App DB
-* Log Search tool (FTS via `to_tsquery`)
+* ✅ Ingestion endpoint (`POST /api/logs`)
+* ✅ Batch insert into App DB
+* ✅ Log Search tool (FTS via `to_tsquery`)
 
 **4b. Database:**
-* Target DB pool with read-only enforcement
-* SQL AST guardrail (`pg_query_go`)
-* DB Search tool
-* Schema introspection
+* ✅ Target DB pool with read-only enforcement
+* ✅ SQL AST guardrail (`pg_query_go`)
+* ✅ DB Search tool
+* ✅ Schema introspection
 
 **4c. Codebase:**
-* File walker + chunker
-* Embedding pipeline (via `EmbeddingProvider`)
-* Code Search tool (`pgvector` similarity)
+* ✅ File walker + chunker
+* ✅ Embedding pipeline (via `EmbeddingProvider`)
+* ✅ Code Search tool (`pgvector` similarity)
 
 ### Phase 5 -- UI
 

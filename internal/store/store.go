@@ -18,3 +18,17 @@ type DataSourceStore interface {
 	Update(ctx context.Context, id uuid.UUID, params UpdateDataSourceParams) (*DataSource, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 }
+
+// LogStore defines operations for log ingestion and search.
+type LogStore interface {
+	BatchInsert(ctx context.Context, entries []LogEntry) (int, error)
+	Search(ctx context.Context, params LogSearchParams) ([]LogEntry, error)
+}
+
+// EmbeddingStore defines operations for code embedding storage and search.
+type EmbeddingStore interface {
+	UpsertChunks(ctx context.Context, chunks []CodeChunk) error
+	Search(ctx context.Context, embedding []float64, limit int) ([]CodeSearchResult, error)
+	DeleteByPath(ctx context.Context, filePath string) error
+	DeleteAll(ctx context.Context) error
+}
