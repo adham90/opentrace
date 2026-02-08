@@ -53,6 +53,7 @@ func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore 
 
 	// Pages
 	router.Get("/", srv.handleInvestigatePage)
+	router.Get("/logs", srv.handleLogsPage)
 	router.Get("/connectors", srv.handleConnectorsPage)
 
 	// API

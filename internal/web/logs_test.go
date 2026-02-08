@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/opentrace/opentrace/internal/config"
 	"github.com/opentrace/opentrace/internal/connector"
+	"github.com/opentrace/opentrace/internal/store"
 )
 
 func setupTestServerWithLogStore() (*Server, *mockLogStore) {
@@ -219,5 +222,108 @@ func TestAPIKeyAuth_Disabled(t *testing.T) {
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+}
+
+func TestLogsPage_Renders(t *testing.T) {
+	srv, ls := setupTestServerWithLogStore()
+
+	// Seed a log entry
+	ls.entries = []store.LogEntry{
+		{
+			ID:          1,
+			Timestamp:   time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+			Level:       "INFO",
+			Service:     "api",
+			Environment: "production",
+			Message:     "request received",
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/logs", nil)
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "request received") {
+		t.Error("expected body to contain log message")
+	}
+	if !strings.Contains(body, "INFO") {
+		t.Error("expected body to contain log level")
+	}
+	if !strings.Contains(body, "1 entries") {
+		t.Error("expected body to contain entry count")
+	}
+}
+
+func TestLogsPage_WithFilters(t *testing.T) {
+	srv, ls := setupTestServerWithLogStore()
+
+	req := httptest.NewRequest(http.MethodGet, "/logs?level=ERROR&service=api&environment=staging&query=timeout", nil)
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	ls.mu.Lock()
+	params := ls.lastSearchParams
+	ls.mu.Unlock()
+
+	if params.Level != "ERROR" {
+		t.Errorf("level = %q, want %q", params.Level, "ERROR")
+	}
+	if params.Service != "api" {
+		t.Errorf("service = %q, want %q", params.Service, "api")
+	}
+	if params.Environment != "staging" {
+		t.Errorf("environment = %q, want %q", params.Environment, "staging")
+	}
+	if params.Query != "timeout" {
+		t.Errorf("query = %q, want %q", params.Query, "timeout")
+	}
+	if params.Limit != 100 {
+		t.Errorf("limit = %d, want %d", params.Limit, 100)
+	}
+}
+
+func TestLogsPage_HTMXFragment(t *testing.T) {
+	srv, ls := setupTestServerWithLogStore()
+
+	ls.entries = []store.LogEntry{
+		{
+			ID:        1,
+			Timestamp: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+			Level:     "ERROR",
+			Service:   "worker",
+			Message:   "connection refused",
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/logs", nil)
+	req.Header.Set("HX-Request", "true")
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	body := w.Body.String()
+	// HTMX fragment should NOT contain the full layout (no <html> tag)
+	if strings.Contains(body, "<html") {
+		t.Error("HTMX response should not contain full HTML layout")
+	}
+	// Should contain the log entry
+	if !strings.Contains(body, "connection refused") {
+		t.Error("expected HTMX fragment to contain log message")
+	}
+	if !strings.Contains(body, "ERROR") {
+		t.Error("expected HTMX fragment to contain log level")
 	}
 }

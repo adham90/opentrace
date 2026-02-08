@@ -94,6 +94,10 @@ h1 .dim { color: var(--text-dim); font-weight: 400; }
 .badge-connected { background: var(--green-dim); color: var(--green); }
 .badge-disconnected { background: var(--bg-tertiary); color: var(--text-dim); }
 .badge-error { background: var(--red-dim); color: var(--red); }
+.badge-ERROR { background: var(--red-dim); color: var(--red); }
+.badge-WARN { background: #78350f; color: var(--yellow); }
+.badge-INFO { background: #1e3a5f; color: var(--blue); }
+.badge-DEBUG { background: var(--bg-tertiary); color: var(--text-dim); }
 
 /* Tables */
 table {
@@ -316,3 +320,29 @@ textarea { resize: vertical; min-height: 60px; }
 .text-green { color: var(--green); }
 .text-red { color: var(--red); }
 .text-xs { font-size: 11px; }
+
+/* Log filters */
+.log-filters {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+
+.log-filters input,
+.log-filters select {
+  width: auto;
+  flex: 1;
+}
+
+.log-filters input:first-child {
+  flex: 2;
+}
+
+/* Log message truncation */
+.log-message {
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -89,9 +89,10 @@ func (m *mockDataSourceStore) Delete(ctx context.Context, id uuid.UUID) error {
 
 // mockLogStore implements store.LogStore for testing.
 type mockLogStore struct {
-	mu      sync.Mutex
-	entries []store.LogEntry
-	err     error
+	mu           sync.Mutex
+	entries      []store.LogEntry
+	err          error
+	lastSearchParams store.LogSearchParams
 }
 
 func newMockLogStore() *mockLogStore {
@@ -113,6 +114,7 @@ func (m *mockLogStore) Search(ctx context.Context, params store.LogSearchParams)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.lastSearchParams = params
 	if m.err != nil {
 		return nil, m.err
 	}
