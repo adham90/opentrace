@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/opentrace/opentrace/internal/agent"
 	"github.com/opentrace/opentrace/internal/store"
@@ -30,13 +31,30 @@ func (c *LogsConnector) TestConnection(ctx context.Context) error {
 func (c *LogsConnector) Tools() []agent.Tool {
 	return []agent.Tool{
 		{
-			Name:        "log_search",
-			Description: "Search ingested logs by keyword, service, level, or trace ID.",
+			Name: "log_search",
+			Description: `Search ingested logs. Supports filtering by:
+- query: full-text keyword search across log messages
+- service: exact match on service name (e.g. "api-gateway", "auth-service")
+- level: log level filter (debug, info, warn, error, fatal)
+- trace_id: find all logs for a specific trace/request
+- environment: filter by environment (e.g. "production", "staging")
+- start: only logs after this time (ISO 8601, e.g. "2024-01-15T00:00:00Z")
+- end: only logs before this time (ISO 8601, e.g. "2024-01-16T00:00:00Z")
+- limit: max results (default 50)
+
+Tips:
+- To investigate an error, start with level="error" to find failures
+- Use trace_id to follow a single request across services
+- Combine service + level to narrow down (e.g. service="payments" level="error")
+- Results are sorted by timestamp descending (newest first)`,
 			Params: []agent.ToolParam{
 				{Name: "query", Type: "string", Required: false},
 				{Name: "service", Type: "string", Required: false},
 				{Name: "level", Type: "string", Required: false},
 				{Name: "trace_id", Type: "string", Required: false},
+				{Name: "environment", Type: "string", Required: false},
+				{Name: "start", Type: "string", Required: false},
+				{Name: "end", Type: "string", Required: false},
 				{Name: "limit", Type: "int", Required: false},
 			},
 			Handler: c.handleLogSearch,
@@ -60,6 +78,19 @@ func (c *LogsConnector) handleLogSearch(ctx context.Context, args map[string]any
 	}
 	if v, ok := args["trace_id"].(string); ok {
 		params.TraceID = v
+	}
+	if v, ok := args["environment"].(string); ok {
+		params.Environment = v
+	}
+	if v, ok := args["start"].(string); ok && v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			params.Start = &t
+		}
+	}
+	if v, ok := args["end"].(string); ok && v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			params.End = &t
+		}
 	}
 	if v, ok := args["limit"].(float64); ok {
 		params.Limit = int(v)

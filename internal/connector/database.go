@@ -68,16 +68,33 @@ func (c *DatabaseConnector) TestConnection(ctx context.Context) error {
 func (c *DatabaseConnector) Tools() []agent.Tool {
 	return []agent.Tool{
 		{
-			Name:        "db_search",
-			Description: "Execute a read-only SQL SELECT query against the PostgreSQL database. Use this to count rows, find records, join tables, aggregate data, etc. Only SELECT statements are allowed. Example: {\"query\": \"SELECT COUNT(*) FROM users\"} or {\"query\": \"SELECT name, email FROM users LIMIT 10\"}",
+			Name: "db_search",
+			Description: `Execute a read-only SQL SELECT query against the PostgreSQL database.
+Only SELECT statements are allowed. A LIMIT is auto-applied if you don't include one.
+
+Tips:
+- Use db_schema first if you don't know the table structure
+- Use JOINs when you see foreign key relationships in the schema
+- For counting: SELECT COUNT(*) FROM table WHERE ...
+- For aggregation: SELECT col, COUNT(*) FROM table GROUP BY col
+- For date filtering: WHERE created_at >= '2024-01-01'
+- If a query errors, check column names against db_schema output`,
 			Params: []agent.ToolParam{
 				{Name: "query", Type: "string", Required: true},
 			},
 			Handler: c.handleDbSearch,
 		},
 		{
-			Name:        "db_schema",
-			Description: "Get database schema information. Call with no args to list all tables. Call with a table name to see its columns and types. Use this first to understand what tables and columns exist before writing queries.",
+			Name: "db_schema",
+			Description: `Get database schema information. Call with no args to list all tables.
+Call with a table name to see columns, types, foreign keys, and sample values.
+Schema results are cached for 5 minutes.
+
+Tips:
+- Start here to understand the database structure
+- Foreign keys show as -> target_table(column) so you know how to JOIN
+- Sample values help you understand what data looks like
+- Row count estimates help you gauge table size`,
 			Params: []agent.ToolParam{
 				{Name: "table", Type: "string", Required: false},
 			},

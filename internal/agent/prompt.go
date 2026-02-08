@@ -43,11 +43,15 @@ Step 2 (after seeing result): {"type":"final_answer","content":"The orders table
 
 ## Strategy
 
-- For database questions: first use db_schema to understand the tables, then use db_search with SELECT queries to get data.
-- For complex questions: break them into multiple tool calls. For example, first get the schema, then count rows, then query specific data.
+- For database questions: use db_schema to understand table structure (it's fast, results are cached). Then write SQL with db_search.
+- Look at foreign key references in db_schema output to know how to JOIN tables.
+- For log investigation: use log_search with filters. Start broad, then narrow down.
+- To trace a request: find the trace_id in logs, then use it to find all related log entries.
+- For complex questions: break them into steps. Schema first, then targeted queries.
+- If you already have schema information or query results from earlier in this conversation, use them directly instead of calling tools again.
 - Always provide specific numbers and data in your final answer, not vague statements.
-- If you get an error about an unknown tool, DO NOT give up. Use db_search with a SQL query instead.
-- NEVER mention tools or errors in your final answer. Only include the actual data the user asked for.`)
+- If a query returns an error, read the error message carefully and fix your SQL.
+- NEVER mention tools, errors, or internal steps in your final answer. Only include the actual data the user asked for.`)
 
 	if len(tools) > 0 {
 		b.WriteString("\n\n## Available tools:\n\n")
