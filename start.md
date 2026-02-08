@@ -1,9 +1,11 @@
 # OpenTrace -- MVP Engineering Brief
 
 **Objective**
-Build a self-hosted, connector-based AI debugging platform in Go. Users plug in their production environment (logs, database, codebase, VM monitoring), pick an LLM, and chat to debug. Determinism, traceability, and trust come before intelligence.
+Build a self-hosted, connector-based AI debugging engine in Go. Users plug in their production environment (logs, database, codebase), connect Ollama, and chat to debug. Determinism, traceability, and trust come before intelligence.
 
-> **Guiding Principle:** This is a **connector-based debugging platform**, not a chatbot. Users configure data source connectors to their production environment, and the agent dynamically assembles tools from active connectors.
+> **Guiding Principle:** This is a **connector-based debugging engine**, not a chatbot. Users configure data source connectors to their production environment, and the agent dynamically assembles tools from active connectors.
+
+> **MVP Scope:** Logs + Database + Codebase connectors, Ollama only. Monitoring connector and Anthropic/OpenAI providers are designed but deferred to post-MVP.
 
 ---
 
@@ -18,7 +20,7 @@ Build a self-hosted, connector-based AI debugging platform in Go. Users plug in 
 * **Deterministic Safety**:
   * LLM output is treated as *untrusted input*.
   * SQL is parsed and validated before execution.
-  * PromQL queries are parsed and bounded.
+  * PromQL queries are parsed and bounded. *(post-MVP)*
 * **SSE-First UI**:
   * Stream `thinking -> tool_call -> observation -> final` events.
   * Server-Sent Events (SSE) + HTMX only.
@@ -35,13 +37,8 @@ Build a self-hosted, connector-based AI debugging platform in Go. Users plug in 
 * **Target Database**: User's production PostgreSQL (read-only, user-configured at runtime)
 * **Driver**: `github.com/jackc/pgx/v5`
 * **SQL Parsing**: `github.com/pganalyze/pg_query_go/v5`
-* **LLM Providers** (user-configurable):
-  * Ollama (local) -- no API key required
-  * Anthropic (Claude) -- user-provided API key
-  * OpenAI (GPT-4) -- user-provided API key
-  * All providers accessed via raw HTTP (`http.Client`), no SDKs
-  * Provider selected via env var / config file
-  * API keys stored as env vars only, never in the DB
+* **LLM Provider (MVP)**: Ollama (local) -- no API key required, raw HTTP (`http.Client`), no SDKs
+* **LLM Providers (post-MVP)**: Anthropic (Claude), OpenAI (GPT-4) -- interfaces designed now, implemented after loop is proven
 * **Embedding**: Ollama `nomic-embed-text` (768d) as default
 * **Frontend**: Go `html/template` + HTMX + Tailwind CSS
 * **Migrations**: `golang-migrate/migrate` (numbered SQL files in `migrations/`)
@@ -79,7 +76,7 @@ type DataSource interface {
 | **Logs** | (push via HTTP) | `log_search` |
 | **Database** | PG connection string | `db_search` |
 | **Codebase** | Local repo path | `code_search` |
-| **Monitoring** | Prometheus URL | `monitoring_query`, `monitoring_targets`, `monitoring_metric_names` |
+| **Monitoring** *(post-MVP)* | Prometheus URL | `monitoring_query`, `monitoring_targets`, `monitoring_metric_names` |
 
 ### Registry Pattern
 
@@ -227,12 +224,14 @@ type EmbeddingProvider interface {
 }
 ```
 
-Implementations:
+MVP Implementation:
 * `OllamaProvider` -- calls `POST /api/chat` and `POST /api/embeddings`
+
+Post-MVP Implementations (interfaces ready, implement after loop is proven):
 * `AnthropicProvider` -- calls Anthropic Messages API
 * `OpenAIProvider` -- calls OpenAI Chat Completions and Embeddings APIs
 
-Each is ~100-150 lines. No SDKs -- raw `http.Client` + JSON marshal/unmarshal.
+Each provider is ~100-150 lines. No SDKs -- raw `http.Client` + JSON marshal/unmarshal.
 
 ---
 
@@ -334,7 +333,7 @@ Additionally, the Target DB pool is configured with:
 * `default_transaction_read_only=on` at the connection level
 * `statement_timeout` set via `OPENTRACE_STATEMENT_TIMEOUT_MS`
 
-### PromQL Safety (`internal/guardrail/promql.go`)
+### PromQL Safety (`internal/guardrail/promql.go`) *(post-MVP)*
 
 ```go
 func ValidatePromQL(query string, maxRangeHours int) error {
@@ -345,7 +344,7 @@ func ValidatePromQL(query string, maxRangeHours int) error {
 }
 ```
 
-Prevents the agent from querying unbounded time ranges that could overwhelm Prometheus.
+Prevents the agent from querying unbounded time ranges that could overwhelm Prometheus. Implemented alongside the Monitoring connector post-MVP.
 
 ---
 
@@ -374,19 +373,19 @@ Prevents the agent from querying unbounded time ranges that could overwhelm Prom
 * Return file path + chunk content
 * Only active when a Codebase connector is configured
 
-### Tool 4: Monitoring Query (`monitoring_query`)
+### Tool 4: Monitoring Query (`monitoring_query`) *(post-MVP)*
 
 * Execute PromQL queries against user's Prometheus
 * PromQL guardrail enforces max time range
 * Only active when a Monitoring connector is configured
 
-### Tool 5: Monitoring Targets (`monitoring_targets`)
+### Tool 5: Monitoring Targets (`monitoring_targets`) *(post-MVP)*
 
 * Discover what targets Prometheus is monitoring
 * Helps the agent understand the infrastructure
 * Only active when a Monitoring connector is configured
 
-### Tool 6: Monitoring Metric Names (`monitoring_metric_names`)
+### Tool 6: Monitoring Metric Names (`monitoring_metric_names`) *(post-MVP)*
 
 * Discover available metric names in Prometheus
 * Helps the agent construct valid PromQL queries
@@ -407,7 +406,7 @@ Prevents the agent from querying unbounded time ranges that could overwhelm Prom
 
 ---
 
-## 10. VM Monitoring via Prometheus
+## 10. VM Monitoring via Prometheus *(post-MVP)*
 
 **Why Prometheus:** Already deployed in most production environments, HTTP-based (no SSH/agents to install), inherently read-only, standardized metric names (`node_exporter`).
 
@@ -417,6 +416,8 @@ Three tools exposed by the Monitoring connector:
 * `monitoring_query` -- execute PromQL queries (`/api/v1/query_range`)
 
 The Prometheus connector stores the Prometheus URL in `data_sources.config` as `{"prometheus_url": "http://..."}`.
+
+**Note:** The `ConnectorMonitoring` type is included in the enum and schema so no migration is needed when this is implemented. The `prometheus.go` connector and `promql.go` guardrail are deferred.
 
 ---
 
@@ -448,8 +449,8 @@ opentrace/
 │   │   ├── registry.go               -- tool aggregation from active connectors
 │   │   ├── logs.go                   -- logs connector (always active)
 │   │   ├── database.go               -- target DB connector (user's PG)
-│   │   ├── codebase.go               -- codebase connector (embeddings)
-│   │   └── prometheus.go             -- Prometheus connector
+│   │   └── codebase.go               -- codebase connector (embeddings)
+│   │   # prometheus.go              -- Prometheus connector (post-MVP)
 │   ├── agent/
 │   │   ├── loop.go                   -- agent loop (pulls tools from registry)
 │   │   ├── tool.go                   -- Tool, ToolParam types
@@ -457,12 +458,12 @@ opentrace/
 │   │   └── json.go                   -- JSON parsing + repair
 │   ├── llm/
 │   │   ├── provider.go               -- LLMProvider, EmbeddingProvider interfaces
-│   │   ├── ollama.go
-│   │   ├── anthropic.go
-│   │   └── openai.go
+│   │   └── ollama.go
+│   │   # anthropic.go              -- post-MVP
+│   │   # openai.go                 -- post-MVP
 │   ├── guardrail/
-│   │   ├── sql.go                    -- SQL AST validation (pg_query_go)
-│   │   └── promql.go                 -- PromQL validation
+│   │   └── sql.go                    -- SQL AST validation (pg_query_go)
+│   │   # promql.go                 -- PromQL validation (post-MVP)
 │   ├── ingest/logs.go                -- log ingestion HTTP handler
 │   └── web/
 │       ├── handler.go, sse.go, connectors.go
@@ -481,11 +482,12 @@ opentrace/
 # Required
 OPENTRACE_APP_DATABASE_URL=postgres://opentrace:opentrace@localhost:5432/opentrace
 
-# LLM (user selects provider)
-OPENTRACE_LLM_PROVIDER=ollama          # ollama | anthropic | openai
+# LLM (Ollama only for MVP)
+OPENTRACE_LLM_PROVIDER=ollama
 OPENTRACE_OLLAMA_URL=http://localhost:11434
-OPENTRACE_ANTHROPIC_API_KEY=
-OPENTRACE_OPENAI_API_KEY=
+# Post-MVP:
+# OPENTRACE_ANTHROPIC_API_KEY=
+# OPENTRACE_OPENAI_API_KEY=
 
 # Embedding
 OPENTRACE_EMBEDDING_PROVIDER=ollama
@@ -496,14 +498,14 @@ OPENTRACE_LISTEN_ADDR=:8080
 
 # Guardrails
 OPENTRACE_MAX_QUERY_ROWS=500
-OPENTRACE_MAX_PROM_RANGE_HOURS=24
+# OPENTRACE_MAX_PROM_RANGE_HOURS=24   # post-MVP (Monitoring connector)
 OPENTRACE_STATEMENT_TIMEOUT_MS=5000
 OPENTRACE_MAX_AGENT_STEPS=12
 OPENTRACE_MAX_TOOL_CALLS=8
 OPENTRACE_MAX_OBSERVATION_BYTES=8192
 ```
 
-**Important:** Target DB URL, Prometheus URL, and repo path are **not** env vars -- they are user-configured at runtime via UI/API, stored in the `data_sources` table.
+**Important:** Target DB URL and repo path are **not** env vars -- they are user-configured at runtime via UI/API, stored in the `data_sources` table. *(Prometheus URL same pattern, post-MVP.)*
 
 ---
 
@@ -524,9 +526,7 @@ OPENTRACE_MAX_OBSERVATION_BYTES=8192
 
 1. `LLMProvider` + `EmbeddingProvider` interfaces
 2. Ollama provider (chat + embeddings)
-3. Anthropic provider
-4. OpenAI provider
-5. Provider selection via config
+3. Provider selection via config
 
 ### Phase 3 -- Agent Core
 
@@ -555,11 +555,6 @@ OPENTRACE_MAX_OBSERVATION_BYTES=8192
 * Embedding pipeline (via `EmbeddingProvider`)
 * Code Search tool (`pgvector` similarity)
 
-**4d. Monitoring:**
-* Prometheus HTTP client
-* PromQL guardrail (max time range, response size)
-* `monitoring_query`, `monitoring_targets`, `monitoring_metric_names` tools
-
 ### Phase 5 -- UI
 
 1. Layout (Tailwind + HTMX)
@@ -574,6 +569,13 @@ OPENTRACE_MAX_OBSERVATION_BYTES=8192
 3. Error handling / graceful degradation
 4. Docker Compose with all services
 5. README
+
+### Post-MVP -- Deferred (designed, not implemented)
+
+* **Anthropic provider** (`anthropic.go`) -- Anthropic Messages API
+* **OpenAI provider** (`openai.go`) -- OpenAI Chat Completions + Embeddings APIs
+* **Monitoring connector** (`prometheus.go`) -- Prometheus HTTP client, `monitoring_query`, `monitoring_targets`, `monitoring_metric_names` tools
+* **PromQL guardrail** (`promql.go`) -- max time range, response size validation
 
 ---
 
