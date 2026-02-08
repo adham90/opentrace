@@ -1,9 +1,11 @@
 package config
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -21,6 +23,34 @@ type Config struct {
 	MaxAgentSteps       int
 	MaxToolCalls        int
 	MaxObservationBytes int
+}
+
+// LoadEnvFile reads a .env file and sets any variables not already in the environment.
+// Missing file is not an error.
+func LoadEnvFile(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		val = strings.TrimSpace(val)
+		// Don't override existing env vars
+		if os.Getenv(key) == "" {
+			os.Setenv(key, val)
+		}
+	}
 }
 
 func Load() (*Config, error) {

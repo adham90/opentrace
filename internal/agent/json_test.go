@@ -62,10 +62,25 @@ func TestParseResponse_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestParseResponse_UnknownType(t *testing.T) {
-	raw := `{"type":"unknown","content":"hmm"}`
+func TestParseResponse_UnknownType_RecoveredAsToolCall(t *testing.T) {
+	// LLM sometimes puts tool name in "type" field — should recover as tool_call
+	raw := `{"type":"db_search","args":{"query":"SELECT 1"}}`
+	resp, err := ParseResponse(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Type != "tool_call" {
+		t.Errorf("expected type tool_call, got %q", resp.Type)
+	}
+	if resp.Tool != "db_search" {
+		t.Errorf("expected tool db_search, got %q", resp.Tool)
+	}
+}
+
+func TestParseResponse_EmptyType(t *testing.T) {
+	raw := `{"type":"","content":"hmm"}`
 	_, err := ParseResponse(raw)
 	if err == nil {
-		t.Fatal("expected error for unknown type")
+		t.Fatal("expected error for empty type")
 	}
 }

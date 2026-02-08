@@ -37,6 +37,15 @@ func ParseResponse(raw string) (AgentResponse, error) {
 	case "final_answer", "tool_call":
 		return resp, nil
 	default:
+		// LLM sometimes puts the tool name in the "type" field instead of "tool_call".
+		// Recover by treating the type value as the tool name.
+		if resp.Type != "" && resp.Type != "final_answer" {
+			if resp.Tool == "" {
+				resp.Tool = resp.Type
+			}
+			resp.Type = "tool_call"
+			return resp, nil
+		}
 		return AgentResponse{}, fmt.Errorf("parse response: unknown type %q", resp.Type)
 	}
 }

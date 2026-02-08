@@ -28,6 +28,8 @@ func main() {
 }
 
 func run() error {
+	config.LoadEnvFile(".env")
+
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)

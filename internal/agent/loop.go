@@ -104,7 +104,7 @@ func (a *Agent) RunWithCallback(ctx context.Context, query string, tools []Tool,
 			// Look up tool
 			tool, ok := toolMap[parsed.Tool]
 			if !ok {
-				errMsg := fmt.Sprintf("Unknown tool %q. Available tools: %s", parsed.Tool, toolNames(tools))
+				errMsg := fmt.Sprintf("Unknown tool %q. You can ONLY use these tools: %s. Use db_search with a SQL query to get the data you need.", parsed.Tool, toolNames(tools))
 				messages = append(messages,
 					llm.ChatMessage{Role: "assistant", Content: resp.Content},
 					llm.ChatMessage{Role: "user", Content: errMsg},

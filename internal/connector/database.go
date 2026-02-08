@@ -56,7 +56,7 @@ func (c *DatabaseConnector) Tools() []agent.Tool {
 	return []agent.Tool{
 		{
 			Name:        "db_search",
-			Description: "Execute a read-only SQL query against the target database. Only SELECT statements are allowed.",
+			Description: "Execute a read-only SQL SELECT query against the PostgreSQL database. Use this to count rows, find records, join tables, aggregate data, etc. Only SELECT statements are allowed. Example: {\"query\": \"SELECT COUNT(*) FROM users\"} or {\"query\": \"SELECT name, email FROM users LIMIT 10\"}",
 			Params: []agent.ToolParam{
 				{Name: "query", Type: "string", Required: true},
 			},
@@ -64,7 +64,7 @@ func (c *DatabaseConnector) Tools() []agent.Tool {
 		},
 		{
 			Name:        "db_schema",
-			Description: "Get database schema information. Lists tables or columns for a specific table.",
+			Description: "Get database schema information. Call with no args to list all tables. Call with a table name to see its columns and types. Use this first to understand what tables and columns exist before writing queries.",
 			Params: []agent.ToolParam{
 				{Name: "table", Type: "string", Required: false},
 			},
