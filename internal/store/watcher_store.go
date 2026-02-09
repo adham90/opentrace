@@ -28,10 +28,10 @@ func (s *PgWatcherStore) Create(ctx context.Context, params CreateWatcherParams)
 		severity = SeverityWarning
 	}
 
-	// Default interval
-	interval := params.IntervalSeconds
-	if interval <= 0 {
-		interval = 300
+	// Default time range
+	timeRange := params.TimeRange
+	if timeRange == "" {
+		timeRange = "15m"
 	}
 
 	// Default filters
@@ -51,14 +51,14 @@ func (s *PgWatcherStore) Create(ctx context.Context, params CreateWatcherParams)
 
 	w := &Watcher{}
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO watchers (title, description, severity, filters, interval_seconds, notify, next_run_at)
+		`INSERT INTO watchers (title, description, severity, filters, time_range, notify, next_run_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)
-		 RETURNING id, title, description, severity, filters, interval_seconds, status, notify,
+		 RETURNING id, title, description, severity, filters, time_range, status, notify,
 		           last_run_at, next_run_at, last_error, created_at, updated_at`,
-		params.Title, params.Description, severity, filters, interval, notify, nextRun,
+		params.Title, params.Description, severity, filters, timeRange, notify, nextRun,
 	).Scan(
 		&w.ID, &w.Title, &w.Description, &w.Severity, &w.Filters,
-		&w.IntervalSeconds, &w.Status, &w.Notify,
+		&w.TimeRange, &w.Status, &w.Notify,
 		&w.LastRunAt, &w.NextRunAt, &w.LastError,
 		&w.CreatedAt, &w.UpdatedAt,
 	)
@@ -72,12 +72,12 @@ func (s *PgWatcherStore) Create(ctx context.Context, params CreateWatcherParams)
 func (s *PgWatcherStore) GetByID(ctx context.Context, id uuid.UUID) (*Watcher, error) {
 	w := &Watcher{}
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, title, description, severity, filters, interval_seconds, status, notify,
+		`SELECT id, title, description, severity, filters, time_range, status, notify,
 		        last_run_at, next_run_at, last_error, created_at, updated_at
 		 FROM watchers WHERE id = $1`, id,
 	).Scan(
 		&w.ID, &w.Title, &w.Description, &w.Severity, &w.Filters,
-		&w.IntervalSeconds, &w.Status, &w.Notify,
+		&w.TimeRange, &w.Status, &w.Notify,
 		&w.LastRunAt, &w.NextRunAt, &w.LastError,
 		&w.CreatedAt, &w.UpdatedAt,
 	)
@@ -93,7 +93,7 @@ func (s *PgWatcherStore) GetByID(ctx context.Context, id uuid.UUID) (*Watcher, e
 
 func (s *PgWatcherStore) List(ctx context.Context) ([]Watcher, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, title, description, severity, filters, interval_seconds, status, notify,
+		`SELECT id, title, description, severity, filters, time_range, status, notify,
 		        last_run_at, next_run_at, last_error, created_at, updated_at
 		 FROM watchers ORDER BY created_at DESC`,
 	)
@@ -107,7 +107,7 @@ func (s *PgWatcherStore) List(ctx context.Context) ([]Watcher, error) {
 		var w Watcher
 		if err := rows.Scan(
 			&w.ID, &w.Title, &w.Description, &w.Severity, &w.Filters,
-			&w.IntervalSeconds, &w.Status, &w.Notify,
+			&w.TimeRange, &w.Status, &w.Notify,
 			&w.LastRunAt, &w.NextRunAt, &w.LastError,
 			&w.CreatedAt, &w.UpdatedAt,
 		); err != nil {
@@ -125,21 +125,21 @@ func (s *PgWatcherStore) Update(ctx context.Context, id uuid.UUID, params Update
 
 	err := s.pool.QueryRow(ctx,
 		`UPDATE watchers
-		 SET title            = COALESCE($2, title),
-		     description      = COALESCE($3, description),
-		     severity         = COALESCE($4, severity),
-		     filters          = COALESCE($5, filters),
-		     interval_seconds = COALESCE($6, interval_seconds),
-		     notify           = COALESCE($7, notify),
-		     updated_at       = $8
+		 SET title       = COALESCE($2, title),
+		     description = COALESCE($3, description),
+		     severity    = COALESCE($4, severity),
+		     filters     = COALESCE($5, filters),
+		     time_range  = COALESCE($6, time_range),
+		     notify      = COALESCE($7, notify),
+		     updated_at  = $8
 		 WHERE id = $1
-		 RETURNING id, title, description, severity, filters, interval_seconds, status, notify,
+		 RETURNING id, title, description, severity, filters, time_range, status, notify,
 		           last_run_at, next_run_at, last_error, created_at, updated_at`,
 		id, params.Title, params.Description, params.Severity,
-		params.Filters, params.IntervalSeconds, params.Notify, now,
+		params.Filters, params.TimeRange, params.Notify, now,
 	).Scan(
 		&w.ID, &w.Title, &w.Description, &w.Severity, &w.Filters,
-		&w.IntervalSeconds, &w.Status, &w.Notify,
+		&w.TimeRange, &w.Status, &w.Notify,
 		&w.LastRunAt, &w.NextRunAt, &w.LastError,
 		&w.CreatedAt, &w.UpdatedAt,
 	)
@@ -158,12 +158,12 @@ func (s *PgWatcherStore) UpdateStatus(ctx context.Context, id uuid.UUID, status 
 	err := s.pool.QueryRow(ctx,
 		`UPDATE watchers SET status = $2, updated_at = now()
 		 WHERE id = $1
-		 RETURNING id, title, description, severity, filters, interval_seconds, status, notify,
+		 RETURNING id, title, description, severity, filters, time_range, status, notify,
 		           last_run_at, next_run_at, last_error, created_at, updated_at`,
 		id, status,
 	).Scan(
 		&w.ID, &w.Title, &w.Description, &w.Severity, &w.Filters,
-		&w.IntervalSeconds, &w.Status, &w.Notify,
+		&w.TimeRange, &w.Status, &w.Notify,
 		&w.LastRunAt, &w.NextRunAt, &w.LastError,
 		&w.CreatedAt, &w.UpdatedAt,
 	)
@@ -189,7 +189,7 @@ func (s *PgWatcherStore) Delete(ctx context.Context, id uuid.UUID) error {
 
 func (s *PgWatcherStore) GetDueWatchers(ctx context.Context) ([]Watcher, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, title, description, severity, filters, interval_seconds, status, notify,
+		`SELECT id, title, description, severity, filters, time_range, status, notify,
 		        last_run_at, next_run_at, last_error, created_at, updated_at
 		 FROM watchers
 		 WHERE status = 'active' AND next_run_at <= now()
@@ -205,7 +205,7 @@ func (s *PgWatcherStore) GetDueWatchers(ctx context.Context) ([]Watcher, error) 
 		var w Watcher
 		if err := rows.Scan(
 			&w.ID, &w.Title, &w.Description, &w.Severity, &w.Filters,
-			&w.IntervalSeconds, &w.Status, &w.Notify,
+			&w.TimeRange, &w.Status, &w.Notify,
 			&w.LastRunAt, &w.NextRunAt, &w.LastError,
 			&w.CreatedAt, &w.UpdatedAt,
 		); err != nil {

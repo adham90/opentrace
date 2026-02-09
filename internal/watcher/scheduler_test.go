@@ -78,7 +78,7 @@ func TestScheduler_ExecutesDueWatchers(t *testing.T) {
 				Description:     "For scheduler test",
 				Severity:        store.SeverityWarning,
 				Filters:         json.RawMessage(`{}`),
-				IntervalSeconds: 300,
+				TimeRange:       "5m",
 				Notify:          json.RawMessage(`["dashboard"]`),
 			},
 		},

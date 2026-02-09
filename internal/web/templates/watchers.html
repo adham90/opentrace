@@ -39,8 +39,15 @@
           </select>
         </div>
         <div class="form-group">
-          <label>Run every (minutes)</label>
-          <input type="number" id="watcher-interval" value="5" min="1" max="1440">
+          <label>Time range (lookback window &amp; run interval)</label>
+          <select id="watcher-timerange">
+            <option value="5m">Every 5 minutes</option>
+            <option value="15m" selected>Every 15 minutes</option>
+            <option value="30m">Every 30 minutes</option>
+            <option value="1h">Every 1 hour</option>
+            <option value="6h">Every 6 hours</option>
+            <option value="24h">Every 24 hours</option>
+          </select>
         </div>
       </div>
       <fieldset class="form-fieldset">
@@ -65,17 +72,6 @@
           <div class="form-group">
             <label>Environment</label>
             <input type="text" id="filter-env" placeholder="e.g. production">
-          </div>
-          <div class="form-group">
-            <label>Time range</label>
-            <select id="filter-timerange">
-              <option value="5m">Last 5 minutes</option>
-              <option value="15m" selected>Last 15 minutes</option>
-              <option value="30m">Last 30 minutes</option>
-              <option value="1h">Last 1 hour</option>
-              <option value="6h">Last 6 hours</option>
-              <option value="24h">Last 24 hours</option>
-            </select>
           </div>
         </div>
         <div class="form-group">
@@ -112,13 +108,12 @@ function loadWatchers() {
     watchers.forEach(function(w) {
       var statusClass = w.status === 'active' ? 'status-active' : w.status === 'paused' ? 'status-paused' : 'status-error';
       var statusIcon = w.status === 'active' ? '&#9679;' : w.status === 'paused' ? '&#9208;' : '&#9888;';
-      var interval = w.interval_seconds >= 60 ? Math.floor(w.interval_seconds / 60) + 'm' : w.interval_seconds + 's';
       var lastRun = w.last_run_at ? getTimeAgo(w.last_run_at) : 'never';
 
       html += '<div class="watcher-card">';
       html += '  <div class="watcher-header">';
       html += '    <span class="watcher-title">' + escapeHtml(w.title) + '</span>';
-      html += '    <span class="watcher-meta">every ' + interval + '</span>';
+      html += '    <span class="watcher-meta">every ' + escapeHtml(w.time_range || '15m') + '</span>';
       html += '    <span class="watcher-status ' + statusClass + '">' + statusIcon + ' ' + w.status + '</span>';
       html += '  </div>';
       html += '  <div class="watcher-info">';
@@ -166,12 +161,10 @@ function saveWatcher(e) {
   var svc = document.getElementById('filter-service').value;
   var lvl = document.getElementById('filter-level').value;
   var env = document.getElementById('filter-env').value;
-  var tr = document.getElementById('filter-timerange').value;
   var q = document.getElementById('filter-query').value;
   if (svc) filters.service = svc;
   if (lvl) filters.level = lvl;
   if (env) filters.environment = env;
-  if (tr) filters.time_range = tr;
   if (q) filters.query = q;
 
   var notify = ['dashboard'];
@@ -184,7 +177,7 @@ function saveWatcher(e) {
     title: document.getElementById('watcher-title').value,
     description: document.getElementById('watcher-description').value,
     severity: document.getElementById('watcher-severity').value,
-    interval_seconds: parseInt(document.getElementById('watcher-interval').value) * 60,
+    time_range: document.getElementById('watcher-timerange').value,
     filters: filters,
     notify: notify
   };
@@ -209,13 +202,12 @@ function editWatcher(id) {
     document.getElementById('watcher-title').value = w.title;
     document.getElementById('watcher-description').value = w.description;
     document.getElementById('watcher-severity').value = w.severity;
-    document.getElementById('watcher-interval').value = Math.floor(w.interval_seconds / 60) || 5;
+    document.getElementById('watcher-timerange').value = w.time_range || '15m';
 
     var f = w.filters || {};
     document.getElementById('filter-service').value = f.service || '';
     document.getElementById('filter-level').value = f.level || '';
     document.getElementById('filter-env').value = f.environment || '';
-    document.getElementById('filter-timerange').value = f.time_range || '15m';
     document.getElementById('filter-query').value = f.query || '';
 
     document.getElementById('watcher-modal').style.display = 'flex';

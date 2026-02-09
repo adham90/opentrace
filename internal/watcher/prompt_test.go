@@ -12,7 +12,8 @@ func TestBuildQuery_Basic(t *testing.T) {
 	w := store.Watcher{
 		Title:       "Payment errors",
 		Description: "Check for payment gateway failures",
-		Filters:     json.RawMessage(`{"service":"payment-api","level":"error","time_range":"15m"}`),
+		TimeRange:   "15m",
+		Filters:     json.RawMessage(`{"service":"payment-api","level":"error"}`),
 	}
 
 	q := BuildQuery(w, "")
@@ -75,11 +76,11 @@ func TestBuildQuery_AllFilters(t *testing.T) {
 	w := store.Watcher{
 		Title:       "Full filter watcher",
 		Description: "Testing all filters",
+		TimeRange:   "1h",
 		Filters: json.RawMessage(`{
 			"service":"api",
 			"level":"error",
 			"environment":"production",
-			"time_range":"1h",
 			"query":"timeout"
 		}`),
 	}

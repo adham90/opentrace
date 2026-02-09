@@ -60,9 +60,8 @@ func Serve(deps Deps) error {
 				mcp.WithString("service", mcp.Description("Filter by service name")),
 				mcp.WithString("level", mcp.Description("Filter by log level (e.g. error, warning)")),
 				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production)")),
-				mcp.WithString("time_range", mcp.Description("Lookback window (e.g. 15m, 1h)")),
+				mcp.WithString("time_range", mcp.Description("Lookback window and run interval (e.g. 5m, 15m, 1h, 6h, 24h). Default: 15m")),
 				mcp.WithString("query", mcp.Description("Full-text search query for logs")),
-				mcp.WithNumber("interval_minutes", mcp.Description("How often to run in minutes (default: 5)")),
 				mcp.WithString("severity", mcp.Description("Alert severity: info, warning, or critical (default: warning)")),
 			),
 			createWatcherHandler(deps.WatcherStore),
@@ -192,18 +191,15 @@ func createWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 		if v, ok := args["environment"].(string); ok && v != "" {
 			filters["environment"] = v
 		}
-		if v, ok := args["time_range"].(string); ok && v != "" {
-			filters["time_range"] = v
-		}
 		if v, ok := args["query"].(string); ok && v != "" {
 			filters["query"] = v
 		}
 
 		filtersJSON, _ := json.Marshal(filters)
 
-		intervalSeconds := 300 // default 5 minutes
-		if v, ok := args["interval_minutes"].(float64); ok && v > 0 {
-			intervalSeconds = int(v) * 60
+		timeRange := "15m"
+		if v, ok := args["time_range"].(string); ok && v != "" {
+			timeRange = v
 		}
 
 		severity := store.SeverityWarning
@@ -212,12 +208,12 @@ func createWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 		}
 
 		params := store.CreateWatcherParams{
-			Title:           title,
-			Description:     description,
-			Severity:        severity,
-			Filters:         filtersJSON,
-			IntervalSeconds: intervalSeconds,
-			Notify:          json.RawMessage(`["dashboard"]`),
+			Title:       title,
+			Description: description,
+			Severity:    severity,
+			Filters:     filtersJSON,
+			TimeRange:   timeRange,
+			Notify:      json.RawMessage(`["dashboard"]`),
 		}
 
 		watcher, err := ws.Create(ctx, params)

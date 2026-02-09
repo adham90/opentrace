@@ -26,7 +26,7 @@ func newTestServerWithWatchers() *Server {
 func TestHandleCreateWatcher(t *testing.T) {
 	srv := newTestServerWithWatchers()
 
-	body := `{"title":"Error watcher","description":"Watch for errors","severity":"critical","interval_seconds":120}`
+	body := `{"title":"Error watcher","description":"Watch for errors","severity":"critical","time_range":"15m"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/watchers", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

@@ -111,7 +111,7 @@ func (e *Executor) Execute(ctx context.Context, w store.Watcher) {
 
 func (e *Executor) updateWatcherTiming(ctx context.Context, w store.Watcher) {
 	now := time.Now()
-	next := now.Add(time.Duration(w.IntervalSeconds) * time.Second)
+	next := now.Add(ParseTimeRange(w.TimeRange))
 	if err := e.watcherStore.UpdateRunTime(ctx, w.ID, now, next); err != nil {
 		log.Printf("watcher %s: failed to update run time: %v", w.ID, err)
 	}

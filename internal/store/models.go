@@ -137,39 +137,39 @@ const (
 
 // Watcher represents an automated monitoring rule.
 type Watcher struct {
-	ID              uuid.UUID       `json:"id"`
-	Title           string          `json:"title"`
-	Description     string          `json:"description"`
-	Severity        WatcherSeverity `json:"severity"`
-	Filters         json.RawMessage `json:"filters"`
-	IntervalSeconds int             `json:"interval_seconds"`
-	Status          WatcherStatus   `json:"status"`
-	Notify          json.RawMessage `json:"notify"`
-	LastRunAt       *time.Time      `json:"last_run_at,omitempty"`
-	NextRunAt       *time.Time      `json:"next_run_at,omitempty"`
-	LastError       *string         `json:"last_error,omitempty"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
+	ID          uuid.UUID       `json:"id"`
+	Title       string          `json:"title"`
+	Description string          `json:"description"`
+	Severity    WatcherSeverity `json:"severity"`
+	Filters     json.RawMessage `json:"filters"`
+	TimeRange   string          `json:"time_range"`
+	Status      WatcherStatus   `json:"status"`
+	Notify      json.RawMessage `json:"notify"`
+	LastRunAt   *time.Time      `json:"last_run_at,omitempty"`
+	NextRunAt   *time.Time      `json:"next_run_at,omitempty"`
+	LastError   *string         `json:"last_error,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
 // CreateWatcherParams defines the input for creating a watcher.
 type CreateWatcherParams struct {
-	Title           string          `json:"title"`
-	Description     string          `json:"description"`
-	Severity        WatcherSeverity `json:"severity"`
-	Filters         json.RawMessage `json:"filters"`
-	IntervalSeconds int             `json:"interval_seconds"`
-	Notify          json.RawMessage `json:"notify"`
+	Title       string          `json:"title"`
+	Description string          `json:"description"`
+	Severity    WatcherSeverity `json:"severity"`
+	Filters     json.RawMessage `json:"filters"`
+	TimeRange   string          `json:"time_range"`
+	Notify      json.RawMessage `json:"notify"`
 }
 
 // UpdateWatcherParams defines the input for updating a watcher.
 type UpdateWatcherParams struct {
-	Title           *string          `json:"title,omitempty"`
-	Description     *string          `json:"description,omitempty"`
-	Severity        *WatcherSeverity `json:"severity,omitempty"`
-	Filters         json.RawMessage  `json:"filters,omitempty"`
-	IntervalSeconds *int             `json:"interval_seconds,omitempty"`
-	Notify          json.RawMessage  `json:"notify,omitempty"`
+	Title       *string          `json:"title,omitempty"`
+	Description *string          `json:"description,omitempty"`
+	Severity    *WatcherSeverity `json:"severity,omitempty"`
+	Filters     json.RawMessage  `json:"filters,omitempty"`
+	TimeRange   *string          `json:"time_range,omitempty"`
+	Notify      json.RawMessage  `json:"notify,omitempty"`
 }
 
 // WatcherRun represents a single execution of a watcher.

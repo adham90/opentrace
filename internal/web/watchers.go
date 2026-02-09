@@ -11,21 +11,21 @@ import (
 )
 
 type createWatcherRequest struct {
-	Title           string               `json:"title"`
-	Description     string               `json:"description"`
-	Severity        store.WatcherSeverity `json:"severity"`
-	Filters         json.RawMessage      `json:"filters"`
-	IntervalSeconds int                  `json:"interval_seconds"`
-	Notify          json.RawMessage      `json:"notify"`
+	Title       string               `json:"title"`
+	Description string               `json:"description"`
+	Severity    store.WatcherSeverity `json:"severity"`
+	Filters     json.RawMessage      `json:"filters"`
+	TimeRange   string               `json:"time_range"`
+	Notify      json.RawMessage      `json:"notify"`
 }
 
 type updateWatcherRequest struct {
-	Title           *string               `json:"title,omitempty"`
-	Description     *string               `json:"description,omitempty"`
-	Severity        *store.WatcherSeverity `json:"severity,omitempty"`
-	Filters         json.RawMessage       `json:"filters,omitempty"`
-	IntervalSeconds *int                  `json:"interval_seconds,omitempty"`
-	Notify          json.RawMessage       `json:"notify,omitempty"`
+	Title       *string                `json:"title,omitempty"`
+	Description *string                `json:"description,omitempty"`
+	Severity    *store.WatcherSeverity `json:"severity,omitempty"`
+	Filters     json.RawMessage        `json:"filters,omitempty"`
+	TimeRange   *string                `json:"time_range,omitempty"`
+	Notify      json.RawMessage        `json:"notify,omitempty"`
 }
 
 func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
@@ -40,12 +40,12 @@ func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
 	}
 
 	watcher, err := s.watcherStore.Create(r.Context(), store.CreateWatcherParams{
-		Title:           req.Title,
-		Description:     req.Description,
-		Severity:        req.Severity,
-		Filters:         req.Filters,
-		IntervalSeconds: req.IntervalSeconds,
-		Notify:          req.Notify,
+		Title:       req.Title,
+		Description: req.Description,
+		Severity:    req.Severity,
+		Filters:     req.Filters,
+		TimeRange:   req.TimeRange,
+		Notify:      req.Notify,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create watcher")
@@ -96,12 +96,12 @@ func (s *Server) handleUpdateWatcher(w http.ResponseWriter, r *http.Request) {
 	}
 
 	watcher, err := s.watcherStore.Update(r.Context(), id, store.UpdateWatcherParams{
-		Title:           req.Title,
-		Description:     req.Description,
-		Severity:        req.Severity,
-		Filters:         req.Filters,
-		IntervalSeconds: req.IntervalSeconds,
-		Notify:          req.Notify,
+		Title:       req.Title,
+		Description: req.Description,
+		Severity:    req.Severity,
+		Filters:     req.Filters,
+		TimeRange:   req.TimeRange,
+		Notify:      req.Notify,
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {

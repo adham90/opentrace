@@ -39,7 +39,7 @@ func TestExecutor_AlertTriggered(t *testing.T) {
 		Description:     "Watch for payment errors",
 		Severity:        store.SeverityCritical,
 		Filters:         json.RawMessage(`{"service":"payment-api"}`),
-		IntervalSeconds: 300,
+		TimeRange:       "5m",
 		Notify:          json.RawMessage(`["dashboard"]`),
 	}
 
@@ -100,7 +100,7 @@ func TestExecutor_NoAlert(t *testing.T) {
 		Description:     "Check system health",
 		Severity:        store.SeverityInfo,
 		Filters:         json.RawMessage(`{}`),
-		IntervalSeconds: 600,
+		TimeRange:       "10m",
 		Notify:          json.RawMessage(`["dashboard"]`),
 	}
 
@@ -143,7 +143,7 @@ func TestExecutor_AgentError(t *testing.T) {
 		Description:     "This will fail",
 		Severity:        store.SeverityWarning,
 		Filters:         json.RawMessage(`{}`),
-		IntervalSeconds: 300,
+		TimeRange:       "5m",
 		Notify:          json.RawMessage(`["dashboard"]`),
 	}
 

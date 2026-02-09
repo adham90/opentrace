@@ -338,16 +338,16 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 		return nil, m.err
 	}
 	w := &store.Watcher{
-		ID:              uuid.New(),
-		Title:           params.Title,
-		Description:     params.Description,
-		Severity:        params.Severity,
-		Filters:         params.Filters,
-		IntervalSeconds: params.IntervalSeconds,
-		Status:          store.WatcherActive,
-		Notify:          params.Notify,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
+		ID:          uuid.New(),
+		Title:       params.Title,
+		Description: params.Description,
+		Severity:    params.Severity,
+		Filters:     params.Filters,
+		TimeRange:   params.TimeRange,
+		Status:      store.WatcherActive,
+		Notify:      params.Notify,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 	m.created = w
 	return w, nil
@@ -452,13 +452,13 @@ func TestCreateWatcherHandler_Success(t *testing.T) {
 	handler := createWatcherHandler(ws)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"title":            "Error Monitor",
-		"description":      "Watch for error spikes in production",
-		"service":          "api",
-		"level":            "error",
-		"environment":      "production",
-		"interval_minutes": float64(10),
-		"severity":         "critical",
+		"title":       "Error Monitor",
+		"description": "Watch for error spikes in production",
+		"service":     "api",
+		"level":       "error",
+		"environment": "production",
+		"time_range":  "10m",
+		"severity":    "critical",
 	}))
 
 	if err != nil {
@@ -480,8 +480,8 @@ func TestCreateWatcherHandler_Success(t *testing.T) {
 	if ws.created.Title != "Error Monitor" {
 		t.Errorf("title = %q, want %q", ws.created.Title, "Error Monitor")
 	}
-	if ws.created.IntervalSeconds != 600 {
-		t.Errorf("interval = %d, want 600", ws.created.IntervalSeconds)
+	if ws.created.TimeRange != "10m" {
+		t.Errorf("time_range = %q, want %q", ws.created.TimeRange, "10m")
 	}
 	if ws.created.Severity != store.SeverityCritical {
 		t.Errorf("severity = %q, want %q", ws.created.Severity, store.SeverityCritical)
@@ -530,8 +530,8 @@ func TestCreateWatcherHandler_Defaults(t *testing.T) {
 		t.Fatalf("expected success, got error: %s", resultText(t, result))
 	}
 
-	if ws.created.IntervalSeconds != 300 {
-		t.Errorf("default interval = %d, want 300", ws.created.IntervalSeconds)
+	if ws.created.TimeRange != "15m" {
+		t.Errorf("default time_range = %q, want %q", ws.created.TimeRange, "15m")
 	}
 	if ws.created.Severity != store.SeverityWarning {
 		t.Errorf("default severity = %q, want %q", ws.created.Severity, store.SeverityWarning)

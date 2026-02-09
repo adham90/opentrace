@@ -23,12 +23,12 @@ func TestPgWatcherStore_CRUD(t *testing.T) {
 
 	// Create
 	params := store.CreateWatcherParams{
-		Title:           "Test Watcher",
-		Description:     "Watch for errors in payment service",
-		Severity:        store.SeverityCritical,
-		Filters:         json.RawMessage(`{"service":"payment-api","level":"error"}`),
-		IntervalSeconds: 120,
-		Notify:          json.RawMessage(`["dashboard"]`),
+		Title:       "Test Watcher",
+		Description: "Watch for errors in payment service",
+		Severity:    store.SeverityCritical,
+		Filters:     json.RawMessage(`{"service":"payment-api","level":"error"}`),
+		TimeRange:   "15m",
+		Notify:      json.RawMessage(`["dashboard"]`),
 	}
 
 	w, err := s.Create(ctx, params)
@@ -47,8 +47,8 @@ func TestPgWatcherStore_CRUD(t *testing.T) {
 	if w.Status != store.WatcherActive {
 		t.Errorf("status = %q, want %q", w.Status, store.WatcherActive)
 	}
-	if w.IntervalSeconds != 120 {
-		t.Errorf("interval_seconds = %d, want 120", w.IntervalSeconds)
+	if w.TimeRange != "15m" {
+		t.Errorf("time_range = %q, want %q", w.TimeRange, "15m")
 	}
 	if w.NextRunAt == nil {
 		t.Fatal("expected next_run_at to be set")
@@ -148,8 +148,8 @@ func TestPgWatcherStore_Defaults(t *testing.T) {
 	if w.Severity != store.SeverityWarning {
 		t.Errorf("default severity = %q, want %q", w.Severity, store.SeverityWarning)
 	}
-	if w.IntervalSeconds != 300 {
-		t.Errorf("default interval = %d, want 300", w.IntervalSeconds)
+	if w.TimeRange != "15m" {
+		t.Errorf("default time_range = %q, want %q", w.TimeRange, "15m")
 	}
 }
 

@@ -3,7 +3,9 @@ package watcher
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/opentrace/opentrace/internal/store"
 )
@@ -13,8 +15,38 @@ type WatcherFilters struct {
 	Service     string `json:"service,omitempty"`
 	Level       string `json:"level,omitempty"`
 	Environment string `json:"environment,omitempty"`
-	TimeRange   string `json:"time_range,omitempty"`
 	Query       string `json:"query,omitempty"`
+}
+
+// ParseTimeRange parses a time range string like "5m", "15m", "1h", "6h", "24h"
+// into a time.Duration. Defaults to 15 minutes for unrecognized values.
+func ParseTimeRange(s string) time.Duration {
+	if s == "" {
+		return 15 * time.Minute
+	}
+
+	s = strings.TrimSpace(s)
+	if len(s) < 2 {
+		return 15 * time.Minute
+	}
+
+	unit := s[len(s)-1]
+	numStr := s[:len(s)-1]
+	num, err := strconv.Atoi(numStr)
+	if err != nil || num <= 0 {
+		return 15 * time.Minute
+	}
+
+	switch unit {
+	case 'm':
+		return time.Duration(num) * time.Minute
+	case 'h':
+		return time.Duration(num) * time.Hour
+	case 's':
+		return time.Duration(num) * time.Second
+	default:
+		return 15 * time.Minute
+	}
 }
 
 // BuildQuery translates a watcher definition into an agent query string.
@@ -30,7 +62,8 @@ func BuildQuery(w store.Watcher, lastRunSummary string) string {
 
 	// Parse and render filters
 	filters := parseFilters(w.Filters)
-	if hasFilters(filters) {
+	hasScope := hasFilters(filters) || w.TimeRange != ""
+	if hasScope {
 		b.WriteString("## Search Scope\n")
 		if filters.Service != "" {
 			b.WriteString(fmt.Sprintf("- Service: %s\n", filters.Service))
@@ -41,8 +74,8 @@ func BuildQuery(w store.Watcher, lastRunSummary string) string {
 		if filters.Environment != "" {
 			b.WriteString(fmt.Sprintf("- Environment: %s\n", filters.Environment))
 		}
-		if filters.TimeRange != "" {
-			b.WriteString(fmt.Sprintf("- Time range: last %s\n", filters.TimeRange))
+		if w.TimeRange != "" {
+			b.WriteString(fmt.Sprintf("- Time range: last %s\n", w.TimeRange))
 		}
 		if filters.Query != "" {
 			b.WriteString(fmt.Sprintf("- Query: %s\n", filters.Query))
@@ -93,5 +126,5 @@ func parseFilters(raw json.RawMessage) WatcherFilters {
 }
 
 func hasFilters(f WatcherFilters) bool {
-	return f.Service != "" || f.Level != "" || f.Environment != "" || f.TimeRange != "" || f.Query != ""
+	return f.Service != "" || f.Level != "" || f.Environment != "" || f.Query != ""
 }

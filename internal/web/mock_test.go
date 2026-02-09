@@ -178,9 +178,9 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 	if sev == "" {
 		sev = store.SeverityWarning
 	}
-	interval := params.IntervalSeconds
-	if interval <= 0 {
-		interval = 300
+	timeRange := params.TimeRange
+	if timeRange == "" {
+		timeRange = "15m"
 	}
 	filters := params.Filters
 	if filters == nil {
@@ -193,7 +193,7 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 	now := time.Now()
 	w := &store.Watcher{
 		ID: uuid.New(), Title: params.Title, Description: params.Description,
-		Severity: sev, Filters: filters, IntervalSeconds: interval,
+		Severity: sev, Filters: filters, TimeRange: timeRange,
 		Status: store.WatcherActive, Notify: notify, NextRunAt: &now,
 		CreatedAt: now, UpdatedAt: now,
 	}
