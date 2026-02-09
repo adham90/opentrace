@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/adham90/opentrace/internal/llm"
 	"github.com/adham90/opentrace/internal/store"
 )
 
@@ -16,6 +17,7 @@ type createWatcherRequest struct {
 	Severity    store.WatcherSeverity `json:"severity"`
 	Filters     json.RawMessage      `json:"filters"`
 	TimeRange   string               `json:"time_range"`
+	Model       string               `json:"model"`
 	Notify      json.RawMessage      `json:"notify"`
 }
 
@@ -25,6 +27,7 @@ type updateWatcherRequest struct {
 	Severity    *store.WatcherSeverity `json:"severity,omitempty"`
 	Filters     json.RawMessage        `json:"filters,omitempty"`
 	TimeRange   *string                `json:"time_range,omitempty"`
+	Model       *string                `json:"model,omitempty"`
 	Notify      json.RawMessage        `json:"notify,omitempty"`
 }
 
@@ -45,6 +48,7 @@ func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
 		Severity:    req.Severity,
 		Filters:     req.Filters,
 		TimeRange:   req.TimeRange,
+		Model:       req.Model,
 		Notify:      req.Notify,
 	})
 	if err != nil {
@@ -101,6 +105,7 @@ func (s *Server) handleUpdateWatcher(w http.ResponseWriter, r *http.Request) {
 		Severity:    req.Severity,
 		Filters:     req.Filters,
 		TimeRange:   req.TimeRange,
+		Model:       req.Model,
 		Notify:      req.Notify,
 	})
 	if err != nil {
@@ -216,4 +221,14 @@ func (s *Server) handleGetWatcherRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, run)
+}
+
+func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
+	var models []llm.ProviderInfo
+	if s.modelRegistry != nil {
+		models = s.modelRegistry.ListModels(r.Context())
+	} else {
+		models = llm.AvailableProviders(s.cfg)
+	}
+	writeJSON(w, http.StatusOK, models)
 }

@@ -156,8 +156,8 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 	w := &store.Watcher{
 		ID: uuid.New(), Title: params.Title, Description: params.Description,
 		Severity: sev, Filters: filters, TimeRange: timeRange,
-		Status: store.WatcherActive, Notify: notify, NextRunAt: &now,
-		CreatedAt: now, UpdatedAt: now,
+		Model: params.Model, Status: store.WatcherActive, Notify: notify,
+		NextRunAt: &now, CreatedAt: now, UpdatedAt: now,
 	}
 	m.watchers[w.ID] = w
 	return w, nil
@@ -198,6 +198,9 @@ func (m *mockWatcherStore) Update(ctx context.Context, id uuid.UUID, params stor
 	}
 	if params.Severity != nil {
 		w.Severity = *params.Severity
+	}
+	if params.Model != nil {
+		w.Model = *params.Model
 	}
 	w.UpdatedAt = time.Now()
 	return w, nil

@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/llm"
 	"github.com/adham90/opentrace/internal/store"
 )
 
@@ -19,6 +21,7 @@ func newTestServerWithWatchers() *Server {
 		RunStore:     newMockWatcherRunStore(),
 		AlertStore:   newMockAlertStore(),
 		Registry:     connector.NewRegistry(),
+		Cfg:          &config.Config{OllamaModel: "llama3.2"},
 	})
 }
 
@@ -233,5 +236,48 @@ func TestHandleDismissAlert_NotFound(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandleListModels(t *testing.T) {
+	srv := newTestServerWithWatchers()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/models", nil)
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var models []llm.ProviderInfo
+	json.NewDecoder(w.Body).Decode(&models)
+	// Should at least have ollama
+	if len(models) < 1 {
+		t.Fatal("expected at least 1 model (ollama)")
+	}
+	if models[0].Name != "ollama" {
+		t.Errorf("first model name = %q, want %q", models[0].Name, "ollama")
+	}
+}
+
+func TestHandleCreateWatcher_WithModel(t *testing.T) {
+	srv := newTestServerWithWatchers()
+
+	body := `{"title":"Model watcher","description":"Has a model","model":"anthropic-sonnet"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/watchers", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var watcher store.Watcher
+	json.NewDecoder(w.Body).Decode(&watcher)
+	if watcher.Model != "anthropic-sonnet" {
+		t.Errorf("model = %q, want %q", watcher.Model, "anthropic-sonnet")
 	}
 }

@@ -18,7 +18,7 @@ type SchedulerOpts struct {
 	RunStore      store.WatcherRunStore
 	AlertStore    store.AlertStore
 	Registry      *connector.Registry
-	LLMProvider   llm.LLMProvider
+	ProviderCache *llm.ProviderCache
 	AgentCfg      agent.RunConfig
 	PollInterval  time.Duration // how often to check for due watchers (default: 30s)
 	MaxConcurrent int           // max concurrent watcher runs (default: 3)
@@ -50,7 +50,7 @@ func NewScheduler(opts SchedulerOpts) *Scheduler {
 		opts.RunStore,
 		opts.AlertStore,
 		opts.Registry,
-		opts.LLMProvider,
+		opts.ProviderCache,
 		opts.AgentCfg,
 	)
 

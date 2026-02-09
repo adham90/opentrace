@@ -56,13 +56,14 @@ func Serve(deps Deps) error {
 			mcp.NewTool("create_watcher",
 				mcp.WithDescription("Create a new automated watcher that monitors logs on a schedule"),
 				mcp.WithString("title", mcp.Required(), mcp.Description("Title for the watcher")),
-				mcp.WithString("description", mcp.Required(), mcp.Description("Instructions for the monitoring agent — what to look for")),
+				mcp.WithString("description", mcp.Required(), mcp.Description("Instructions for the monitoring agent \u2014 what to look for")),
 				mcp.WithString("service", mcp.Description("Filter by service name")),
 				mcp.WithString("level", mcp.Description("Filter by log level (e.g. error, warning)")),
 				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production)")),
 				mcp.WithString("time_range", mcp.Description("Lookback window and run interval (e.g. 5m, 15m, 1h, 6h, 24h). Default: 15m")),
 				mcp.WithString("query", mcp.Description("Full-text search query for logs")),
 				mcp.WithString("severity", mcp.Description("Alert severity: info, warning, or critical (default: warning)")),
+				mcp.WithString("model", mcp.Description("LLM model variant name (e.g. anthropic-sonnet, openai-gpt4o). Empty for global default")),
 			),
 			createWatcherHandler(deps.WatcherStore),
 		)
@@ -207,12 +208,15 @@ func createWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 			severity = store.WatcherSeverity(v)
 		}
 
+		model, _ := args["model"].(string)
+
 		params := store.CreateWatcherParams{
 			Title:       title,
 			Description: description,
 			Severity:    severity,
 			Filters:     filtersJSON,
 			TimeRange:   timeRange,
+			Model:       model,
 			Notify:      json.RawMessage(`["dashboard"]`),
 		}
 

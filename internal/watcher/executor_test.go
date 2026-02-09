@@ -9,10 +9,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/adham90/opentrace/internal/agent"
+	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/llm"
 	"github.com/adham90/opentrace/internal/store"
 )
+
+// newTestProviderCache creates a ProviderCache backed by the given mock LLM as default.
+func newTestProviderCache(mockLLM llm.LLMProvider) *llm.ProviderCache {
+	return llm.NewProviderCache(&config.Config{}, mockLLM)
+}
 
 func TestExecutor_AlertTriggered(t *testing.T) {
 	ws := newMockWatcherStore()
@@ -27,7 +33,7 @@ func TestExecutor_AlertTriggered(t *testing.T) {
 		},
 	}
 
-	exec := NewExecutor(ws, rs, as, registry, mockLLM, agent.RunConfig{
+	exec := NewExecutor(ws, rs, as, registry, newTestProviderCache(mockLLM), agent.RunConfig{
 		MaxSteps:            5,
 		MaxToolCalls:        3,
 		MaxObservationBytes: 4096,
@@ -88,7 +94,7 @@ func TestExecutor_NoAlert(t *testing.T) {
 		},
 	}
 
-	exec := NewExecutor(ws, rs, as, registry, mockLLM, agent.RunConfig{
+	exec := NewExecutor(ws, rs, as, registry, newTestProviderCache(mockLLM), agent.RunConfig{
 		MaxSteps:            5,
 		MaxToolCalls:        3,
 		MaxObservationBytes: 4096,
@@ -131,7 +137,7 @@ func TestExecutor_AgentError(t *testing.T) {
 		response: llm.ChatResponse{Content: ""},
 	}
 
-	exec := NewExecutor(ws, rs, as, registry, mockLLM, agent.RunConfig{
+	exec := NewExecutor(ws, rs, as, registry, newTestProviderCache(mockLLM), agent.RunConfig{
 		MaxSteps:            5,
 		MaxToolCalls:        3,
 		MaxObservationBytes: 4096,

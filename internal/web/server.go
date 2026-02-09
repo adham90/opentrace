@@ -16,34 +16,37 @@ import (
 
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/llm"
 	"github.com/adham90/opentrace/internal/store"
 	"github.com/adham90/opentrace/internal/watcher"
 )
 
 // Server holds the HTTP server and its dependencies.
 type Server struct {
-	Router       chi.Router
-	dsStore      store.DataSourceStore
-	logStore     store.LogStore
-	watcherStore store.WatcherStore
-	runStore     store.WatcherRunStore
-	alertStore   store.AlertStore
-	registry     *connector.Registry
-	cfg          *config.Config
-	executor     *watcher.Executor
-	logsConnMu   sync.Mutex
+	Router        chi.Router
+	dsStore       store.DataSourceStore
+	logStore      store.LogStore
+	watcherStore  store.WatcherStore
+	runStore      store.WatcherRunStore
+	alertStore    store.AlertStore
+	registry      *connector.Registry
+	cfg           *config.Config
+	executor      *watcher.Executor
+	modelRegistry *llm.ModelRegistry
+	logsConnMu    sync.Mutex
 }
 
 // ServerDeps holds all dependencies for the web server.
 type ServerDeps struct {
-	DSStore      store.DataSourceStore
-	LogStore     store.LogStore
-	WatcherStore store.WatcherStore
-	RunStore     store.WatcherRunStore
-	AlertStore   store.AlertStore
-	Registry     *connector.Registry
-	Cfg          *config.Config
-	Executor     *watcher.Executor
+	DSStore       store.DataSourceStore
+	LogStore      store.LogStore
+	WatcherStore  store.WatcherStore
+	RunStore      store.WatcherRunStore
+	AlertStore    store.AlertStore
+	Registry      *connector.Registry
+	Cfg           *config.Config
+	Executor      *watcher.Executor
+	ModelRegistry *llm.ModelRegistry
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
@@ -59,14 +62,15 @@ func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, registry 
 // NewServerWithDeps creates a new Server using the ServerDeps struct.
 func NewServerWithDeps(deps ServerDeps) *Server {
 	srv := &Server{
-		dsStore:      deps.DSStore,
-		logStore:     deps.LogStore,
-		watcherStore: deps.WatcherStore,
-		runStore:     deps.RunStore,
-		alertStore:   deps.AlertStore,
-		registry:     deps.Registry,
-		cfg:          deps.Cfg,
-		executor:     deps.Executor,
+		dsStore:       deps.DSStore,
+		logStore:      deps.LogStore,
+		watcherStore:  deps.WatcherStore,
+		runStore:      deps.RunStore,
+		alertStore:    deps.AlertStore,
+		registry:      deps.Registry,
+		cfg:           deps.Cfg,
+		executor:      deps.Executor,
+		modelRegistry: deps.ModelRegistry,
 	}
 
 	cfg := deps.Cfg

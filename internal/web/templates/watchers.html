@@ -58,6 +58,12 @@
                 <option value="critical">Critical</option>
               </select>
             </div>
+            <div class="form-group">
+              <label>LLM Model</label>
+              <select id="watcher-model">
+                <option value="">Default (global)</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -123,6 +129,22 @@
 </div>
 
 <script>
+function loadModels() {
+  fetch('/api/models').then(function(r) { return r.json(); }).then(function(models) {
+    var sel = document.getElementById('watcher-model');
+    // Keep the first "Default" option, remove the rest
+    while (sel.options.length > 1) sel.remove(1);
+    if (models && models.length) {
+      models.forEach(function(m) {
+        var opt = document.createElement('option');
+        opt.value = m.name;
+        opt.textContent = m.model + ' (' + m.name + ')';
+        sel.appendChild(opt);
+      });
+    }
+  });
+}
+
 function loadWatchers() {
   fetch('/api/watchers').then(function(r) { return r.json(); }).then(function(watchers) {
     var container = document.getElementById('watchers-list');
@@ -141,6 +163,9 @@ function loadWatchers() {
       html += '  <div class="watcher-header">';
       html += '    <span class="watcher-title">' + escapeHtml(w.title) + '</span>';
       html += '    <span class="watcher-meta">every ' + escapeHtml(w.time_range || '15m') + '</span>';
+      if (w.model) {
+        html += '    <span class="watcher-meta">' + escapeHtml(w.model) + '</span>';
+      }
       html += '    <span class="watcher-status ' + statusClass + '">' + statusIcon + ' ' + w.status + '</span>';
       html += '  </div>';
       html += '  <div class="watcher-info">';
@@ -207,6 +232,7 @@ function saveWatcher(e) {
     description: document.getElementById('watcher-description').value,
     severity: document.getElementById('watcher-severity').value,
     time_range: document.getElementById('watcher-timerange').value,
+    model: document.getElementById('watcher-model').value,
     filters: filters,
     notify: notify
   };
@@ -233,6 +259,7 @@ function editWatcher(id) {
     document.getElementById('watcher-description').value = w.description;
     document.getElementById('watcher-severity').value = w.severity;
     document.getElementById('watcher-timerange').value = w.time_range || '15m';
+    document.getElementById('watcher-model').value = w.model || '';
 
     var f = w.filters || {};
     document.getElementById('filter-service').value = f.service || '';
@@ -293,5 +320,6 @@ function escapeHtml(str) {
 }
 
 loadWatchers();
+loadModels();
 </script>
 {{end}}

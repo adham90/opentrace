@@ -98,6 +98,7 @@ type Watcher struct {
 	Severity    WatcherSeverity `json:"severity"`
 	Filters     json.RawMessage `json:"filters"`
 	TimeRange   string          `json:"time_range"`
+	Model       string          `json:"model"`
 	Status      WatcherStatus   `json:"status"`
 	Notify      json.RawMessage `json:"notify"`
 	LastRunAt   *time.Time      `json:"last_run_at,omitempty"`
@@ -114,6 +115,7 @@ type CreateWatcherParams struct {
 	Severity    WatcherSeverity `json:"severity"`
 	Filters     json.RawMessage `json:"filters"`
 	TimeRange   string          `json:"time_range"`
+	Model       string          `json:"model"`
 	Notify      json.RawMessage `json:"notify"`
 }
 
@@ -124,6 +126,7 @@ type UpdateWatcherParams struct {
 	Severity    *WatcherSeverity `json:"severity,omitempty"`
 	Filters     json.RawMessage  `json:"filters,omitempty"`
 	TimeRange   *string          `json:"time_range,omitempty"`
+	Model       *string          `json:"model,omitempty"`
 	Notify      json.RawMessage  `json:"notify,omitempty"`
 }
 

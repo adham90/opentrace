@@ -11,10 +11,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/adham90/opentrace/internal/agent"
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/llm"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/watcher"
 	"github.com/adham90/opentrace/internal/web"
 )
 
@@ -120,14 +123,40 @@ func run() error {
 	}
 	defer deps.db.Close()
 
+	// Create LLM provider cache for per-watcher model selection
+	defaultLLM, err := llm.NewLLMProvider(deps.cfg)
+	if err != nil {
+		log.Printf("warning: default LLM provider unavailable: %v", err)
+	}
+	providerCache := llm.NewProviderCache(deps.cfg, defaultLLM)
+	modelRegistry := llm.NewModelRegistry(deps.cfg)
+
+	// Create watcher run store and executor
+	runStore := store.NewWatcherRunStore(deps.db)
+	executor := watcher.NewExecutor(
+		deps.watcherStore,
+		runStore,
+		deps.alertStore,
+		deps.registry,
+		providerCache,
+		agent.RunConfig{
+			MaxSteps:            deps.cfg.MaxAgentSteps,
+			MaxToolCalls:        deps.cfg.MaxToolCalls,
+			MaxObservationBytes: deps.cfg.MaxObservationBytes,
+		},
+	)
+
 	// Create server
 	srv := web.NewServerWithDeps(web.ServerDeps{
-		DSStore:      deps.dsStore,
-		LogStore:     deps.logStore,
-		WatcherStore: deps.watcherStore,
-		AlertStore:   deps.alertStore,
-		Registry:     deps.registry,
-		Cfg:          deps.cfg,
+		DSStore:       deps.dsStore,
+		LogStore:      deps.logStore,
+		WatcherStore:  deps.watcherStore,
+		RunStore:      runStore,
+		AlertStore:    deps.alertStore,
+		Registry:      deps.registry,
+		Cfg:           deps.cfg,
+		Executor:      executor,
+		ModelRegistry: modelRegistry,
 	})
 
 	httpServer := &http.Server{

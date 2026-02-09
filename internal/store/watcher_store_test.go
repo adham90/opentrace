@@ -138,6 +138,65 @@ func TestWatcherStore_Defaults(t *testing.T) {
 	}
 }
 
+func TestWatcherStore_ModelField(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewWatcherStore(db)
+	ctx := context.Background()
+
+	// Create with model
+	w, err := s.Create(ctx, CreateWatcherParams{
+		Title:       "Model Watcher",
+		Description: "Has a specific model",
+		Model:       "anthropic-sonnet",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if w.Model != "anthropic-sonnet" {
+		t.Errorf("model = %q, want %q", w.Model, "anthropic-sonnet")
+	}
+
+	// GetByID should preserve model
+	got, err := s.GetByID(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Model != "anthropic-sonnet" {
+		t.Errorf("GetByID model = %q, want %q", got.Model, "anthropic-sonnet")
+	}
+
+	// List should include model
+	list, err := s.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 1 || list[0].Model != "anthropic-sonnet" {
+		t.Errorf("List model = %q, want %q", list[0].Model, "anthropic-sonnet")
+	}
+
+	// Update model
+	newModel := "openai-gpt4o"
+	updated, err := s.Update(ctx, w.ID, UpdateWatcherParams{Model: &newModel})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.Model != "openai-gpt4o" {
+		t.Errorf("updated model = %q, want %q", updated.Model, "openai-gpt4o")
+	}
+
+	// Create without model — defaults to empty
+	w2, err := s.Create(ctx, CreateWatcherParams{
+		Title:       "No Model",
+		Description: "Uses default",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if w2.Model != "" {
+		t.Errorf("default model = %q, want empty", w2.Model)
+	}
+}
+
 func TestWatcherStore_GetDueWatchers(t *testing.T) {
 	db := setupTestDB(t)
 	s := NewWatcherStore(db)

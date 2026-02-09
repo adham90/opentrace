@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -217,7 +218,7 @@ func TestAvailableProviders_AllProviders(t *testing.T) {
 	for _, p := range providers {
 		names[p.Name] = true
 	}
-	for _, want := range []string{"ollama", "anthropic-sonnet", "anthropic-haiku", "openai-gpt4o", "openai-gpt4o-mini", "gemini-flash", "gemini-pro"} {
+	for _, want := range []string{"ollama", "anthropic-opus", "anthropic-sonnet", "anthropic-haiku", "openai-o3-mini", "openai-o1", "openai-o1-mini", "openai-gpt4o", "openai-gpt4o-mini", "openai-gpt4-turbo", "gemini-flash", "gemini-pro", "gemini-2.0-flash"} {
 		if !names[want] {
 			t.Errorf("expected provider %q in list", want)
 		}
@@ -260,5 +261,257 @@ func TestAvailableProviders_AnthropicOnly(t *testing.T) {
 	wantCount := 1 + len(AnthropicModels)
 	if len(providers) != wantCount {
 		t.Fatalf("expected %d providers, got %d", wantCount, len(providers))
+	}
+}
+
+// --- NewProviderByName tests ---
+
+func TestNewProviderByName_Empty(t *testing.T) {
+	cfg := &config.Config{
+		OllamaURL:   "http://localhost:11434",
+		OllamaModel: "llama3.2",
+	}
+	p, err := NewProviderByName("", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := p.(*OllamaProvider); !ok {
+		t.Fatalf("expected *OllamaProvider, got %T", p)
+	}
+}
+
+func TestNewProviderByName_Ollama(t *testing.T) {
+	cfg := &config.Config{
+		OllamaURL:   "http://localhost:11434",
+		OllamaModel: "llama3.2",
+	}
+	p, err := NewProviderByName("ollama", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := p.(*OllamaProvider); !ok {
+		t.Fatalf("expected *OllamaProvider, got %T", p)
+	}
+}
+
+func TestNewProviderByName_AnthropicSonnet(t *testing.T) {
+	cfg := &config.Config{
+		AnthropicAPIKey: "sk-ant-test",
+		AnthropicURL:    "https://api.anthropic.com",
+	}
+	p, err := NewProviderByName("anthropic-sonnet", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ap, ok := p.(*AnthropicProvider)
+	if !ok {
+		t.Fatalf("expected *AnthropicProvider, got %T", p)
+	}
+	if ap.model != "claude-sonnet-4-5-20250929" {
+		t.Errorf("model = %q, want %q", ap.model, "claude-sonnet-4-5-20250929")
+	}
+}
+
+func TestNewProviderByName_OpenAI(t *testing.T) {
+	cfg := &config.Config{
+		OpenAIAPIKey: "sk-openai-test",
+		OpenAIURL:    "https://api.openai.com",
+	}
+	p, err := NewProviderByName("openai-gpt4o", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	op, ok := p.(*OpenAIProvider)
+	if !ok {
+		t.Fatalf("expected *OpenAIProvider, got %T", p)
+	}
+	if op.model != "gpt-4o" {
+		t.Errorf("model = %q, want %q", op.model, "gpt-4o")
+	}
+}
+
+func TestNewProviderByName_GeminiFlash(t *testing.T) {
+	cfg := &config.Config{
+		GeminiAPIKey: "test-key",
+		GeminiURL:    "https://generativelanguage.googleapis.com",
+	}
+	p, err := NewProviderByName("gemini-flash", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	gp, ok := p.(*GeminiProvider)
+	if !ok {
+		t.Fatalf("expected *GeminiProvider, got %T", p)
+	}
+	if gp.model != "gemini-2.5-flash-preview-04-17" {
+		t.Errorf("model = %q, want %q", gp.model, "gemini-2.5-flash-preview-04-17")
+	}
+}
+
+func TestNewProviderByName_MissingKey(t *testing.T) {
+	cfg := &config.Config{}
+	_, err := NewProviderByName("anthropic-sonnet", cfg)
+	if err == nil {
+		t.Fatal("expected error for missing API key")
+	}
+}
+
+func TestNewProviderByName_Unknown(t *testing.T) {
+	cfg := &config.Config{}
+	_, err := NewProviderByName("unknown-model", cfg)
+	if err == nil {
+		t.Fatal("expected error for unknown model")
+	}
+	if !strings.Contains(err.Error(), "unknown model variant") {
+		t.Errorf("expected 'unknown model variant' in error, got %q", err.Error())
+	}
+}
+
+// --- Dynamic provider:modelID format tests ---
+
+func TestNewProviderByName_DynamicOllama(t *testing.T) {
+	cfg := &config.Config{
+		OllamaURL: "http://localhost:11434",
+	}
+	p, err := NewProviderByName("ollama:qwen2.5-coder:latest", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	op, ok := p.(*OllamaProvider)
+	if !ok {
+		t.Fatalf("expected *OllamaProvider, got %T", p)
+	}
+	if op.model != "qwen2.5-coder:latest" {
+		t.Errorf("model = %q, want %q", op.model, "qwen2.5-coder:latest")
+	}
+}
+
+func TestNewProviderByName_DynamicOpenAI(t *testing.T) {
+	cfg := &config.Config{
+		OpenAIAPIKey: "sk-test",
+		OpenAIURL:    "https://api.openai.com",
+	}
+	p, err := NewProviderByName("openai:gpt-4o-2024-08-06", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	op, ok := p.(*OpenAIProvider)
+	if !ok {
+		t.Fatalf("expected *OpenAIProvider, got %T", p)
+	}
+	if op.model != "gpt-4o-2024-08-06" {
+		t.Errorf("model = %q, want %q", op.model, "gpt-4o-2024-08-06")
+	}
+}
+
+func TestNewProviderByName_DynamicAnthropic(t *testing.T) {
+	cfg := &config.Config{
+		AnthropicAPIKey: "sk-ant-test",
+		AnthropicURL:    "https://api.anthropic.com",
+	}
+	p, err := NewProviderByName("anthropic:claude-opus-4-20250514", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ap, ok := p.(*AnthropicProvider)
+	if !ok {
+		t.Fatalf("expected *AnthropicProvider, got %T", p)
+	}
+	if ap.model != "claude-opus-4-20250514" {
+		t.Errorf("model = %q, want %q", ap.model, "claude-opus-4-20250514")
+	}
+}
+
+func TestNewProviderByName_DynamicGemini(t *testing.T) {
+	cfg := &config.Config{
+		GeminiAPIKey: "test-key",
+		GeminiURL:    "https://generativelanguage.googleapis.com",
+	}
+	p, err := NewProviderByName("gemini:gemini-2.5-pro-preview-05-06", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	gp, ok := p.(*GeminiProvider)
+	if !ok {
+		t.Fatalf("expected *GeminiProvider, got %T", p)
+	}
+	if gp.model != "gemini-2.5-pro-preview-05-06" {
+		t.Errorf("model = %q, want %q", gp.model, "gemini-2.5-pro-preview-05-06")
+	}
+}
+
+func TestNewProviderByName_DynamicMissingKey(t *testing.T) {
+	cfg := &config.Config{}
+	_, err := NewProviderByName("openai:gpt-4o", cfg)
+	if err == nil {
+		t.Fatal("expected error for missing API key")
+	}
+	if !strings.Contains(err.Error(), "OPENTRACE_OPENAI_API_KEY") {
+		t.Errorf("error should mention env var, got %q", err.Error())
+	}
+}
+
+func TestNewProviderByName_DynamicUnknownPrefix(t *testing.T) {
+	cfg := &config.Config{}
+	_, err := NewProviderByName("unknown:some-model", cfg)
+	if err == nil {
+		t.Fatal("expected error for unknown prefix")
+	}
+	if !strings.Contains(err.Error(), "unknown provider prefix") {
+		t.Errorf("expected 'unknown provider prefix' in error, got %q", err.Error())
+	}
+}
+
+// --- ProviderCache tests ---
+
+type mockCacheProvider struct{}
+
+func (m *mockCacheProvider) ChatCompletion(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+	return ChatResponse{Content: "mock"}, nil
+}
+
+func TestProviderCache_DefaultEmpty(t *testing.T) {
+	defaultLLM := &mockCacheProvider{}
+	cache := NewProviderCache(&config.Config{}, defaultLLM)
+
+	p, err := cache.Get("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if p != defaultLLM {
+		t.Error("expected default provider for empty string")
+	}
+}
+
+func TestProviderCache_CacheHit(t *testing.T) {
+	cfg := &config.Config{
+		OllamaURL:   "http://localhost:11434",
+		OllamaModel: "llama3.2",
+	}
+	cache := NewProviderCache(cfg, &mockCacheProvider{})
+
+	// First call creates
+	p1, err := cache.Get("ollama")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Second call should return cached
+	p2, err := cache.Get("ollama")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if p1 != p2 {
+		t.Error("expected same provider instance from cache")
+	}
+}
+
+func TestProviderCache_Error(t *testing.T) {
+	cache := NewProviderCache(&config.Config{}, &mockCacheProvider{})
+
+	_, err := cache.Get("unknown-model")
+	if err == nil {
+		t.Fatal("expected error for unknown model")
 	}
 }
