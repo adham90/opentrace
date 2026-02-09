@@ -57,9 +57,27 @@ type pageData struct {
 	Nav        string
 	Content    string
 	ChatID     string
+	DevMode    bool
 	Connectors interface{}
 	Logs       []store.LogEntry
 	LogFilters LogFilters
+}
+
+func (s *Server) isDevMode() bool {
+	return s.cfg != nil && s.cfg.DevMode
+}
+
+// getTemplate returns a freshly-parsed template from disk in dev mode,
+// or the pre-compiled embedded template in production.
+func (s *Server) getTemplate(fallback *template.Template, files ...string) *template.Template {
+	if !s.isDevMode() {
+		return fallback
+	}
+	t, err := template.ParseFiles(files...)
+	if err != nil {
+		return fallback
+	}
+	return t
 }
 
 func (s *Server) handleInvestigatePage(w http.ResponseWriter, r *http.Request) {
@@ -67,8 +85,12 @@ func (s *Server) handleInvestigatePage(w http.ResponseWriter, r *http.Request) {
 		Title:   "Investigate",
 		Nav:     "investigate",
 		Content: "investigate",
+		DevMode: s.isDevMode(),
 	}
-	investigateTmpl.ExecuteTemplate(w, "layout", data)
+	tmpl := s.getTemplate(investigateTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/investigate.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
 }
 
 func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
@@ -95,8 +117,12 @@ func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
 		Nav:     "investigate",
 		Content: "investigate",
 		ChatID:  chatID.String(),
+		DevMode: s.isDevMode(),
 	}
-	investigateTmpl.ExecuteTemplate(w, "layout", data)
+	tmpl := s.getTemplate(investigateTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/investigate.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
 }
 
 func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
@@ -132,15 +158,20 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		Content:    "logs",
 		Logs:       logs,
 		LogFilters: filters,
+		DevMode:    s.isDevMode(),
 	}
 
 	if isHTMX(r) {
 		w.Header().Set("Content-Type", "text/html")
-		logsFragmentTmpl.ExecuteTemplate(w, "logs-list", data)
+		ft := s.getTemplate(logsFragmentTmpl, "internal/web/templates/logs.html")
+		ft.ExecuteTemplate(w, "logs-list", data)
 		return
 	}
 
-	logsTmpl.ExecuteTemplate(w, "layout", data)
+	tmpl := s.getTemplate(logsTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/logs.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
 }
 
 func (s *Server) handleConnectorsPage(w http.ResponseWriter, r *http.Request) {
@@ -155,6 +186,10 @@ func (s *Server) handleConnectorsPage(w http.ResponseWriter, r *http.Request) {
 		Nav:        "connectors",
 		Content:    "connectors",
 		Connectors: connectors,
+		DevMode:    s.isDevMode(),
 	}
-	connectorsTmpl.ExecuteTemplate(w, "layout", data)
+	tmpl := s.getTemplate(connectorsTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/connectors.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
 }

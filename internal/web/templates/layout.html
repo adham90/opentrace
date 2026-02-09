@@ -31,5 +31,6 @@
       </div>
     </main>
   {{end}}
+  {{if .DevMode}}<script>(function(){var h='';setInterval(function(){fetch('/api/dev/hash').then(function(r){return r.text()}).then(function(v){if(h&&v!==h)location.reload();h=v}).catch(function(){})},1000)})();</script>{{end}}
 </body>
 </html>{{end}}

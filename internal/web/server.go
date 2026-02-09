@@ -1,8 +1,14 @@
 package web
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
@@ -73,8 +79,14 @@ func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore 
 	router.Get("/healthz", srv.handleHealthCheck)
 
 	// Static files
-	staticSub, _ := fs.Sub(staticFS, "static")
-	router.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+	if cfg != nil && cfg.DevMode {
+		// Dev mode: serve from disk for live editing
+		router.Handle("/static/*", http.StripPrefix("/static/",
+			http.FileServer(http.Dir("internal/web/static"))))
+	} else {
+		staticSub, _ := fs.Sub(staticFS, "static")
+		router.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+	}
 
 	// Pages
 	router.Get("/", srv.handleInvestigatePage)
@@ -110,6 +122,11 @@ func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore 
 
 		// Provider API
 		r.Get("/providers", srv.handleListProviders)
+
+		// Dev-mode live-reload endpoint
+		if cfg != nil && cfg.DevMode {
+			r.Get("/dev/hash", srv.handleDevHash)
+		}
 	})
 
 	srv.Router = router
@@ -131,4 +148,26 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	}
 	providers := llm.AvailableProviders(s.cfg)
 	writeJSON(w, http.StatusOK, providers)
+}
+
+// handleDevHash returns a hash of UI file modification times for live-reload.
+func (s *Server) handleDevHash(w http.ResponseWriter, r *http.Request) {
+	var buf strings.Builder
+	for _, dir := range []string{"internal/web/templates", "internal/web/static"} {
+		filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			info, err := d.Info()
+			if err != nil {
+				return nil
+			}
+			fmt.Fprintf(&buf, "%s:%d\n", path, info.ModTime().UnixNano())
+			return nil
+		})
+	}
+	h := sha256.Sum256([]byte(buf.String()))
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Write([]byte(hex.EncodeToString(h[:8])))
 }

@@ -1,11 +1,11 @@
 /* ===== Variables ===== */
 :root {
-  --bg: #0a0a0a;
-  --bg-secondary: #111;
-  --bg-tertiary: #1a1a1a;
-  --border: #2a2a2a;
-  --text: #c8c8c8;
-  --text-dim: #666;
+  --bg: #0e0e0e;
+  --bg-secondary: #161616;
+  --bg-tertiary: #1e1e1e;
+  --border: #2e2e2e;
+  --text: #d0d0d0;
+  --text-dim: #777;
   --text-bright: #e0e0e0;
   --green: #4ade80;
   --green-dim: #22633a;
@@ -329,7 +329,7 @@ textarea { resize: vertical; min-height: 60px; }
 .chat-sidebar {
   width: 280px;
   min-width: 280px;
-  background: #080808;
+  background: #0b0b0b;
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -593,11 +593,11 @@ textarea { resize: vertical; min-height: 60px; }
 /* ===== Messages ===== */
 .message {
   margin-bottom: 24px;
-  max-width: 100%;
 }
 
 .message-user {
-  padding: 12px 16px;
+  padding-top: 12px;
+  padding-bottom: 12px;
   border-left: 3px solid var(--green);
   background: rgba(74, 222, 128, 0.04);
   border-radius: 0 4px 4px 0;
@@ -615,7 +615,8 @@ textarea { resize: vertical; min-height: 60px; }
 }
 
 .message-assistant {
-  padding: 12px 0;
+  padding-top: 12px;
+  padding-bottom: 12px;
   background: none;
   border: none;
   border-radius: 0;
@@ -746,15 +747,20 @@ textarea { resize: vertical; min-height: 60px; }
 
 /* ===== Timeline Steps — Compact Accordion ===== */
 .timeline-step {
-  margin-bottom: 2px;
-  max-width: 100%;
+  margin-bottom: 4px;
   border-radius: 4px;
   font-size: 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.035);
   border: none;
+  border-left: 2px solid transparent;
   cursor: pointer;
   transition: background 150ms;
 }
+
+.timeline-thinking { border-left-color: var(--purple); }
+.timeline-tool_call { border-left-color: var(--cyan); }
+.timeline-observation { border-left-color: var(--yellow); }
+.timeline-error { border-left-color: var(--red); }
 
 .timeline-step:hover {
   background: rgba(255, 255, 255, 0.04);
@@ -953,6 +959,7 @@ textarea { resize: vertical; min-height: 60px; }
 /* ===== Plan Panel ===== */
 .plan-panel {
   margin: 16px 0;
+  margin-bottom: 20px;
   padding: 12px 16px;
   background: rgba(74, 222, 128, 0.03);
   border: 1px solid rgba(74, 222, 128, 0.1);

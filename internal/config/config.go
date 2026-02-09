@@ -31,6 +31,8 @@ type Config struct {
 	MaxAgentSteps       int
 	MaxToolCalls        int
 	MaxObservationBytes int
+
+	DevMode bool
 }
 
 // LoadEnvFile reads a .env file and sets any variables not already in the environment.
@@ -118,6 +120,7 @@ func Load() (*Config, error) {
 		MaxAgentSteps:       maxSteps,
 		MaxToolCalls:        maxTools,
 		MaxObservationBytes: maxObs,
+		DevMode:             os.Getenv("OPENTRACE_DEV") == "true",
 	}, nil
 }
 

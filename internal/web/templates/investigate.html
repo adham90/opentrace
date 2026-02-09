@@ -216,9 +216,14 @@ function renderMarkdown(text) {
 }
 
 function createAssistantBubble(content) {
+  if (!content || !content.trim()) {
+    var empty = document.createElement('div');
+    empty.style.display = 'none';
+    return empty;
+  }
   var div = document.createElement('div');
   div.className = 'message message-assistant';
-  div.innerHTML = '<div class="message-role">assistant</div><div class="message-content markdown-body">' + renderMarkdown(content) + '</div>';
+  div.innerHTML = '<div class="message-role">$ assistant</div><div class="message-content markdown-body">' + renderMarkdown(content) + '</div>';
   return div;
 }
 
