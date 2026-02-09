@@ -1,6 +1,6 @@
 {{define "content"}}
-<div class="flex-between mb-8">
-  <h1><span class="prompt-prefix">$</span> logs <span class="dim">{{len .Logs}} entries</span></h1>
+<div class="page-header">
+  <h1><span class="prompt">$</span> logs <span class="dim">{{len .Logs}} entries</span></h1>
 </div>
 
 <form class="log-filters" hx-get="/logs" hx-target="#logs-list" hx-swap="innerHTML" hx-trigger="submit" hx-push-url="false">
@@ -24,29 +24,31 @@
 
 {{define "logs-list"}}
 {{if .Logs}}
-<table>
-  <thead>
-    <tr>
-      <th>timestamp</th>
-      <th>level</th>
-      <th>service</th>
-      <th>environment</th>
-      <th>message</th>
-    </tr>
-  </thead>
-  <tbody>
-    {{range .Logs}}
-    <tr>
-      <td class="text-dim text-xs">{{.Timestamp.Format "2006-01-02 15:04:05"}}</td>
-      <td><span class="badge badge-{{.Level}}">{{.Level}}</span></td>
-      <td>{{.Service}}</td>
-      <td class="text-dim">{{.Environment}}</td>
-      <td class="log-message" title="{{.Message}}">{{.Message}}</td>
-    </tr>
-    {{end}}
-  </tbody>
-</table>
+<div class="log-list">
+  {{range .Logs}}
+  <div class="log-entry collapsed" onclick="this.classList.toggle('collapsed');this.classList.toggle('expanded')">
+    <div class="log-entry-meta">
+      <span class="log-entry-ts">{{.Timestamp.Format "2006-01-02 15:04:05"}}</span>
+      <span class="badge badge-{{.Level}}">{{.Level}}</span>
+      {{if .Service}}<span class="log-entry-svc">{{.Service}}</span>{{end}}
+      {{if .Environment}}<span class="log-entry-env">{{.Environment}}</span>{{end}}
+    </div>
+    <div class="log-entry-msg">{{.Message}}</div>
+    <div class="log-entry-detail">
+      <div class="log-detail-row"><span class="log-detail-key">id</span><span class="log-detail-val">{{.ID}}</span></div>
+      {{if .TraceID}}<div class="log-detail-row"><span class="log-detail-key">trace_id</span><span class="log-detail-val">{{.TraceID}}</span></div>{{end}}
+      {{if .Service}}<div class="log-detail-row"><span class="log-detail-key">service</span><span class="log-detail-val">{{.Service}}</span></div>{{end}}
+      {{if .Environment}}<div class="log-detail-row"><span class="log-detail-key">env</span><span class="log-detail-val">{{.Environment}}</span></div>{{end}}
+      <div class="log-detail-row"><span class="log-detail-key">level</span><span class="log-detail-val">{{.Level}}</span></div>
+      <div class="log-detail-row"><span class="log-detail-key">timestamp</span><span class="log-detail-val">{{.Timestamp.Format "2006-01-02T15:04:05.000Z07:00"}}</span></div>
+    </div>
+  </div>
+  {{end}}
+</div>
 {{else}}
-<div class="empty">no logs found<br><span class="text-xs">logs will appear here once ingested via POST /api/logs</span></div>
+<div class="empty-state">
+  <p>no logs found</p>
+  <p>logs will appear here once ingested via POST /api/logs</p>
+</div>
 {{end}}
 {{end}}

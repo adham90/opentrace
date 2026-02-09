@@ -1,8 +1,10 @@
 {{define "content"}}
 <div class="watchers-page">
   <div class="page-header">
-    <h2>Watchers</h2>
-    <button class="btn btn-primary" onclick="showCreateModal()">+ New Watcher</button>
+    <h1><span class="prompt">$</span> watchers</h1>
+    <div class="actions">
+      <button class="btn btn-primary" onclick="showCreateModal()">+ New Watcher</button>
+    </div>
   </div>
 
   <div id="watchers-list" class="watchers-list">

@@ -1,7 +1,9 @@
 {{define "content"}}
-<div class="flex-between mb-8">
-  <h1><span class="prompt-prefix">$</span> connectors</h1>
-  <button class="btn btn-primary btn-sm" onclick="document.getElementById('add-panel').style.display='block'">+ add</button>
+<div class="page-header">
+  <h1><span class="prompt">$</span> connectors</h1>
+  <div class="actions">
+    <button class="btn btn-primary btn-sm" onclick="document.getElementById('add-panel').style.display='block'">+ add</button>
+  </div>
 </div>
 
 <!-- Add connector panel -->
@@ -77,6 +79,6 @@
   </tbody>
 </table>
 {{else}}
-<div class="empty">no connectors configured<br><span class="text-xs">click + add to connect a data source</span></div>
+<div class="empty-state"><p>no connectors configured</p><p>click + add to connect a data source</p></div>
 {{end}}
 {{end}}
