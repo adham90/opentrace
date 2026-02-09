@@ -94,6 +94,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Get("/watchers/{id}/runs", srv.handleWatcherRunsPage)
 	router.Get("/logs", srv.handleLogsPage)
 	router.Get("/connectors", srv.handleConnectorsPage)
+	router.Get("/setup", srv.handleSetupPage)
 
 	// API
 	router.Route("/api", func(r chi.Router) {
@@ -108,6 +109,9 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			apiKey = cfg.APIKey
 		}
 		r.With(APIKeyAuth(apiKey)).Post("/logs", srv.handleIngestLogs)
+
+		// Models API
+		r.Get("/models", srv.handleListModels)
 
 		// Watcher API
 		r.Post("/watchers", srv.handleCreateWatcher)

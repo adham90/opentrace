@@ -23,6 +23,7 @@ var (
 	alertsTmpl      *template.Template
 	watchersTmpl    *template.Template
 	watcherRunsTmpl *template.Template
+	setupTmpl       *template.Template
 )
 
 func init() {
@@ -37,6 +38,8 @@ func init() {
 		"templates/layout.html", "templates/watchers.html"))
 	watcherRunsTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/watcher_runs.html"))
+	setupTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/setup.html"))
 }
 
 // templates is used for rendering HTMX fragment responses (e.g. connector-list)
@@ -169,6 +172,18 @@ func (s *Server) handleWatcherRunsPage(w http.ResponseWriter, r *http.Request) {
 	tmpl := s.getTemplate(watcherRunsTmpl,
 		"internal/web/templates/layout.html",
 		"internal/web/templates/watcher_runs.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleSetupPage(w http.ResponseWriter, r *http.Request) {
+	data := pageData{
+		Title:   "Setup",
+		Nav:     "setup",
+		DevMode: s.isDevMode(),
+	}
+	tmpl := s.getTemplate(setupTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/setup.html")
 	tmpl.ExecuteTemplate(w, "layout", data)
 }
 
