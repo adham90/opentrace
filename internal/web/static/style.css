@@ -546,12 +546,13 @@ textarea { resize: vertical; min-height: 60px; }
   scroll-behavior: smooth;
 }
 
-.message-area > * {
+.message-area-inner {
   max-width: 768px;
   margin-left: auto;
   margin-right: auto;
   padding-left: 24px;
   padding-right: 24px;
+  min-height: 100%;
 }
 
 /* ===== Empty State ===== */
@@ -563,8 +564,6 @@ textarea { resize: vertical; min-height: 60px; }
   height: 100%;
   gap: 8px;
   color: var(--text-dim);
-  max-width: none;
-  padding: 0;
 }
 
 .empty-state-prompt {
@@ -959,14 +958,16 @@ textarea { resize: vertical; min-height: 60px; }
 /* ===== Sticky Plan Wrapper ===== */
 #plan-sticky-wrapper {
   flex-shrink: 0;
+  max-width: 768px;
+  margin: 0 auto;
+  padding: 0 24px;
+  width: 100%;
 }
 #plan-sticky-wrapper:empty {
   display: none;
 }
 #plan-sticky-wrapper .plan-panel {
-  max-width: 768px;
-  margin: 0 auto;
-  padding: 10px 24px;
+  margin: 0;
   border-radius: 0;
   border-left: none;
   border-right: none;

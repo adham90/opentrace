@@ -36,10 +36,12 @@
   <!-- Right Panel: Conversation -->
   <div class="chat-main">
     <div class="message-area" id="message-area">
-      <div class="empty-state" id="empty-state">
-        <div class="empty-state-prompt">$_</div>
-        <div class="empty-state-text">start a new investigation</div>
-        <div class="empty-state-hint">describe an issue, ask a question, or paste an error</div>
+      <div class="message-area-inner" id="message-area-inner">
+        <div class="empty-state" id="empty-state">
+          <div class="empty-state-prompt">$_</div>
+          <div class="empty-state-text">start a new investigation</div>
+          <div class="empty-state-hint">describe an issue, ask a question, or paste an error</div>
+        </div>
       </div>
     </div>
 
@@ -63,7 +65,6 @@
 var currentChatId = {{if .ChatID}}"{{.ChatID}}"{{else}}null{{end}};
 var eventSource = null;
 var activePlanPanel = null;   // currently active plan panel element
-var planAnchorEl = null;      // user bubble that triggered the plan
 var planIsSticky = false;     // whether plan is in sticky wrapper
 
 // --- Sidebar ---
@@ -149,7 +150,7 @@ function deleteChat(id) {
 }
 
 function showEmptyState() {
-  var area = document.getElementById('message-area');
+  var area = document.getElementById('message-area-inner');
   area.innerHTML = '<div class="empty-state" id="empty-state">' +
     '<div class="empty-state-prompt">$_</div>' +
     '<div class="empty-state-text">start a new investigation</div>' +
@@ -160,7 +161,7 @@ function showEmptyState() {
 // --- Messages ---
 
 function renderMessages(messages) {
-  var area = document.getElementById('message-area');
+  var area = document.getElementById('message-area-inner');
   area.innerHTML = '';
 
   if (!messages || messages.length === 0) {
@@ -374,12 +375,8 @@ function stickyPlan(panel) {
 function unstickyPlan() {
   if (!planIsSticky || !activePlanPanel) return;
   var wrapper = document.getElementById('plan-sticky-wrapper');
-  var area = document.getElementById('message-area');
-  if (planAnchorEl && planAnchorEl.parentNode === area && planAnchorEl.nextSibling) {
-    area.insertBefore(activePlanPanel, planAnchorEl.nextSibling);
-  } else {
-    area.appendChild(activePlanPanel);
-  }
+  var area = document.getElementById('message-area-inner');
+  area.appendChild(activePlanPanel);
   wrapper.innerHTML = '';
   planIsSticky = false;
 }
@@ -432,7 +429,6 @@ function finishProgressPanel() {
   activePlanPanel.classList.add('completed');
   unstickyPlan();
   activePlanPanel = null;
-  planAnchorEl = null;
 }
 
 // --- Plan Panel (legacy, for historical plan data) ---
@@ -501,7 +497,7 @@ function startInvestigation(e) {
   var btn = document.getElementById('submit-btn');
   var input = document.getElementById('query-input');
   var status = document.getElementById('status-bar');
-  var area = document.getElementById('message-area');
+  var area = document.getElementById('message-area-inner');
 
   // Clear empty state
   var emptyEl = document.getElementById('empty-state');
@@ -513,7 +509,6 @@ function startInvestigation(e) {
   // Show user message immediately and save as anchor
   var userBubble = createUserBubble(query);
   area.appendChild(userBubble);
-  planAnchorEl = userBubble;
   scrollToBottom();
 
   // Disable input
@@ -741,7 +736,7 @@ document.addEventListener('keydown', function(e) {
       document.getElementById('status-bar').textContent = 'cancelled';
 
       // Collapse all streaming-expanded steps
-      var allSteps = document.getElementById('message-area').querySelectorAll('.timeline-step.streaming-expanded');
+      var allSteps = document.getElementById('message-area-inner').querySelectorAll('.timeline-step.streaming-expanded');
       for (var s = 0; s < allSteps.length; s++) {
         allSteps[s].classList.remove('expanded', 'streaming-expanded');
       }

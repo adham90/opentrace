@@ -16,42 +16,64 @@ import (
 	"github.com/opentrace/opentrace/internal/config"
 	"github.com/opentrace/opentrace/internal/connector"
 	"github.com/opentrace/opentrace/internal/llm"
+	mcpserver "github.com/opentrace/opentrace/internal/mcp"
 	"github.com/opentrace/opentrace/internal/store"
 	"github.com/opentrace/opentrace/internal/web"
 )
 
+// appDeps holds shared application dependencies initialized by initApp.
+type appDeps struct {
+	pool        *pgxpool.Pool
+	dsStore     store.DataSourceStore
+	logStore    store.LogStore
+	embStore    store.EmbeddingStore
+	chatStore   store.ChatStore
+	memoryStore store.MemoryStore
+	registry    *connector.Registry
+	cfg         *config.Config
+	embedder    llm.EmbeddingProvider
+}
+
 func main() {
-	if err := run(); err != nil {
+	var err error
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		err = runMCP()
+	} else {
+		err = run()
+	}
+
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+// initApp performs shared initialization: config, migrations, DB connection,
+// stores, embedding provider, and connector registry.
+func initApp(ctx context.Context) (*appDeps, error) {
 	config.LoadEnvFile(".env")
 
 	cfg, err := config.Load()
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		return nil, fmt.Errorf("loading config: %w", err)
 	}
 
 	// Run migrations
 	migrationsPath := defaultMigrationsPath()
 	if err := store.RunMigrations(cfg.AppDatabaseURL, migrationsPath); err != nil {
-		return fmt.Errorf("running migrations: %w", err)
+		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 	log.Println("migrations applied successfully")
 
 	// Connect to database
-	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, cfg.AppDatabaseURL)
 	if err != nil {
-		return fmt.Errorf("connecting to database: %w", err)
+		return nil, fmt.Errorf("connecting to database: %w", err)
 	}
-	defer pool.Close()
 
 	if err := pool.Ping(ctx); err != nil {
-		return fmt.Errorf("pinging database: %w", err)
+		pool.Close()
+		return nil, fmt.Errorf("pinging database: %w", err)
 	}
 	log.Println("connected to database")
 
@@ -78,15 +100,52 @@ func run() error {
 	// Auto-register system connector (memory tools)
 	registry.Register(connector.NewSystemConnector(memoryStore))
 
+	return &appDeps{
+		pool:        pool,
+		dsStore:     dsStore,
+		logStore:    logStore,
+		embStore:    embStore,
+		chatStore:   chatStore,
+		memoryStore: memoryStore,
+		registry:    registry,
+		cfg:         cfg,
+		embedder:    embedder,
+	}, nil
+}
+
+// runMCP starts the MCP stdio server. All log output goes to stderr to keep
+// stdout clean for the JSON-RPC stream.
+func runMCP() error {
+	log.SetOutput(os.Stderr)
+
+	ctx := context.Background()
+	deps, err := initApp(ctx)
+	if err != nil {
+		return err
+	}
+	defer deps.pool.Close()
+	defer deps.registry.CloseAll()
+
+	return mcpserver.Serve(deps.registry)
+}
+
+func run() error {
+	ctx := context.Background()
+	deps, err := initApp(ctx)
+	if err != nil {
+		return err
+	}
+	defer deps.pool.Close()
+
 	// Build map of all available LLM providers
-	llmProviders := buildProviderMap(cfg)
-	defaultProvider := cfg.LLMProvider
+	llmProviders := buildProviderMap(deps.cfg)
+	defaultProvider := deps.cfg.LLMProvider
 
 	// Create server
-	srv := web.NewServer(dsStore, logStore, embStore, chatStore, memoryStore, registry, cfg, embedder, llmProviders, defaultProvider)
+	srv := web.NewServer(deps.dsStore, deps.logStore, deps.embStore, deps.chatStore, deps.memoryStore, deps.registry, deps.cfg, deps.embedder, llmProviders, defaultProvider)
 
 	httpServer := &http.Server{
-		Addr:    cfg.ListenAddr,
+		Addr:    deps.cfg.ListenAddr,
 		Handler: srv.Router,
 	}
 
@@ -95,7 +154,7 @@ func run() error {
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("listening on %s", cfg.ListenAddr)
+		log.Printf("listening on %s", deps.cfg.ListenAddr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen error: %v", err)
 		}
@@ -104,7 +163,7 @@ func run() error {
 	<-done
 	log.Println("shutting down...")
 
-	registry.CloseAll()
+	deps.registry.CloseAll()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

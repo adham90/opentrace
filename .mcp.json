@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "opentrace": {
+      "type": "stdio",
+      "command": "/Users/adhameldeeb/dev/open_trace/run-mcp.sh",
+      "args": []
+    }
+  }
+}
