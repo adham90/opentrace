@@ -956,6 +956,24 @@ textarea { resize: vertical; min-height: 60px; }
   min-height: 20px;
 }
 
+/* ===== Sticky Plan Wrapper ===== */
+#plan-sticky-wrapper {
+  flex-shrink: 0;
+}
+#plan-sticky-wrapper:empty {
+  display: none;
+}
+#plan-sticky-wrapper .plan-panel {
+  max-width: 768px;
+  margin: 0 auto;
+  padding: 10px 24px;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  border-top: 1px solid rgba(74, 222, 128, 0.15);
+}
+
 /* ===== Plan Panel ===== */
 .plan-panel {
   margin: 16px 0;
@@ -965,6 +983,19 @@ textarea { resize: vertical; min-height: 60px; }
   border: 1px solid rgba(74, 222, 128, 0.1);
   border-radius: 6px;
   font-size: 12px;
+  transition: opacity 300ms ease, border-color 300ms ease, background 300ms ease;
+}
+
+/* Active — slightly brighter border */
+.plan-panel.active {
+  border-color: rgba(74, 222, 128, 0.2);
+}
+
+/* Completed — dimmed */
+.plan-panel.completed {
+  opacity: 0.5;
+  border-color: rgba(74, 222, 128, 0.05);
+  background: rgba(255, 255, 255, 0.015);
 }
 
 .plan-header {

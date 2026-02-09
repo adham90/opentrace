@@ -43,6 +43,8 @@
       </div>
     </div>
 
+    <div id="plan-sticky-wrapper"></div>
+
     <div class="chat-input-area">
       <div class="chat-input-inner">
         <form class="query-form" onsubmit="startInvestigation(event)">
@@ -60,6 +62,9 @@
 <script>
 var currentChatId = {{if .ChatID}}"{{.ChatID}}"{{else}}null{{end}};
 var eventSource = null;
+var activePlanPanel = null;   // currently active plan panel element
+var planAnchorEl = null;      // user bubble that triggered the plan
+var planIsSticky = false;     // whether plan is in sticky wrapper
 
 // --- Sidebar ---
 
@@ -186,6 +191,7 @@ function renderMessages(messages) {
         for (var j = 0; j < steps.length; j++) {
           updatePlanStep(panel, steps[j].id, 'completed');
         }
+        panel.classList.add('completed');
         area.appendChild(panel);
       }
     }
@@ -356,7 +362,80 @@ document.getElementById('message-area').addEventListener('click', function(e) {
   step.classList.toggle('expanded');
 });
 
-// --- Plan Panel ---
+// --- Sticky Progress Panel ---
+
+function stickyPlan(panel) {
+  var wrapper = document.getElementById('plan-sticky-wrapper');
+  wrapper.innerHTML = '';
+  wrapper.appendChild(panel);
+  planIsSticky = true;
+}
+
+function unstickyPlan() {
+  if (!planIsSticky || !activePlanPanel) return;
+  var wrapper = document.getElementById('plan-sticky-wrapper');
+  var area = document.getElementById('message-area');
+  if (planAnchorEl && planAnchorEl.parentNode === area && planAnchorEl.nextSibling) {
+    area.insertBefore(activePlanPanel, planAnchorEl.nextSibling);
+  } else {
+    area.appendChild(activePlanPanel);
+  }
+  wrapper.innerHTML = '';
+  planIsSticky = false;
+}
+
+function createProgressPanel() {
+  var panel = document.createElement('div');
+  panel.className = 'plan-panel active';
+  panel.id = 'plan-panel';
+  var header = document.createElement('div');
+  header.className = 'plan-header';
+  header.textContent = 'investigation progress';
+  panel.appendChild(header);
+  return panel;
+}
+
+function addProgressStep(panel, num, toolName) {
+  var step = document.createElement('div');
+  step.className = 'plan-step in_progress';
+  step.setAttribute('data-step-num', num);
+  var icon = document.createElement('span');
+  icon.className = 'plan-step-icon spinner-icon';
+  icon.textContent = '\u25D4';
+  step.appendChild(icon);
+  var desc = document.createElement('span');
+  desc.className = 'plan-step-desc';
+  desc.textContent = toolName;
+  step.appendChild(desc);
+  panel.appendChild(step);
+}
+
+function completeProgressStep(panel, num) {
+  var step = panel.querySelector('[data-step-num="' + num + '"]');
+  if (!step) return;
+  step.classList.remove('in_progress');
+  step.classList.add('completed');
+  var icon = step.querySelector('.plan-step-icon');
+  icon.textContent = '\u2714';
+  icon.classList.remove('spinner-icon');
+}
+
+function finishProgressPanel() {
+  if (!activePlanPanel) return;
+  // Complete last step
+  var inProgress = activePlanPanel.querySelector('.plan-step.in_progress');
+  if (inProgress) {
+    var num = inProgress.getAttribute('data-step-num');
+    completeProgressStep(activePlanPanel, num);
+  }
+  activePlanPanel.classList.remove('active');
+  activePlanPanel.classList.add('completed');
+  unstickyPlan();
+  activePlanPanel = null;
+  planAnchorEl = null;
+}
+
+// --- Plan Panel (legacy, for historical plan data) ---
 
 function createPlanPanel(steps) {
   var panel = document.createElement('div');
@@ -428,8 +507,13 @@ function startInvestigation(e) {
   var emptyEl = document.getElementById('empty-state');
   if (emptyEl) emptyEl.remove();
 
-  // Show user message immediately
-  area.appendChild(createUserBubble(query));
+  // Un-stick and dim any previous progress panel
+  finishProgressPanel();
+
+  // Show user message immediately and save as anchor
+  var userBubble = createUserBubble(query);
+  area.appendChild(userBubble);
+  planAnchorEl = userBubble;
   scrollToBottom();
 
   // Disable input
@@ -452,6 +536,7 @@ function startInvestigation(e) {
 
   // Streaming state
   var stepCount = 0;
+  var toolStepCount = 0;
 
   if (eventSource) {
     eventSource.close();
@@ -469,41 +554,48 @@ function startInvestigation(e) {
       return;
     }
 
-    // Plan events don't increment stepCount
-    if (data.step_type === 'plan') {
-      var panel = createPlanPanel(data.steps || []);
-      area.appendChild(panel);
-      status.textContent = 'planning...';
-      scrollToBottom();
-      return;
-    }
-
-    if (data.step_type === 'plan_update') {
-      updatePlanStep(null, data.step_id, data.status);
-      if (data.status === 'in_progress') {
-        var panel = document.getElementById('plan-panel');
-        if (panel) {
-          var stepEl = panel.querySelector('[data-step-id="' + data.step_id + '"]');
-          if (stepEl) {
-            var desc = stepEl.querySelector('.plan-step-desc');
-            status.textContent = desc ? desc.textContent : 'working...';
-          }
-        }
-      }
-      scrollToBottom();
-      return;
-    }
-
     stepCount++;
 
     if (data.step_type === 'final') {
+      finishProgressPanel();
       area.appendChild(createAssistantBubble(data.content));
       status.textContent = 'done (' + stepCount + ' steps)';
+
+      // Collapse all streaming-expanded steps
+      var allSteps = area.querySelectorAll('.timeline-step.streaming-expanded');
+      for (var s = 0; s < allSteps.length; s++) {
+        allSteps[s].classList.remove('expanded', 'streaming-expanded');
+      }
     } else if (data.step_type === 'error') {
+      finishProgressPanel();
       area.appendChild(createTimelineStep('error', data.content, data.tool_name, null));
       status.textContent = 'error';
+    } else if (data.step_type === 'tool_call') {
+      // Synthesize progress panel from tool_call events
+      if (!activePlanPanel) {
+        activePlanPanel = createProgressPanel();
+        stickyPlan(activePlanPanel);
+      }
+      // Complete previous step
+      if (toolStepCount > 0) {
+        completeProgressStep(activePlanPanel, toolStepCount);
+      }
+      toolStepCount++;
+      addProgressStep(activePlanPanel, toolStepCount, data.tool_name || 'tool');
+      status.textContent = 'calling ' + (data.tool_name || 'tool') + '...';
+
+      // Also add inline timeline step
+      var stepEl = createTimelineStep(data.step_type, data.content, data.tool_name, data.args || null);
+      area.appendChild(stepEl);
+
+      // Auto-expand latest step during streaming, collapse previous
+      var allSteps = area.querySelectorAll('.timeline-step.streaming-expanded');
+      for (var s = 0; s < allSteps.length; s++) {
+        allSteps[s].classList.remove('expanded', 'streaming-expanded');
+      }
+      stepEl.classList.add('expanded', 'streaming-expanded');
     } else {
-      // Inline timeline step (thinking, tool_call, observation)
+      // Inline timeline step (thinking, observation)
       var stepEl = createTimelineStep(data.step_type, data.content, data.tool_name, data.args || null);
       area.appendChild(stepEl);
 
@@ -517,8 +609,6 @@ function startInvestigation(e) {
       // Contextual status
       if (data.step_type === 'thinking') {
         status.textContent = 'thinking...';
-      } else if (data.step_type === 'tool_call') {
-        status.textContent = 'calling ' + (data.tool_name || 'tool') + '...';
       } else if (data.step_type === 'observation') {
         status.textContent = 'processing result...';
       } else {
@@ -532,6 +622,8 @@ function startInvestigation(e) {
   eventSource.onerror = function() {
     eventSource.close();
     eventSource = null;
+
+    finishProgressPanel();
 
     btn.disabled = false;
     btn.textContent = 'run';
@@ -639,6 +731,7 @@ document.addEventListener('keydown', function(e) {
     if (eventSource) {
       eventSource.close();
       eventSource = null;
+      finishProgressPanel();
       var btn = document.getElementById('submit-btn');
       var input = document.getElementById('query-input');
       btn.disabled = false;
@@ -646,6 +739,12 @@ document.addEventListener('keydown', function(e) {
       btn.classList.remove('spinner');
       input.disabled = false;
       document.getElementById('status-bar').textContent = 'cancelled';
+
+      // Collapse all streaming-expanded steps
+      var allSteps = document.getElementById('message-area').querySelectorAll('.timeline-step.streaming-expanded');
+      for (var s = 0; s < allSteps.length; s++) {
+        allSteps[s].classList.remove('expanded', 'streaming-expanded');
+      }
     }
     document.getElementById('query-input').focus();
   }
