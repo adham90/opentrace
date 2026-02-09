@@ -465,6 +465,40 @@ select:focus { outline: none; border-color: var(--green); }
 .watcher-info { display: flex; gap: 12px; align-items: center; font-size: 11px; color: var(--text-dim); margin-bottom: 8px; }
 .watcher-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
+/* ===== Connectors Page ===== */
+.connectors-list { display: flex; flex-direction: column; gap: 8px; }
+
+.connector-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+}
+
+.connector-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.connector-name { color: var(--text-bright); font-weight: 600; flex: 1; }
+
+.connector-meta {
+  display: flex; gap: 12px; align-items: center;
+  font-size: 11px; color: var(--text-dim); margin-bottom: 8px;
+}
+
+.connector-error { color: var(--red); }
+
+.connector-actions { display: flex; gap: 6px; }
+
+.badge-type {
+  background: var(--bg-tertiary);
+  color: var(--cyan);
+}
+
+.config-help {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-style: italic;
+  padding: 8px 0;
+}
+
 /* ===== Watcher Runs Page ===== */
 .watcher-info-card {
   border: 1px solid var(--border);
