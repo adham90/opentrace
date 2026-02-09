@@ -267,3 +267,49 @@ func TestAnthropic_ChatCompletion_ContextCancel(t *testing.T) {
 		t.Fatal("expected error for cancelled context, got nil")
 	}
 }
+
+func TestAnthropic_ChatCompletion_EmptyContentFiltered(t *testing.T) {
+	var gotBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &gotBody)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]any{
+				{"type": "text", "text": "OK"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := NewAnthropicProvider(srv.URL, "claude-sonnet-4-20250514", "test-key")
+	_, err := p.ChatCompletion(context.Background(), ChatRequest{
+		Messages: []ChatMessage{
+			{Role: "system", Content: "You are a helper."},
+			{Role: "user", Content: "Hello"},
+			{Role: "assistant", Content: ""},
+			{Role: "assistant", Content: ""},
+			{Role: "user", Content: "What happened?"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Empty-content assistant messages should be filtered out
+	msgs, ok := gotBody["messages"].([]any)
+	if !ok {
+		t.Fatal("expected messages array")
+	}
+	// Should be: user("Hello"), assistant merged... wait, empty ones removed, so:
+	// user("Hello"), user("What happened?") -> merged to user("Hello\n\nWhat happened?")
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message after filtering+merging, got %d: %v", len(msgs), msgs)
+	}
+	firstMsg := msgs[0].(map[string]any)
+	if firstMsg["role"] != "user" {
+		t.Errorf("expected user role, got %q", firstMsg["role"])
+	}
+}

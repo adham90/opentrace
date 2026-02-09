@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -55,8 +56,11 @@ func (a *AnthropicProvider) ChatCompletion(ctx context.Context, req ChatRequest)
 
 	for _, m := range req.Messages {
 		if m.Role == "system" {
-			systemParts = append(systemParts, m.Content)
-		} else {
+			if m.Content != "" {
+				systemParts = append(systemParts, m.Content)
+			}
+		} else if m.Content != "" {
+			// Skip empty-content messages (Anthropic rejects them)
 			messages = append(messages, anthropicMessage{
 				Role:    m.Role,
 				Content: m.Content,
@@ -67,9 +71,19 @@ func (a *AnthropicProvider) ChatCompletion(ctx context.Context, req ChatRequest)
 	// Merge adjacent same-role messages (Anthropic requires strict alternation)
 	messages = mergeAdjacentMessages(messages)
 
-	// Ensure messages start with a user message
-	if len(messages) > 0 && messages[0].Role != "user" {
+	// Ensure we have at least one message (Anthropic requires non-empty messages)
+	if len(messages) == 0 {
+		messages = []anthropicMessage{{Role: "user", Content: "Hello."}}
+	}
+
+	// Ensure messages start with a user message (Anthropic requirement)
+	if messages[0].Role != "user" {
 		messages = append([]anthropicMessage{{Role: "user", Content: "Continue."}}, messages...)
+	}
+
+	// Ensure messages end with a user message (Anthropic requirement)
+	if messages[len(messages)-1].Role != "user" {
+		messages = append(messages, anthropicMessage{Role: "user", Content: "Continue."})
 	}
 
 	systemPrompt := strings.Join(systemParts, "\n\n")
@@ -116,7 +130,8 @@ func (a *AnthropicProvider) ChatCompletion(ctx context.Context, req ChatRequest)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return ChatResponse{}, fmt.Errorf("anthropic: chat returned status %d", resp.StatusCode)
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return ChatResponse{}, fmt.Errorf("anthropic: chat returned status %d: %s", resp.StatusCode, string(errBody))
 	}
 
 	var anthropicResp anthropicResponse

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -97,7 +98,8 @@ func (o *OpenAIProvider) ChatCompletion(ctx context.Context, req ChatRequest) (C
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return ChatResponse{}, fmt.Errorf("openai: chat returned status %d", resp.StatusCode)
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return ChatResponse{}, fmt.Errorf("openai: chat returned status %d: %s", resp.StatusCode, string(errBody))
 	}
 
 	var openAIResp openAIChatResponse
@@ -147,7 +149,8 @@ func (o *OpenAIProvider) Embed(ctx context.Context, text string) ([]float64, err
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openai: embed returned status %d", resp.StatusCode)
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("openai: embed returned status %d: %s", resp.StatusCode, string(errBody))
 	}
 
 	var embedResp openAIEmbedResponse
