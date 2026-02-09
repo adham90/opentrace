@@ -15,83 +15,108 @@
 </div>
 
 <!-- Create/Edit Modal -->
-<div id="watcher-modal" class="modal" style="display:none">
+<div id="watcher-modal" class="modal" style="display:none" onclick="if(event.target===this)hideModal()">
   <div class="modal-content">
     <div class="modal-header">
-      <h3 id="modal-title">New Watcher</h3>
+      <h3><span class="prompt">$</span> <span id="modal-title">new-watcher</span></h3>
       <button class="btn-close" onclick="hideModal()">&times;</button>
     </div>
     <form id="watcher-form" onsubmit="saveWatcher(event)">
-      <input type="hidden" id="watcher-id" value="">
-      <div class="form-group">
-        <label>Title</label>
-        <input type="text" id="watcher-title" required placeholder="e.g. Payment failures spike">
-      </div>
-      <div class="form-group">
-        <label>Description (instructions for the AI agent)</label>
-        <textarea id="watcher-description" rows="4" required placeholder="Check if payment gateway errors exceed normal rate. Look for patterns in failing merchant IDs."></textarea>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Severity</label>
-          <select id="watcher-severity">
-            <option value="info">Info</option>
-            <option value="warning" selected>Warning</option>
-            <option value="critical">Critical</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Time range (lookback window &amp; run interval)</label>
-          <select id="watcher-timerange">
-            <option value="5m">Every 5 minutes</option>
-            <option value="15m" selected>Every 15 minutes</option>
-            <option value="30m">Every 30 minutes</option>
-            <option value="1h">Every 1 hour</option>
-            <option value="6h">Every 6 hours</option>
-            <option value="24h">Every 24 hours</option>
-          </select>
-        </div>
-      </div>
-      <fieldset class="form-fieldset">
-        <legend>Filters</legend>
-        <div class="form-row">
+      <div class="modal-body">
+        <input type="hidden" id="watcher-id" value="">
+
+        <div class="modal-section">
           <div class="form-group">
-            <label>Service</label>
-            <input type="text" id="filter-service" placeholder="e.g. payment-api">
+            <label>Title</label>
+            <input type="text" id="watcher-title" required placeholder="e.g. Payment failures spike">
           </div>
           <div class="form-group">
-            <label>Level</label>
-            <select id="filter-level">
-              <option value="">Any</option>
-              <option value="error">error</option>
-              <option value="warn">warn</option>
-              <option value="info">info</option>
-              <option value="debug">debug</option>
-            </select>
+            <label>Prompt (instructions for the AI agent)</label>
+            <textarea id="watcher-description" rows="3" required placeholder="Check if payment gateway errors exceed normal rate. Look for patterns in failing merchant IDs."></textarea>
           </div>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Environment</label>
-            <input type="text" id="filter-env" placeholder="e.g. production">
+
+        <div class="modal-section">
+          <div class="modal-section-label">Schedule &amp; Severity</div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Time Range</label>
+              <select id="watcher-timerange">
+                <option value="5m">Every 5 min</option>
+                <option value="15m" selected>Every 15 min</option>
+                <option value="30m">Every 30 min</option>
+                <option value="1h">Every 1 hour</option>
+                <option value="6h">Every 6 hours</option>
+                <option value="24h">Every 24 hours</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Severity</label>
+              <select id="watcher-severity">
+                <option value="info">Info</option>
+                <option value="warning" selected>Warning</option>
+                <option value="critical">Critical</option>
+              </select>
+            </div>
           </div>
         </div>
-        <div class="form-group">
-          <label>Query (full-text search)</label>
-          <input type="text" id="filter-query" placeholder="e.g. timeout OR connection refused">
+
+        <div class="modal-section">
+          <div class="modal-section-label">Filters</div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Service</label>
+              <input type="text" id="filter-service" placeholder="e.g. payment-api">
+            </div>
+            <div class="form-group">
+              <label>Level</label>
+              <select id="filter-level">
+                <option value="">Any</option>
+                <option value="error">error</option>
+                <option value="warn">warn</option>
+                <option value="info">info</option>
+                <option value="debug">debug</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Environment</label>
+              <input type="text" id="filter-env" placeholder="e.g. production">
+            </div>
+            <div class="form-group">
+              <label>Query</label>
+              <input type="text" id="filter-query" placeholder="e.g. timeout OR refused">
+            </div>
+          </div>
         </div>
-      </fieldset>
-      <fieldset class="form-fieldset">
-        <legend>Notifications</legend>
-        <label class="checkbox-label"><input type="checkbox" id="notify-dashboard" checked disabled> Dashboard alerts</label>
-        <label class="checkbox-label"><input type="checkbox" id="notify-webhook" onchange="toggleWebhook()"> Webhook</label>
-        <div id="webhook-url-group" class="form-group" style="display:none">
-          <input type="url" id="webhook-url" placeholder="https://hooks.slack.com/...">
+
+        <div class="modal-section">
+          <div class="modal-section-label">Notifications</div>
+          <div class="notify-channels">
+            <div class="notify-channel">
+              <span class="notify-channel-icon">&#9632;</span>
+              <span class="notify-channel-name">Dashboard</span>
+              <span class="notify-channel-status always-on">always on</span>
+            </div>
+            <div>
+              <div class="notify-channel">
+                <span class="notify-channel-icon">&#9993;</span>
+                <span class="notify-channel-name">Webhook</span>
+                <input type="checkbox" class="notify-toggle" id="notify-webhook" onchange="toggleWebhook()">
+              </div>
+              <div class="notify-channel-detail" id="webhook-url-group">
+                <div class="form-group" style="margin-bottom:0">
+                  <label>Webhook URL</label>
+                  <input type="url" id="webhook-url" placeholder="https://hooks.slack.com/...">
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-      </fieldset>
+      </div>
+
       <div class="modal-footer">
         <button type="button" class="btn" onclick="hideModal()">Cancel</button>
-        <button type="submit" class="btn btn-primary">Save Watcher</button>
+        <button type="submit" class="btn btn-primary" id="modal-save-btn">Create Watcher</button>
       </div>
     </form>
   </div>
@@ -140,10 +165,11 @@ function loadWatchers() {
 }
 
 function showCreateModal() {
-  document.getElementById('modal-title').textContent = 'New Watcher';
+  document.getElementById('modal-title').textContent = 'new-watcher';
+  document.getElementById('modal-save-btn').textContent = 'Create Watcher';
   document.getElementById('watcher-id').value = '';
   document.getElementById('watcher-form').reset();
-  document.getElementById('notify-dashboard').checked = true;
+  document.getElementById('webhook-url-group').classList.remove('show');
   document.getElementById('watcher-modal').style.display = 'flex';
 }
 
@@ -153,7 +179,8 @@ function hideModal() {
 
 function toggleWebhook() {
   var show = document.getElementById('notify-webhook').checked;
-  document.getElementById('webhook-url-group').style.display = show ? 'block' : 'none';
+  var el = document.getElementById('webhook-url-group');
+  if (show) { el.classList.add('show'); } else { el.classList.remove('show'); }
 }
 
 function saveWatcher(e) {
@@ -199,7 +226,8 @@ function saveWatcher(e) {
 
 function editWatcher(id) {
   fetch('/api/watchers/' + id).then(function(r) { return r.json(); }).then(function(w) {
-    document.getElementById('modal-title').textContent = 'Edit Watcher';
+    document.getElementById('modal-title').textContent = 'edit-watcher';
+    document.getElementById('modal-save-btn').textContent = 'Save Changes';
     document.getElementById('watcher-id').value = w.id;
     document.getElementById('watcher-title').value = w.title;
     document.getElementById('watcher-description').value = w.description;
@@ -211,6 +239,18 @@ function editWatcher(id) {
     document.getElementById('filter-level').value = f.level || '';
     document.getElementById('filter-env').value = f.environment || '';
     document.getElementById('filter-query').value = f.query || '';
+
+    // Restore webhook state
+    var notify = w.notify || [];
+    var hasWebhook = false;
+    var webhookUrl = '';
+    for (var i = 0; i < notify.length; i++) {
+      if (notify[i] && notify[i].type === 'webhook') { hasWebhook = true; webhookUrl = notify[i].url || ''; }
+    }
+    document.getElementById('notify-webhook').checked = hasWebhook;
+    document.getElementById('webhook-url').value = webhookUrl;
+    var wg = document.getElementById('webhook-url-group');
+    if (hasWebhook) { wg.classList.add('show'); } else { wg.classList.remove('show'); }
 
     document.getElementById('watcher-modal').style.display = 'flex';
   });
