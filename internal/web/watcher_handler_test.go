@@ -16,8 +16,6 @@ func newTestServerWithWatchers() *Server {
 		DSStore:      newMockStore(),
 		LogStore:     newMockLogStore(),
 		EmbStore:     newMockEmbeddingStore(),
-		ChatStore:    newMockChatStore(),
-		MemoryStore:  newMockMemoryStore(),
 		WatcherStore: newMockWatcherStore(),
 		RunStore:     newMockWatcherRunStore(),
 		AlertStore:   newMockAlertStore(),

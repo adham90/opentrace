@@ -7,7 +7,6 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 
 	"github.com/opentrace/opentrace/internal/store"
 )
@@ -19,7 +18,6 @@ var templateFS embed.FS
 var staticFS embed.FS
 
 var (
-	investigateTmpl *template.Template
 	connectorsTmpl  *template.Template
 	logsTmpl        *template.Template
 	alertsTmpl      *template.Template
@@ -29,8 +27,6 @@ var (
 
 func init() {
 	// Each page gets layout + its own content template
-	investigateTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/investigate.html"))
 	connectorsTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/connectors.html"))
 	logsTmpl = template.Must(template.ParseFS(templateFS,
@@ -65,7 +61,6 @@ type pageData struct {
 	Title      string
 	Nav        string
 	Content    string
-	ChatID     string
 	WatcherID  string
 	DevMode    bool
 	Connectors interface{}
@@ -88,51 +83,6 @@ func (s *Server) getTemplate(fallback *template.Template, files ...string) *temp
 		return fallback
 	}
 	return t
-}
-
-func (s *Server) handleInvestigatePage(w http.ResponseWriter, r *http.Request) {
-	data := pageData{
-		Title:   "Investigate",
-		Nav:     "investigate",
-		Content: "investigate",
-		DevMode: s.isDevMode(),
-	}
-	tmpl := s.getTemplate(investigateTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/investigate.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
-}
-
-func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	chatID, err := uuid.Parse(idStr)
-	if err != nil {
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
-	}
-
-	if s.chatStore == nil {
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
-	}
-
-	_, err = s.chatStore.GetChat(r.Context(), chatID)
-	if err != nil {
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
-	}
-
-	data := pageData{
-		Title:   "Investigate",
-		Nav:     "investigate",
-		Content: "investigate",
-		ChatID:  chatID.String(),
-		DevMode: s.isDevMode(),
-	}
-	tmpl := s.getTemplate(investigateTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/investigate.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
 }
 
 func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {

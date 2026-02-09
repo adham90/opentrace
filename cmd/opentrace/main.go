@@ -27,7 +27,6 @@ type appDeps struct {
 	dsStore     store.DataSourceStore
 	logStore    store.LogStore
 	embStore    store.EmbeddingStore
-	chatStore   store.ChatStore
 	memoryStore store.MemoryStore
 	registry    *connector.Registry
 	cfg         *config.Config
@@ -81,7 +80,6 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	dsStore := store.NewPgDataSourceStore(pool)
 	logStore := store.NewPgLogStore(pool)
 	embStore := store.NewPgEmbeddingStore(pool)
-	chatStore := store.NewPgChatStore(pool)
 	memoryStore := store.NewPgMemoryStore(pool)
 
 	// Initialize embedding provider (may be nil if not configured)
@@ -105,7 +103,6 @@ func initApp(ctx context.Context) (*appDeps, error) {
 		dsStore:     dsStore,
 		logStore:    logStore,
 		embStore:    embStore,
-		chatStore:   chatStore,
 		memoryStore: memoryStore,
 		registry:    registry,
 		cfg:         cfg,
@@ -137,12 +134,8 @@ func run() error {
 	}
 	defer deps.pool.Close()
 
-	// Build map of all available LLM providers
-	llmProviders := buildProviderMap(deps.cfg)
-	defaultProvider := deps.cfg.LLMProvider
-
 	// Create server
-	srv := web.NewServer(deps.dsStore, deps.logStore, deps.embStore, deps.chatStore, deps.memoryStore, deps.registry, deps.cfg, deps.embedder, llmProviders, defaultProvider)
+	srv := web.NewServer(deps.dsStore, deps.logStore, deps.embStore, deps.registry, deps.cfg, deps.embedder)
 
 	httpServer := &http.Server{
 		Addr:    deps.cfg.ListenAddr,
@@ -209,47 +202,6 @@ func reconnectConnectors(ctx context.Context, dsStore store.DataSourceStore, log
 		registry.Register(c)
 		log.Printf("reconnected connector %q (%s)", ds.Name, ds.Type)
 	}
-}
-
-// buildProviderMap creates all available LLM providers from config.
-// Ollama is always attempted. Anthropic and OpenAI register multiple
-// model variants when their API keys are set.
-func buildProviderMap(cfg *config.Config) map[string]llm.LLMProvider {
-	providers := make(map[string]llm.LLMProvider)
-
-	// Ollama — always available (local)
-	providers["ollama"] = llm.NewOllamaProvider(
-		cfg.OllamaURL,
-		cfg.OllamaModel,
-		cfg.EmbeddingModel,
-		cfg.EmbeddingDimension,
-	)
-
-	if cfg.AnthropicAPIKey != "" {
-		for _, m := range llm.AnthropicModels {
-			providers[m.Name] = llm.NewAnthropicProvider(
-				cfg.AnthropicURL,
-				m.ModelID,
-				cfg.AnthropicAPIKey,
-			)
-		}
-		log.Printf("anthropic providers available (%d models)", len(llm.AnthropicModels))
-	}
-
-	if cfg.OpenAIAPIKey != "" {
-		for _, m := range llm.OpenAIModels {
-			providers[m.Name] = llm.NewOpenAIProvider(
-				cfg.OpenAIURL,
-				m.ModelID,
-				cfg.EmbeddingModel,
-				cfg.EmbeddingDimension,
-				cfg.OpenAIAPIKey,
-			)
-		}
-		log.Printf("openai providers available (%d models)", len(llm.OpenAIModels))
-	}
-
-	return providers
 }
 
 func defaultMigrationsPath() string {
