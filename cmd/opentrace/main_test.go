@@ -5,26 +5,27 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/opentrace/opentrace/internal/connector"
 	"github.com/opentrace/opentrace/internal/store"
-	"github.com/opentrace/opentrace/internal/testutil"
 	"github.com/opentrace/opentrace/internal/web"
 )
 
 func TestAppStartup(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
+	db, err := store.OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	if err := store.RunSQLiteMigrations(db); err != nil {
+		t.Fatalf("migrations: %v", err)
 	}
 
-	pool, cleanup := testutil.SetupTestDB(t)
-	defer cleanup()
-
-	dsStore := store.NewPgDataSourceStore(pool)
-	logStore := store.NewPgLogStore(pool)
+	dsStore := store.NewDataSourceStore(db)
+	logStore := store.NewLogStore(db)
 	registry := connector.NewRegistry()
 	srv := web.NewServer(dsStore, logStore, registry, nil)
 
@@ -95,10 +96,4 @@ func waitForServer(t *testing.T, baseURL string, timeout time.Duration) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("server did not start in time")
-}
-
-// Ensure OPENTRACE_APP_DATABASE_URL is not required for build
-func init() {
-	// Don't set env vars - tests use testcontainers directly
-	os.Setenv("OPENTRACE_APP_DATABASE_URL", "not-used-in-test")
 }

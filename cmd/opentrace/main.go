@@ -2,17 +2,15 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"runtime"
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/opentrace/opentrace/internal/config"
 	"github.com/opentrace/opentrace/internal/connector"
 	mcpserver "github.com/opentrace/opentrace/internal/mcp"
@@ -22,7 +20,7 @@ import (
 
 // appDeps holds shared application dependencies initialized by initApp.
 type appDeps struct {
-	pool         *pgxpool.Pool
+	db           *sql.DB
 	dsStore      store.DataSourceStore
 	logStore     store.LogStore
 	watcherStore store.WatcherStore
@@ -45,8 +43,8 @@ func main() {
 	}
 }
 
-// initApp performs shared initialization: config, migrations, DB connection,
-// stores, and connector registry.
+// initApp performs shared initialization: config, SQLite database,
+// migrations, stores, and connector registry.
 func initApp(ctx context.Context) (*appDeps, error) {
 	config.LoadEnvFile(".env")
 
@@ -55,37 +53,36 @@ func initApp(ctx context.Context) (*appDeps, error) {
 		return nil, fmt.Errorf("loading config: %w", err)
 	}
 
+	// Ensure data directory exists
+	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+		return nil, fmt.Errorf("creating data directory: %w", err)
+	}
+
+	// Open SQLite database
+	db, err := store.OpenSQLite(cfg.DatabasePath())
+	if err != nil {
+		return nil, fmt.Errorf("opening database: %w", err)
+	}
+
 	// Run migrations
-	migrationsPath := defaultMigrationsPath()
-	if err := store.RunMigrations(cfg.AppDatabaseURL, migrationsPath); err != nil {
+	if err := store.RunSQLiteMigrations(db); err != nil {
+		db.Close()
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
-	log.Println("migrations applied successfully")
-
-	// Connect to database
-	pool, err := pgxpool.New(ctx, cfg.AppDatabaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("connecting to database: %w", err)
-	}
-
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("pinging database: %w", err)
-	}
-	log.Println("connected to database")
+	log.Println("database ready")
 
 	// Initialize stores
-	dsStore := store.NewPgDataSourceStore(pool)
-	logStore := store.NewPgLogStore(pool)
-	watcherStore := store.NewPgWatcherStore(pool)
-	alertStore := store.NewPgAlertStore(pool)
+	dsStore := store.NewDataSourceStore(db)
+	logStore := store.NewLogStore(db)
+	watcherStore := store.NewWatcherStore(db)
+	alertStore := store.NewAlertStore(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
 	reconnectConnectors(ctx, dsStore, logStore, registry, cfg)
 
 	return &appDeps{
-		pool:         pool,
+		db:           db,
 		dsStore:      dsStore,
 		logStore:     logStore,
 		watcherStore: watcherStore,
@@ -105,7 +102,7 @@ func runMCP() error {
 	if err != nil {
 		return err
 	}
-	defer deps.pool.Close()
+	defer deps.db.Close()
 	defer deps.registry.CloseAll()
 
 	return mcpserver.Serve(mcpserver.Deps{
@@ -121,7 +118,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer deps.pool.Close()
+	defer deps.db.Close()
 
 	// Create server
 	srv := web.NewServerWithDeps(web.ServerDeps{
@@ -198,14 +195,4 @@ func reconnectConnectors(ctx context.Context, dsStore store.DataSourceStore, log
 		registry.Register(c)
 		log.Printf("reconnected connector %q (%s)", ds.Name, ds.Type)
 	}
-}
-
-func defaultMigrationsPath() string {
-	// Check for /migrations (Docker)
-	if _, err := os.Stat("/migrations"); err == nil {
-		return "/migrations"
-	}
-	// Development: relative to binary
-	_, filename, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(filename), "..", "..", "migrations")
 }

@@ -1,27 +1,20 @@
-package store_test
+package store
 
 import (
 	"context"
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/opentrace/opentrace/internal/store"
-	"github.com/opentrace/opentrace/internal/testutil"
 )
 
-func TestPgWatcherRunStore_Lifecycle(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	pool, cleanup := testutil.SetupTestDB(t)
-	defer cleanup()
-	ws := store.NewPgWatcherStore(pool)
-	rs := store.NewPgWatcherRunStore(pool)
+func TestWatcherRunStore_Lifecycle(t *testing.T) {
+	db := setupTestDB(t)
+	ws := NewWatcherStore(db)
+	rs := NewWatcherRunStore(db)
 	ctx := context.Background()
 
 	// Create a watcher first
-	w, err := ws.Create(ctx, store.CreateWatcherParams{
+	w, err := ws.Create(ctx, CreateWatcherParams{
 		Title:       "Test Watcher",
 		Description: "For run tests",
 	})
@@ -67,7 +60,7 @@ func TestPgWatcherRunStore_Lifecycle(t *testing.T) {
 
 	// GetByID not found
 	_, err = rs.GetByID(ctx, uuid.New())
-	if err != store.ErrNotFound {
+	if err != ErrNotFound {
 		t.Errorf("GetByID unknown = %v, want ErrNotFound", err)
 	}
 
@@ -81,18 +74,13 @@ func TestPgWatcherRunStore_Lifecycle(t *testing.T) {
 	}
 }
 
-func TestPgWatcherRunStore_Fail(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	pool, cleanup := testutil.SetupTestDB(t)
-	defer cleanup()
-	ws := store.NewPgWatcherStore(pool)
-	rs := store.NewPgWatcherRunStore(pool)
+func TestWatcherRunStore_Fail(t *testing.T) {
+	db := setupTestDB(t)
+	ws := NewWatcherStore(db)
+	rs := NewWatcherRunStore(db)
 	ctx := context.Background()
 
-	w, err := ws.Create(ctx, store.CreateWatcherParams{
+	w, err := ws.Create(ctx, CreateWatcherParams{
 		Title:       "Fail Test",
 		Description: "For fail tests",
 	})
@@ -122,18 +110,13 @@ func TestPgWatcherRunStore_Fail(t *testing.T) {
 	}
 }
 
-func TestPgWatcherRunStore_CompleteNotFound(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	pool, cleanup := testutil.SetupTestDB(t)
-	defer cleanup()
-	rs := store.NewPgWatcherRunStore(pool)
+func TestWatcherRunStore_CompleteNotFound(t *testing.T) {
+	db := setupTestDB(t)
+	rs := NewWatcherRunStore(db)
 	ctx := context.Background()
 
 	err := rs.Complete(ctx, uuid.New(), "summary", nil, false)
-	if err != store.ErrNotFound {
+	if err != ErrNotFound {
 		t.Errorf("Complete unknown = %v, want ErrNotFound", err)
 	}
 }

@@ -1,29 +1,22 @@
-package store_test
+package store
 
 import (
 	"context"
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/opentrace/opentrace/internal/store"
-	"github.com/opentrace/opentrace/internal/testutil"
 )
 
-func TestPgAlertStore_CRUD(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	pool, cleanup := testutil.SetupTestDB(t)
-	defer cleanup()
-	as := store.NewPgAlertStore(pool)
+func TestAlertStore_CRUD(t *testing.T) {
+	db := setupTestDB(t)
+	as := NewAlertStore(db)
 	ctx := context.Background()
 
 	// Create alert
-	a, err := as.Create(ctx, store.CreateAlertParams{
+	a, err := as.Create(ctx, CreateAlertParams{
 		Title:    "Payment errors spike",
 		Summary:  "Found 47 payment errors in the last 15 minutes",
-		Severity: store.SeverityCritical,
+		Severity: SeverityCritical,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -42,10 +35,10 @@ func TestPgAlertStore_CRUD(t *testing.T) {
 	}
 
 	// Create a second alert
-	a2, err := as.Create(ctx, store.CreateAlertParams{
+	a2, err := as.Create(ctx, CreateAlertParams{
 		Title:    "Memory leak",
 		Summary:  "RSS growing 12MB/min",
-		Severity: store.SeverityWarning,
+		Severity: SeverityWarning,
 	})
 	if err != nil {
 		t.Fatalf("Create second: %v", err)
@@ -61,7 +54,7 @@ func TestPgAlertStore_CRUD(t *testing.T) {
 	}
 
 	// List all
-	all, err := as.List(ctx, store.ListAlertParams{Limit: 10})
+	all, err := as.List(ctx, ListAlertParams{Limit: 10})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -81,7 +74,7 @@ func TestPgAlertStore_CRUD(t *testing.T) {
 	}
 
 	// List unread only
-	unread, err := as.List(ctx, store.ListAlertParams{UnreadOnly: true, Limit: 10})
+	unread, err := as.List(ctx, ListAlertParams{UnreadOnly: true, Limit: 10})
 	if err != nil {
 		t.Fatalf("List unread: %v", err)
 	}
@@ -105,42 +98,37 @@ func TestPgAlertStore_CRUD(t *testing.T) {
 
 	// MarkRead not found
 	err = as.MarkRead(ctx, uuid.New())
-	if err != store.ErrNotFound {
+	if err != ErrNotFound {
 		t.Errorf("MarkRead unknown = %v, want ErrNotFound", err)
 	}
 
 	// Dismiss not found
 	err = as.Dismiss(ctx, uuid.New())
-	if err != store.ErrNotFound {
+	if err != ErrNotFound {
 		t.Errorf("Dismiss unknown = %v, want ErrNotFound", err)
 	}
 }
 
-func TestPgAlertStore_WithWatcher(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	pool, cleanup := testutil.SetupTestDB(t)
-	defer cleanup()
-	ws := store.NewPgWatcherStore(pool)
-	rs := store.NewPgWatcherRunStore(pool)
-	as := store.NewPgAlertStore(pool)
+func TestAlertStore_WithWatcher(t *testing.T) {
+	db := setupTestDB(t)
+	ws := NewWatcherStore(db)
+	rs := NewWatcherRunStore(db)
+	as := NewAlertStore(db)
 	ctx := context.Background()
 
 	// Create watcher + run + alert
-	w, _ := ws.Create(ctx, store.CreateWatcherParams{
+	w, _ := ws.Create(ctx, CreateWatcherParams{
 		Title:       "Error Watcher",
 		Description: "Watch for errors",
 	})
 	run, _ := rs.Create(ctx, w.ID)
 
-	a, err := as.Create(ctx, store.CreateAlertParams{
+	a, err := as.Create(ctx, CreateAlertParams{
 		WatcherID: &w.ID,
 		RunID:     &run.ID,
 		Title:     "Errors found",
 		Summary:   "Found 10 errors",
-		Severity:  store.SeverityWarning,
+		Severity:  SeverityWarning,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -153,7 +141,7 @@ func TestPgAlertStore_WithWatcher(t *testing.T) {
 	}
 
 	// Filter by watcher
-	filtered, err := as.List(ctx, store.ListAlertParams{WatcherID: &w.ID, Limit: 10})
+	filtered, err := as.List(ctx, ListAlertParams{WatcherID: &w.ID, Limit: 10})
 	if err != nil {
 		t.Fatalf("List by watcher: %v", err)
 	}
@@ -163,7 +151,7 @@ func TestPgAlertStore_WithWatcher(t *testing.T) {
 
 	// Filter by different watcher
 	other := uuid.New()
-	empty, err := as.List(ctx, store.ListAlertParams{WatcherID: &other, Limit: 10})
+	empty, err := as.List(ctx, ListAlertParams{WatcherID: &other, Limit: 10})
 	if err != nil {
 		t.Fatalf("List by other: %v", err)
 	}
@@ -172,24 +160,19 @@ func TestPgAlertStore_WithWatcher(t *testing.T) {
 	}
 }
 
-func TestPgAlertStore_DefaultSeverity(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	pool, cleanup := testutil.SetupTestDB(t)
-	defer cleanup()
-	as := store.NewPgAlertStore(pool)
+func TestAlertStore_DefaultSeverity(t *testing.T) {
+	db := setupTestDB(t)
+	as := NewAlertStore(db)
 	ctx := context.Background()
 
-	a, err := as.Create(ctx, store.CreateAlertParams{
+	a, err := as.Create(ctx, CreateAlertParams{
 		Title:   "No severity",
 		Summary: "Test default",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if a.Severity != store.SeverityWarning {
-		t.Errorf("default severity = %q, want %q", a.Severity, store.SeverityWarning)
+	if a.Severity != SeverityWarning {
+		t.Errorf("default severity = %q, want %q", a.Severity, SeverityWarning)
 	}
 }

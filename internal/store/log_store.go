@@ -2,105 +2,118 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"time"
 )
 
-// PgLogStore implements LogStore using pgx.
-type PgLogStore struct {
-	pool *pgxpool.Pool
+// logStore implements LogStore using database/sql (SQLite).
+type logStore struct {
+	db *sql.DB
 }
 
-// NewPgLogStore creates a new PgLogStore.
-func NewPgLogStore(pool *pgxpool.Pool) *PgLogStore {
-	return &PgLogStore{pool: pool}
+// NewLogStore creates a new LogStore backed by SQLite.
+func NewLogStore(db *sql.DB) LogStore {
+	return &logStore{db: db}
 }
 
-func (s *PgLogStore) BatchInsert(ctx context.Context, entries []LogEntry) (int, error) {
+func (s *logStore) BatchInsert(ctx context.Context, entries []LogEntry) (int, error) {
 	if len(entries) == 0 {
 		return 0, nil
 	}
 
-	rows := make([][]any, len(entries))
-	for i, e := range entries {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO logs (timestamp, level, service, trace_id, message, environment, metadata)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return 0, fmt.Errorf("prepare insert: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, e := range entries {
 		meta, err := json.Marshal(e.Metadata)
 		if err != nil {
 			return 0, fmt.Errorf("marshaling metadata: %w", err)
 		}
-		rows[i] = []any{e.Timestamp, e.Level, e.Service, e.TraceID, e.Message, e.Environment, meta}
+		ts := e.Timestamp.UTC().Format(time.RFC3339Nano)
+		_, err = stmt.ExecContext(ctx, ts, e.Level, e.Service, e.TraceID, e.Message, e.Environment, string(meta))
+		if err != nil {
+			return 0, fmt.Errorf("inserting log entry: %w", err)
+		}
 	}
 
-	count, err := s.pool.CopyFrom(ctx,
-		pgx.Identifier{"logs"},
-		[]string{"timestamp", "level", "service", "trace_id", "message", "environment", "metadata"},
-		pgx.CopyFromRows(rows),
-	)
-	if err != nil {
-		return 0, fmt.Errorf("batch insert: %w", err)
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit batch insert: %w", err)
 	}
 
-	return int(count), nil
+	return len(entries), nil
 }
 
-func (s *PgLogStore) Search(ctx context.Context, params LogSearchParams) ([]LogEntry, error) {
+func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEntry, error) {
 	var conditions []string
 	var args []any
-	argN := 1
+	useFTS := false
 
 	if params.Query != "" {
-		conditions = append(conditions, fmt.Sprintf("to_tsvector('english', message) @@ plainto_tsquery('english', $%d)", argN))
+		useFTS = true
+		conditions = append(conditions, "logs_fts MATCH ?")
 		args = append(args, params.Query)
-		argN++
 	}
 	if params.Service != "" {
-		conditions = append(conditions, fmt.Sprintf("LOWER(service) = LOWER($%d)", argN))
+		conditions = append(conditions, "l.service = ? COLLATE NOCASE")
 		args = append(args, params.Service)
-		argN++
 	}
 	if params.Level != "" {
-		conditions = append(conditions, fmt.Sprintf("LOWER(level) = LOWER($%d)", argN))
+		conditions = append(conditions, "l.level = ? COLLATE NOCASE")
 		args = append(args, params.Level)
-		argN++
 	}
 	if params.TraceID != "" {
-		conditions = append(conditions, fmt.Sprintf("trace_id = $%d", argN))
+		conditions = append(conditions, "l.trace_id = ?")
 		args = append(args, params.TraceID)
-		argN++
 	}
 	if params.Environment != "" {
-		conditions = append(conditions, fmt.Sprintf("environment = $%d", argN))
+		conditions = append(conditions, "l.environment = ?")
 		args = append(args, params.Environment)
-		argN++
 	}
 	if params.Start != nil {
-		conditions = append(conditions, fmt.Sprintf("timestamp >= $%d", argN))
-		args = append(args, *params.Start)
-		argN++
+		conditions = append(conditions, "l.timestamp >= ?")
+		args = append(args, params.Start.UTC().Format(time.RFC3339Nano))
 	}
 	if params.End != nil {
-		conditions = append(conditions, fmt.Sprintf("timestamp <= $%d", argN))
-		args = append(args, *params.End)
-		argN++
+		conditions = append(conditions, "l.timestamp <= ?")
+		args = append(args, params.End.UTC().Format(time.RFC3339Nano))
 	}
 
-	query := "SELECT id, timestamp, level, service, trace_id, message, environment, metadata, created_at FROM logs"
+	var query string
+	if useFTS {
+		query = `SELECT l.id, l.timestamp, l.level, l.service, l.trace_id, l.message, l.environment, l.metadata
+		         FROM logs l JOIN logs_fts ON l.id = logs_fts.rowid`
+	} else {
+		query = `SELECT l.id, l.timestamp, l.level, l.service, l.trace_id, l.message, l.environment, l.metadata
+		         FROM logs l`
+	}
+
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	query += " ORDER BY timestamp DESC"
+	query += " ORDER BY l.timestamp DESC"
 
 	limit := params.Limit
 	if limit <= 0 {
 		limit = 100
 	}
-	query += fmt.Sprintf(" LIMIT $%d", argN)
+	query += " LIMIT ?"
 	args = append(args, limit)
 
-	rows, err := s.pool.Query(ctx, query, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("searching logs: %w", err)
 	}
@@ -109,17 +122,17 @@ func (s *PgLogStore) Search(ctx context.Context, params LogSearchParams) ([]LogE
 	result := make([]LogEntry, 0)
 	for rows.Next() {
 		var entry LogEntry
-		var metaJSON []byte
+		var tsStr string
+		var metaJSON sql.NullString
 		if err := rows.Scan(
-			&entry.ID, &entry.Timestamp, &entry.Level, &entry.Service,
-			&entry.TraceID, &entry.Message, &entry.Environment, &metaJSON, &entry.CreatedAt,
+			&entry.ID, &tsStr, &entry.Level, &entry.Service,
+			&entry.TraceID, &entry.Message, &entry.Environment, &metaJSON,
 		); err != nil {
 			return nil, fmt.Errorf("scanning log entry: %w", err)
 		}
-		if metaJSON != nil {
-			if err := json.Unmarshal(metaJSON, &entry.Metadata); err != nil {
-				return nil, fmt.Errorf("unmarshaling metadata: %w", err)
-			}
+		entry.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
+		if metaJSON.Valid && metaJSON.String != "" {
+			json.Unmarshal([]byte(metaJSON.String), &entry.Metadata)
 		}
 		result = append(result, entry)
 	}

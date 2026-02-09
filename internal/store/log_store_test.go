@@ -4,41 +4,11 @@ import (
 	"context"
 	"testing"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func setupLogStore(t *testing.T) (*PgLogStore, func()) {
-	t.Helper()
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	connStr, cleanup := setupTestContainer(t)
-
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, connStr)
-	if err != nil {
-		cleanup()
-		t.Fatalf("failed to create pool: %v", err)
-	}
-
-	migrationsPath := "../../migrations"
-	if err := RunMigrations(connStr, migrationsPath); err != nil {
-		pool.Close()
-		cleanup()
-		t.Fatalf("failed to run migrations: %v", err)
-	}
-
-	return NewPgLogStore(pool), func() {
-		pool.Close()
-		cleanup()
-	}
-}
-
 func TestBatchInsert_Success(t *testing.T) {
-	store, cleanup := setupLogStore(t)
-	defer cleanup()
+	db := setupTestDB(t)
+	s := NewLogStore(db)
 
 	entries := []LogEntry{
 		{Timestamp: time.Now(), Level: "INFO", Service: "api", Message: "request received"},
@@ -46,7 +16,7 @@ func TestBatchInsert_Success(t *testing.T) {
 		{Timestamp: time.Now(), Level: "WARN", Service: "worker", Message: "slow query detected"},
 	}
 
-	count, err := store.BatchInsert(context.Background(), entries)
+	count, err := s.BatchInsert(context.Background(), entries)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -56,10 +26,10 @@ func TestBatchInsert_Success(t *testing.T) {
 }
 
 func TestBatchInsert_Empty(t *testing.T) {
-	store, cleanup := setupLogStore(t)
-	defer cleanup()
+	db := setupTestDB(t)
+	s := NewLogStore(db)
 
-	count, err := store.BatchInsert(context.Background(), []LogEntry{})
+	count, err := s.BatchInsert(context.Background(), []LogEntry{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -69,18 +39,18 @@ func TestBatchInsert_Empty(t *testing.T) {
 }
 
 func TestLogSearch_FTS(t *testing.T) {
-	store, cleanup := setupLogStore(t)
-	defer cleanup()
-
+	db := setupTestDB(t)
+	s := NewLogStore(db)
 	ctx := context.Background()
+
 	entries := []LogEntry{
 		{Timestamp: time.Now(), Level: "INFO", Service: "api", Message: "user authentication successful"},
 		{Timestamp: time.Now(), Level: "ERROR", Service: "api", Message: "database connection timeout"},
 		{Timestamp: time.Now(), Level: "INFO", Service: "api", Message: "user logged out"},
 	}
-	store.BatchInsert(ctx, entries)
+	s.BatchInsert(ctx, entries)
 
-	results, err := store.Search(ctx, LogSearchParams{Query: "authentication"})
+	results, err := s.Search(ctx, LogSearchParams{Query: "authentication"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -93,18 +63,18 @@ func TestLogSearch_FTS(t *testing.T) {
 }
 
 func TestLogSearch_FilterByService(t *testing.T) {
-	store, cleanup := setupLogStore(t)
-	defer cleanup()
-
+	db := setupTestDB(t)
+	s := NewLogStore(db)
 	ctx := context.Background()
+
 	entries := []LogEntry{
 		{Timestamp: time.Now(), Level: "INFO", Service: "api", Message: "msg one"},
 		{Timestamp: time.Now(), Level: "INFO", Service: "worker", Message: "msg two"},
 		{Timestamp: time.Now(), Level: "INFO", Service: "api", Message: "msg three"},
 	}
-	store.BatchInsert(ctx, entries)
+	s.BatchInsert(ctx, entries)
 
-	results, err := store.Search(ctx, LogSearchParams{Service: "worker"})
+	results, err := s.Search(ctx, LogSearchParams{Service: "worker"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -114,18 +84,18 @@ func TestLogSearch_FilterByService(t *testing.T) {
 }
 
 func TestLogSearch_FilterByLevel(t *testing.T) {
-	store, cleanup := setupLogStore(t)
-	defer cleanup()
-
+	db := setupTestDB(t)
+	s := NewLogStore(db)
 	ctx := context.Background()
+
 	entries := []LogEntry{
 		{Timestamp: time.Now(), Level: "INFO", Service: "api", Message: "info msg"},
 		{Timestamp: time.Now(), Level: "ERROR", Service: "api", Message: "error msg"},
 		{Timestamp: time.Now(), Level: "INFO", Service: "api", Message: "another info"},
 	}
-	store.BatchInsert(ctx, entries)
+	s.BatchInsert(ctx, entries)
 
-	results, err := store.Search(ctx, LogSearchParams{Level: "ERROR"})
+	results, err := s.Search(ctx, LogSearchParams{Level: "ERROR"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -135,21 +105,21 @@ func TestLogSearch_FilterByLevel(t *testing.T) {
 }
 
 func TestLogSearch_TimeBounds(t *testing.T) {
-	store, cleanup := setupLogStore(t)
-	defer cleanup()
-
+	db := setupTestDB(t)
+	s := NewLogStore(db)
 	ctx := context.Background()
+
 	now := time.Now()
 	entries := []LogEntry{
 		{Timestamp: now.Add(-2 * time.Hour), Level: "INFO", Service: "api", Message: "old msg"},
 		{Timestamp: now.Add(-30 * time.Minute), Level: "INFO", Service: "api", Message: "recent msg"},
 		{Timestamp: now.Add(-5 * time.Minute), Level: "INFO", Service: "api", Message: "very recent msg"},
 	}
-	store.BatchInsert(ctx, entries)
+	s.BatchInsert(ctx, entries)
 
 	start := now.Add(-1 * time.Hour)
 	end := now
-	results, err := store.Search(ctx, LogSearchParams{Start: &start, End: &end})
+	results, err := s.Search(ctx, LogSearchParams{Start: &start, End: &end})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -159,10 +129,10 @@ func TestLogSearch_TimeBounds(t *testing.T) {
 }
 
 func TestLogSearch_NoResults(t *testing.T) {
-	store, cleanup := setupLogStore(t)
-	defer cleanup()
+	db := setupTestDB(t)
+	s := NewLogStore(db)
 
-	results, err := store.Search(context.Background(), LogSearchParams{Service: "nonexistent"})
+	results, err := s.Search(context.Background(), LogSearchParams{Service: "nonexistent"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

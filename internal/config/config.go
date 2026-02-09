@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
 
 type Config struct {
-	AppDatabaseURL    string
+	DataDir           string
 	LLMProvider       string
 	OllamaURL         string
 	OllamaModel       string
@@ -61,9 +62,13 @@ func LoadEnvFile(path string) {
 }
 
 func Load() (*Config, error) {
-	dbURL := os.Getenv("OPENTRACE_APP_DATABASE_URL")
-	if dbURL == "" {
-		return nil, fmt.Errorf("OPENTRACE_APP_DATABASE_URL is required")
+	dataDir := os.Getenv("OPENTRACE_DATA_DIR")
+	if dataDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("determining home directory: %w", err)
+		}
+		dataDir = filepath.Join(home, ".opentrace")
 	}
 
 	maxQueryRows, err := envOrDefaultInt("OPENTRACE_MAX_QUERY_ROWS", 500)
@@ -92,7 +97,7 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		AppDatabaseURL:      dbURL,
+		DataDir:             dataDir,
 		LLMProvider:         envOrDefault("OPENTRACE_LLM_PROVIDER", "ollama"),
 		OllamaURL:           envOrDefault("OPENTRACE_OLLAMA_URL", "http://localhost:11434"),
 		OllamaModel:         envOrDefault("OPENTRACE_OLLAMA_MODEL", "llama3.2"),
@@ -111,6 +116,11 @@ func Load() (*Config, error) {
 		MaxObservationBytes: maxObs,
 		DevMode:             os.Getenv("OPENTRACE_DEV") == "true",
 	}, nil
+}
+
+// DatabasePath returns the full path to the SQLite database file.
+func (c *Config) DatabasePath() string {
+	return filepath.Join(c.DataDir, "opentrace.db")
 }
 
 func envOrDefault(key, defaultVal string) string {

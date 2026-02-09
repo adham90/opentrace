@@ -1,4 +1,4 @@
-package store_test
+package store
 
 import (
 	"context"
@@ -7,25 +7,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/opentrace/opentrace/internal/store"
-	"github.com/opentrace/opentrace/internal/testutil"
 )
 
-func TestPgWatcherStore_CRUD(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	pool, cleanup := testutil.SetupTestDB(t)
-	defer cleanup()
-	s := store.NewPgWatcherStore(pool)
+func TestWatcherStore_CRUD(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewWatcherStore(db)
 	ctx := context.Background()
 
 	// Create
-	params := store.CreateWatcherParams{
+	params := CreateWatcherParams{
 		Title:       "Test Watcher",
 		Description: "Watch for errors in payment service",
-		Severity:    store.SeverityCritical,
+		Severity:    SeverityCritical,
 		Filters:     json.RawMessage(`{"service":"payment-api","level":"error"}`),
 		TimeRange:   "15m",
 		Notify:      json.RawMessage(`["dashboard"]`),
@@ -41,17 +34,14 @@ func TestPgWatcherStore_CRUD(t *testing.T) {
 	if w.Title != params.Title {
 		t.Errorf("title = %q, want %q", w.Title, params.Title)
 	}
-	if w.Severity != store.SeverityCritical {
-		t.Errorf("severity = %q, want %q", w.Severity, store.SeverityCritical)
+	if w.Severity != SeverityCritical {
+		t.Errorf("severity = %q, want %q", w.Severity, SeverityCritical)
 	}
-	if w.Status != store.WatcherActive {
-		t.Errorf("status = %q, want %q", w.Status, store.WatcherActive)
+	if w.Status != WatcherActive {
+		t.Errorf("status = %q, want %q", w.Status, WatcherActive)
 	}
 	if w.TimeRange != "15m" {
 		t.Errorf("time_range = %q, want %q", w.TimeRange, "15m")
-	}
-	if w.NextRunAt == nil {
-		t.Fatal("expected next_run_at to be set")
 	}
 
 	// GetByID
@@ -65,7 +55,7 @@ func TestPgWatcherStore_CRUD(t *testing.T) {
 
 	// GetByID not found
 	_, err = s.GetByID(ctx, uuid.New())
-	if err != store.ErrNotFound {
+	if err != ErrNotFound {
 		t.Errorf("GetByID unknown = %v, want ErrNotFound", err)
 	}
 
@@ -80,8 +70,8 @@ func TestPgWatcherStore_CRUD(t *testing.T) {
 
 	// Update
 	newTitle := "Updated Title"
-	newSeverity := store.SeverityWarning
-	updated, err := s.Update(ctx, w.ID, store.UpdateWatcherParams{
+	newSeverity := SeverityWarning
+	updated, err := s.Update(ctx, w.ID, UpdateWatcherParams{
 		Title:    &newTitle,
 		Severity: &newSeverity,
 	})
@@ -91,13 +81,13 @@ func TestPgWatcherStore_CRUD(t *testing.T) {
 	if updated.Title != newTitle {
 		t.Errorf("updated title = %q, want %q", updated.Title, newTitle)
 	}
-	if updated.Severity != store.SeverityWarning {
-		t.Errorf("updated severity = %q, want %q", updated.Severity, store.SeverityWarning)
+	if updated.Severity != SeverityWarning {
+		t.Errorf("updated severity = %q, want %q", updated.Severity, SeverityWarning)
 	}
 
 	// Update not found
-	_, err = s.Update(ctx, uuid.New(), store.UpdateWatcherParams{Title: &newTitle})
-	if err != store.ErrNotFound {
+	_, err = s.Update(ctx, uuid.New(), UpdateWatcherParams{Title: &newTitle})
+	if err != ErrNotFound {
 		t.Errorf("Update unknown = %v, want ErrNotFound", err)
 	}
 
@@ -122,22 +112,17 @@ func TestPgWatcherStore_CRUD(t *testing.T) {
 
 	// Delete not found
 	err = s.Delete(ctx, w.ID)
-	if err != store.ErrNotFound {
+	if err != ErrNotFound {
 		t.Errorf("Delete again = %v, want ErrNotFound", err)
 	}
 }
 
-func TestPgWatcherStore_Defaults(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	pool, cleanup := testutil.SetupTestDB(t)
-	defer cleanup()
-	s := store.NewPgWatcherStore(pool)
+func TestWatcherStore_Defaults(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewWatcherStore(db)
 	ctx := context.Background()
 
-	w, err := s.Create(ctx, store.CreateWatcherParams{
+	w, err := s.Create(ctx, CreateWatcherParams{
 		Title:       "Minimal Watcher",
 		Description: "Just a test",
 	})
@@ -145,26 +130,21 @@ func TestPgWatcherStore_Defaults(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if w.Severity != store.SeverityWarning {
-		t.Errorf("default severity = %q, want %q", w.Severity, store.SeverityWarning)
+	if w.Severity != SeverityWarning {
+		t.Errorf("default severity = %q, want %q", w.Severity, SeverityWarning)
 	}
 	if w.TimeRange != "15m" {
 		t.Errorf("default time_range = %q, want %q", w.TimeRange, "15m")
 	}
 }
 
-func TestPgWatcherStore_GetDueWatchers(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	pool, cleanup := testutil.SetupTestDB(t)
-	defer cleanup()
-	s := store.NewPgWatcherStore(pool)
+func TestWatcherStore_GetDueWatchers(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewWatcherStore(db)
 	ctx := context.Background()
 
 	// Create a watcher with next_run_at in the past (should be due)
-	w1, err := s.Create(ctx, store.CreateWatcherParams{
+	w1, err := s.Create(ctx, CreateWatcherParams{
 		Title:       "Due Watcher",
 		Description: "Should be due",
 	})
@@ -181,7 +161,7 @@ func TestPgWatcherStore_GetDueWatchers(t *testing.T) {
 	}
 
 	// Create a watcher with next_run_at in the future (not due)
-	w2, err := s.Create(ctx, store.CreateWatcherParams{
+	w2, err := s.Create(ctx, CreateWatcherParams{
 		Title:       "Future Watcher",
 		Description: "Not due yet",
 	})

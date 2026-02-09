@@ -8,7 +8,7 @@ import (
 func clearEnv(t *testing.T) {
 	t.Helper()
 	envVars := []string{
-		"OPENTRACE_APP_DATABASE_URL",
+		"OPENTRACE_DATA_DIR",
 		"OPENTRACE_LLM_PROVIDER",
 		"OPENTRACE_OLLAMA_URL",
 		"OPENTRACE_LISTEN_ADDR",
@@ -31,16 +31,14 @@ func clearEnv(t *testing.T) {
 
 func TestLoad_Defaults(t *testing.T) {
 	clearEnv(t)
-	os.Setenv("OPENTRACE_APP_DATABASE_URL", "postgres://localhost/test")
-	defer os.Unsetenv("OPENTRACE_APP_DATABASE_URL")
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if cfg.AppDatabaseURL != "postgres://localhost/test" {
-		t.Errorf("AppDatabaseURL = %q, want %q", cfg.AppDatabaseURL, "postgres://localhost/test")
+	if cfg.DataDir == "" {
+		t.Error("DataDir should default to ~/.opentrace")
 	}
 	if cfg.LLMProvider != "ollama" {
 		t.Errorf("LLMProvider = %q, want %q", cfg.LLMProvider, "ollama")
@@ -89,7 +87,7 @@ func TestLoad_Defaults(t *testing.T) {
 func TestLoad_AllOverrides(t *testing.T) {
 	clearEnv(t)
 	overrides := map[string]string{
-		"OPENTRACE_APP_DATABASE_URL":      "postgres://prod/opentrace",
+		"OPENTRACE_DATA_DIR":              "/tmp/opentrace-test",
 		"OPENTRACE_LLM_PROVIDER":          "anthropic",
 		"OPENTRACE_OLLAMA_URL":            "http://gpu-server:11434",
 		"OPENTRACE_LISTEN_ADDR":           ":9090",
@@ -115,8 +113,8 @@ func TestLoad_AllOverrides(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if cfg.AppDatabaseURL != "postgres://prod/opentrace" {
-		t.Errorf("AppDatabaseURL = %q", cfg.AppDatabaseURL)
+	if cfg.DataDir != "/tmp/opentrace-test" {
+		t.Errorf("DataDir = %q, want %q", cfg.DataDir, "/tmp/opentrace-test")
 	}
 	if cfg.LLMProvider != "anthropic" {
 		t.Errorf("LLMProvider = %q", cfg.LLMProvider)
@@ -162,19 +160,27 @@ func TestLoad_AllOverrides(t *testing.T) {
 	}
 }
 
-func TestLoad_MissingRequired(t *testing.T) {
+func TestLoad_DataDir_Default(t *testing.T) {
 	clearEnv(t)
 
-	_, err := Load()
-	if err == nil {
-		t.Fatal("expected error for missing OPENTRACE_APP_DATABASE_URL")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should default to $HOME/.opentrace
+	home, _ := os.UserHomeDir()
+	want := home + "/.opentrace"
+	if cfg.DataDir != want {
+		t.Errorf("DataDir = %q, want %q", cfg.DataDir, want)
+	}
+	if cfg.DatabasePath() != want+"/opentrace.db" {
+		t.Errorf("DatabasePath = %q, want %q", cfg.DatabasePath(), want+"/opentrace.db")
 	}
 }
 
 func TestLoad_InvalidIntValue(t *testing.T) {
 	clearEnv(t)
-	os.Setenv("OPENTRACE_APP_DATABASE_URL", "postgres://localhost/test")
-	defer os.Unsetenv("OPENTRACE_APP_DATABASE_URL")
 	os.Setenv("OPENTRACE_MAX_QUERY_ROWS", "not-a-number")
 	defer os.Unsetenv("OPENTRACE_MAX_QUERY_ROWS")
 
