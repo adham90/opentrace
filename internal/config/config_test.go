@@ -77,8 +77,8 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.AnthropicAPIKey != "" {
 		t.Errorf("AnthropicAPIKey = %q, want empty", cfg.AnthropicAPIKey)
 	}
-	if cfg.AnthropicModel != "claude-sonnet-4-20250514" {
-		t.Errorf("AnthropicModel = %q, want %q", cfg.AnthropicModel, "claude-sonnet-4-20250514")
+	if cfg.AnthropicModel != "claude-sonnet-4-5-20250929" {
+		t.Errorf("AnthropicModel = %q, want %q", cfg.AnthropicModel, "claude-sonnet-4-5-20250929")
 	}
 	if cfg.AnthropicURL != "https://api.anthropic.com" {
 		t.Errorf("AnthropicURL = %q, want %q", cfg.AnthropicURL, "https://api.anthropic.com")

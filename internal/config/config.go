@@ -108,7 +108,7 @@ func Load() (*Config, error) {
 		ListenAddr:          envOrDefault("OPENTRACE_LISTEN_ADDR", ":8080"),
 		APIKey:              os.Getenv("OPENTRACE_API_KEY"),
 		AnthropicAPIKey:     os.Getenv("OPENTRACE_ANTHROPIC_API_KEY"),
-		AnthropicModel:      envOrDefault("OPENTRACE_ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
+		AnthropicModel:      envOrDefault("OPENTRACE_ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929"),
 		AnthropicURL:        envOrDefault("OPENTRACE_ANTHROPIC_URL", "https://api.anthropic.com"),
 		OpenAIAPIKey:        os.Getenv("OPENTRACE_OPENAI_API_KEY"),
 		OpenAIModel:         envOrDefault("OPENTRACE_OPENAI_MODEL", "gpt-4o"),

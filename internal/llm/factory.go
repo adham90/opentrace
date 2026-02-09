@@ -69,9 +69,28 @@ type ProviderInfo struct {
 	Model string `json:"model"`
 }
 
+// ModelVariant defines a named model within a provider family.
+type ModelVariant struct {
+	Name    string // key used in provider map, e.g. "anthropic-sonnet"
+	ModelID string // actual model ID sent to the API
+	Label   string // display label for the UI
+}
+
+// AnthropicModels lists the Anthropic model variants to register.
+var AnthropicModels = []ModelVariant{
+	{Name: "anthropic-sonnet", ModelID: "claude-sonnet-4-5-20250929", Label: "Sonnet 4.5"},
+	{Name: "anthropic-haiku", ModelID: "claude-haiku-4-5-20251001", Label: "Haiku 4.5"},
+}
+
+// OpenAIModels lists the OpenAI model variants to register.
+var OpenAIModels = []ModelVariant{
+	{Name: "openai-gpt4o", ModelID: "gpt-4o", Label: "GPT-4o"},
+	{Name: "openai-gpt4o-mini", ModelID: "gpt-4o-mini", Label: "GPT-4o mini"},
+}
+
 // AvailableProviders returns a list of LLM providers that have valid
-// configuration. Ollama is always included. Anthropic and OpenAI require
-// their respective API keys.
+// configuration. Ollama is always included. Anthropic and OpenAI register
+// multiple model variants when their API keys are set.
 func AvailableProviders(cfg *config.Config) []ProviderInfo {
 	var providers []ProviderInfo
 
@@ -82,17 +101,21 @@ func AvailableProviders(cfg *config.Config) []ProviderInfo {
 	})
 
 	if cfg.AnthropicAPIKey != "" {
-		providers = append(providers, ProviderInfo{
-			Name:  "anthropic",
-			Model: cfg.AnthropicModel,
-		})
+		for _, m := range AnthropicModels {
+			providers = append(providers, ProviderInfo{
+				Name:  m.Name,
+				Model: m.Label,
+			})
+		}
 	}
 
 	if cfg.OpenAIAPIKey != "" {
-		providers = append(providers, ProviderInfo{
-			Name:  "openai",
-			Model: cfg.OpenAIModel,
-		})
+		for _, m := range OpenAIModels {
+			providers = append(providers, ProviderInfo{
+				Name:  m.Name,
+				Model: m.Label,
+			})
+		}
 	}
 
 	return providers

@@ -62,6 +62,23 @@ Step 2 (after seeing result): {"type":"final_answer","content":"Request abc-123 
 	}
 
 	b.WriteString(`
+## Planning Mode
+
+For complex questions that require multiple steps (3+ tool calls), create a plan FIRST:
+{"type":"plan","steps":[{"id":1,"description":"step description"},{"id":2,"description":"..."}]}
+
+Before starting work on each step, mark it in progress:
+{"type":"plan_update","step_id":1,"status":"in_progress"}
+
+After completing a step, mark it done:
+{"type":"plan_update","step_id":1,"status":"completed"}
+
+Rules:
+- Only create a plan for complex multi-step questions. Simple questions → tool_call directly.
+- Keep plans to 3-6 steps. Be concise.
+- You MUST still use tool_call to execute tools. plan_update only marks progress.
+- After all steps complete, give a final_answer.
+
 ## Strategy
 `)
 

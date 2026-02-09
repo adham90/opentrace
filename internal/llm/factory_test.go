@@ -209,25 +209,25 @@ func TestAvailableProviders_OllamaOnly(t *testing.T) {
 	}
 }
 
-func TestAvailableProviders_AllThree(t *testing.T) {
+func TestAvailableProviders_AllProviders(t *testing.T) {
 	cfg := &config.Config{
-		OllamaModel:    "llama3.2",
-		AnthropicAPIKey: "sk-ant-test",
-		AnthropicModel:  "claude-sonnet-4-20250514",
-		OpenAIAPIKey:    "sk-openai-test",
-		OpenAIModel:     "gpt-4o",
+		OllamaModel:     "llama3.2",
+		AnthropicAPIKey:  "sk-ant-test",
+		OpenAIAPIKey:     "sk-openai-test",
 	}
 
 	providers := AvailableProviders(cfg)
-	if len(providers) != 3 {
-		t.Fatalf("expected 3 providers, got %d", len(providers))
+	// 1 ollama + 2 anthropic + 2 openai = 5
+	wantCount := 1 + len(AnthropicModels) + len(OpenAIModels)
+	if len(providers) != wantCount {
+		t.Fatalf("expected %d providers, got %d: %v", wantCount, len(providers), providers)
 	}
 
 	names := make(map[string]bool)
 	for _, p := range providers {
 		names[p.Name] = true
 	}
-	for _, want := range []string{"ollama", "anthropic", "openai"} {
+	for _, want := range []string{"ollama", "anthropic-sonnet", "anthropic-haiku", "openai-gpt4o", "openai-gpt4o-mini"} {
 		if !names[want] {
 			t.Errorf("expected provider %q in list", want)
 		}
@@ -236,13 +236,13 @@ func TestAvailableProviders_AllThree(t *testing.T) {
 
 func TestAvailableProviders_AnthropicOnly(t *testing.T) {
 	cfg := &config.Config{
-		OllamaModel:    "llama3.2",
-		AnthropicAPIKey: "sk-ant-test",
-		AnthropicModel:  "claude-sonnet-4-20250514",
+		OllamaModel:     "llama3.2",
+		AnthropicAPIKey:  "sk-ant-test",
 	}
 
 	providers := AvailableProviders(cfg)
-	if len(providers) != 2 {
-		t.Fatalf("expected 2 providers, got %d", len(providers))
+	wantCount := 1 + len(AnthropicModels)
+	if len(providers) != wantCount {
+		t.Fatalf("expected %d providers, got %d", wantCount, len(providers))
 	}
 }

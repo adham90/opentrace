@@ -248,3 +248,108 @@ func TestRun_ContextCancelled(t *testing.T) {
 		t.Errorf("expected 'canceled' in error, got: %v", err)
 	}
 }
+
+func TestRun_PlanThenToolThenFinal(t *testing.T) {
+	mock := &mockLLM{responses: []string{
+		`{"type":"plan","steps":[{"id":1,"description":"Search logs"},{"id":2,"description":"Summarize"}]}`,
+		`{"type":"plan_update","step_id":1,"status":"in_progress"}`,
+		`{"type":"tool_call","tool":"echo","args":{"message":"found logs"}}`,
+		`{"type":"plan_update","step_id":1,"status":"completed"}`,
+		`{"type":"plan_update","step_id":2,"status":"in_progress"}`,
+		`{"type":"final_answer","content":"Summary of logs."}`,
+	}}
+	a := New(mock, defaultCfg())
+	tools := []Tool{EchoTool()}
+
+	var events []Event
+	cb := func(e Event) { events = append(events, e) }
+
+	result, err := a.RunWithCallback(context.Background(), "complex query", tools, cb, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "Summary of logs." {
+		t.Errorf("unexpected result: %q", result)
+	}
+
+	// Verify event types in order
+	expectedTypes := []string{"thinking", "plan", "thinking", "plan_update", "thinking", "tool_call", "observation", "thinking", "plan_update", "thinking", "plan_update", "thinking", "final"}
+	if len(events) != len(expectedTypes) {
+		t.Fatalf("expected %d events, got %d: %v", len(expectedTypes), len(events), eventTypes(events))
+	}
+	for i, et := range expectedTypes {
+		if events[i].Type != et {
+			t.Errorf("event[%d]: expected type %q, got %q", i, et, events[i].Type)
+		}
+	}
+
+	// Verify plan event has steps
+	if len(events[1].Steps) != 2 {
+		t.Errorf("expected plan event with 2 steps, got %d", len(events[1].Steps))
+	}
+}
+
+func TestRun_PlanDoesNotConsumeStepBudget(t *testing.T) {
+	// MaxSteps=3 — plan + 2 plan_updates + 1 tool_call + final = 5 LLM calls
+	// Without step budget bypass, this would fail at step 3
+	mock := &mockLLM{responses: []string{
+		`{"type":"plan","steps":[{"id":1,"description":"Do thing"}]}`,
+		`{"type":"plan_update","step_id":1,"status":"in_progress"}`,
+		`{"type":"tool_call","tool":"echo","args":{"message":"x"}}`,
+		`{"type":"plan_update","step_id":1,"status":"completed"}`,
+		`{"type":"final_answer","content":"done"}`,
+	}}
+	cfg := RunConfig{MaxSteps: 3, MaxToolCalls: 8, MaxObservationBytes: 8192}
+	a := New(mock, cfg)
+	tools := []Tool{EchoTool()}
+
+	result, err := a.Run(context.Background(), "test budget", tools)
+	if err != nil {
+		t.Fatalf("unexpected error (plan should not consume step budget): %v", err)
+	}
+	if result != "done" {
+		t.Errorf("unexpected result: %q", result)
+	}
+}
+
+func TestRun_PlanUpdateFields(t *testing.T) {
+	mock := &mockLLM{responses: []string{
+		`{"type":"plan_update","step_id":3,"status":"completed"}`,
+		`{"type":"final_answer","content":"ok"}`,
+	}}
+	a := New(mock, defaultCfg())
+
+	var events []Event
+	cb := func(e Event) { events = append(events, e) }
+
+	_, err := a.RunWithCallback(context.Background(), "update test", nil, cb, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Find the plan_update event
+	found := false
+	for _, e := range events {
+		if e.Type == "plan_update" {
+			found = true
+			if e.StepID != 3 {
+				t.Errorf("expected StepID 3, got %d", e.StepID)
+			}
+			if e.Status != "completed" {
+				t.Errorf("expected Status completed, got %q", e.Status)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected a plan_update event")
+	}
+}
+
+func eventTypes(events []Event) []string {
+	types := make([]string, len(events))
+	for i, e := range events {
+		types[i] = e.Type
+	}
+	return types
+}

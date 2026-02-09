@@ -44,9 +44,19 @@ func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore 
 		llmProviders: llmProviders,
 	}
 
-	// Set default LLM provider from the map
+	// Set default LLM provider from the map.
+	// Map legacy names ("anthropic", "openai") to their default variants.
 	if defaultProvider != "" && llmProviders != nil {
 		srv.llmProvider = llmProviders[defaultProvider]
+		if srv.llmProvider == nil {
+			legacyMap := map[string]string{
+				"anthropic": "anthropic-sonnet",
+				"openai":    "openai-gpt4o",
+			}
+			if mapped, ok := legacyMap[defaultProvider]; ok {
+				srv.llmProvider = llmProviders[mapped]
+			}
+		}
 	}
 	// Fallback: if no provider set from map, try type assertion from embedder
 	if srv.llmProvider == nil {

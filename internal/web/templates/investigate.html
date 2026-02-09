@@ -18,9 +18,9 @@
 
     <div class="chat-input-area">
       <form class="query-form" onsubmit="startInvestigation(event)">
-        <span class="prompt-prefix" style="line-height:34px;">>&nbsp;</span>
+        <span class="prompt-prefix">&gt;&nbsp;</span>
         <input type="text" id="query-input" placeholder="describe the issue to investigate..." autofocus autocomplete="off">
-        <select id="provider-select" title="LLM provider" style="background:#1a1a2e;color:#e0e0e0;border:1px solid #333;border-radius:4px;padding:4px 8px;font-size:12px;font-family:inherit;margin-right:4px;"></select>
+        <select id="provider-select" title="LLM provider"></select>
         <button type="submit" class="btn btn-primary" id="submit-btn">run</button>
       </form>
       <div id="status-bar" class="text-xs text-dim"></div>
@@ -108,26 +108,33 @@ function renderMessages(messages) {
     return;
   }
 
-  // Group trace steps (tool_call, observation, thinking) between user and assistant messages
-  var i = 0;
-  while (i < messages.length) {
+  for (var i = 0; i < messages.length; i++) {
     var msg = messages[i];
 
     if (msg.role === 'user') {
       area.appendChild(createUserBubble(msg.content));
-      i++;
     } else if (msg.role === 'assistant') {
       area.appendChild(createAssistantBubble(msg.content));
-      i++;
-    } else {
-      // Collect consecutive trace steps
-      var traceSteps = [];
-      while (i < messages.length && (messages[i].role === 'tool_call' || messages[i].role === 'observation' || messages[i].role === 'thinking')) {
-        traceSteps.push(messages[i]);
-        i++;
-      }
-      if (traceSteps.length > 0) {
-        area.appendChild(createTraceBlock(traceSteps));
+    } else if (msg.role === 'tool_call') {
+      // Parse stored JSON args back into object
+      var args = null;
+      try { args = JSON.parse(msg.content); } catch(e) {}
+      area.appendChild(createTimelineStep('tool_call', msg.content, msg.tool_name, args));
+    } else if (msg.role === 'observation') {
+      area.appendChild(createTimelineStep('observation', msg.content, msg.tool_name, null));
+    } else if (msg.role === 'thinking') {
+      area.appendChild(createTimelineStep('thinking', msg.content, '', null));
+    } else if (msg.role === 'plan') {
+      // Replay stored plan with all steps completed
+      var steps = [];
+      try { steps = JSON.parse(msg.content); } catch(e) {}
+      if (steps.length > 0) {
+        var panel = createPlanPanel(steps);
+        // Mark all steps completed in replay
+        for (var j = 0; j < steps.length; j++) {
+          updatePlanStep(panel, steps[j].id, 'completed');
+        }
+        area.appendChild(panel);
       }
     }
   }
@@ -149,102 +156,173 @@ function createAssistantBubble(content) {
   return div;
 }
 
-function createTraceBlock(steps) {
-  var details = document.createElement('details');
-  details.className = 'message-trace';
+function createTimelineStep(stepType, content, toolName, args) {
+  var div = document.createElement('div');
+  div.className = 'timeline-step timeline-' + stepType;
 
-  var toolNames = [];
-  for (var i = 0; i < steps.length; i++) {
-    if (steps[i].tool_name && toolNames.indexOf(steps[i].tool_name) === -1) {
-      toolNames.push(steps[i].tool_name);
-    }
-  }
+  var labelDiv = document.createElement('div');
+  labelDiv.className = 'timeline-label';
 
-  var summary = document.createElement('summary');
-  var label = steps.length + ' trace step' + (steps.length !== 1 ? 's' : '');
-  if (toolNames.length > 0) {
-    label += ' (' + toolNames.join(', ') + ')';
-  }
-  summary.textContent = label;
-  details.appendChild(summary);
+  var bodyDiv = document.createElement('div');
+  bodyDiv.className = 'timeline-body';
 
-  var container = document.createElement('div');
-  container.className = 'trace-steps';
-  for (var j = 0; j < steps.length; j++) {
-    var step = steps[j];
-    var stepDiv = document.createElement('div');
-    stepDiv.className = 'trace-step ' + step.role;
-
-    var stepLabel = step.role;
-    if (step.tool_name) stepLabel += ' \u2192 ' + step.tool_name;
-
-    stepDiv.innerHTML = '<div class="step-label">' + escapeHtml(stepLabel) + '</div><pre>' + escapeHtml(step.content) + '</pre>';
-    container.appendChild(stepDiv);
-  }
-  details.appendChild(container);
-  return details;
-}
-
-function createStreamingTraceBlock() {
-  var details = document.createElement('details');
-  details.className = 'message-trace';
-  details.setAttribute('open', '');
-  details.setAttribute('data-streaming', 'true');
-
-  var summary = document.createElement('summary');
-  summary.textContent = 'trace steps...';
-  details.appendChild(summary);
-
-  var container = document.createElement('div');
-  container.className = 'trace-steps';
-  details.appendChild(container);
-
-  return details;
-}
-
-function addStepToStreamingTrace(traceBlock, stepType, content, toolName) {
-  var container = traceBlock.querySelector('.trace-steps');
-  var stepDiv = document.createElement('div');
-  stepDiv.className = 'trace-step ' + stepType;
-
-  var label = stepType;
-  if (toolName) label += ' \u2192 ' + toolName;
-
-  stepDiv.innerHTML = '<div class="step-label">' + escapeHtml(label) + '</div><pre>' + escapeHtml(content) + '</pre>';
-  container.appendChild(stepDiv);
-
-  // Update summary count
-  var steps = container.querySelectorAll('.trace-step');
-  var summary = traceBlock.querySelector('summary');
-  summary.textContent = steps.length + ' trace step' + (steps.length !== 1 ? 's' : '') + '...';
-}
-
-function finalizeStreamingTrace(traceBlock) {
-  traceBlock.removeAttribute('data-streaming');
-  traceBlock.removeAttribute('open');
-
-  var steps = traceBlock.querySelectorAll('.trace-step');
-  var summary = traceBlock.querySelector('summary');
-
-  // Collect tool names
-  var toolNames = [];
-  for (var i = 0; i < steps.length; i++) {
-    var labelEl = steps[i].querySelector('.step-label');
-    if (labelEl) {
-      var text = labelEl.textContent;
-      var arrowIdx = text.indexOf('\u2192');
-      if (arrowIdx !== -1) {
-        var name = text.substring(arrowIdx + 2).trim();
-        if (toolNames.indexOf(name) === -1) toolNames.push(name);
+  if (stepType === 'thinking') {
+    // Parse LLM JSON to extract a summary
+    var summary = content;
+    try {
+      var parsed = JSON.parse(content);
+      if (parsed.type === 'final_answer') {
+        // Skip thinking steps that are just final_answer wrappers
+        div.style.display = 'none';
+        return div;
       }
+      if (parsed.type === 'tool_call' && parsed.tool) {
+        summary = 'Planning to call ' + parsed.tool + '...';
+      } else if (parsed.reasoning) {
+        summary = parsed.reasoning;
+      } else if (typeof parsed === 'string') {
+        summary = parsed;
+      }
+    } catch(e) {
+      // Not JSON, show raw text
     }
+    labelDiv.textContent = 'thinking';
+    var pre = document.createElement('pre');
+    pre.textContent = summary;
+    bodyDiv.appendChild(pre);
+  } else if (stepType === 'tool_call') {
+    labelDiv.textContent = 'tool: ' + (toolName || 'unknown');
+    if (args && typeof args === 'object') {
+      bodyDiv.appendChild(formatToolArgs(args));
+    } else {
+      var pre = document.createElement('pre');
+      pre.textContent = content;
+      bodyDiv.appendChild(pre);
+    }
+  } else if (stepType === 'observation') {
+    labelDiv.textContent = 'result' + (toolName ? ' (' + toolName + ')' : '');
+    var pre = document.createElement('pre');
+    pre.textContent = content;
+    bodyDiv.appendChild(pre);
+    // Defer show-more check
+    setTimeout(function() { createShowMore(bodyDiv, pre); }, 0);
+  } else if (stepType === 'error') {
+    labelDiv.textContent = 'error';
+    var pre = document.createElement('pre');
+    pre.textContent = content;
+    pre.style.color = 'var(--red)';
+    bodyDiv.appendChild(pre);
   }
 
-  var label = steps.length + ' trace step' + (steps.length !== 1 ? 's' : '');
-  if (toolNames.length > 0) {
-    label += ' (' + toolNames.join(', ') + ')';
+  div.appendChild(labelDiv);
+  div.appendChild(bodyDiv);
+  return div;
+}
+
+function formatToolArgs(args) {
+  var container = document.createElement('div');
+  container.className = 'tool-args';
+  var keys = Object.keys(args);
+  for (var i = 0; i < keys.length; i++) {
+    var line = document.createElement('div');
+    line.className = 'arg-line';
+
+    var connector = document.createElement('span');
+    connector.className = 'arg-connector';
+    connector.textContent = (i === keys.length - 1) ? '\u2514\u2500 ' : '\u251C\u2500 ';
+
+    var key = document.createElement('span');
+    key.className = 'arg-key';
+    key.textContent = keys[i] + ': ';
+
+    var val = document.createElement('span');
+    val.className = 'arg-value';
+    var v = args[keys[i]];
+    val.textContent = (typeof v === 'string') ? '"' + v + '"' : JSON.stringify(v);
+
+    line.appendChild(connector);
+    line.appendChild(key);
+    line.appendChild(val);
+    container.appendChild(line);
   }
-  summary.textContent = label;
+  return container;
+}
+
+function createShowMore(bodyDiv, preElement) {
+  if (preElement.scrollHeight <= 150) return;
+  bodyDiv.classList.add('clamped');
+
+  var toggle = document.createElement('span');
+  toggle.className = 'show-more-toggle';
+  toggle.textContent = 'show more';
+  toggle.onclick = function() {
+    if (bodyDiv.classList.contains('clamped')) {
+      bodyDiv.classList.remove('clamped');
+      toggle.textContent = 'show less';
+    } else {
+      bodyDiv.classList.add('clamped');
+      toggle.textContent = 'show more';
+    }
+  };
+  // Insert toggle after the bodyDiv (as sibling in the step)
+  bodyDiv.parentNode.appendChild(toggle);
+}
+
+// --- Plan Panel ---
+
+function createPlanPanel(steps) {
+  var panel = document.createElement('div');
+  panel.className = 'plan-panel';
+  panel.id = 'plan-panel';
+
+  var header = document.createElement('div');
+  header.className = 'plan-header';
+  header.textContent = 'investigation plan';
+  panel.appendChild(header);
+
+  for (var i = 0; i < steps.length; i++) {
+    var step = document.createElement('div');
+    step.className = 'plan-step pending';
+    step.setAttribute('data-step-id', steps[i].id);
+
+    var icon = document.createElement('span');
+    icon.className = 'plan-step-icon';
+    icon.textContent = '\u25CB'; // empty circle
+    step.appendChild(icon);
+
+    var desc = document.createElement('span');
+    desc.className = 'plan-step-desc';
+    desc.textContent = steps[i].id + '. ' + steps[i].description;
+    step.appendChild(desc);
+
+    panel.appendChild(step);
+  }
+
+  return panel;
+}
+
+function updatePlanStep(panel, stepId, status) {
+  if (!panel) panel = document.getElementById('plan-panel');
+  if (!panel) return;
+
+  var steps = panel.querySelectorAll('.plan-step');
+  for (var i = 0; i < steps.length; i++) {
+    if (parseInt(steps[i].getAttribute('data-step-id')) === stepId) {
+      var icon = steps[i].querySelector('.plan-step-icon');
+      // Remove old status classes
+      steps[i].classList.remove('pending', 'in_progress', 'completed');
+      steps[i].classList.add(status);
+
+      if (status === 'in_progress') {
+        icon.textContent = '\u25D4'; // half circle
+        icon.classList.add('spinner-icon');
+      } else if (status === 'completed') {
+        icon.textContent = '\u2714'; // checkmark
+        icon.classList.remove('spinner-icon');
+      }
+      break;
+    }
+  }
 }
 
 // --- Investigation SSE ---
@@ -287,7 +365,6 @@ function startInvestigation(e) {
 
   // Streaming state
   var stepCount = 0;
-  var currentTraceBlock = null;
 
   if (eventSource) {
     eventSource.close();
@@ -304,26 +381,54 @@ function startInvestigation(e) {
       return;
     }
 
+    // Plan events don't increment stepCount
+    if (data.step_type === 'plan') {
+      var panel = createPlanPanel(data.steps || []);
+      area.appendChild(panel);
+      status.textContent = 'planning...';
+      scrollToBottom();
+      return;
+    }
+
+    if (data.step_type === 'plan_update') {
+      updatePlanStep(null, data.step_id, data.status);
+      if (data.status === 'in_progress') {
+        // Find the step description for status bar
+        var panel = document.getElementById('plan-panel');
+        if (panel) {
+          var stepEl = panel.querySelector('[data-step-id="' + data.step_id + '"]');
+          if (stepEl) {
+            var desc = stepEl.querySelector('.plan-step-desc');
+            status.textContent = desc ? desc.textContent : 'working...';
+          }
+        }
+      }
+      scrollToBottom();
+      return;
+    }
+
     stepCount++;
 
-    if (data.step_type === 'final' || data.step_type === 'error') {
-      // Finalize any open trace block
-      if (currentTraceBlock) {
-        finalizeStreamingTrace(currentTraceBlock);
-        currentTraceBlock = null;
-      }
-
-      // Show final/error as assistant message
+    if (data.step_type === 'final') {
       area.appendChild(createAssistantBubble(data.content));
       status.textContent = 'done (' + stepCount + ' steps)';
+    } else if (data.step_type === 'error') {
+      area.appendChild(createTimelineStep('error', data.content, data.tool_name, null));
+      status.textContent = 'error';
     } else {
-      // It's a trace step (thinking, tool_call, observation)
-      if (!currentTraceBlock) {
-        currentTraceBlock = createStreamingTraceBlock();
-        area.appendChild(currentTraceBlock);
+      // Inline timeline step (thinking, tool_call, observation)
+      area.appendChild(createTimelineStep(data.step_type, data.content, data.tool_name, data.args || null));
+
+      // Contextual status
+      if (data.step_type === 'thinking') {
+        status.textContent = 'thinking...';
+      } else if (data.step_type === 'tool_call') {
+        status.textContent = 'calling ' + (data.tool_name || 'tool') + '...';
+      } else if (data.step_type === 'observation') {
+        status.textContent = 'processing result...';
+      } else {
+        status.textContent = 'step ' + stepCount + '...';
       }
-      addStepToStreamingTrace(currentTraceBlock, data.step_type, data.content, data.tool_name);
-      status.textContent = 'step ' + stepCount + '...';
     }
 
     scrollToBottom();
@@ -337,12 +442,6 @@ function startInvestigation(e) {
     btn.textContent = 'run';
     btn.classList.remove('spinner');
     input.disabled = false;
-
-    // Finalize any open trace block
-    if (currentTraceBlock) {
-      finalizeStreamingTrace(currentTraceBlock);
-      currentTraceBlock = null;
-    }
 
     if (stepCount === 0) {
       status.textContent = 'connection failed';

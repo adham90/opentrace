@@ -66,6 +66,15 @@ func TestSSEEndpoint_EventFormat(t *testing.T) {
 	if len(events) == 0 {
 		t.Fatal("no events received")
 	}
+
+	// Verify tool_call events include args
+	for _, evt := range events {
+		if evt["step_type"] == "tool_call" {
+			if _, hasArgs := evt["args"]; !hasArgs {
+				t.Errorf("tool_call event missing args field: %v", evt)
+			}
+		}
+	}
 }
 
 func TestSSEEndpoint_EventSequence(t *testing.T) {

@@ -16,10 +16,13 @@ type RunConfig struct {
 
 // Event represents an observable event from the agent loop.
 type Event struct {
-	Type     string         // "thinking", "tool_call", "observation", "final", "error"
+	Type     string         // "thinking", "tool_call", "observation", "final", "error", "plan", "plan_update"
 	Content  string
 	ToolName string
 	Args     map[string]any
+	Steps    []PlanStep // for "plan"
+	StepID   int        // for "plan_update"
+	Status   string     // for "plan_update"
 }
 
 // EventCallback is a function that receives agent events for observability.
@@ -104,6 +107,24 @@ func (a *Agent) RunWithCallback(ctx context.Context, query string, tools []Tool,
 		case "final_answer":
 			emit(Event{Type: "final", Content: parsed.Content})
 			return parsed.Content, nil
+
+		case "plan":
+			emit(Event{Type: "plan", Steps: parsed.Steps})
+			messages = append(messages,
+				llm.ChatMessage{Role: "assistant", Content: resp.Content},
+				llm.ChatMessage{Role: "user", Content: "Good plan. Now execute step 1."},
+			)
+			step-- // free — don't consume step budget
+			continue
+
+		case "plan_update":
+			emit(Event{Type: "plan_update", StepID: parsed.StepID, Status: parsed.Status})
+			messages = append(messages,
+				llm.ChatMessage{Role: "assistant", Content: resp.Content},
+				llm.ChatMessage{Role: "user", Content: "Noted. Continue."},
+			)
+			step-- // free — don't consume step budget
+			continue
 
 		case "tool_call":
 			// Look up tool

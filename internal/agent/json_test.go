@@ -84,3 +84,67 @@ func TestParseResponse_EmptyType(t *testing.T) {
 		t.Fatal("expected error for empty type")
 	}
 }
+
+func TestParseResponse_Plan(t *testing.T) {
+	raw := `{"type":"plan","steps":[{"id":1,"description":"Search logs"},{"id":2,"description":"Query database"}]}`
+	resp, err := ParseResponse(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Type != "plan" {
+		t.Errorf("expected type plan, got %q", resp.Type)
+	}
+	if len(resp.Steps) != 2 {
+		t.Fatalf("expected 2 steps, got %d", len(resp.Steps))
+	}
+	if resp.Steps[0].ID != 1 || resp.Steps[0].Description != "Search logs" {
+		t.Errorf("unexpected step 0: %+v", resp.Steps[0])
+	}
+	if resp.Steps[1].ID != 2 || resp.Steps[1].Description != "Query database" {
+		t.Errorf("unexpected step 1: %+v", resp.Steps[1])
+	}
+}
+
+func TestParseResponse_PlanEmptySteps(t *testing.T) {
+	raw := `{"type":"plan","steps":[]}`
+	_, err := ParseResponse(raw)
+	if err == nil {
+		t.Fatal("expected error for plan with empty steps")
+	}
+}
+
+func TestParseResponse_PlanUpdate(t *testing.T) {
+	raw := `{"type":"plan_update","step_id":2,"status":"completed"}`
+	resp, err := ParseResponse(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Type != "plan_update" {
+		t.Errorf("expected type plan_update, got %q", resp.Type)
+	}
+	if resp.StepID != 2 {
+		t.Errorf("expected step_id 2, got %d", resp.StepID)
+	}
+	if resp.Status != "completed" {
+		t.Errorf("expected status completed, got %q", resp.Status)
+	}
+}
+
+func TestParseResponse_PlanUpdateDefaultStatus(t *testing.T) {
+	raw := `{"type":"plan_update","step_id":1}`
+	resp, err := ParseResponse(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Status != "in_progress" {
+		t.Errorf("expected default status in_progress, got %q", resp.Status)
+	}
+}
+
+func TestParseResponse_PlanUpdateInvalidStepID(t *testing.T) {
+	raw := `{"type":"plan_update","step_id":0}`
+	_, err := ParseResponse(raw)
+	if err == nil {
+		t.Fatal("expected error for plan_update with step_id 0")
+	}
+}

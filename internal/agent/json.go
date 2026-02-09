@@ -6,12 +6,21 @@ import (
 	"strings"
 )
 
+// PlanStep represents a single step in an agent plan.
+type PlanStep struct {
+	ID          int    `json:"id"`
+	Description string `json:"description"`
+}
+
 // AgentResponse represents a parsed LLM response.
 type AgentResponse struct {
-	Type    string         `json:"type"`    // "final_answer" or "tool_call"
-	Content string         `json:"content"` // for final_answer
-	Tool    string         `json:"tool"`    // for tool_call
-	Args    map[string]any `json:"args"`    // for tool_call
+	Type    string         `json:"type"`              // "final_answer", "tool_call", "plan", or "plan_update"
+	Content string         `json:"content"`           // for final_answer
+	Tool    string         `json:"tool"`              // for tool_call
+	Args    map[string]any `json:"args"`              // for tool_call
+	Steps   []PlanStep     `json:"steps,omitempty"`   // for "plan"
+	StepID  int            `json:"step_id,omitempty"` // for "plan_update"
+	Status  string         `json:"status,omitempty"`  // for "plan_update"
 }
 
 // ParseResponse parses a raw LLM response string into an AgentResponse.
@@ -35,6 +44,19 @@ func ParseResponse(raw string) (AgentResponse, error) {
 
 	switch resp.Type {
 	case "final_answer", "tool_call":
+		return resp, nil
+	case "plan":
+		if len(resp.Steps) == 0 {
+			return AgentResponse{}, fmt.Errorf("parse response: plan must have at least one step")
+		}
+		return resp, nil
+	case "plan_update":
+		if resp.StepID <= 0 {
+			return AgentResponse{}, fmt.Errorf("parse response: plan_update requires step_id > 0")
+		}
+		if resp.Status == "" {
+			resp.Status = "in_progress"
+		}
 		return resp, nil
 	default:
 		// LLM sometimes puts the tool name in the "type" field instead of "tool_call".

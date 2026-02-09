@@ -153,7 +153,8 @@ func reconnectConnectors(ctx context.Context, dsStore store.DataSourceStore, log
 }
 
 // buildProviderMap creates all available LLM providers from config.
-// Ollama is always attempted. Anthropic and OpenAI require API keys.
+// Ollama is always attempted. Anthropic and OpenAI register multiple
+// model variants when their API keys are set.
 func buildProviderMap(cfg *config.Config) map[string]llm.LLMProvider {
 	providers := make(map[string]llm.LLMProvider)
 
@@ -166,23 +167,27 @@ func buildProviderMap(cfg *config.Config) map[string]llm.LLMProvider {
 	)
 
 	if cfg.AnthropicAPIKey != "" {
-		providers["anthropic"] = llm.NewAnthropicProvider(
-			cfg.AnthropicURL,
-			cfg.AnthropicModel,
-			cfg.AnthropicAPIKey,
-		)
-		log.Printf("anthropic provider available (model: %s)", cfg.AnthropicModel)
+		for _, m := range llm.AnthropicModels {
+			providers[m.Name] = llm.NewAnthropicProvider(
+				cfg.AnthropicURL,
+				m.ModelID,
+				cfg.AnthropicAPIKey,
+			)
+		}
+		log.Printf("anthropic providers available (%d models)", len(llm.AnthropicModels))
 	}
 
 	if cfg.OpenAIAPIKey != "" {
-		providers["openai"] = llm.NewOpenAIProvider(
-			cfg.OpenAIURL,
-			cfg.OpenAIModel,
-			cfg.EmbeddingModel,
-			cfg.EmbeddingDimension,
-			cfg.OpenAIAPIKey,
-		)
-		log.Printf("openai provider available (model: %s)", cfg.OpenAIModel)
+		for _, m := range llm.OpenAIModels {
+			providers[m.Name] = llm.NewOpenAIProvider(
+				cfg.OpenAIURL,
+				m.ModelID,
+				cfg.EmbeddingModel,
+				cfg.EmbeddingDimension,
+				cfg.OpenAIAPIKey,
+			)
+		}
+		log.Printf("openai providers available (%d models)", len(llm.OpenAIModels))
 	}
 
 	return providers

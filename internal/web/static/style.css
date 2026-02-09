@@ -366,84 +366,102 @@ textarea { resize: vertical; min-height: 60px; }
   word-break: break-word;
 }
 
-/* Trace steps (tool_call + observation) */
-.message-trace {
-  margin-bottom: 12px;
+/* Timeline steps — always-visible vertical trace */
+.timeline-step {
+  margin-bottom: 6px;
   max-width: 85%;
   margin-right: auto;
-}
-
-.message-trace summary {
-  font-size: 11px;
-  color: var(--text-dim);
-  cursor: pointer;
-  padding: 4px 8px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--border);
   background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  list-style: none;
-  user-select: none;
+  border-radius: 0 4px 4px 0;
 }
 
-.message-trace summary::-webkit-details-marker { display: none; }
+.timeline-thinking { border-left-color: var(--purple); }
+.timeline-tool_call { border-left-color: var(--cyan); }
+.timeline-observation { border-left-color: var(--yellow); }
+.timeline-error { border-left-color: var(--red); }
 
-.message-trace summary::before {
-  content: '\25B6 ';
-  font-size: 9px;
-  margin-right: 4px;
-}
-
-.message-trace[open] summary::before {
-  content: '\25BC ';
-}
-
-.message-trace summary:hover {
-  color: var(--text);
-  border-color: var(--text-dim);
-}
-
-.message-trace .trace-steps {
-  border-left: 2px solid var(--border);
-  margin: 4px 0 0 8px;
-  padding-left: 12px;
-}
-
-/* Legacy trace step styles (reused inside trace blocks) */
-.trace-step {
-  padding: 6px 0;
-  font-size: 12px;
-  border-bottom: 1px solid var(--border);
-}
-
-.trace-step:last-child {
-  border-bottom: none;
-}
-
-.trace-step .step-label {
+.timeline-label {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin-bottom: 4px;
   font-weight: 600;
+  margin-bottom: 4px;
 }
 
-.trace-step.thinking .step-label { color: var(--purple); }
-.trace-step.tool_call .step-label { color: var(--cyan); }
-.trace-step.observation .step-label { color: var(--yellow); }
-.trace-step.final .step-label { color: var(--green); }
-.trace-step.error .step-label { color: var(--red); }
+.timeline-thinking .timeline-label { color: var(--purple); }
+.timeline-tool_call .timeline-label { color: var(--cyan); }
+.timeline-observation .timeline-label { color: var(--yellow); }
+.timeline-error .timeline-label { color: var(--red); }
 
-.trace-step pre {
+.timeline-body {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.timeline-body pre {
   white-space: pre-wrap;
   word-break: break-word;
-  color: var(--text-dim);
-  margin-top: 4px;
+  margin: 0;
   font-size: 11px;
-  max-height: 200px;
-  overflow-y: auto;
 }
 
-.trace-step.final pre { color: var(--text-bright); }
+/* Tool arguments tree */
+.tool-args {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.tool-args .arg-line {
+  padding-left: 8px;
+}
+
+.arg-key {
+  color: var(--cyan);
+}
+
+.arg-value {
+  color: var(--text);
+}
+
+.arg-connector {
+  color: var(--text-dim);
+  margin-right: 4px;
+}
+
+/* Clamped observations with show-more */
+.timeline-body.clamped {
+  max-height: 150px;
+  overflow: hidden;
+  position: relative;
+}
+
+.timeline-body.clamped::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  background: linear-gradient(transparent, var(--bg-secondary));
+  pointer-events: none;
+}
+
+.show-more-toggle {
+  font-size: 11px;
+  color: var(--cyan);
+  cursor: pointer;
+  margin-top: 4px;
+  display: inline-block;
+  user-select: none;
+}
+
+.show-more-toggle:hover {
+  text-decoration: underline;
+}
 
 /* Chat input area — pinned at bottom */
 .chat-input-area {
@@ -456,10 +474,29 @@ textarea { resize: vertical; min-height: 60px; }
   display: flex;
   gap: 8px;
   margin-bottom: 0;
+  align-items: center;
+}
+
+.chat-input-area .query-form .prompt-prefix {
+  flex: 0 0 auto;
+  line-height: 34px;
 }
 
 .chat-input-area .query-form input {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.chat-input-area .query-form select {
+  width: auto;
+  flex: 0 0 auto;
+  max-width: 160px;
+  font-size: 11px;
+  padding: 6px 8px;
+}
+
+.chat-input-area .query-form .btn {
+  flex: 0 0 auto;
 }
 
 .chat-input-area #status-bar {
@@ -572,3 +609,72 @@ textarea { resize: vertical; min-height: 60px; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Plan panel */
+.plan-panel {
+  border-left: 3px solid var(--green);
+  background: var(--bg-secondary);
+  border-radius: 0 4px 4px 0;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  max-width: 85%;
+  margin-right: auto;
+}
+
+.plan-header {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  color: var(--green);
+  margin-bottom: 8px;
+}
+
+.plan-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.plan-step-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.plan-step-desc {
+  flex: 1;
+}
+
+.plan-step.pending {
+  color: var(--text-dim);
+}
+
+.plan-step.in_progress {
+  color: var(--text-bright);
+}
+
+.plan-step.in_progress .plan-step-icon {
+  color: var(--yellow);
+}
+
+.plan-step.completed {
+  color: var(--text-dim);
+}
+
+.plan-step.completed .plan-step-icon {
+  color: var(--green);
+}
+
+.plan-step.completed .plan-step-desc {
+  text-decoration: line-through;
+}
+
+.spinner-icon {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
