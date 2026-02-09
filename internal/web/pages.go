@@ -17,6 +17,10 @@ var templateFS embed.FS
 //go:embed static/*
 var staticFS embed.FS
 
+var tmplFuncs = template.FuncMap{
+	"add": func(a, b int) int { return a + b },
+}
+
 var (
 	connectorsTmpl  *template.Template
 	logsTmpl        *template.Template
@@ -30,7 +34,7 @@ func init() {
 	// Each page gets layout + its own content template
 	connectorsTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/connectors.html"))
-	logsTmpl = template.Must(template.ParseFS(templateFS,
+	logsTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
 		"templates/layout.html", "templates/logs.html"))
 	alertsTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/alerts.html"))
@@ -50,7 +54,7 @@ var logsFragmentTmpl *template.Template
 
 func init() {
 	templates = template.Must(template.ParseFS(templateFS, "templates/connectors.html"))
-	logsFragmentTmpl = template.Must(template.ParseFS(templateFS, "templates/logs.html"))
+	logsFragmentTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS, "templates/logs.html"))
 }
 
 type LogFilters struct {
@@ -69,6 +73,9 @@ type pageData struct {
 	Connectors interface{}
 	Logs       []store.LogEntry
 	LogFilters LogFilters
+	LogOffset  int
+	LogLimit   int
+	HasMore    bool
 }
 
 func (s *Server) isDevMode() bool {
@@ -81,7 +88,7 @@ func (s *Server) getTemplate(fallback *template.Template, files ...string) *temp
 	if !s.isDevMode() {
 		return fallback
 	}
-	t, err := template.ParseFiles(files...)
+	t, err := template.New("").Funcs(tmplFuncs).ParseFiles(files...)
 	if err != nil {
 		return fallback
 	}
@@ -96,10 +103,17 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		Environment: r.URL.Query().Get("environment"),
 	}
 
-	limit := 100
+	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
 			limit = parsed
+		}
+	}
+
+	offset := 0
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+			offset = parsed
 		}
 	}
 
@@ -108,11 +122,17 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		Service:     filters.Service,
 		Level:       filters.Level,
 		Environment: filters.Environment,
-		Limit:       limit,
+		Limit:       limit + 1, // fetch one extra to detect if there are more
+		Offset:      offset,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to search logs")
 		return
+	}
+
+	hasMore := len(logs) > limit
+	if hasMore {
+		logs = logs[:limit]
 	}
 
 	data := pageData{
@@ -121,13 +141,21 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		Content:    "logs",
 		Logs:       logs,
 		LogFilters: filters,
+		LogOffset:  offset,
+		LogLimit:   limit,
+		HasMore:    hasMore,
 		DevMode:    s.isDevMode(),
 	}
 
 	if isHTMX(r) {
 		w.Header().Set("Content-Type", "text/html")
 		ft := s.getTemplate(logsFragmentTmpl, "internal/web/templates/logs.html")
-		ft.ExecuteTemplate(w, "logs-list", data)
+		// If this is a "load more" request (has offset), return just the rows
+		if offset > 0 {
+			ft.ExecuteTemplate(w, "logs-rows", data)
+		} else {
+			ft.ExecuteTemplate(w, "logs-list", data)
+		}
 		return
 	}
 

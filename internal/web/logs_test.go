@@ -293,8 +293,8 @@ func TestLogsPage_WithFilters(t *testing.T) {
 	if params.Query != "timeout" {
 		t.Errorf("query = %q, want %q", params.Query, "timeout")
 	}
-	if params.Limit != 100 {
-		t.Errorf("limit = %d, want %d", params.Limit, 100)
+	if params.Limit != 51 {
+		t.Errorf("limit = %d, want %d", params.Limit, 51)
 	}
 }
 

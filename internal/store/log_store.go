@@ -113,6 +113,11 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 	query += " LIMIT ?"
 	args = append(args, limit)
 
+	if params.Offset > 0 {
+		query += " OFFSET ?"
+		args = append(args, params.Offset)
+	}
+
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("searching logs: %w", err)

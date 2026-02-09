@@ -70,6 +70,7 @@ type LogSearchParams struct {
 	Start       *time.Time `json:"start,omitempty"`
 	End         *time.Time `json:"end,omitempty"`
 	Limit       int        `json:"limit,omitempty"`
+	Offset      int        `json:"offset,omitempty"`
 }
 
 // WatcherSeverity represents the severity level of a watcher.

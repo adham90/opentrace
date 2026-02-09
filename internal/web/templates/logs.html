@@ -4,16 +4,24 @@
 </div>
 
 <form class="log-filters" hx-get="/logs" hx-target="#logs-list" hx-swap="innerHTML" hx-trigger="submit" hx-push-url="false">
-  <input type="text" name="query" placeholder="search messages..." value="{{.LogFilters.Query}}">
-  <input type="text" name="service" placeholder="service" value="{{.LogFilters.Service}}">
-  <select name="level">
-    <option value="">all levels</option>
-    <option value="DEBUG" {{if eq .LogFilters.Level "DEBUG"}}selected{{end}}>DEBUG</option>
-    <option value="INFO" {{if eq .LogFilters.Level "INFO"}}selected{{end}}>INFO</option>
-    <option value="WARN" {{if eq .LogFilters.Level "WARN"}}selected{{end}}>WARN</option>
-    <option value="ERROR" {{if eq .LogFilters.Level "ERROR"}}selected{{end}}>ERROR</option>
-  </select>
-  <input type="text" name="environment" placeholder="environment" value="{{.LogFilters.Environment}}">
+  <div class="filter-group filter-search">
+    <input type="text" name="query" placeholder="search messages..." value="{{.LogFilters.Query}}">
+  </div>
+  <div class="filter-group">
+    <input type="text" name="service" placeholder="service" value="{{.LogFilters.Service}}">
+  </div>
+  <div class="filter-group">
+    <select name="level">
+      <option value="">all levels</option>
+      <option value="DEBUG" {{if eq .LogFilters.Level "DEBUG"}}selected{{end}}>DEBUG</option>
+      <option value="INFO" {{if eq .LogFilters.Level "INFO"}}selected{{end}}>INFO</option>
+      <option value="WARN" {{if eq .LogFilters.Level "WARN"}}selected{{end}}>WARN</option>
+      <option value="ERROR" {{if eq .LogFilters.Level "ERROR"}}selected{{end}}>ERROR</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <input type="text" name="environment" placeholder="environment" value="{{.LogFilters.Environment}}">
+  </div>
   <button type="submit" class="btn btn-primary btn-sm">filter</button>
 </form>
 
@@ -22,28 +30,45 @@
 </div>
 {{end}}
 
+{{define "log-entry"}}
+<div class="log-entry collapsed" onclick="this.classList.toggle('collapsed');this.classList.toggle('expanded')">
+  <div class="log-entry-meta">
+    <span class="log-entry-ts">{{.Timestamp.Format "2006-01-02 15:04:05"}}</span>
+    <span class="badge badge-{{.Level}}">{{.Level}}</span>
+    {{if .Service}}<span class="log-entry-svc">{{.Service}}</span>{{end}}
+    {{if .Environment}}<span class="log-entry-env">{{.Environment}}</span>{{end}}
+  </div>
+  <div class="log-entry-msg">{{.Message}}</div>
+  <div class="log-entry-detail">
+    <div class="log-detail-row"><span class="log-detail-key">id</span><span class="log-detail-val">{{.ID}}</span></div>
+    {{if .TraceID}}<div class="log-detail-row"><span class="log-detail-key">trace_id</span><span class="log-detail-val">{{.TraceID}}</span></div>{{end}}
+    {{if .Service}}<div class="log-detail-row"><span class="log-detail-key">service</span><span class="log-detail-val">{{.Service}}</span></div>{{end}}
+    {{if .Environment}}<div class="log-detail-row"><span class="log-detail-key">env</span><span class="log-detail-val">{{.Environment}}</span></div>{{end}}
+    <div class="log-detail-row"><span class="log-detail-key">level</span><span class="log-detail-val">{{.Level}}</span></div>
+    <div class="log-detail-row"><span class="log-detail-key">timestamp</span><span class="log-detail-val">{{.Timestamp.Format "2006-01-02T15:04:05.000Z07:00"}}</span></div>
+  </div>
+</div>
+{{end}}
+
+{{define "logs-sentinel"}}
+{{if .HasMore}}
+<div class="logs-sentinel"
+     hx-get="/logs?query={{.LogFilters.Query}}&service={{.LogFilters.Service}}&level={{.LogFilters.Level}}&environment={{.LogFilters.Environment}}&offset={{add .LogOffset .LogLimit}}&limit={{.LogLimit}}"
+     hx-trigger="revealed"
+     hx-swap="outerHTML"
+     hx-target="this">
+  <div class="logs-loading">loading more...</div>
+</div>
+{{end}}
+{{end}}
+
 {{define "logs-list"}}
 {{if .Logs}}
 <div class="log-list">
   {{range .Logs}}
-  <div class="log-entry collapsed" onclick="this.classList.toggle('collapsed');this.classList.toggle('expanded')">
-    <div class="log-entry-meta">
-      <span class="log-entry-ts">{{.Timestamp.Format "2006-01-02 15:04:05"}}</span>
-      <span class="badge badge-{{.Level}}">{{.Level}}</span>
-      {{if .Service}}<span class="log-entry-svc">{{.Service}}</span>{{end}}
-      {{if .Environment}}<span class="log-entry-env">{{.Environment}}</span>{{end}}
-    </div>
-    <div class="log-entry-msg">{{.Message}}</div>
-    <div class="log-entry-detail">
-      <div class="log-detail-row"><span class="log-detail-key">id</span><span class="log-detail-val">{{.ID}}</span></div>
-      {{if .TraceID}}<div class="log-detail-row"><span class="log-detail-key">trace_id</span><span class="log-detail-val">{{.TraceID}}</span></div>{{end}}
-      {{if .Service}}<div class="log-detail-row"><span class="log-detail-key">service</span><span class="log-detail-val">{{.Service}}</span></div>{{end}}
-      {{if .Environment}}<div class="log-detail-row"><span class="log-detail-key">env</span><span class="log-detail-val">{{.Environment}}</span></div>{{end}}
-      <div class="log-detail-row"><span class="log-detail-key">level</span><span class="log-detail-val">{{.Level}}</span></div>
-      <div class="log-detail-row"><span class="log-detail-key">timestamp</span><span class="log-detail-val">{{.Timestamp.Format "2006-01-02T15:04:05.000Z07:00"}}</span></div>
-    </div>
-  </div>
+  {{template "log-entry" .}}
   {{end}}
+  {{template "logs-sentinel" .}}
 </div>
 {{else}}
 <div class="empty-state">
@@ -51,4 +76,11 @@
   <p>logs will appear here once ingested via POST /api/logs</p>
 </div>
 {{end}}
+{{end}}
+
+{{define "logs-rows"}}
+{{range .Logs}}
+{{template "log-entry" .}}
+{{end}}
+{{template "logs-sentinel" .}}
 {{end}}
