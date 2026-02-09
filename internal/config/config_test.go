@@ -23,6 +23,9 @@ func clearEnv(t *testing.T) {
 		"OPENTRACE_OPENAI_API_KEY",
 		"OPENTRACE_OPENAI_MODEL",
 		"OPENTRACE_OPENAI_URL",
+		"OPENTRACE_GEMINI_API_KEY",
+		"OPENTRACE_GEMINI_MODEL",
+		"OPENTRACE_GEMINI_URL",
 	}
 	for _, v := range envVars {
 		os.Unsetenv(v)
@@ -82,6 +85,15 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.OpenAIURL != "https://api.openai.com" {
 		t.Errorf("OpenAIURL = %q, want %q", cfg.OpenAIURL, "https://api.openai.com")
 	}
+	if cfg.GeminiAPIKey != "" {
+		t.Errorf("GeminiAPIKey = %q, want empty", cfg.GeminiAPIKey)
+	}
+	if cfg.GeminiModel != "gemini-2.5-flash-preview-04-17" {
+		t.Errorf("GeminiModel = %q, want %q", cfg.GeminiModel, "gemini-2.5-flash-preview-04-17")
+	}
+	if cfg.GeminiURL != "https://generativelanguage.googleapis.com" {
+		t.Errorf("GeminiURL = %q, want %q", cfg.GeminiURL, "https://generativelanguage.googleapis.com")
+	}
 }
 
 func TestLoad_AllOverrides(t *testing.T) {
@@ -102,6 +114,9 @@ func TestLoad_AllOverrides(t *testing.T) {
 		"OPENTRACE_OPENAI_API_KEY":        "sk-openai-test",
 		"OPENTRACE_OPENAI_MODEL":          "gpt-4-turbo",
 		"OPENTRACE_OPENAI_URL":            "https://custom-openai.example.com",
+		"OPENTRACE_GEMINI_API_KEY":        "AIzaSy-test-key",
+		"OPENTRACE_GEMINI_MODEL":          "gemini-2.5-pro-preview-05-06",
+		"OPENTRACE_GEMINI_URL":            "https://custom-gemini.example.com",
 	}
 	for k, v := range overrides {
 		os.Setenv(k, v)
@@ -157,6 +172,15 @@ func TestLoad_AllOverrides(t *testing.T) {
 	}
 	if cfg.OpenAIURL != "https://custom-openai.example.com" {
 		t.Errorf("OpenAIURL = %q", cfg.OpenAIURL)
+	}
+	if cfg.GeminiAPIKey != "AIzaSy-test-key" {
+		t.Errorf("GeminiAPIKey = %q", cfg.GeminiAPIKey)
+	}
+	if cfg.GeminiModel != "gemini-2.5-pro-preview-05-06" {
+		t.Errorf("GeminiModel = %q", cfg.GeminiModel)
+	}
+	if cfg.GeminiURL != "https://custom-gemini.example.com" {
+		t.Errorf("GeminiURL = %q", cfg.GeminiURL)
 	}
 }
 

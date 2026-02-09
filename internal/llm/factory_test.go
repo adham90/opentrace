@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/adham90/opentrace/internal/config"
@@ -127,6 +128,31 @@ func TestNewLLMProvider_Gemini(t *testing.T) {
 	if gp.apiKey != "test-gemini-key" {
 		t.Errorf("got apiKey %q, want %q", gp.apiKey, "test-gemini-key")
 	}
+	if gp.baseURL != "https://generativelanguage.googleapis.com" {
+		t.Errorf("got baseURL %q, want %q", gp.baseURL, "https://generativelanguage.googleapis.com")
+	}
+}
+
+func TestNewLLMProvider_Gemini_CustomURL(t *testing.T) {
+	cfg := &config.Config{
+		LLMProvider:  "gemini",
+		GeminiAPIKey: "test-key",
+		GeminiModel:  "gemini-2.5-pro-preview-05-06",
+		GeminiURL:    "https://custom-proxy.example.com",
+	}
+
+	p, err := NewLLMProvider(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	gp := p.(*GeminiProvider)
+	if gp.baseURL != "https://custom-proxy.example.com" {
+		t.Errorf("baseURL = %q, want custom proxy URL", gp.baseURL)
+	}
+	if gp.model != "gemini-2.5-pro-preview-05-06" {
+		t.Errorf("model = %q, want pro model", gp.model)
+	}
 }
 
 func TestNewLLMProvider_Gemini_MissingKey(t *testing.T) {
@@ -138,6 +164,9 @@ func TestNewLLMProvider_Gemini_MissingKey(t *testing.T) {
 	_, err := NewLLMProvider(cfg)
 	if err == nil {
 		t.Fatal("expected error for missing API key, got nil")
+	}
+	if !strings.Contains(err.Error(), "OPENTRACE_GEMINI_API_KEY") {
+		t.Errorf("error should mention the env var name, got %q", err.Error())
 	}
 }
 
@@ -191,6 +220,32 @@ func TestAvailableProviders_AllProviders(t *testing.T) {
 	for _, want := range []string{"ollama", "anthropic-sonnet", "anthropic-haiku", "openai-gpt4o", "openai-gpt4o-mini", "gemini-flash", "gemini-pro"} {
 		if !names[want] {
 			t.Errorf("expected provider %q in list", want)
+		}
+	}
+}
+
+func TestAvailableProviders_GeminiOnly(t *testing.T) {
+	cfg := &config.Config{
+		OllamaModel:  "llama3.2",
+		GeminiAPIKey: "test-gemini-key",
+	}
+
+	providers := AvailableProviders(cfg)
+	wantCount := 1 + len(GeminiModels)
+	if len(providers) != wantCount {
+		t.Fatalf("expected %d providers, got %d", wantCount, len(providers))
+	}
+
+	names := make(map[string]bool)
+	for _, p := range providers {
+		names[p.Name] = true
+	}
+	if !names["ollama"] {
+		t.Error("expected ollama provider")
+	}
+	for _, m := range GeminiModels {
+		if !names[m.Name] {
+			t.Errorf("expected provider %q in list", m.Name)
 		}
 	}
 }
