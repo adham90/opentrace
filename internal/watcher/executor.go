@@ -79,8 +79,12 @@ func (e *Executor) Execute(ctx context.Context, w store.Watcher) {
 		return
 	}
 
-	// 6. Run the agent loop
-	ag := agent.New(provider, e.agentCfg)
+	// 6. Run the agent loop with effort-adjusted config
+	runCfg := e.agentCfg
+	effortCfg := EffortSettings(w.Effort)
+	runCfg.MaxSteps = effortCfg.MaxSteps
+	runCfg.MaxToolCalls = effortCfg.MaxToolCalls
+	ag := agent.New(provider, runCfg)
 	answer, err := ag.Run(ctx, query, tools)
 	if err != nil {
 		errMsg := fmt.Sprintf("agent error: %v", err)

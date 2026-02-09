@@ -197,6 +197,65 @@ func TestWatcherStore_ModelField(t *testing.T) {
 	}
 }
 
+func TestWatcherStore_EffortField(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewWatcherStore(db)
+	ctx := context.Background()
+
+	// Create with effort
+	w, err := s.Create(ctx, CreateWatcherParams{
+		Title:       "High Effort Watcher",
+		Description: "Deep analysis",
+		Effort:      EffortHigh,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if w.Effort != EffortHigh {
+		t.Errorf("effort = %q, want %q", w.Effort, EffortHigh)
+	}
+
+	// GetByID preserves effort
+	got, err := s.GetByID(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Effort != EffortHigh {
+		t.Errorf("GetByID effort = %q, want %q", got.Effort, EffortHigh)
+	}
+
+	// List includes effort
+	list, err := s.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 1 || list[0].Effort != EffortHigh {
+		t.Errorf("List effort = %q, want %q", list[0].Effort, EffortHigh)
+	}
+
+	// Update effort
+	newEffort := EffortLow
+	updated, err := s.Update(ctx, w.ID, UpdateWatcherParams{Effort: &newEffort})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.Effort != EffortLow {
+		t.Errorf("updated effort = %q, want %q", updated.Effort, EffortLow)
+	}
+
+	// Default effort is medium
+	w2, err := s.Create(ctx, CreateWatcherParams{
+		Title:       "Default Effort",
+		Description: "Uses default",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if w2.Effort != EffortMedium {
+		t.Errorf("default effort = %q, want %q", w2.Effort, EffortMedium)
+	}
+}
+
 func TestWatcherStore_GetDueWatchers(t *testing.T) {
 	db := setupTestDB(t)
 	s := NewWatcherStore(db)

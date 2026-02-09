@@ -152,11 +152,15 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 	if notify == nil {
 		notify = json.RawMessage(`["dashboard"]`)
 	}
+	effort := params.Effort
+	if effort == "" {
+		effort = store.EffortMedium
+	}
 	now := time.Now()
 	w := &store.Watcher{
 		ID: uuid.New(), Title: params.Title, Description: params.Description,
 		Severity: sev, Filters: filters, TimeRange: timeRange,
-		Model: params.Model, Status: store.WatcherActive, Notify: notify,
+		Model: params.Model, Effort: effort, Status: store.WatcherActive, Notify: notify,
 		NextRunAt: &now, CreatedAt: now, UpdatedAt: now,
 	}
 	m.watchers[w.ID] = w
@@ -201,6 +205,9 @@ func (m *mockWatcherStore) Update(ctx context.Context, id uuid.UUID, params stor
 	}
 	if params.Model != nil {
 		w.Model = *params.Model
+	}
+	if params.Effort != nil {
+		w.Effort = *params.Effort
 	}
 	w.UpdatedAt = time.Now()
 	return w, nil

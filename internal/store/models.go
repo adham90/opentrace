@@ -83,6 +83,15 @@ const (
 	SeverityCritical WatcherSeverity = "critical"
 )
 
+// WatcherEffort represents how thorough the AI analysis should be.
+type WatcherEffort string
+
+const (
+	EffortLow    WatcherEffort = "low"
+	EffortMedium WatcherEffort = "medium"
+	EffortHigh   WatcherEffort = "high"
+)
+
 // WatcherStatus represents the operational status of a watcher.
 type WatcherStatus string
 
@@ -101,6 +110,7 @@ type Watcher struct {
 	Filters     json.RawMessage `json:"filters"`
 	TimeRange   string          `json:"time_range"`
 	Model       string          `json:"model"`
+	Effort      WatcherEffort   `json:"effort"`
 	Status      WatcherStatus   `json:"status"`
 	Notify      json.RawMessage `json:"notify"`
 	LastRunAt   *time.Time      `json:"last_run_at,omitempty"`
@@ -118,6 +128,7 @@ type CreateWatcherParams struct {
 	Filters     json.RawMessage `json:"filters"`
 	TimeRange   string          `json:"time_range"`
 	Model       string          `json:"model"`
+	Effort      WatcherEffort   `json:"effort"`
 	Notify      json.RawMessage `json:"notify"`
 }
 
@@ -129,6 +140,7 @@ type UpdateWatcherParams struct {
 	Filters     json.RawMessage  `json:"filters,omitempty"`
 	TimeRange   *string          `json:"time_range,omitempty"`
 	Model       *string          `json:"model,omitempty"`
+	Effort      *WatcherEffort   `json:"effort,omitempty"`
 	Notify      json.RawMessage  `json:"notify,omitempty"`
 }
 

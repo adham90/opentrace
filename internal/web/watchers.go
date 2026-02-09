@@ -18,6 +18,7 @@ type createWatcherRequest struct {
 	Filters     json.RawMessage      `json:"filters"`
 	TimeRange   string               `json:"time_range"`
 	Model       string               `json:"model"`
+	Effort      store.WatcherEffort   `json:"effort"`
 	Notify      json.RawMessage      `json:"notify"`
 }
 
@@ -28,6 +29,7 @@ type updateWatcherRequest struct {
 	Filters     json.RawMessage        `json:"filters,omitempty"`
 	TimeRange   *string                `json:"time_range,omitempty"`
 	Model       *string                `json:"model,omitempty"`
+	Effort      *store.WatcherEffort   `json:"effort,omitempty"`
 	Notify      json.RawMessage        `json:"notify,omitempty"`
 }
 
@@ -49,6 +51,7 @@ func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
 		Filters:     req.Filters,
 		TimeRange:   req.TimeRange,
 		Model:       req.Model,
+		Effort:      req.Effort,
 		Notify:      req.Notify,
 	})
 	if err != nil {
@@ -106,6 +109,7 @@ func (s *Server) handleUpdateWatcher(w http.ResponseWriter, r *http.Request) {
 		Filters:     req.Filters,
 		TimeRange:   req.TimeRange,
 		Model:       req.Model,
+		Effort:      req.Effort,
 		Notify:      req.Notify,
 	})
 	if err != nil {

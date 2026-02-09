@@ -100,6 +100,76 @@ func TestBuildQuery_AllFilters(t *testing.T) {
 	}
 }
 
+func TestBuildQuery_LowEffort(t *testing.T) {
+	w := store.Watcher{
+		Title:       "Quick check",
+		Description: "Check error count",
+		TimeRange:   "5m",
+		Effort:      store.EffortLow,
+		Filters:     json.RawMessage(`{"service":"api"}`),
+	}
+
+	q := BuildQuery(w, "")
+
+	if !strings.Contains(q, "Quickly assess") {
+		t.Error("expected low-effort prompt to contain 'Quickly assess'")
+	}
+	if !strings.Contains(q, "1-2 sentences") {
+		t.Error("expected low-effort prompt to mention brief summary")
+	}
+	// Should NOT contain deep analysis instructions
+	if strings.Contains(q, "Cross-reference") {
+		t.Error("low-effort prompt should not contain 'Cross-reference'")
+	}
+}
+
+func TestBuildQuery_HighEffort(t *testing.T) {
+	w := store.Watcher{
+		Title:       "Deep analysis",
+		Description: "Analyze payment failures thoroughly",
+		TimeRange:   "24h",
+		Effort:      store.EffortHigh,
+		Filters:     json.RawMessage(`{"service":"payment-api"}`),
+	}
+
+	q := BuildQuery(w, "Previous: 5 errors detected")
+
+	if !strings.Contains(q, "Cross-reference") {
+		t.Error("expected high-effort prompt to contain 'Cross-reference'")
+	}
+	if !strings.Contains(q, "root cause analysis") {
+		t.Error("expected high-effort prompt to mention root cause analysis")
+	}
+	if !strings.Contains(q, "Previous: 5 errors detected") {
+		t.Error("expected previous run summary in query")
+	}
+}
+
+func TestEffortSettings(t *testing.T) {
+	low := EffortSettings(store.EffortLow)
+	med := EffortSettings(store.EffortMedium)
+	high := EffortSettings(store.EffortHigh)
+
+	if low.MaxSteps >= med.MaxSteps {
+		t.Errorf("low steps (%d) should be less than medium (%d)", low.MaxSteps, med.MaxSteps)
+	}
+	if med.MaxSteps >= high.MaxSteps {
+		t.Errorf("medium steps (%d) should be less than high (%d)", med.MaxSteps, high.MaxSteps)
+	}
+	if low.MaxToolCalls >= med.MaxToolCalls {
+		t.Errorf("low tool calls (%d) should be less than medium (%d)", low.MaxToolCalls, med.MaxToolCalls)
+	}
+	if med.MaxToolCalls >= high.MaxToolCalls {
+		t.Errorf("medium tool calls (%d) should be less than high (%d)", med.MaxToolCalls, high.MaxToolCalls)
+	}
+
+	// Default (empty string) should return medium
+	def := EffortSettings("")
+	if def.MaxSteps != med.MaxSteps || def.MaxToolCalls != med.MaxToolCalls {
+		t.Error("empty effort should default to medium settings")
+	}
+}
+
 func TestEvaluateFindings(t *testing.T) {
 	tests := []struct {
 		answer string

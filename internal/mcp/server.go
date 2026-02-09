@@ -64,6 +64,7 @@ func Serve(deps Deps) error {
 				mcp.WithString("query", mcp.Description("Full-text search query for logs")),
 				mcp.WithString("severity", mcp.Description("Alert severity: info, warning, or critical (default: warning)")),
 				mcp.WithString("model", mcp.Description("LLM model variant name (e.g. anthropic-sonnet, openai-gpt4o). Empty for global default")),
+				mcp.WithString("effort", mcp.Description("Analysis effort level: low (quick check), medium (default), or high (deep analysis)")),
 			),
 			createWatcherHandler(deps.WatcherStore),
 		)
@@ -210,6 +211,11 @@ func createWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 
 		model, _ := args["model"].(string)
 
+		effort := store.EffortMedium
+		if v, ok := args["effort"].(string); ok && v != "" {
+			effort = store.WatcherEffort(v)
+		}
+
 		params := store.CreateWatcherParams{
 			Title:       title,
 			Description: description,
@@ -217,6 +223,7 @@ func createWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 			Filters:     filtersJSON,
 			TimeRange:   timeRange,
 			Model:       model,
+			Effort:      effort,
 			Notify:      json.RawMessage(`["dashboard"]`),
 		}
 

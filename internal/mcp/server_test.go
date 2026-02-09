@@ -337,6 +337,10 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 	if m.err != nil {
 		return nil, m.err
 	}
+	effort := params.Effort
+	if effort == "" {
+		effort = store.EffortMedium
+	}
 	w := &store.Watcher{
 		ID:          uuid.New(),
 		Title:       params.Title,
@@ -344,6 +348,7 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 		Severity:    params.Severity,
 		Filters:     params.Filters,
 		TimeRange:   params.TimeRange,
+		Effort:      effort,
 		Status:      store.WatcherActive,
 		Notify:      params.Notify,
 		CreatedAt:   time.Now(),

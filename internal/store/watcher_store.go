@@ -30,6 +30,10 @@ func (s *watcherStore) Create(ctx context.Context, params CreateWatcherParams) (
 	if timeRange == "" {
 		timeRange = "15m"
 	}
+	effort := params.Effort
+	if effort == "" {
+		effort = EffortMedium
+	}
 	filters := params.Filters
 	if filters == nil {
 		filters = json.RawMessage(`{}`)
@@ -43,10 +47,10 @@ func (s *watcherStore) Create(ctx context.Context, params CreateWatcherParams) (
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO watchers (id, title, description, severity, filters, time_range, model, notify, next_run_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO watchers (id, title, description, severity, filters, time_range, model, effort, notify, next_run_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id.String(), params.Title, params.Description, string(severity),
-		string(filters), timeRange, params.Model, string(notify), now, now, now,
+		string(filters), timeRange, params.Model, string(effort), string(notify), now, now, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("inserting watcher: %w", err)
@@ -62,12 +66,12 @@ func (s *watcherStore) GetByID(ctx context.Context, id uuid.UUID) (*Watcher, err
 	var lastRunAt, nextRunAt sql.NullString
 
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, title, description, severity, filters, time_range, model, status, notify,
+		`SELECT id, title, description, severity, filters, time_range, model, effort, status, notify,
 		        last_run_at, next_run_at, last_error, created_at, updated_at
 		 FROM watchers WHERE id = ?`, id.String(),
 	).Scan(
 		&w.ID, &w.Title, &w.Description, &w.Severity, &filtersStr,
-		&w.TimeRange, &w.Model, &w.Status, &notifyStr,
+		&w.TimeRange, &w.Model, &w.Effort, &w.Status, &notifyStr,
 		&lastRunAt, &nextRunAt, &w.LastError,
 		&createdAt, &updatedAt,
 	)
@@ -96,7 +100,7 @@ func (s *watcherStore) GetByID(ctx context.Context, id uuid.UUID) (*Watcher, err
 
 func (s *watcherStore) List(ctx context.Context) ([]Watcher, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, title, description, severity, filters, time_range, model, status, notify,
+		`SELECT id, title, description, severity, filters, time_range, model, effort, status, notify,
 		        last_run_at, next_run_at, last_error, created_at, updated_at
 		 FROM watchers ORDER BY created_at DESC`,
 	)
@@ -114,7 +118,7 @@ func (s *watcherStore) List(ctx context.Context) ([]Watcher, error) {
 
 		if err := rows.Scan(
 			&w.ID, &w.Title, &w.Description, &w.Severity, &filtersStr,
-			&w.TimeRange, &w.Model, &w.Status, &notifyStr,
+			&w.TimeRange, &w.Model, &w.Effort, &w.Status, &notifyStr,
 			&lastRunAt, &nextRunAt, &w.LastError,
 			&createdAt, &updatedAt,
 		); err != nil {
@@ -144,7 +148,7 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	var titleStr, descStr *string
-	var sevStr *string
+	var sevStr, effortStr *string
 	var filtersStr, timeRangeStr, modelStr, notifyStr *string
 	if params.Title != nil {
 		titleStr = params.Title
@@ -166,6 +170,10 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 	if params.Model != nil {
 		modelStr = params.Model
 	}
+	if params.Effort != nil {
+		s := string(*params.Effort)
+		effortStr = &s
+	}
 	if params.Notify != nil {
 		s := string(params.Notify)
 		notifyStr = &s
@@ -179,10 +187,11 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 		     filters     = COALESCE(?, filters),
 		     time_range  = COALESCE(?, time_range),
 		     model       = COALESCE(?, model),
+		     effort      = COALESCE(?, effort),
 		     notify      = COALESCE(?, notify),
 		     updated_at  = ?
 		 WHERE id = ?`,
-		titleStr, descStr, sevStr, filtersStr, timeRangeStr, modelStr, notifyStr, now, id.String(),
+		titleStr, descStr, sevStr, filtersStr, timeRangeStr, modelStr, effortStr, notifyStr, now, id.String(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("updating watcher: %w", err)
@@ -226,7 +235,7 @@ func (s *watcherStore) Delete(ctx context.Context, id uuid.UUID) error {
 func (s *watcherStore) GetDueWatchers(ctx context.Context) ([]Watcher, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, title, description, severity, filters, time_range, model, status, notify,
+		`SELECT id, title, description, severity, filters, time_range, model, effort, status, notify,
 		        last_run_at, next_run_at, last_error, created_at, updated_at
 		 FROM watchers
 		 WHERE status = 'active' AND next_run_at <= ?
@@ -246,7 +255,7 @@ func (s *watcherStore) GetDueWatchers(ctx context.Context) ([]Watcher, error) {
 
 		if err := rows.Scan(
 			&w.ID, &w.Title, &w.Description, &w.Severity, &filtersStr,
-			&w.TimeRange, &w.Model, &w.Status, &notifyStr,
+			&w.TimeRange, &w.Model, &w.Effort, &w.Status, &notifyStr,
 			&lastRunAt, &nextRunAt, &w.LastError,
 			&createdAt, &updatedAt,
 		); err != nil {

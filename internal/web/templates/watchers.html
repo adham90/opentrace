@@ -112,6 +112,15 @@
                 <option value="">Default (global)</option>
               </select>
             </div>
+            <div class="form-group">
+              <label>Analysis Effort</label>
+              <select id="watcher-effort">
+                <option value="low">Low — quick check</option>
+                <option value="medium" selected>Medium — balanced</option>
+                <option value="high">High — deep analysis</option>
+              </select>
+              <div class="form-hint">Controls how thorough the AI analysis is. Low = fast &amp; cheap, High = detailed &amp; costly.</div>
+            </div>
           </div>
         </div>
 
@@ -187,6 +196,9 @@ function loadWatchers() {
       if (w.model) {
         html += '    <span class="watcher-meta">' + escapeHtml(w.model) + '</span>';
       }
+      if (w.effort && w.effort !== 'medium') {
+        html += '    <span class="watcher-meta">' + escapeHtml(w.effort) + ' effort</span>';
+      }
       html += '    <span class="watcher-status ' + statusClass + '">' + statusIcon + ' ' + w.status + '</span>';
       html += '  </div>';
       html += '  <div class="watcher-info">';
@@ -254,6 +266,7 @@ function saveWatcher(e) {
     severity: document.getElementById('watcher-severity').value,
     time_range: document.getElementById('watcher-timerange').value,
     model: document.getElementById('watcher-model').value,
+    effort: document.getElementById('watcher-effort').value,
     filters: filters,
     notify: notify
   };
@@ -281,6 +294,7 @@ function editWatcher(id) {
     document.getElementById('watcher-severity').value = w.severity;
     document.getElementById('watcher-timerange').value = w.time_range || '15m';
     document.getElementById('watcher-model').value = w.model || '';
+    document.getElementById('watcher-effort').value = w.effort || 'medium';
 
     var f = w.filters || {};
     document.getElementById('filter-service').value = f.service || '';
