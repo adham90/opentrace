@@ -145,7 +145,16 @@ func run() error {
 	defer deps.pool.Close()
 
 	// Create server
-	srv := web.NewServer(deps.dsStore, deps.logStore, deps.embStore, deps.registry, deps.cfg, deps.embedder)
+	srv := web.NewServerWithDeps(web.ServerDeps{
+		DSStore:      deps.dsStore,
+		LogStore:     deps.logStore,
+		EmbStore:     deps.embStore,
+		WatcherStore: deps.watcherStore,
+		AlertStore:   deps.alertStore,
+		Registry:     deps.registry,
+		Cfg:          deps.cfg,
+		Embedder:     deps.embedder,
+	})
 
 	httpServer := &http.Server{
 		Addr:    deps.cfg.ListenAddr,
