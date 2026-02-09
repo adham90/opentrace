@@ -135,10 +135,14 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	}
 
 	// Pages
-	router.Get("/", srv.handleInvestigatePage)
-	router.Get("/chats/{id}", srv.handleChatPage)
+	router.Get("/", srv.handleAlertsPage)
+	router.Get("/watchers", srv.handleWatchersPage)
+	router.Get("/watchers/{id}/runs", srv.handleWatcherRunsPage)
 	router.Get("/logs", srv.handleLogsPage)
 	router.Get("/connectors", srv.handleConnectorsPage)
+	// Legacy routes (kept for backward compat, will be removed in Phase 5)
+	router.Get("/investigate", srv.handleInvestigatePage)
+	router.Get("/chats/{id}", srv.handleChatPage)
 
 	// API
 	router.Route("/api", func(r chi.Router) {

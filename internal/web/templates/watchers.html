@@ -1,0 +1,263 @@
+{{define "content"}}
+<div class="watchers-page">
+  <div class="page-header">
+    <h2>Watchers</h2>
+    <button class="btn btn-primary" onclick="showCreateModal()">+ New Watcher</button>
+  </div>
+
+  <div id="watchers-list" class="watchers-list">
+    <div class="empty-state" id="watchers-empty">
+      <p>No watchers configured. Create one to start automated monitoring.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Create/Edit Modal -->
+<div id="watcher-modal" class="modal" style="display:none">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3 id="modal-title">New Watcher</h3>
+      <button class="btn-close" onclick="hideModal()">&times;</button>
+    </div>
+    <form id="watcher-form" onsubmit="saveWatcher(event)">
+      <input type="hidden" id="watcher-id" value="">
+      <div class="form-group">
+        <label>Title</label>
+        <input type="text" id="watcher-title" required placeholder="e.g. Payment failures spike">
+      </div>
+      <div class="form-group">
+        <label>Description (instructions for the AI agent)</label>
+        <textarea id="watcher-description" rows="4" required placeholder="Check if payment gateway errors exceed normal rate. Look for patterns in failing merchant IDs."></textarea>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Severity</label>
+          <select id="watcher-severity">
+            <option value="info">Info</option>
+            <option value="warning" selected>Warning</option>
+            <option value="critical">Critical</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Run every (minutes)</label>
+          <input type="number" id="watcher-interval" value="5" min="1" max="1440">
+        </div>
+      </div>
+      <fieldset class="form-fieldset">
+        <legend>Filters</legend>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Service</label>
+            <input type="text" id="filter-service" placeholder="e.g. payment-api">
+          </div>
+          <div class="form-group">
+            <label>Level</label>
+            <select id="filter-level">
+              <option value="">Any</option>
+              <option value="error">error</option>
+              <option value="warn">warn</option>
+              <option value="info">info</option>
+              <option value="debug">debug</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Environment</label>
+            <input type="text" id="filter-env" placeholder="e.g. production">
+          </div>
+          <div class="form-group">
+            <label>Time range</label>
+            <select id="filter-timerange">
+              <option value="5m">Last 5 minutes</option>
+              <option value="15m" selected>Last 15 minutes</option>
+              <option value="30m">Last 30 minutes</option>
+              <option value="1h">Last 1 hour</option>
+              <option value="6h">Last 6 hours</option>
+              <option value="24h">Last 24 hours</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Query (full-text search)</label>
+          <input type="text" id="filter-query" placeholder="e.g. timeout OR connection refused">
+        </div>
+      </fieldset>
+      <fieldset class="form-fieldset">
+        <legend>Notifications</legend>
+        <label class="checkbox-label"><input type="checkbox" id="notify-dashboard" checked disabled> Dashboard alerts</label>
+        <label class="checkbox-label"><input type="checkbox" id="notify-webhook" onchange="toggleWebhook()"> Webhook</label>
+        <div id="webhook-url-group" class="form-group" style="display:none">
+          <input type="url" id="webhook-url" placeholder="https://hooks.slack.com/...">
+        </div>
+      </fieldset>
+      <div class="modal-footer">
+        <button type="button" class="btn" onclick="hideModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Watcher</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function loadWatchers() {
+  fetch('/api/watchers').then(function(r) { return r.json(); }).then(function(watchers) {
+    var container = document.getElementById('watchers-list');
+    if (!watchers || watchers.length === 0) {
+      container.innerHTML = '<div class="empty-state"><p>No watchers configured. Create one to start automated monitoring.</p></div>';
+      return;
+    }
+
+    var html = '';
+    watchers.forEach(function(w) {
+      var statusClass = w.status === 'active' ? 'status-active' : w.status === 'paused' ? 'status-paused' : 'status-error';
+      var statusIcon = w.status === 'active' ? '&#9679;' : w.status === 'paused' ? '&#9208;' : '&#9888;';
+      var interval = w.interval_seconds >= 60 ? Math.floor(w.interval_seconds / 60) + 'm' : w.interval_seconds + 's';
+      var lastRun = w.last_run_at ? getTimeAgo(w.last_run_at) : 'never';
+
+      html += '<div class="watcher-card">';
+      html += '  <div class="watcher-header">';
+      html += '    <span class="watcher-title">' + escapeHtml(w.title) + '</span>';
+      html += '    <span class="watcher-meta">every ' + interval + '</span>';
+      html += '    <span class="watcher-status ' + statusClass + '">' + statusIcon + ' ' + w.status + '</span>';
+      html += '  </div>';
+      html += '  <div class="watcher-info">';
+      html += '    <span>Last run: ' + lastRun + '</span>';
+      html += '    <span class="severity-badge severity-' + w.severity + '">' + w.severity + '</span>';
+      html += '  </div>';
+      html += '  <div class="watcher-actions">';
+      html += '    <button class="btn btn-sm" onclick="editWatcher(\'' + w.id + '\')">Edit</button>';
+      if (w.status === 'active') {
+        html += '    <button class="btn btn-sm" onclick="pauseWatcher(\'' + w.id + '\')">Pause</button>';
+      } else {
+        html += '    <button class="btn btn-sm" onclick="resumeWatcher(\'' + w.id + '\')">Resume</button>';
+      }
+      html += '    <button class="btn btn-sm" onclick="runNow(\'' + w.id + '\')">Run Now</button>';
+      html += '    <a href="/watchers/' + w.id + '/runs" class="btn btn-sm">History</a>';
+      html += '    <button class="btn btn-sm btn-danger" onclick="deleteWatcher(\'' + w.id + '\')">Delete</button>';
+      html += '  </div>';
+      html += '</div>';
+    });
+    container.innerHTML = html;
+  });
+}
+
+function showCreateModal() {
+  document.getElementById('modal-title').textContent = 'New Watcher';
+  document.getElementById('watcher-id').value = '';
+  document.getElementById('watcher-form').reset();
+  document.getElementById('notify-dashboard').checked = true;
+  document.getElementById('watcher-modal').style.display = 'flex';
+}
+
+function hideModal() {
+  document.getElementById('watcher-modal').style.display = 'none';
+}
+
+function toggleWebhook() {
+  var show = document.getElementById('notify-webhook').checked;
+  document.getElementById('webhook-url-group').style.display = show ? 'block' : 'none';
+}
+
+function saveWatcher(e) {
+  e.preventDefault();
+  var id = document.getElementById('watcher-id').value;
+  var filters = {};
+  var svc = document.getElementById('filter-service').value;
+  var lvl = document.getElementById('filter-level').value;
+  var env = document.getElementById('filter-env').value;
+  var tr = document.getElementById('filter-timerange').value;
+  var q = document.getElementById('filter-query').value;
+  if (svc) filters.service = svc;
+  if (lvl) filters.level = lvl;
+  if (env) filters.environment = env;
+  if (tr) filters.time_range = tr;
+  if (q) filters.query = q;
+
+  var notify = ['dashboard'];
+  if (document.getElementById('notify-webhook').checked) {
+    var url = document.getElementById('webhook-url').value;
+    if (url) notify.push({type: 'webhook', url: url});
+  }
+
+  var body = {
+    title: document.getElementById('watcher-title').value,
+    description: document.getElementById('watcher-description').value,
+    severity: document.getElementById('watcher-severity').value,
+    interval_seconds: parseInt(document.getElementById('watcher-interval').value) * 60,
+    filters: filters,
+    notify: notify
+  };
+
+  var method = id ? 'PUT' : 'POST';
+  var url = id ? '/api/watchers/' + id : '/api/watchers';
+
+  fetch(url, {
+    method: method,
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  }).then(function() {
+    hideModal();
+    loadWatchers();
+  });
+}
+
+function editWatcher(id) {
+  fetch('/api/watchers/' + id).then(function(r) { return r.json(); }).then(function(w) {
+    document.getElementById('modal-title').textContent = 'Edit Watcher';
+    document.getElementById('watcher-id').value = w.id;
+    document.getElementById('watcher-title').value = w.title;
+    document.getElementById('watcher-description').value = w.description;
+    document.getElementById('watcher-severity').value = w.severity;
+    document.getElementById('watcher-interval').value = Math.floor(w.interval_seconds / 60) || 5;
+
+    var f = w.filters || {};
+    document.getElementById('filter-service').value = f.service || '';
+    document.getElementById('filter-level').value = f.level || '';
+    document.getElementById('filter-env').value = f.environment || '';
+    document.getElementById('filter-timerange').value = f.time_range || '15m';
+    document.getElementById('filter-query').value = f.query || '';
+
+    document.getElementById('watcher-modal').style.display = 'flex';
+  });
+}
+
+function pauseWatcher(id) {
+  fetch('/api/watchers/' + id + '/pause', { method: 'POST' }).then(function() { loadWatchers(); });
+}
+
+function resumeWatcher(id) {
+  fetch('/api/watchers/' + id + '/resume', { method: 'POST' }).then(function() { loadWatchers(); });
+}
+
+function runNow(id) {
+  fetch('/api/watchers/' + id + '/run', { method: 'POST' }).then(function() {
+    loadWatchers();
+  });
+}
+
+function deleteWatcher(id) {
+  if (!confirm('Delete this watcher?')) return;
+  fetch('/api/watchers/' + id, { method: 'DELETE' }).then(function() { loadWatchers(); });
+}
+
+function getTimeAgo(dateStr) {
+  if (!dateStr) return 'never';
+  var now = new Date();
+  var date = new Date(dateStr);
+  var diff = Math.floor((now - date) / 1000);
+  if (diff < 60) return diff + 's ago';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return Math.floor(diff / 86400) + 'd ago';
+}
+
+function escapeHtml(str) {
+  var div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+
+loadWatchers();
+</script>
+{{end}}

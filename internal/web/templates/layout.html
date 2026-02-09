@@ -12,25 +12,34 @@
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
 </head>
 <body>
-  {{if eq .Nav "investigate"}}
-    {{template "content" .}}
-  {{else}}
-    <header class="header">
-      <div class="container">
-        <span class="logo">OPENTRACE</span>
-        <nav>
-          <a href="/" {{if eq .Nav "investigate"}}class="active"{{end}}>investigate</a>
-          <a href="/logs" {{if eq .Nav "logs"}}class="active"{{end}}>logs</a>
-          <a href="/connectors" {{if eq .Nav "connectors"}}class="active"{{end}}>connectors</a>
-        </nav>
-      </div>
-    </header>
-    <main>
-      <div class="container">
-        {{template "content" .}}
-      </div>
-    </main>
-  {{end}}
+  <header class="header">
+    <div class="container">
+      <span class="logo">OPENTRACE</span>
+      <nav>
+        <a href="/" {{if eq .Nav "alerts"}}class="active"{{end}}>alerts <span id="alert-badge" class="badge" style="display:none">0</span></a>
+        <a href="/watchers" {{if eq .Nav "watchers"}}class="active"{{end}}>watchers</a>
+        <a href="/logs" {{if eq .Nav "logs"}}class="active"{{end}}>logs</a>
+        <a href="/connectors" {{if eq .Nav "connectors"}}class="active"{{end}}>connectors</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <div class="container">
+      {{template "content" .}}
+    </div>
+  </main>
+  <script>
+  (function(){
+    function updateBadge() {
+      fetch('/api/alerts/count').then(function(r){return r.json()}).then(function(d){
+        var b=document.getElementById('alert-badge');
+        if(b){b.textContent=d.count;b.style.display=d.count>0?'inline':'none';}
+      }).catch(function(){});
+    }
+    updateBadge();
+    setInterval(updateBadge, 30000);
+  })();
+  </script>
   {{if .DevMode}}<script>(function(){var h='';setInterval(function(){fetch('/api/dev/hash').then(function(r){return r.text()}).then(function(v){if(h&&v!==h)location.reload();h=v}).catch(function(){})},1000)})();</script>{{end}}
 </body>
 </html>{{end}}

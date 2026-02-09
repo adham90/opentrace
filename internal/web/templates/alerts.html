@@ -1,0 +1,123 @@
+{{define "content"}}
+<div class="alerts-page">
+  <div class="page-header">
+    <h2>Alerts</h2>
+    <div class="header-actions">
+      <select id="alertFilter" onchange="filterAlerts()">
+        <option value="all">All alerts</option>
+        <option value="unread" selected>Unread</option>
+        <option value="critical">Critical only</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="alerts-list" class="alerts-list">
+    <div class="empty-state" id="alerts-empty">
+      <p>No alerts yet. Watchers will generate alerts when conditions are met.</p>
+      <a href="/watchers" class="btn btn-primary">Set up a watcher</a>
+    </div>
+  </div>
+</div>
+
+<script>
+var allAlerts = [];
+
+function loadAlerts() {
+  var filter = document.getElementById('alertFilter').value;
+  var url = '/api/alerts?';
+  if (filter === 'unread') url += 'unread=true&';
+  url += 'limit=50';
+
+  fetch(url).then(function(r) { return r.json(); }).then(function(alerts) {
+    allAlerts = alerts || [];
+    if (filter === 'critical') {
+      allAlerts = allAlerts.filter(function(a) { return a.severity === 'critical'; });
+    }
+    renderAlerts();
+  });
+}
+
+function renderAlerts() {
+  var container = document.getElementById('alerts-list');
+  var empty = document.getElementById('alerts-empty');
+
+  if (allAlerts.length === 0) {
+    container.innerHTML = '';
+    container.appendChild(empty);
+    empty.style.display = 'block';
+    return;
+  }
+
+  var html = '';
+  allAlerts.forEach(function(a) {
+    var sevClass = 'severity-' + a.severity;
+    var sevIcon = a.severity === 'critical' ? '!!' : a.severity === 'warning' ? '!' : 'i';
+    var timeAgo = getTimeAgo(a.created_at);
+    var readClass = a.read ? ' alert-read' : '';
+
+    html += '<div class="alert-card ' + sevClass + readClass + '" data-id="' + a.id + '">';
+    html += '  <div class="alert-header">';
+    html += '    <span class="severity-badge ' + sevClass + '">' + sevIcon + '</span>';
+    html += '    <span class="alert-title">' + escapeHtml(a.title) + '</span>';
+    html += '    <span class="alert-time">' + timeAgo + '</span>';
+    html += '  </div>';
+    html += '  <div class="alert-summary">' + escapeHtml(a.summary).substring(0, 200) + '</div>';
+    html += '  <div class="alert-actions">';
+    if (!a.read) {
+      html += '    <button class="btn btn-sm" onclick="markRead(\'' + a.id + '\')">Mark read</button>';
+    }
+    html += '    <button class="btn btn-sm btn-danger" onclick="dismissAlert(\'' + a.id + '\')">Dismiss</button>';
+    html += '  </div>';
+    html += '</div>';
+  });
+  container.innerHTML = html;
+}
+
+function markRead(id) {
+  fetch('/api/alerts/' + id + '/read', { method: 'POST' }).then(function() {
+    loadAlerts();
+    updateBadge();
+  });
+}
+
+function dismissAlert(id) {
+  fetch('/api/alerts/' + id + '/dismiss', { method: 'POST' }).then(function() {
+    loadAlerts();
+    updateBadge();
+  });
+}
+
+function filterAlerts() {
+  loadAlerts();
+}
+
+function updateBadge() {
+  fetch('/api/alerts/count').then(function(r) { return r.json(); }).then(function(data) {
+    var badge = document.getElementById('alert-badge');
+    if (badge) {
+      badge.textContent = data.count;
+      badge.style.display = data.count > 0 ? 'inline' : 'none';
+    }
+  });
+}
+
+function getTimeAgo(dateStr) {
+  var now = new Date();
+  var date = new Date(dateStr);
+  var diff = Math.floor((now - date) / 1000);
+  if (diff < 60) return diff + 's ago';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return Math.floor(diff / 86400) + 'd ago';
+}
+
+function escapeHtml(str) {
+  var div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+
+loadAlerts();
+setInterval(function() { loadAlerts(); updateBadge(); }, 30000);
+</script>
+{{end}}

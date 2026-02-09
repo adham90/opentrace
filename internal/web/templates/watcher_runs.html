@@ -1,0 +1,85 @@
+{{define "content"}}
+<div class="runs-page">
+  <div class="page-header">
+    <h2>Watcher Runs</h2>
+    <a href="/watchers" class="btn">&larr; Back to Watchers</a>
+  </div>
+
+  <div id="watcher-info" class="watcher-info-card"></div>
+  <div id="runs-list" class="runs-list">
+    <div class="empty-state">Loading...</div>
+  </div>
+</div>
+
+<script>
+var watcherId = '{{.WatcherID}}';
+
+function loadWatcherInfo() {
+  fetch('/api/watchers/' + watcherId).then(function(r) { return r.json(); }).then(function(w) {
+    var container = document.getElementById('watcher-info');
+    container.innerHTML = '<h3>' + escapeHtml(w.title) + '</h3>' +
+      '<p>' + escapeHtml(w.description) + '</p>' +
+      '<span class="severity-badge severity-' + w.severity + '">' + w.severity + '</span>' +
+      ' <span class="watcher-status status-' + w.status + '">' + w.status + '</span>';
+  });
+}
+
+function loadRuns() {
+  fetch('/api/watchers/' + watcherId + '/runs').then(function(r) { return r.json(); }).then(function(runs) {
+    var container = document.getElementById('runs-list');
+    if (!runs || runs.length === 0) {
+      container.innerHTML = '<div class="empty-state"><p>No runs yet. This watcher has not executed.</p></div>';
+      return;
+    }
+
+    var html = '';
+    runs.forEach(function(run) {
+      var statusClass = run.status === 'completed' ? 'status-active' : run.status === 'error' ? 'status-error' : 'status-paused';
+      var duration = '';
+      if (run.finished_at) {
+        var ms = new Date(run.finished_at) - new Date(run.started_at);
+        duration = (ms / 1000).toFixed(1) + 's';
+      }
+      var alertBadge = run.has_alert ? ' <span class="severity-badge severity-warning">ALERT</span>' : '';
+      var time = getTimeAgo(run.started_at);
+
+      html += '<div class="run-card ' + statusClass + '">';
+      html += '  <div class="run-header">';
+      html += '    <span class="run-status ' + statusClass + '">' + run.status + '</span>';
+      html += '    <span class="run-time">' + time + '</span>';
+      if (duration) html += '    <span class="run-duration">' + duration + '</span>';
+      html += alertBadge;
+      html += '  </div>';
+      if (run.summary) {
+        html += '  <div class="run-summary">' + escapeHtml(run.summary).substring(0, 300) + '</div>';
+      }
+      if (run.error) {
+        html += '  <div class="run-error">' + escapeHtml(run.error) + '</div>';
+      }
+      html += '</div>';
+    });
+    container.innerHTML = html;
+  });
+}
+
+function getTimeAgo(dateStr) {
+  if (!dateStr) return '';
+  var now = new Date();
+  var date = new Date(dateStr);
+  var diff = Math.floor((now - date) / 1000);
+  if (diff < 60) return diff + 's ago';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return Math.floor(diff / 86400) + 'd ago';
+}
+
+function escapeHtml(str) {
+  var div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+
+loadWatcherInfo();
+loadRuns();
+</script>
+{{end}}

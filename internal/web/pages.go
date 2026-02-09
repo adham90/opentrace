@@ -22,6 +22,9 @@ var (
 	investigateTmpl *template.Template
 	connectorsTmpl  *template.Template
 	logsTmpl        *template.Template
+	alertsTmpl      *template.Template
+	watchersTmpl    *template.Template
+	watcherRunsTmpl *template.Template
 )
 
 func init() {
@@ -32,6 +35,12 @@ func init() {
 		"templates/layout.html", "templates/connectors.html"))
 	logsTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/logs.html"))
+	alertsTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/alerts.html"))
+	watchersTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/watchers.html"))
+	watcherRunsTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/watcher_runs.html"))
 }
 
 // templates is used for rendering HTMX fragment responses (e.g. connector-list)
@@ -57,6 +66,7 @@ type pageData struct {
 	Nav        string
 	Content    string
 	ChatID     string
+	WatcherID  string
 	DevMode    bool
 	Connectors interface{}
 	Logs       []store.LogEntry
@@ -171,6 +181,44 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 	tmpl := s.getTemplate(logsTmpl,
 		"internal/web/templates/layout.html",
 		"internal/web/templates/logs.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleAlertsPage(w http.ResponseWriter, r *http.Request) {
+	data := pageData{
+		Title:   "Alerts",
+		Nav:     "alerts",
+		DevMode: s.isDevMode(),
+	}
+	tmpl := s.getTemplate(alertsTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/alerts.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleWatchersPage(w http.ResponseWriter, r *http.Request) {
+	data := pageData{
+		Title:   "Watchers",
+		Nav:     "watchers",
+		DevMode: s.isDevMode(),
+	}
+	tmpl := s.getTemplate(watchersTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/watchers.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleWatcherRunsPage(w http.ResponseWriter, r *http.Request) {
+	watcherID := chi.URLParam(r, "id")
+	data := pageData{
+		Title:     "Watcher Runs",
+		Nav:       "watchers",
+		WatcherID: watcherID,
+		DevMode:   s.isDevMode(),
+	}
+	tmpl := s.getTemplate(watcherRunsTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/watcher_runs.html")
 	tmpl.ExecuteTemplate(w, "layout", data)
 }
 
