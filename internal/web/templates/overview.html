@@ -33,7 +33,7 @@
       <a href="/alerts" class="panel-link">view all &rarr;</a>
     </div>
     <div class="overview-panel-body" id="recent-alerts">
-      <div class="empty-state"><p>no alerts</p></div>
+      <div class="empty-state"><div class="empty-icon">--</div><p>no alerts</p></div>
     </div>
   </div>
   <div class="overview-panel">
@@ -42,7 +42,7 @@
       <a href="/logs" class="panel-link">view all &rarr;</a>
     </div>
     <div class="overview-panel-body" id="recent-logs">
-      <div class="empty-state"><p>no recent logs</p></div>
+      <div class="empty-state"><div class="empty-icon">--</div><p>no recent logs</p></div>
     </div>
   </div>
 </div>
@@ -93,7 +93,7 @@
     fetch('/api/alerts?limit=5').then(function(r){ return r.json(); }).then(function(alerts){
       var container = document.getElementById('recent-alerts');
       if (!alerts || alerts.length === 0) {
-        container.innerHTML = '<div class="empty-state"><p>no alerts</p></div>';
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no alerts</p></div>';
         return;
       }
       var html = '';
@@ -120,7 +120,7 @@
     var container = document.getElementById('recent-logs');
     fetch('/api/overview').then(function(r){ return r.json(); }).then(function(d){
       if (d.logs.last_hour === 0) {
-        container.innerHTML = '<div class="empty-state"><p>no recent logs</p></div>';
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no recent logs</p></div>';
         return;
       }
       container.innerHTML = '<div class="overview-log-summary">' +

@@ -142,7 +142,7 @@
 {{end}}
 
 {{define "log-entry"}}
-<div class="log-entry collapsed" onclick="this.classList.toggle('collapsed');this.classList.toggle('expanded')">
+<div class="log-entry collapsed level-{{.Level}}" onclick="this.classList.toggle('collapsed');this.classList.toggle('expanded')">
   <div class="log-entry-meta">
     <span class="log-entry-ts">{{.Timestamp.Format "2006-01-02 15:04:05"}}</span>
     <span class="badge badge-{{.Level}}">{{.Level}}</span>
@@ -183,6 +183,7 @@
 </div>
 {{else}}
 <div class="empty-state">
+  <div class="empty-icon">--</div>
   <p>no logs found</p>
   <p>logs will appear here once ingested via POST /api/logs</p>
 </div>

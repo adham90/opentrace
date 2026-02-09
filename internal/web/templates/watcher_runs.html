@@ -30,7 +30,7 @@ function loadRuns() {
   fetch('/api/watchers/' + watcherId + '/runs').then(function(r) { return r.json(); }).then(function(runs) {
     var container = document.getElementById('runs-list');
     if (!runs || runs.length === 0) {
-      container.innerHTML = '<div class="empty-state"><p>No runs yet. This watcher has not executed.</p></div>';
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no runs yet</p><p>this watcher has not executed</p></div>';
       return;
     }
 

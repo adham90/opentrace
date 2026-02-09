@@ -9,7 +9,9 @@
 
   <div id="watchers-list" class="watchers-list">
     <div class="empty-state" id="watchers-empty">
-      <p>No watchers configured. Create one to start automated monitoring.</p>
+      <div class="empty-icon">--</div>
+      <p>no watchers configured</p>
+      <p>create one to start automated monitoring</p>
     </div>
   </div>
 </div>
@@ -168,7 +170,7 @@ function loadWatchers() {
   fetch('/api/watchers').then(function(r) { return r.json(); }).then(function(watchers) {
     var container = document.getElementById('watchers-list');
     if (!watchers || watchers.length === 0) {
-      container.innerHTML = '<div class="empty-state"><p>No watchers configured. Create one to start automated monitoring.</p></div>';
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no watchers configured</p><p>create one to start automated monitoring</p></div>';
       return;
     }
 

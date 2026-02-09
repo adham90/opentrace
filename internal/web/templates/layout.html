@@ -16,39 +16,27 @@
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
 </head>
 <body>
-  <aside class="sidebar">
-    <div class="sidebar-header">
+  <header class="topbar">
+    <div class="topbar-inner">
       <a href="/" class="logo">OPENTRACE</a>
-    </div>
-    <nav class="sidebar-nav">
-      <a href="/" class="nav-item {{if eq .Nav "overview"}}active{{end}}">
-        <span class="nav-bullet">&#9670;</span> overview
-      </a>
-      <div class="nav-section">monitor</div>
-      <a href="/alerts" class="nav-item {{if eq .Nav "alerts"}}active{{end}}">
-        <span class="nav-bullet">&#9670;</span> alerts
-        <span id="alert-badge" class="nav-badge" style="display:none">0</span>
-      </a>
-      <a href="/logs" class="nav-item {{if eq .Nav "logs"}}active{{end}}">
-        <span class="nav-bullet">&#9670;</span> logs
-      </a>
-      <div class="nav-section">configure</div>
-      <a href="/watchers" class="nav-item {{if eq .Nav "watchers"}}active{{end}}">
-        <span class="nav-bullet">&#9670;</span> watchers
-      </a>
-      <a href="/connectors" class="nav-item {{if eq .Nav "connectors"}}active{{end}}">
-        <span class="nav-bullet">&#9670;</span> connectors
-      </a>
-    </nav>
-    <div class="sidebar-footer">
-      <a href="/setup" class="nav-item {{if eq .Nav "setup"}}active{{end}}">
-        <span class="nav-bullet">&#9670;</span> setup
-      </a>
+      <nav class="topbar-nav">
+        <a href="/" class="nav-item {{if eq .Nav "overview"}}active{{end}}">overview</a>
+        <span class="nav-sep">|</span>
+        <a href="/alerts" class="nav-item {{if eq .Nav "alerts"}}active{{end}}">
+          alerts<span id="alert-badge" class="nav-badge" style="display:none">0</span>
+        </a>
+        <a href="/logs" class="nav-item {{if eq .Nav "logs"}}active{{end}}">logs</a>
+        <span class="nav-sep">|</span>
+        <a href="/watchers" class="nav-item {{if eq .Nav "watchers"}}active{{end}}">watchers</a>
+        <a href="/connectors" class="nav-item {{if eq .Nav "connectors"}}active{{end}}">connectors</a>
+        <span class="nav-sep">|</span>
+        <a href="/setup" class="nav-item {{if eq .Nav "setup"}}active{{end}}">setup</a>
+      </nav>
       <button class="theme-toggle" onclick="cycleTheme()" id="theme-btn" title="Toggle theme">
         <span id="theme-icon">&#9684;</span> <span id="theme-label">system</span>
       </button>
     </div>
-  </aside>
+  </header>
   <main class="content">
     <div class="content-container">
       {{template "content" .}}

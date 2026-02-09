@@ -9,8 +9,9 @@
 
   <div id="connectors-list" class="connectors-list">
     <div class="empty-state" id="connectors-empty">
-      <p>No connectors configured.</p>
-      <p>Click + New Connector to connect a data source.</p>
+      <div class="empty-icon">--</div>
+      <p>no connectors configured</p>
+      <p>click + new connector to connect a data source</p>
     </div>
   </div>
 </div>
@@ -75,7 +76,7 @@ function loadConnectors() {
   fetch('/api/connectors').then(function(r) { return r.json(); }).then(function(connectors) {
     var container = document.getElementById('connectors-list');
     if (!connectors || connectors.length === 0) {
-      container.innerHTML = '<div class="empty-state"><p>No connectors configured.</p><p>Click + New Connector to connect a data source.</p></div>';
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no connectors configured</p><p>click + new connector to connect a data source</p></div>';
       return;
     }
 
@@ -206,6 +207,6 @@ loadConnectors();
   {{end}}
 </div>
 {{else}}
-<div class="empty-state"><p>No connectors configured.</p><p>Click + New Connector to connect a data source.</p></div>
+<div class="empty-state"><div class="empty-icon">--</div><p>no connectors configured</p><p>click + new connector to connect a data source</p></div>
 {{end}}
 {{end}}
