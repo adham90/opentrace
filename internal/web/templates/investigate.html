@@ -149,10 +149,24 @@ function createUserBubble(content) {
   return div;
 }
 
+marked.setOptions({
+  highlight: function(code, lang) {
+    if (lang && hljs.getLanguage(lang)) {
+      return hljs.highlight(code, { language: lang }).value;
+    }
+    return hljs.highlightAuto(code).value;
+  }
+});
+
+function renderMarkdown(text) {
+  var raw = marked.parse(text);
+  return DOMPurify.sanitize(raw);
+}
+
 function createAssistantBubble(content) {
   var div = document.createElement('div');
   div.className = 'message message-assistant';
-  div.innerHTML = '<div class="message-role">assistant</div><div class="message-content"><pre>' + escapeHtml(content) + '</pre></div>';
+  div.innerHTML = '<div class="message-role">assistant</div><div class="message-content markdown-body">' + renderMarkdown(content) + '</div>';
   return div;
 }
 
