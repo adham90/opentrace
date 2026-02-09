@@ -83,6 +83,10 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 		conditions = append(conditions, "l.environment = ?")
 		args = append(args, params.Environment)
 	}
+	if params.SinceID > 0 {
+		conditions = append(conditions, "l.id > ?")
+		args = append(args, params.SinceID)
+	}
 	if params.Start != nil {
 		conditions = append(conditions, "l.timestamp >= ?")
 		args = append(args, params.Start.UTC().Format(time.RFC3339Nano))

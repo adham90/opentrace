@@ -97,6 +97,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Get("/watchers", srv.handleWatchersPage)
 	router.Get("/watchers/{id}/runs", srv.handleWatcherRunsPage)
 	router.Get("/logs", srv.handleLogsPage)
+	router.Get("/api/logs/poll", srv.handleLogsPoll)
 	router.Get("/connectors", srv.handleConnectorsPage)
 	router.Get("/setup", srv.handleSetupPage)
 

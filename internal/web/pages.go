@@ -76,6 +76,7 @@ type pageData struct {
 	LogOffset  int
 	LogLimit   int
 	HasMore    bool
+	MaxLogID   int64
 }
 
 func (s *Server) isDevMode() bool {
@@ -135,6 +136,13 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		logs = logs[:limit]
 	}
 
+	var maxID int64
+	for _, l := range logs {
+		if l.ID > maxID {
+			maxID = l.ID
+		}
+	}
+
 	data := pageData{
 		Title:      "Logs",
 		Nav:        "logs",
@@ -144,6 +152,7 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		LogOffset:  offset,
 		LogLimit:   limit,
 		HasMore:    hasMore,
+		MaxLogID:   maxID,
 		DevMode:    s.isDevMode(),
 	}
 
@@ -163,6 +172,57 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		"internal/web/templates/layout.html",
 		"internal/web/templates/logs.html")
 	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleLogsPoll(w http.ResponseWriter, r *http.Request) {
+	sinceID := int64(0)
+	if v := r.URL.Query().Get("since_id"); v != "" {
+		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil && parsed > 0 {
+			sinceID = parsed
+		}
+	}
+
+	if sinceID == 0 {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	filters := LogFilters{
+		Query:       r.URL.Query().Get("query"),
+		Service:     r.URL.Query().Get("service"),
+		Level:       r.URL.Query().Get("level"),
+		Environment: r.URL.Query().Get("environment"),
+	}
+
+	logs, err := s.logStore.Search(r.Context(), store.LogSearchParams{
+		Query:       filters.Query,
+		Service:     filters.Service,
+		Level:       filters.Level,
+		Environment: filters.Environment,
+		SinceID:     sinceID,
+		Limit:       200,
+	})
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	if len(logs) == 0 {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	var maxID int64
+	for _, l := range logs {
+		if l.ID > maxID {
+			maxID = l.ID
+		}
+	}
+
+	ft := s.getTemplate(logsFragmentTmpl, "internal/web/templates/logs.html")
+	ft.ExecuteTemplate(w, "logs-new", pageData{Logs: logs, MaxLogID: maxID})
 }
 
 func (s *Server) handleAlertsPage(w http.ResponseWriter, r *http.Request) {

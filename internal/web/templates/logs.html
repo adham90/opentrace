@@ -1,9 +1,15 @@
 {{define "content"}}
 <div class="page-header">
-  <h1><span class="prompt">$</span> logs <span class="dim">{{len .Logs}} entries</span></h1>
+  <h1><span class="prompt">$</span> logs <span class="dim" id="logs-count">{{len .Logs}} entries</span></h1>
+  <div class="actions">
+    <button id="live-toggle" class="btn btn-sm live-btn live-on" onclick="toggleLive()">
+      <span class="live-dot"></span> <span id="live-label">live</span>
+    </button>
+  </div>
 </div>
 
-<form class="log-filters" hx-get="/logs" hx-target="#logs-list" hx-swap="innerHTML" hx-trigger="submit" hx-push-url="false">
+<form class="log-filters" hx-get="/logs" hx-target="#logs-list" hx-swap="innerHTML" hx-trigger="submit" hx-push-url="false"
+      onsubmit="pauseLiveOnFilter()">
   <div class="filter-group filter-search">
     <input type="text" name="query" placeholder="search messages..." value="{{.LogFilters.Query}}">
   </div>
@@ -25,9 +31,114 @@
   <button type="submit" class="btn btn-primary btn-sm">filter</button>
 </form>
 
-<div id="logs-list">
+<div id="logs-list" data-max-id="{{.MaxLogID}}">
 {{template "logs-list" .}}
 </div>
+
+<script>
+(function(){
+  var live = true;
+  var timer = null;
+  var POLL_INTERVAL = 2000;
+
+  function getFilters() {
+    var form = document.querySelector('.log-filters');
+    if (!form) return '';
+    var params = new URLSearchParams(new FormData(form));
+    return params.toString();
+  }
+
+  function getMaxID() {
+    var el = document.getElementById('logs-list');
+    return el ? (el.getAttribute('data-max-id') || '0') : '0';
+  }
+
+  function setMaxID(id) {
+    var el = document.getElementById('logs-list');
+    if (el) el.setAttribute('data-max-id', id);
+  }
+
+  function poll() {
+    if (!live) return;
+    var sinceID = getMaxID();
+    var filters = getFilters();
+    var url = '/api/logs/poll?since_id=' + sinceID + '&' + filters;
+
+    fetch(url).then(function(r){ return r.text(); }).then(function(html){
+      if (!live) return;
+      html = html.trim();
+      if (!html) return;
+
+      var container = document.createElement('div');
+      container.innerHTML = html;
+
+      // Extract max-id from response
+      var newMaxEl = container.querySelector('[data-new-max-id]');
+      if (newMaxEl) {
+        setMaxID(newMaxEl.getAttribute('data-new-max-id'));
+        newMaxEl.remove();
+      }
+
+      var logList = document.querySelector('.log-list');
+      if (!logList) {
+        // No log list yet — replace empty state
+        var listEl = document.getElementById('logs-list');
+        if (listEl) {
+          listEl.innerHTML = '<div class="log-list">' + container.innerHTML + '</div>';
+        }
+        return;
+      }
+
+      // Prepend new entries
+      var newEntries = container.querySelectorAll('.log-entry');
+      for (var i = newEntries.length - 1; i >= 0; i--) {
+        newEntries[i].classList.add('log-entry-new');
+        logList.insertBefore(newEntries[i], logList.firstChild);
+      }
+
+      // Update count
+      var countEl = document.getElementById('logs-count');
+      if (countEl) {
+        var total = logList.querySelectorAll('.log-entry').length;
+        countEl.textContent = total + ' entries';
+      }
+    }).catch(function(){});
+  }
+
+  function startPolling() {
+    if (timer) return;
+    timer = setInterval(poll, POLL_INTERVAL);
+    poll();
+  }
+
+  function stopPolling() {
+    if (timer) { clearInterval(timer); timer = null; }
+  }
+
+  window.toggleLive = function() {
+    live = !live;
+    var btn = document.getElementById('live-toggle');
+    var label = document.getElementById('live-label');
+    if (live) {
+      btn.classList.remove('live-off');
+      btn.classList.add('live-on');
+      label.textContent = 'live';
+      startPolling();
+    } else {
+      btn.classList.remove('live-on');
+      btn.classList.add('live-off');
+      label.textContent = 'paused';
+      stopPolling();
+    }
+  };
+
+  window.pauseLiveOnFilter = function() {
+    if (live) window.toggleLive();
+  };
+
+  startPolling();
+})();
+</script>
 {{end}}
 
 {{define "log-entry"}}
@@ -83,4 +194,11 @@
 {{template "log-entry" .}}
 {{end}}
 {{template "logs-sentinel" .}}
+{{end}}
+
+{{define "logs-new"}}
+<span data-new-max-id="{{.MaxLogID}}" style="display:none"></span>
+{{range .Logs}}
+{{template "log-entry" .}}
+{{end}}
 {{end}}
