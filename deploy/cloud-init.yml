@@ -1,0 +1,102 @@
+#cloud-config
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - sqlite3
+
+write_files:
+  - path: /etc/caddy/Caddyfile
+    content: |
+      ${DOMAIN} {
+          reverse_proxy localhost:8080
+      }
+
+  - path: /opt/opentrace/.env
+    permissions: "0600"
+    content: |
+      OPENTRACE_LISTEN_ADDR=:8080
+      OPENTRACE_DATA_DIR=/opt/opentrace/data
+      OPENTRACE_LLM_PROVIDER=${LLM_PROVIDER}
+      OPENTRACE_ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      OPENTRACE_ANTHROPIC_MODEL=${ANTHROPIC_MODEL}
+      OPENTRACE_OPENAI_API_KEY=${OPENAI_API_KEY}
+      OPENTRACE_OPENAI_MODEL=${OPENAI_MODEL}
+      OPENTRACE_API_KEY=${APP_API_KEY}
+      OPENTRACE_MAX_QUERY_ROWS=500
+      OPENTRACE_STATEMENT_TIMEOUT_MS=5000
+      OPENTRACE_MAX_AGENT_STEPS=12
+      OPENTRACE_MAX_TOOL_CALLS=8
+      OPENTRACE_MAX_OBSERVATION_BYTES=8192
+
+  - path: /etc/systemd/system/opentrace.service
+    content: |
+      [Unit]
+      Description=OpenTrace
+      After=network.target docker.service
+      Requires=docker.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      WorkingDirectory=/opt/opentrace
+      ExecStart=/usr/bin/docker compose up -d --build
+      ExecStop=/usr/bin/docker compose down
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/opentrace-backup.service
+    content: |
+      [Unit]
+      Description=OpenTrace SQLite Backup
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/bin/sqlite3 /opt/opentrace/data/opentrace.db ".backup /opt/opentrace/backups/opentrace-backup.db"
+
+  - path: /etc/systemd/system/opentrace-backup.timer
+    content: |
+      [Unit]
+      Description=Daily OpenTrace backup
+
+      [Timer]
+      OnCalendar=daily
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+runcmd:
+  # Install Docker
+  - curl -fsSL https://get.docker.com | sh
+  - systemctl enable --now docker
+
+  # Install Caddy
+  - curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  - curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+  - apt-get update
+  - apt-get install -y caddy
+  - systemctl enable caddy
+
+  # Clone and start OpenTrace
+  - git clone https://github.com/adham90/opentrace.git /opt/opentrace/repo
+  - cp -r /opt/opentrace/repo/* /opt/opentrace/
+  - cp /opt/opentrace/repo/.* /opt/opentrace/ 2>/dev/null || true
+  - mkdir -p /opt/opentrace/data /opt/opentrace/backups
+
+  # Start services
+  - systemctl daemon-reload
+  - systemctl enable --now opentrace
+  - systemctl enable --now opentrace-backup.timer
+  - systemctl restart caddy
+
+  # Firewall
+  - ufw allow 22/tcp
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw --force enable
