@@ -1,10 +1,35 @@
 {{define "content"}}
+<!-- Floating expand button (visible when sidebar collapsed) -->
+<button class="sidebar-expand" id="sidebar-expand-btn" onclick="toggleSidebar()" title="expand sidebar">]</button>
+
 <div class="chat-layout">
-  <!-- Left Panel: Chat Sidebar -->
-  <div class="chat-sidebar">
-    <div class="chat-sidebar-header">
-      <button class="btn btn-primary" onclick="newChat()">+ new chat</button>
+  <!-- Left Panel: Sidebar with nav + chat list -->
+  <div class="chat-sidebar" id="chat-sidebar">
+    <!-- Brand + collapse toggle -->
+    <div class="sidebar-brand">
+      <span class="logo">OPENTRACE</span>
+      <button class="sidebar-toggle" onclick="toggleSidebar()" title="collapse sidebar">[</button>
     </div>
+
+    <!-- Navigation tabs -->
+    <nav class="sidebar-nav">
+      <a href="/" class="sidebar-nav-item active">
+        <span class="nav-icon">&#9656;</span> investigate
+      </a>
+      <a href="/logs" class="sidebar-nav-item">
+        <span class="nav-icon">&#9776;</span> logs
+      </a>
+      <a href="/connectors" class="sidebar-nav-item">
+        <span class="nav-icon">&#9881;</span> connectors
+      </a>
+    </nav>
+
+    <!-- New chat button -->
+    <div class="chat-sidebar-header">
+      <button class="btn-new-chat" onclick="newChat()">+ new chat</button>
+    </div>
+
+    <!-- Chat history list -->
     <div class="chat-list" id="chat-list"></div>
   </div>
 
@@ -12,18 +37,22 @@
   <div class="chat-main">
     <div class="message-area" id="message-area">
       <div class="empty-state" id="empty-state">
-        <span class="prompt-prefix">$</span>&nbsp; start a new investigation
+        <div class="empty-state-prompt">$_</div>
+        <div class="empty-state-text">start a new investigation</div>
+        <div class="empty-state-hint">describe an issue, ask a question, or paste an error</div>
       </div>
     </div>
 
     <div class="chat-input-area">
-      <form class="query-form" onsubmit="startInvestigation(event)">
-        <span class="prompt-prefix">&gt;&nbsp;</span>
-        <input type="text" id="query-input" placeholder="describe the issue to investigate..." autofocus autocomplete="off">
-        <select id="provider-select" title="LLM provider"></select>
-        <button type="submit" class="btn btn-primary" id="submit-btn">run</button>
-      </form>
-      <div id="status-bar" class="text-xs text-dim"></div>
+      <div class="chat-input-inner">
+        <form class="query-form" onsubmit="startInvestigation(event)">
+          <span class="prompt-prefix">&gt;&nbsp;</span>
+          <input type="text" id="query-input" placeholder="describe the issue to investigate..." autofocus autocomplete="off">
+          <select id="provider-select" title="LLM provider"></select>
+          <button type="submit" class="btn-submit" id="submit-btn">run</button>
+        </form>
+        <div id="status-bar"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -34,13 +63,32 @@ var eventSource = null;
 
 // --- Sidebar ---
 
+function toggleSidebar() {
+  var sidebar = document.getElementById('chat-sidebar');
+  var expandBtn = document.getElementById('sidebar-expand-btn');
+  sidebar.classList.toggle('collapsed');
+  var isCollapsed = sidebar.classList.contains('collapsed');
+  expandBtn.style.display = isCollapsed ? 'block' : 'none';
+  localStorage.setItem('sidebar-collapsed', isCollapsed);
+}
+
+// Restore sidebar state on load
+(function() {
+  if (localStorage.getItem('sidebar-collapsed') === 'true') {
+    var sidebar = document.getElementById('chat-sidebar');
+    var expandBtn = document.getElementById('sidebar-expand-btn');
+    if (sidebar) sidebar.classList.add('collapsed');
+    if (expandBtn) expandBtn.style.display = 'block';
+  }
+})();
+
 function loadChatList() {
   fetch('/api/chats')
     .then(function(r) { return r.json(); })
     .then(function(chats) {
       var list = document.getElementById('chat-list');
       if (!chats || chats.length === 0) {
-        list.innerHTML = '<div class="empty" style="padding:16px;">no chats yet</div>';
+        list.innerHTML = '<div class="empty" style="padding:16px;font-size:11px;color:var(--text-dim);">no chats yet</div>';
         return;
       }
       var html = '';
@@ -97,7 +145,11 @@ function deleteChat(id) {
 
 function showEmptyState() {
   var area = document.getElementById('message-area');
-  area.innerHTML = '<div class="empty-state" id="empty-state"><span class="prompt-prefix">$</span>&nbsp; start a new investigation</div>';
+  area.innerHTML = '<div class="empty-state" id="empty-state">' +
+    '<div class="empty-state-prompt">$_</div>' +
+    '<div class="empty-state-text">start a new investigation</div>' +
+    '<div class="empty-state-hint">describe an issue, ask a question, or paste an error</div>' +
+    '</div>';
 }
 
 // --- Messages ---
@@ -119,7 +171,6 @@ function renderMessages(messages) {
     } else if (msg.role === 'assistant') {
       area.appendChild(createAssistantBubble(msg.content));
     } else if (msg.role === 'tool_call') {
-      // Parse stored JSON args back into object
       var args = null;
       try { args = JSON.parse(msg.content); } catch(e) {}
       area.appendChild(createTimelineStep('tool_call', msg.content, msg.tool_name, args));
@@ -128,12 +179,10 @@ function renderMessages(messages) {
     } else if (msg.role === 'thinking') {
       area.appendChild(createTimelineStep('thinking', msg.content, '', null));
     } else if (msg.role === 'plan') {
-      // Replay stored plan with all steps completed
       var steps = [];
       try { steps = JSON.parse(msg.content); } catch(e) {}
       if (steps.length > 0) {
         var panel = createPlanPanel(steps);
-        // Mark all steps completed in replay
         for (var j = 0; j < steps.length; j++) {
           updatePlanStep(panel, steps[j].id, 'completed');
         }
@@ -148,7 +197,7 @@ function renderMessages(messages) {
 function createUserBubble(content) {
   var div = document.createElement('div');
   div.className = 'message message-user';
-  div.innerHTML = '<div class="message-role">you</div><div class="message-content"><pre>' + escapeHtml(content) + '</pre></div>';
+  div.innerHTML = '<div class="message-role">&gt; you</div><div class="message-content"><pre>' + escapeHtml(content) + '</pre></div>';
   return div;
 }
 
@@ -173,6 +222,20 @@ function createAssistantBubble(content) {
   return div;
 }
 
+function truncateText(text, maxLen) {
+  if (!text) return '';
+  // Try to extract a meaningful summary from JSON
+  var summary = text;
+  try {
+    var parsed = JSON.parse(text);
+    if (parsed.reasoning) summary = parsed.reasoning;
+    else if (parsed.type === 'tool_call' && parsed.tool) summary = 'call ' + parsed.tool;
+    else if (typeof parsed === 'string') summary = parsed;
+  } catch(e) {}
+  if (summary.length > maxLen) return summary.substring(0, maxLen) + '...';
+  return summary;
+}
+
 function createTimelineStep(stepType, content, toolName, args) {
   var div = document.createElement('div');
   div.className = 'timeline-step timeline-' + stepType;
@@ -184,12 +247,10 @@ function createTimelineStep(stepType, content, toolName, args) {
   bodyDiv.className = 'timeline-body';
 
   if (stepType === 'thinking') {
-    // Parse LLM JSON to extract a summary
     var summary = content;
     try {
       var parsed = JSON.parse(content);
       if (parsed.type === 'final_answer') {
-        // Skip thinking steps that are just final_answer wrappers
         div.style.display = 'none';
         return div;
       }
@@ -200,15 +261,27 @@ function createTimelineStep(stepType, content, toolName, args) {
       } else if (typeof parsed === 'string') {
         summary = parsed;
       }
-    } catch(e) {
-      // Not JSON, show raw text
-    }
+    } catch(e) {}
     labelDiv.textContent = 'thinking';
+    // Add inline summary
+    var summarySpan = document.createElement('span');
+    summarySpan.className = 'timeline-summary';
+    summarySpan.textContent = truncateText(summary, 60);
+    labelDiv.appendChild(summarySpan);
     var pre = document.createElement('pre');
     pre.textContent = summary;
     bodyDiv.appendChild(pre);
   } else if (stepType === 'tool_call') {
     labelDiv.textContent = 'tool: ' + (toolName || 'unknown');
+    var summarySpan = document.createElement('span');
+    summarySpan.className = 'timeline-summary';
+    if (args && typeof args === 'object') {
+      var keys = Object.keys(args);
+      summarySpan.textContent = keys.length > 0 ? truncateText(JSON.stringify(args[keys[0]]), 50) : '';
+    } else {
+      summarySpan.textContent = truncateText(content, 50);
+    }
+    labelDiv.appendChild(summarySpan);
     if (args && typeof args === 'object') {
       bodyDiv.appendChild(formatToolArgs(args));
     } else {
@@ -218,17 +291,21 @@ function createTimelineStep(stepType, content, toolName, args) {
     }
   } else if (stepType === 'observation') {
     labelDiv.textContent = 'result' + (toolName ? ' (' + toolName + ')' : '');
+    var summarySpan = document.createElement('span');
+    summarySpan.className = 'timeline-summary';
+    summarySpan.textContent = truncateText(content, 60);
+    labelDiv.appendChild(summarySpan);
     var pre = document.createElement('pre');
     pre.textContent = content;
     bodyDiv.appendChild(pre);
-    // Defer show-more check
-    setTimeout(function() { createShowMore(bodyDiv, pre); }, 0);
   } else if (stepType === 'error') {
     labelDiv.textContent = 'error';
     var pre = document.createElement('pre');
     pre.textContent = content;
     pre.style.color = 'var(--red)';
     bodyDiv.appendChild(pre);
+    // Auto-expand errors
+    div.classList.add('expanded');
   }
 
   div.appendChild(labelDiv);
@@ -265,25 +342,14 @@ function formatToolArgs(args) {
   return container;
 }
 
-function createShowMore(bodyDiv, preElement) {
-  if (preElement.scrollHeight <= 150) return;
-  bodyDiv.classList.add('clamped');
-
-  var toggle = document.createElement('span');
-  toggle.className = 'show-more-toggle';
-  toggle.textContent = 'show more';
-  toggle.onclick = function() {
-    if (bodyDiv.classList.contains('clamped')) {
-      bodyDiv.classList.remove('clamped');
-      toggle.textContent = 'show less';
-    } else {
-      bodyDiv.classList.add('clamped');
-      toggle.textContent = 'show more';
-    }
-  };
-  // Insert toggle after the bodyDiv (as sibling in the step)
-  bodyDiv.parentNode.appendChild(toggle);
-}
+// --- Click-to-expand timeline steps ---
+document.getElementById('message-area').addEventListener('click', function(e) {
+  var step = e.target.closest('.timeline-step');
+  if (!step) return;
+  // Don't toggle if clicking inside body (e.g. selecting text)
+  if (e.target.closest('.timeline-body')) return;
+  step.classList.toggle('expanded');
+});
 
 // --- Plan Panel ---
 
@@ -326,7 +392,6 @@ function updatePlanStep(panel, stepId, status) {
   for (var i = 0; i < steps.length; i++) {
     if (parseInt(steps[i].getAttribute('data-step-id')) === stepId) {
       var icon = steps[i].querySelector('.plan-step-icon');
-      // Remove old status classes
       steps[i].classList.remove('pending', 'in_progress', 'completed');
       steps[i].classList.add(status);
 
@@ -411,7 +476,6 @@ function startInvestigation(e) {
     if (data.step_type === 'plan_update') {
       updatePlanStep(null, data.step_id, data.status);
       if (data.status === 'in_progress') {
-        // Find the step description for status bar
         var panel = document.getElementById('plan-panel');
         if (panel) {
           var stepEl = panel.querySelector('[data-step-id="' + data.step_id + '"]');
@@ -435,7 +499,15 @@ function startInvestigation(e) {
       status.textContent = 'error';
     } else {
       // Inline timeline step (thinking, tool_call, observation)
-      area.appendChild(createTimelineStep(data.step_type, data.content, data.tool_name, data.args || null));
+      var stepEl = createTimelineStep(data.step_type, data.content, data.tool_name, data.args || null);
+      area.appendChild(stepEl);
+
+      // Auto-expand latest step during streaming, collapse previous
+      var allSteps = area.querySelectorAll('.timeline-step.streaming-expanded');
+      for (var s = 0; s < allSteps.length; s++) {
+        allSteps[s].classList.remove('expanded', 'streaming-expanded');
+      }
+      stepEl.classList.add('expanded', 'streaming-expanded');
 
       // Contextual status
       if (data.step_type === 'thinking') {
@@ -460,6 +532,12 @@ function startInvestigation(e) {
     btn.textContent = 'run';
     btn.classList.remove('spinner');
     input.disabled = false;
+
+    // Collapse all streaming-expanded steps
+    var allSteps = area.querySelectorAll('.timeline-step.streaming-expanded');
+    for (var s = 0; s < allSteps.length; s++) {
+      allSteps[s].classList.remove('expanded', 'streaming-expanded');
+    }
 
     if (stepCount === 0) {
       status.textContent = 'connection failed';
@@ -536,6 +614,39 @@ window.addEventListener('popstate', function(e) {
   } else {
     loadChatList();
     showEmptyState();
+  }
+});
+
+// --- Keyboard Shortcuts ---
+
+document.addEventListener('keydown', function(e) {
+  var mod = e.metaKey || e.ctrlKey;
+  if (mod && e.key === 'n') {
+    e.preventDefault();
+    newChat();
+  }
+  if (mod && e.key === 'b') {
+    e.preventDefault();
+    toggleSidebar();
+  }
+  if (e.key === 'Escape') {
+    // Cancel running stream if active
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+      var btn = document.getElementById('submit-btn');
+      var input = document.getElementById('query-input');
+      btn.disabled = false;
+      btn.textContent = 'run';
+      btn.classList.remove('spinner');
+      input.disabled = false;
+      document.getElementById('status-bar').textContent = 'cancelled';
+    }
+    document.getElementById('query-input').focus();
+  }
+  if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+    e.preventDefault();
+    document.getElementById('query-input').focus();
   }
 });
 

@@ -12,20 +12,24 @@
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
 </head>
 <body>
-  <header>
-    <div class="container">
-      <span class="logo">OPENTRACE</span>
-      <nav>
-        <a href="/" {{if eq .Nav "investigate"}}class="active"{{end}}>investigate</a>
-        <a href="/logs" {{if eq .Nav "logs"}}class="active"{{end}}>logs</a>
-        <a href="/connectors" {{if eq .Nav "connectors"}}class="active"{{end}}>connectors</a>
-      </nav>
-    </div>
-  </header>
-  <main {{if eq .Nav "investigate"}}class="investigate-layout"{{end}}>
-    <div class="container">
-      {{template "content" .}}
-    </div>
-  </main>
+  {{if eq .Nav "investigate"}}
+    {{template "content" .}}
+  {{else}}
+    <header class="header">
+      <div class="container">
+        <span class="logo">OPENTRACE</span>
+        <nav>
+          <a href="/" {{if eq .Nav "investigate"}}class="active"{{end}}>investigate</a>
+          <a href="/logs" {{if eq .Nav "logs"}}class="active"{{end}}>logs</a>
+          <a href="/connectors" {{if eq .Nav "connectors"}}class="active"{{end}}>connectors</a>
+        </nav>
+      </div>
+    </header>
+    <main>
+      <div class="container">
+        {{template "content" .}}
+      </div>
+    </main>
+  {{end}}
 </body>
 </html>{{end}}
