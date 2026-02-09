@@ -21,6 +21,11 @@ func NewLLMProvider(cfg *config.Config) (LLMProvider, error) {
 			return nil, fmt.Errorf("OPENTRACE_OPENAI_API_KEY is required for openai provider")
 		}
 		return NewOpenAIProvider(cfg.OpenAIURL, cfg.OpenAIModel, cfg.OpenAIAPIKey), nil
+	case "gemini":
+		if cfg.GeminiAPIKey == "" {
+			return nil, fmt.Errorf("OPENTRACE_GEMINI_API_KEY is required for gemini provider")
+		}
+		return NewGeminiProvider(cfg.GeminiURL, cfg.GeminiModel, cfg.GeminiAPIKey), nil
 	default:
 		return nil, fmt.Errorf("unsupported LLM provider: %q", cfg.LLMProvider)
 	}
@@ -51,6 +56,12 @@ var OpenAIModels = []ModelVariant{
 	{Name: "openai-gpt4o-mini", ModelID: "gpt-4o-mini", Label: "GPT-4o mini"},
 }
 
+// GeminiModels lists the Google Gemini model variants to register.
+var GeminiModels = []ModelVariant{
+	{Name: "gemini-flash", ModelID: "gemini-2.5-flash-preview-04-17", Label: "Gemini 2.5 Flash"},
+	{Name: "gemini-pro", ModelID: "gemini-2.5-pro-preview-05-06", Label: "Gemini 2.5 Pro"},
+}
+
 // AvailableProviders returns a list of LLM providers that have valid
 // configuration. Ollama is always included. Anthropic and OpenAI register
 // multiple model variants when their API keys are set.
@@ -74,6 +85,15 @@ func AvailableProviders(cfg *config.Config) []ProviderInfo {
 
 	if cfg.OpenAIAPIKey != "" {
 		for _, m := range OpenAIModels {
+			providers = append(providers, ProviderInfo{
+				Name:  m.Name,
+				Model: m.Label,
+			})
+		}
+	}
+
+	if cfg.GeminiAPIKey != "" {
+		for _, m := range GeminiModels {
 			providers = append(providers, ProviderInfo{
 				Name:  m.Name,
 				Model: m.Label,

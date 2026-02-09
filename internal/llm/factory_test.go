@@ -104,6 +104,43 @@ func TestNewLLMProvider_OpenAI_MissingKey(t *testing.T) {
 	}
 }
 
+func TestNewLLMProvider_Gemini(t *testing.T) {
+	cfg := &config.Config{
+		LLMProvider:  "gemini",
+		GeminiAPIKey: "test-gemini-key",
+		GeminiModel:  "gemini-2.5-flash-preview-04-17",
+		GeminiURL:    "https://generativelanguage.googleapis.com",
+	}
+
+	p, err := NewLLMProvider(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	gp, ok := p.(*GeminiProvider)
+	if !ok {
+		t.Fatalf("expected *GeminiProvider, got %T", p)
+	}
+	if gp.model != "gemini-2.5-flash-preview-04-17" {
+		t.Errorf("got model %q, want %q", gp.model, "gemini-2.5-flash-preview-04-17")
+	}
+	if gp.apiKey != "test-gemini-key" {
+		t.Errorf("got apiKey %q, want %q", gp.apiKey, "test-gemini-key")
+	}
+}
+
+func TestNewLLMProvider_Gemini_MissingKey(t *testing.T) {
+	cfg := &config.Config{
+		LLMProvider: "gemini",
+		// No API key
+	}
+
+	_, err := NewLLMProvider(cfg)
+	if err == nil {
+		t.Fatal("expected error for missing API key, got nil")
+	}
+}
+
 func TestNewLLMProvider_Unknown(t *testing.T) {
 	cfg := &config.Config{
 		LLMProvider: "gpt-magic",
@@ -137,11 +174,12 @@ func TestAvailableProviders_AllProviders(t *testing.T) {
 		OllamaModel:     "llama3.2",
 		AnthropicAPIKey:  "sk-ant-test",
 		OpenAIAPIKey:     "sk-openai-test",
+		GeminiAPIKey:     "test-gemini-key",
 	}
 
 	providers := AvailableProviders(cfg)
-	// 1 ollama + 2 anthropic + 2 openai = 5
-	wantCount := 1 + len(AnthropicModels) + len(OpenAIModels)
+	// 1 ollama + 2 anthropic + 2 openai + 2 gemini = 7
+	wantCount := 1 + len(AnthropicModels) + len(OpenAIModels) + len(GeminiModels)
 	if len(providers) != wantCount {
 		t.Fatalf("expected %d providers, got %d: %v", wantCount, len(providers), providers)
 	}
@@ -150,7 +188,7 @@ func TestAvailableProviders_AllProviders(t *testing.T) {
 	for _, p := range providers {
 		names[p.Name] = true
 	}
-	for _, want := range []string{"ollama", "anthropic-sonnet", "anthropic-haiku", "openai-gpt4o", "openai-gpt4o-mini"} {
+	for _, want := range []string{"ollama", "anthropic-sonnet", "anthropic-haiku", "openai-gpt4o", "openai-gpt4o-mini", "gemini-flash", "gemini-pro"} {
 		if !names[want] {
 			t.Errorf("expected provider %q in list", want)
 		}

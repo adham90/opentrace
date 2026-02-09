@@ -23,6 +23,9 @@ type Config struct {
 	OpenAIAPIKey    string
 	OpenAIModel     string
 	OpenAIURL       string
+	GeminiAPIKey    string
+	GeminiModel     string
+	GeminiURL       string
 
 	MaxQueryRows        int
 	StatementTimeoutMS  int
@@ -109,6 +112,9 @@ func Load() (*Config, error) {
 		OpenAIAPIKey:        os.Getenv("OPENTRACE_OPENAI_API_KEY"),
 		OpenAIModel:         envOrDefault("OPENTRACE_OPENAI_MODEL", "gpt-4o"),
 		OpenAIURL:           envOrDefault("OPENTRACE_OPENAI_URL", "https://api.openai.com"),
+		GeminiAPIKey:        os.Getenv("OPENTRACE_GEMINI_API_KEY"),
+		GeminiModel:         envOrDefault("OPENTRACE_GEMINI_MODEL", "gemini-2.5-flash-preview-04-17"),
+		GeminiURL:           envOrDefault("OPENTRACE_GEMINI_URL", "https://generativelanguage.googleapis.com"),
 		MaxQueryRows:        maxQueryRows,
 		StatementTimeoutMS:  stmtTimeout,
 		MaxAgentSteps:       maxSteps,
