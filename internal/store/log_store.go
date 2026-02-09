@@ -57,12 +57,12 @@ func (s *PgLogStore) Search(ctx context.Context, params LogSearchParams) ([]LogE
 		argN++
 	}
 	if params.Service != "" {
-		conditions = append(conditions, fmt.Sprintf("service = $%d", argN))
+		conditions = append(conditions, fmt.Sprintf("LOWER(service) = LOWER($%d)", argN))
 		args = append(args, params.Service)
 		argN++
 	}
 	if params.Level != "" {
-		conditions = append(conditions, fmt.Sprintf("level = $%d", argN))
+		conditions = append(conditions, fmt.Sprintf("LOWER(level) = LOWER($%d)", argN))
 		args = append(args, params.Level)
 		argN++
 	}
