@@ -153,6 +153,29 @@ func (s *PgWatcherStore) Update(ctx context.Context, id uuid.UUID, params Update
 	return w, nil
 }
 
+func (s *PgWatcherStore) UpdateStatus(ctx context.Context, id uuid.UUID, status WatcherStatus) (*Watcher, error) {
+	w := &Watcher{}
+	err := s.pool.QueryRow(ctx,
+		`UPDATE watchers SET status = $2, updated_at = now()
+		 WHERE id = $1
+		 RETURNING id, title, description, severity, filters, interval_seconds, status, notify,
+		           last_run_at, next_run_at, last_error, created_at, updated_at`,
+		id, status,
+	).Scan(
+		&w.ID, &w.Title, &w.Description, &w.Severity, &w.Filters,
+		&w.IntervalSeconds, &w.Status, &w.Notify,
+		&w.LastRunAt, &w.NextRunAt, &w.LastError,
+		&w.CreatedAt, &w.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("updating watcher status: %w", err)
+	}
+	return w, nil
+}
+
 func (s *PgWatcherStore) Delete(ctx context.Context, id uuid.UUID) error {
 	result, err := s.pool.Exec(ctx, `DELETE FROM watchers WHERE id = $1`, id)
 	if err != nil {

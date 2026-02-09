@@ -2,7 +2,9 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/opentrace/opentrace/internal/store"
@@ -289,4 +291,251 @@ func (m *mockMemoryStore) DeleteMemory(ctx context.Context, id uuid.UUID) error 
 		}
 	}
 	return store.ErrNotFound
+}
+
+// mockWatcherStore implements store.WatcherStore for testing.
+type mockWatcherStore struct {
+	mu       sync.Mutex
+	watchers map[uuid.UUID]*store.Watcher
+}
+
+func newMockWatcherStore() *mockWatcherStore {
+	return &mockWatcherStore{watchers: make(map[uuid.UUID]*store.Watcher)}
+}
+
+func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatcherParams) (*store.Watcher, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sev := params.Severity
+	if sev == "" {
+		sev = store.SeverityWarning
+	}
+	interval := params.IntervalSeconds
+	if interval <= 0 {
+		interval = 300
+	}
+	filters := params.Filters
+	if filters == nil {
+		filters = json.RawMessage(`{}`)
+	}
+	notify := params.Notify
+	if notify == nil {
+		notify = json.RawMessage(`["dashboard"]`)
+	}
+	now := time.Now()
+	w := &store.Watcher{
+		ID: uuid.New(), Title: params.Title, Description: params.Description,
+		Severity: sev, Filters: filters, IntervalSeconds: interval,
+		Status: store.WatcherActive, Notify: notify, NextRunAt: &now,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	m.watchers[w.ID] = w
+	return w, nil
+}
+
+func (m *mockWatcherStore) GetByID(ctx context.Context, id uuid.UUID) (*store.Watcher, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	w, ok := m.watchers[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return w, nil
+}
+
+func (m *mockWatcherStore) List(ctx context.Context) ([]store.Watcher, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]store.Watcher, 0, len(m.watchers))
+	for _, w := range m.watchers {
+		result = append(result, *w)
+	}
+	return result, nil
+}
+
+func (m *mockWatcherStore) Update(ctx context.Context, id uuid.UUID, params store.UpdateWatcherParams) (*store.Watcher, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	w, ok := m.watchers[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	if params.Title != nil {
+		w.Title = *params.Title
+	}
+	if params.Description != nil {
+		w.Description = *params.Description
+	}
+	if params.Severity != nil {
+		w.Severity = *params.Severity
+	}
+	w.UpdatedAt = time.Now()
+	return w, nil
+}
+
+func (m *mockWatcherStore) UpdateStatus(ctx context.Context, id uuid.UUID, status store.WatcherStatus) (*store.Watcher, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	w, ok := m.watchers[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	w.Status = status
+	w.UpdatedAt = time.Now()
+	return w, nil
+}
+
+func (m *mockWatcherStore) Delete(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.watchers[id]; !ok {
+		return store.ErrNotFound
+	}
+	delete(m.watchers, id)
+	return nil
+}
+
+func (m *mockWatcherStore) GetDueWatchers(ctx context.Context) ([]store.Watcher, error) {
+	return nil, nil
+}
+
+func (m *mockWatcherStore) UpdateRunTime(ctx context.Context, id uuid.UUID, lastRun, nextRun time.Time) error {
+	return nil
+}
+
+// mockWatcherRunStore implements store.WatcherRunStore for testing.
+type mockWatcherRunStore struct {
+	mu   sync.Mutex
+	runs map[uuid.UUID]*store.WatcherRun
+	byW  map[uuid.UUID][]uuid.UUID
+}
+
+func newMockWatcherRunStore() *mockWatcherRunStore {
+	return &mockWatcherRunStore{
+		runs: make(map[uuid.UUID]*store.WatcherRun),
+		byW:  make(map[uuid.UUID][]uuid.UUID),
+	}
+}
+
+func (m *mockWatcherRunStore) Create(ctx context.Context, watcherID uuid.UUID) (*store.WatcherRun, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r := &store.WatcherRun{ID: uuid.New(), WatcherID: watcherID, StartedAt: time.Now(), Status: "running", CreatedAt: time.Now()}
+	m.runs[r.ID] = r
+	m.byW[watcherID] = append(m.byW[watcherID], r.ID)
+	return r, nil
+}
+
+func (m *mockWatcherRunStore) Complete(ctx context.Context, id uuid.UUID, summary string, details any, hasAlert bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r := m.runs[id]
+	if r == nil {
+		return store.ErrNotFound
+	}
+	now := time.Now()
+	r.Status = "completed"
+	r.Summary = &summary
+	r.HasAlert = hasAlert
+	r.FinishedAt = &now
+	return nil
+}
+
+func (m *mockWatcherRunStore) Fail(ctx context.Context, id uuid.UUID, errMsg string) error {
+	return nil
+}
+
+func (m *mockWatcherRunStore) List(ctx context.Context, watcherID uuid.UUID, limit int) ([]store.WatcherRun, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []store.WatcherRun
+	for _, id := range m.byW[watcherID] {
+		if r := m.runs[id]; r != nil {
+			result = append(result, *r)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockWatcherRunStore) GetByID(ctx context.Context, id uuid.UUID) (*store.WatcherRun, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r := m.runs[id]
+	if r == nil {
+		return nil, store.ErrNotFound
+	}
+	return r, nil
+}
+
+// mockAlertStore implements store.AlertStore for testing.
+type mockAlertStore struct {
+	mu     sync.Mutex
+	alerts map[uuid.UUID]*store.Alert
+}
+
+func newMockAlertStore() *mockAlertStore {
+	return &mockAlertStore{alerts: make(map[uuid.UUID]*store.Alert)}
+}
+
+func (m *mockAlertStore) Create(ctx context.Context, params store.CreateAlertParams) (*store.Alert, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sev := params.Severity
+	if sev == "" {
+		sev = store.SeverityWarning
+	}
+	a := &store.Alert{
+		ID: uuid.New(), WatcherID: params.WatcherID, RunID: params.RunID,
+		Title: params.Title, Summary: params.Summary, Severity: sev,
+		Details: params.Details, CreatedAt: time.Now(),
+	}
+	m.alerts[a.ID] = a
+	return a, nil
+}
+
+func (m *mockAlertStore) List(ctx context.Context, params store.ListAlertParams) ([]store.Alert, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]store.Alert, 0, len(m.alerts))
+	for _, a := range m.alerts {
+		if params.UnreadOnly && (a.Read || a.Dismissed) {
+			continue
+		}
+		result = append(result, *a)
+	}
+	return result, nil
+}
+
+func (m *mockAlertStore) CountUnread(ctx context.Context) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, a := range m.alerts {
+		if !a.Read && !a.Dismissed {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (m *mockAlertStore) MarkRead(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.alerts[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	a.Read = true
+	return nil
+}
+
+func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.alerts[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	a.Dismissed = true
+	return nil
 }

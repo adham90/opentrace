@@ -18,6 +18,7 @@ import (
 	"github.com/opentrace/opentrace/internal/connector"
 	"github.com/opentrace/opentrace/internal/llm"
 	"github.com/opentrace/opentrace/internal/store"
+	"github.com/opentrace/opentrace/internal/watcher"
 )
 
 // Server holds the HTTP server and its dependencies.
@@ -28,48 +29,93 @@ type Server struct {
 	embStore     store.EmbeddingStore
 	chatStore    store.ChatStore
 	memoryStore  store.MemoryStore
+	watcherStore store.WatcherStore
+	runStore     store.WatcherRunStore
+	alertStore   store.AlertStore
 	registry     *connector.Registry
 	cfg          *config.Config
 	embedder     llm.EmbeddingProvider
 	llmProvider  llm.LLMProvider
 	llmProviders map[string]llm.LLMProvider
+	executor     *watcher.Executor
 	logsConnMu   sync.Mutex
+}
+
+// ServerDeps holds all dependencies for the web server.
+type ServerDeps struct {
+	DSStore      store.DataSourceStore
+	LogStore     store.LogStore
+	EmbStore     store.EmbeddingStore
+	ChatStore    store.ChatStore
+	MemoryStore  store.MemoryStore
+	WatcherStore store.WatcherStore
+	RunStore     store.WatcherRunStore
+	AlertStore   store.AlertStore
+	Registry     *connector.Registry
+	Cfg          *config.Config
+	Embedder     llm.EmbeddingProvider
+	LLMProviders map[string]llm.LLMProvider
+	DefaultProvider string
+	Executor     *watcher.Executor
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
 func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore store.EmbeddingStore, chatStore store.ChatStore, memoryStore store.MemoryStore, registry *connector.Registry, cfg *config.Config, embedder llm.EmbeddingProvider, llmProviders map[string]llm.LLMProvider, defaultProvider string) *Server {
+	return NewServerWithDeps(ServerDeps{
+		DSStore:         dsStore,
+		LogStore:        logStore,
+		EmbStore:        embStore,
+		ChatStore:       chatStore,
+		MemoryStore:     memoryStore,
+		Registry:        registry,
+		Cfg:             cfg,
+		Embedder:        embedder,
+		LLMProviders:    llmProviders,
+		DefaultProvider: defaultProvider,
+	})
+}
+
+// NewServerWithDeps creates a new Server using the ServerDeps struct.
+func NewServerWithDeps(deps ServerDeps) *Server {
 	srv := &Server{
-		dsStore:      dsStore,
-		logStore:     logStore,
-		embStore:     embStore,
-		chatStore:    chatStore,
-		memoryStore:  memoryStore,
-		registry:     registry,
-		cfg:          cfg,
-		embedder:     embedder,
-		llmProviders: llmProviders,
+		dsStore:      deps.DSStore,
+		logStore:     deps.LogStore,
+		embStore:     deps.EmbStore,
+		chatStore:    deps.ChatStore,
+		memoryStore:  deps.MemoryStore,
+		watcherStore: deps.WatcherStore,
+		runStore:     deps.RunStore,
+		alertStore:   deps.AlertStore,
+		registry:     deps.Registry,
+		cfg:          deps.Cfg,
+		embedder:     deps.Embedder,
+		llmProviders: deps.LLMProviders,
+		executor:     deps.Executor,
 	}
+	defaultProvider := deps.DefaultProvider
 
 	// Set default LLM provider from the map.
 	// Map legacy names ("anthropic", "openai") to their default variants.
-	if defaultProvider != "" && llmProviders != nil {
-		srv.llmProvider = llmProviders[defaultProvider]
+	if defaultProvider != "" && deps.LLMProviders != nil {
+		srv.llmProvider = deps.LLMProviders[defaultProvider]
 		if srv.llmProvider == nil {
 			legacyMap := map[string]string{
 				"anthropic": "anthropic-sonnet",
 				"openai":    "openai-gpt4o",
 			}
 			if mapped, ok := legacyMap[defaultProvider]; ok {
-				srv.llmProvider = llmProviders[mapped]
+				srv.llmProvider = deps.LLMProviders[mapped]
 			}
 		}
 	}
 	// Fallback: if no provider set from map, try type assertion from embedder
 	if srv.llmProvider == nil {
-		if lp, ok := embedder.(llm.LLMProvider); ok {
+		if lp, ok := deps.Embedder.(llm.LLMProvider); ok {
 			srv.llmProvider = lp
 		}
 	}
+
+	cfg := deps.Cfg
 
 	router := chi.NewRouter()
 	router.Use(middleware.Logger)
@@ -122,6 +168,24 @@ func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore 
 
 		// Provider API
 		r.Get("/providers", srv.handleListProviders)
+
+		// Watcher API
+		r.Post("/watchers", srv.handleCreateWatcher)
+		r.Get("/watchers", srv.handleListWatchers)
+		r.Get("/watchers/{id}", srv.handleGetWatcher)
+		r.Put("/watchers/{id}", srv.handleUpdateWatcher)
+		r.Delete("/watchers/{id}", srv.handleDeleteWatcher)
+		r.Post("/watchers/{id}/pause", srv.handlePauseWatcher)
+		r.Post("/watchers/{id}/resume", srv.handleResumeWatcher)
+		r.Post("/watchers/{id}/run", srv.handleRunWatcherNow)
+		r.Get("/watchers/{id}/runs", srv.handleListWatcherRuns)
+		r.Get("/watchers/{id}/runs/{runId}", srv.handleGetWatcherRun)
+
+		// Alert API
+		r.Get("/alerts", srv.handleListAlerts)
+		r.Get("/alerts/count", srv.handleAlertCount)
+		r.Post("/alerts/{id}/read", srv.handleMarkAlertRead)
+		r.Post("/alerts/{id}/dismiss", srv.handleDismissAlert)
 
 		// Dev-mode live-reload endpoint
 		if cfg != nil && cfg.DevMode {

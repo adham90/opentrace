@@ -197,6 +197,9 @@ func (m *mockWatcherStore) List(ctx context.Context) ([]store.Watcher, error) { 
 func (m *mockWatcherStore) Update(ctx context.Context, id uuid.UUID, params store.UpdateWatcherParams) (*store.Watcher, error) {
 	return nil, nil
 }
+func (m *mockWatcherStore) UpdateStatus(ctx context.Context, id uuid.UUID, status store.WatcherStatus) (*store.Watcher, error) {
+	return nil, nil
+}
 func (m *mockWatcherStore) Delete(ctx context.Context, id uuid.UUID) error { return nil }
 func (m *mockWatcherStore) GetDueWatchers(ctx context.Context) ([]store.Watcher, error) {
 	return nil, nil

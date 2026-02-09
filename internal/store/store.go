@@ -59,6 +59,7 @@ type WatcherStore interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*Watcher, error)
 	List(ctx context.Context) ([]Watcher, error)
 	Update(ctx context.Context, id uuid.UUID, params UpdateWatcherParams) (*Watcher, error)
+	UpdateStatus(ctx context.Context, id uuid.UUID, status WatcherStatus) (*Watcher, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 	GetDueWatchers(ctx context.Context) ([]Watcher, error)
 	UpdateRunTime(ctx context.Context, id uuid.UUID, lastRun, nextRun time.Time) error
