@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
 	"github.com/opentrace/opentrace/internal/store"
 )
 
@@ -53,6 +56,7 @@ type pageData struct {
 	Title      string
 	Nav        string
 	Content    string
+	ChatID     string
 	Connectors interface{}
 	Logs       []store.LogEntry
 	LogFilters LogFilters
@@ -63,6 +67,34 @@ func (s *Server) handleInvestigatePage(w http.ResponseWriter, r *http.Request) {
 		Title:   "Investigate",
 		Nav:     "investigate",
 		Content: "investigate",
+	}
+	investigateTmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	chatID, err := uuid.Parse(idStr)
+	if err != nil {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+
+	if s.chatStore == nil {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+
+	_, err = s.chatStore.GetChat(r.Context(), chatID)
+	if err != nil {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+
+	data := pageData{
+		Title:   "Investigate",
+		Nav:     "investigate",
+		Content: "investigate",
+		ChatID:  chatID.String(),
 	}
 	investigateTmpl.ExecuteTemplate(w, "layout", data)
 }

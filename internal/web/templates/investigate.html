@@ -29,7 +29,7 @@
 </div>
 
 <script>
-var currentChatId = null;
+var currentChatId = {{if .ChatID}}"{{.ChatID}}"{{else}}null{{end}};
 var eventSource = null;
 
 // --- Sidebar ---
@@ -47,13 +47,13 @@ function loadChatList() {
       for (var i = 0; i < chats.length; i++) {
         var c = chats[i];
         var isActive = currentChatId === c.id;
-        html += '<div class="chat-list-item' + (isActive ? ' active' : '') + '" onclick="selectChat(\'' + c.id + '\')">';
+        html += '<a href="/chats/' + c.id + '" class="chat-list-item' + (isActive ? ' active' : '') + '" onclick="event.preventDefault();selectChat(\'' + c.id + '\')">';
         html += '<div class="chat-info">';
         html += '<div class="chat-title">' + escapeHtml(c.title || 'Untitled') + '</div>';
         html += '<div class="chat-time">' + relativeTime(c.updated_at) + '</div>';
         html += '</div>';
-        html += '<button class="chat-delete" onclick="event.stopPropagation();deleteChat(\'' + c.id + '\')" title="delete">&times;</button>';
-        html += '</div>';
+        html += '<button class="chat-delete" onclick="event.preventDefault();event.stopPropagation();deleteChat(\'' + c.id + '\')" title="delete">&times;</button>';
+        html += '</a>';
       }
       list.innerHTML = html;
     })
@@ -62,6 +62,7 @@ function loadChatList() {
 
 function selectChat(id) {
   currentChatId = id;
+  history.pushState({chatId: id}, '', '/chats/' + id);
   loadChatList();
   fetch('/api/chats/' + id)
     .then(function(r) { return r.json(); })
@@ -75,6 +76,7 @@ function selectChat(id) {
 
 function newChat() {
   currentChatId = null;
+  history.pushState({chatId: null}, '', '/');
   loadChatList();
   showEmptyState();
   document.getElementById('query-input').focus();
@@ -85,6 +87,7 @@ function deleteChat(id) {
     .then(function() {
       if (currentChatId === id) {
         currentChatId = null;
+        history.pushState({chatId: null}, '', '/');
         showEmptyState();
       }
       loadChatList();
@@ -391,6 +394,7 @@ function startInvestigation(e) {
     // Handle chat_id event
     if (data.step_type === 'chat_id') {
       currentChatId = data.content;
+      history.pushState({chatId: data.content}, '', '/chats/' + data.content);
       loadChatList();
       return;
     }
@@ -514,8 +518,40 @@ function loadProviders() {
     .catch(function() {});
 }
 
+// --- Browser Navigation ---
+
+window.addEventListener('popstate', function(e) {
+  var chatId = (e.state && e.state.chatId) ? e.state.chatId : null;
+  currentChatId = chatId;
+  if (chatId) {
+    loadChatList();
+    fetch('/api/chats/' + chatId)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        renderMessages(data.messages || []);
+      })
+      .catch(function() {
+        showEmptyState();
+      });
+  } else {
+    loadChatList();
+    showEmptyState();
+  }
+});
+
 // --- Init ---
 loadChatList();
 loadProviders();
+if (currentChatId) {
+  history.replaceState({chatId: currentChatId}, '', '/chats/' + currentChatId);
+  fetch('/api/chats/' + currentChatId)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      renderMessages(data.messages || []);
+    })
+    .catch(function() {
+      showEmptyState();
+    });
+}
 </script>
 {{end}}
