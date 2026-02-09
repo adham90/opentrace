@@ -32,6 +32,82 @@ func TestNewLLMProvider_Ollama(t *testing.T) {
 	}
 }
 
+func TestNewLLMProvider_Anthropic(t *testing.T) {
+	cfg := &config.Config{
+		LLMProvider:     "anthropic",
+		AnthropicAPIKey: "sk-ant-test",
+		AnthropicModel:  "claude-sonnet-4-20250514",
+		AnthropicURL:    "https://api.anthropic.com",
+	}
+
+	p, err := NewLLMProvider(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ap, ok := p.(*AnthropicProvider)
+	if !ok {
+		t.Fatalf("expected *AnthropicProvider, got %T", p)
+	}
+	if ap.model != "claude-sonnet-4-20250514" {
+		t.Errorf("got model %q, want %q", ap.model, "claude-sonnet-4-20250514")
+	}
+	if ap.apiKey != "sk-ant-test" {
+		t.Errorf("got apiKey %q, want %q", ap.apiKey, "sk-ant-test")
+	}
+}
+
+func TestNewLLMProvider_Anthropic_MissingKey(t *testing.T) {
+	cfg := &config.Config{
+		LLMProvider: "anthropic",
+		// No API key
+	}
+
+	_, err := NewLLMProvider(cfg)
+	if err == nil {
+		t.Fatal("expected error for missing API key, got nil")
+	}
+}
+
+func TestNewLLMProvider_OpenAI(t *testing.T) {
+	cfg := &config.Config{
+		LLMProvider:        "openai",
+		OpenAIAPIKey:       "sk-openai-test",
+		OpenAIModel:        "gpt-4o",
+		OpenAIURL:          "https://api.openai.com",
+		EmbeddingModel:     "text-embedding-3-small",
+		EmbeddingDimension: 1536,
+	}
+
+	p, err := NewLLMProvider(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	op, ok := p.(*OpenAIProvider)
+	if !ok {
+		t.Fatalf("expected *OpenAIProvider, got %T", p)
+	}
+	if op.model != "gpt-4o" {
+		t.Errorf("got model %q, want %q", op.model, "gpt-4o")
+	}
+	if op.apiKey != "sk-openai-test" {
+		t.Errorf("got apiKey %q, want %q", op.apiKey, "sk-openai-test")
+	}
+}
+
+func TestNewLLMProvider_OpenAI_MissingKey(t *testing.T) {
+	cfg := &config.Config{
+		LLMProvider: "openai",
+		// No API key
+	}
+
+	_, err := NewLLMProvider(cfg)
+	if err == nil {
+		t.Fatal("expected error for missing API key, got nil")
+	}
+}
+
 func TestNewLLMProvider_Unknown(t *testing.T) {
 	cfg := &config.Config{
 		LLMProvider: "gpt-magic",
@@ -69,6 +145,42 @@ func TestNewEmbeddingProvider_Ollama(t *testing.T) {
 	}
 }
 
+func TestNewEmbeddingProvider_OpenAI(t *testing.T) {
+	cfg := &config.Config{
+		EmbeddingProvider:  "openai",
+		OpenAIAPIKey:       "sk-openai-test",
+		OpenAIURL:          "https://api.openai.com",
+		OpenAIModel:        "gpt-4o",
+		EmbeddingModel:     "text-embedding-3-small",
+		EmbeddingDimension: 1536,
+	}
+
+	p, err := NewEmbeddingProvider(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	op, ok := p.(*OpenAIProvider)
+	if !ok {
+		t.Fatalf("expected *OpenAIProvider, got %T", p)
+	}
+	if op.Dimension() != 1536 {
+		t.Errorf("got dimension %d, want 1536", op.Dimension())
+	}
+}
+
+func TestNewEmbeddingProvider_OpenAI_MissingKey(t *testing.T) {
+	cfg := &config.Config{
+		EmbeddingProvider: "openai",
+		// No API key
+	}
+
+	_, err := NewEmbeddingProvider(cfg)
+	if err == nil {
+		t.Fatal("expected error for missing API key, got nil")
+	}
+}
+
 func TestNewEmbeddingProvider_Unknown(t *testing.T) {
 	cfg := &config.Config{
 		EmbeddingProvider: "deepmind",
@@ -77,5 +189,60 @@ func TestNewEmbeddingProvider_Unknown(t *testing.T) {
 	_, err := NewEmbeddingProvider(cfg)
 	if err == nil {
 		t.Fatal("expected error for unknown provider, got nil")
+	}
+}
+
+func TestAvailableProviders_OllamaOnly(t *testing.T) {
+	cfg := &config.Config{
+		OllamaModel: "llama3.2",
+	}
+
+	providers := AvailableProviders(cfg)
+	if len(providers) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(providers))
+	}
+	if providers[0].Name != "ollama" {
+		t.Errorf("expected ollama, got %q", providers[0].Name)
+	}
+	if providers[0].Model != "llama3.2" {
+		t.Errorf("expected llama3.2, got %q", providers[0].Model)
+	}
+}
+
+func TestAvailableProviders_AllThree(t *testing.T) {
+	cfg := &config.Config{
+		OllamaModel:    "llama3.2",
+		AnthropicAPIKey: "sk-ant-test",
+		AnthropicModel:  "claude-sonnet-4-20250514",
+		OpenAIAPIKey:    "sk-openai-test",
+		OpenAIModel:     "gpt-4o",
+	}
+
+	providers := AvailableProviders(cfg)
+	if len(providers) != 3 {
+		t.Fatalf("expected 3 providers, got %d", len(providers))
+	}
+
+	names := make(map[string]bool)
+	for _, p := range providers {
+		names[p.Name] = true
+	}
+	for _, want := range []string{"ollama", "anthropic", "openai"} {
+		if !names[want] {
+			t.Errorf("expected provider %q in list", want)
+		}
+	}
+}
+
+func TestAvailableProviders_AnthropicOnly(t *testing.T) {
+	cfg := &config.Config{
+		OllamaModel:    "llama3.2",
+		AnthropicAPIKey: "sk-ant-test",
+		AnthropicModel:  "claude-sonnet-4-20250514",
+	}
+
+	providers := AvailableProviders(cfg)
+	if len(providers) != 2 {
+		t.Fatalf("expected 2 providers, got %d", len(providers))
 	}
 }

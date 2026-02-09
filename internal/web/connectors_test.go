@@ -16,7 +16,7 @@ import (
 func setupTestServer() (*Server, *mockDataSourceStore) {
 	ms := newMockStore()
 	reg := connector.NewRegistry()
-	srv := NewServer(ms, newMockLogStore(), newMockEmbeddingStore(), nil, nil, reg, nil, nil)
+	srv := NewServer(ms, newMockLogStore(), newMockEmbeddingStore(), nil, nil, reg, nil, nil, nil, "")
 	return srv, ms
 }
 

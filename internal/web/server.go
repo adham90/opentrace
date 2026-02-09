@@ -16,34 +16,43 @@ import (
 
 // Server holds the HTTP server and its dependencies.
 type Server struct {
-	Router            chi.Router
-	dsStore           store.DataSourceStore
-	logStore          store.LogStore
-	embStore          store.EmbeddingStore
-	chatStore         store.ChatStore
-	memoryStore       store.MemoryStore
-	registry          *connector.Registry
-	cfg               *config.Config
-	embedder          llm.EmbeddingProvider
+	Router       chi.Router
+	dsStore      store.DataSourceStore
+	logStore     store.LogStore
+	embStore     store.EmbeddingStore
+	chatStore    store.ChatStore
+	memoryStore  store.MemoryStore
+	registry     *connector.Registry
+	cfg          *config.Config
+	embedder     llm.EmbeddingProvider
 	llmProvider  llm.LLMProvider
-	logsConnMu  sync.Mutex
+	llmProviders map[string]llm.LLMProvider
+	logsConnMu   sync.Mutex
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
-func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore store.EmbeddingStore, chatStore store.ChatStore, memoryStore store.MemoryStore, registry *connector.Registry, cfg *config.Config, embedder llm.EmbeddingProvider) *Server {
+func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore store.EmbeddingStore, chatStore store.ChatStore, memoryStore store.MemoryStore, registry *connector.Registry, cfg *config.Config, embedder llm.EmbeddingProvider, llmProviders map[string]llm.LLMProvider, defaultProvider string) *Server {
 	srv := &Server{
-		dsStore:     dsStore,
-		logStore:    logStore,
-		embStore:    embStore,
-		chatStore:   chatStore,
-		memoryStore: memoryStore,
-		registry:    registry,
-		cfg:         cfg,
-		embedder:    embedder,
+		dsStore:      dsStore,
+		logStore:     logStore,
+		embStore:     embStore,
+		chatStore:    chatStore,
+		memoryStore:  memoryStore,
+		registry:     registry,
+		cfg:          cfg,
+		embedder:     embedder,
+		llmProviders: llmProviders,
 	}
-	// If the embedder also implements LLMProvider (e.g. OllamaProvider), use it
-	if lp, ok := embedder.(llm.LLMProvider); ok {
-		srv.llmProvider = lp
+
+	// Set default LLM provider from the map
+	if defaultProvider != "" && llmProviders != nil {
+		srv.llmProvider = llmProviders[defaultProvider]
+	}
+	// Fallback: if no provider set from map, try type assertion from embedder
+	if srv.llmProvider == nil {
+		if lp, ok := embedder.(llm.LLMProvider); ok {
+			srv.llmProvider = lp
+		}
 	}
 
 	router := chi.NewRouter()
@@ -87,6 +96,9 @@ func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore 
 		// Memory API
 		r.Get("/memory", srv.handleListMemories)
 		r.Delete("/memory/{id}", srv.handleDeleteMemory)
+
+		// Provider API
+		r.Get("/providers", srv.handleListProviders)
 	})
 
 	srv.Router = router
@@ -99,4 +111,13 @@ func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
 		"llm":    s.llmProvider != nil,
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
+	if s.cfg == nil {
+		writeJSON(w, http.StatusOK, []llm.ProviderInfo{})
+		return
+	}
+	providers := llm.AvailableProviders(s.cfg)
+	writeJSON(w, http.StatusOK, providers)
 }

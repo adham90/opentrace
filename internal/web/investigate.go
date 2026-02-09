@@ -40,7 +40,18 @@ func (s *Server) handleInvestigateSSE(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
-	if s.llmProvider == nil {
+	// Select LLM provider: query param > default
+	selectedProvider := s.llmProvider
+	if providerName := r.URL.Query().Get("provider"); providerName != "" && s.llmProviders != nil {
+		if p, ok := s.llmProviders[providerName]; ok {
+			selectedProvider = p
+		} else {
+			sendEvent("error", fmt.Sprintf("Unknown provider: %q. Check /api/providers for available options.", providerName), "")
+			return
+		}
+	}
+
+	if selectedProvider == nil {
 		sendEvent("error", "No LLM provider configured. Set OPENTRACE_OLLAMA_URL and ensure Ollama is running.", "")
 		return
 	}
@@ -113,7 +124,7 @@ func (s *Server) handleInvestigateSSE(w http.ResponseWriter, r *http.Request) {
 		cfg.MaxObservationBytes = s.cfg.MaxObservationBytes
 	}
 
-	ag := agent.New(s.llmProvider, cfg)
+	ag := agent.New(selectedProvider, cfg)
 
 	// Run with callback for SSE events, persisting messages as they happen
 	ctx := r.Context()

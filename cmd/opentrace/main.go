@@ -78,8 +78,12 @@ func run() error {
 	// Auto-register system connector (memory tools)
 	registry.Register(connector.NewSystemConnector(memoryStore))
 
+	// Build map of all available LLM providers
+	llmProviders := buildProviderMap(cfg)
+	defaultProvider := cfg.LLMProvider
+
 	// Create server
-	srv := web.NewServer(dsStore, logStore, embStore, chatStore, memoryStore, registry, cfg, embedder)
+	srv := web.NewServer(dsStore, logStore, embStore, chatStore, memoryStore, registry, cfg, embedder, llmProviders, defaultProvider)
 
 	httpServer := &http.Server{
 		Addr:    cfg.ListenAddr,
@@ -146,6 +150,42 @@ func reconnectConnectors(ctx context.Context, dsStore store.DataSourceStore, log
 		registry.Register(c)
 		log.Printf("reconnected connector %q (%s)", ds.Name, ds.Type)
 	}
+}
+
+// buildProviderMap creates all available LLM providers from config.
+// Ollama is always attempted. Anthropic and OpenAI require API keys.
+func buildProviderMap(cfg *config.Config) map[string]llm.LLMProvider {
+	providers := make(map[string]llm.LLMProvider)
+
+	// Ollama — always available (local)
+	providers["ollama"] = llm.NewOllamaProvider(
+		cfg.OllamaURL,
+		cfg.OllamaModel,
+		cfg.EmbeddingModel,
+		cfg.EmbeddingDimension,
+	)
+
+	if cfg.AnthropicAPIKey != "" {
+		providers["anthropic"] = llm.NewAnthropicProvider(
+			cfg.AnthropicURL,
+			cfg.AnthropicModel,
+			cfg.AnthropicAPIKey,
+		)
+		log.Printf("anthropic provider available (model: %s)", cfg.AnthropicModel)
+	}
+
+	if cfg.OpenAIAPIKey != "" {
+		providers["openai"] = llm.NewOpenAIProvider(
+			cfg.OpenAIURL,
+			cfg.OpenAIModel,
+			cfg.EmbeddingModel,
+			cfg.EmbeddingDimension,
+			cfg.OpenAIAPIKey,
+		)
+		log.Printf("openai provider available (model: %s)", cfg.OpenAIModel)
+	}
+
+	return providers
 }
 
 func defaultMigrationsPath() string {

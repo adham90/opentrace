@@ -20,6 +20,7 @@
       <form class="query-form" onsubmit="startInvestigation(event)">
         <span class="prompt-prefix" style="line-height:34px;">>&nbsp;</span>
         <input type="text" id="query-input" placeholder="describe the issue to investigate..." autofocus autocomplete="off">
+        <select id="provider-select" title="LLM provider" style="background:#1a1a2e;color:#e0e0e0;border:1px solid #333;border-radius:4px;padding:4px 8px;font-size:12px;font-family:inherit;margin-right:4px;"></select>
         <button type="submit" class="btn btn-primary" id="submit-btn">run</button>
       </form>
       <div id="status-bar" class="text-xs text-dim"></div>
@@ -279,6 +280,10 @@ function startInvestigation(e) {
   if (currentChatId) {
     url += '&chat_id=' + encodeURIComponent(currentChatId);
   }
+  var providerSelect = document.getElementById('provider-select');
+  if (providerSelect && providerSelect.value) {
+    url += '&provider=' + encodeURIComponent(providerSelect.value);
+  }
 
   // Streaming state
   var stepCount = 0;
@@ -377,7 +382,27 @@ function relativeTime(dateStr) {
   return then.toLocaleDateString();
 }
 
+// --- Providers ---
+
+function loadProviders() {
+  fetch('/api/providers')
+    .then(function(r) { return r.json(); })
+    .then(function(providers) {
+      var sel = document.getElementById('provider-select');
+      sel.innerHTML = '';
+      if (!providers || providers.length === 0) return;
+      for (var i = 0; i < providers.length; i++) {
+        var opt = document.createElement('option');
+        opt.value = providers[i].name;
+        opt.textContent = providers[i].name + ' (' + providers[i].model + ')';
+        sel.appendChild(opt);
+      }
+    })
+    .catch(function() {});
+}
+
 // --- Init ---
 loadChatList();
+loadProviders();
 </script>
 {{end}}

@@ -29,7 +29,7 @@ func TestAppStartup(t *testing.T) {
 	registry := connector.NewRegistry()
 	chatStore := store.NewPgChatStore(pool)
 	memoryStore := store.NewPgMemoryStore(pool)
-	srv := web.NewServer(dsStore, logStore, embStore, chatStore, memoryStore, registry, nil, nil)
+	srv := web.NewServer(dsStore, logStore, embStore, chatStore, memoryStore, registry, nil, nil, nil, "")
 
 	// Find a free port
 	listener, err := net.Listen("tcp", ":0")

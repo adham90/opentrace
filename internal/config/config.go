@@ -19,6 +19,13 @@ type Config struct {
 	ListenAddr         string
 	APIKey             string
 
+	AnthropicAPIKey string
+	AnthropicModel  string
+	AnthropicURL    string
+	OpenAIAPIKey    string
+	OpenAIModel     string
+	OpenAIURL       string
+
 	MaxQueryRows        int
 	StatementTimeoutMS  int
 	MaxAgentSteps       int
@@ -100,6 +107,12 @@ func Load() (*Config, error) {
 		EmbeddingDimension:  embDim,
 		ListenAddr:          envOrDefault("OPENTRACE_LISTEN_ADDR", ":8080"),
 		APIKey:              os.Getenv("OPENTRACE_API_KEY"),
+		AnthropicAPIKey:     os.Getenv("OPENTRACE_ANTHROPIC_API_KEY"),
+		AnthropicModel:      envOrDefault("OPENTRACE_ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
+		AnthropicURL:        envOrDefault("OPENTRACE_ANTHROPIC_URL", "https://api.anthropic.com"),
+		OpenAIAPIKey:        os.Getenv("OPENTRACE_OPENAI_API_KEY"),
+		OpenAIModel:         envOrDefault("OPENTRACE_OPENAI_MODEL", "gpt-4o"),
+		OpenAIURL:           envOrDefault("OPENTRACE_OPENAI_URL", "https://api.openai.com"),
 		MaxQueryRows:        maxQueryRows,
 		StatementTimeoutMS:  stmtTimeout,
 		MaxAgentSteps:       maxSteps,
