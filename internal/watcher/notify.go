@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/opentrace/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 // Notifier sends alert notifications.

@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/opentrace/opentrace/internal/connector"
-	"github.com/opentrace/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 type ingestLogEntry struct {

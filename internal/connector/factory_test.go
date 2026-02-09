@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/opentrace/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 func TestCreateConnector_Logs(t *testing.T) {

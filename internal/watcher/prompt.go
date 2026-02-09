@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opentrace/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 // WatcherFilters represents the parsed filter configuration for a watcher.

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/opentrace/opentrace/internal/config"
-	"github.com/opentrace/opentrace/internal/connector"
-	"github.com/opentrace/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/config"
+	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 func setupTestServerWithLogStore() (*Server, *mockLogStore) {

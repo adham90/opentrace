@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/opentrace/opentrace/internal/config"
-	"github.com/opentrace/opentrace/internal/connector"
-	mcpserver "github.com/opentrace/opentrace/internal/mcp"
-	"github.com/opentrace/opentrace/internal/store"
-	"github.com/opentrace/opentrace/internal/web"
+	"github.com/adham90/opentrace/internal/config"
+	"github.com/adham90/opentrace/internal/connector"
+	mcpserver "github.com/adham90/opentrace/internal/mcp"
+	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/web"
 )
 
 // appDeps holds shared application dependencies initialized by initApp.

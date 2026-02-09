@@ -3,7 +3,7 @@ package llm
 import (
 	"fmt"
 
-	"github.com/opentrace/opentrace/internal/config"
+	"github.com/adham90/opentrace/internal/config"
 )
 
 // NewLLMProvider creates an LLMProvider based on config.

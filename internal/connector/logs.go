@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opentrace/opentrace/internal/agent"
-	"github.com/opentrace/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/agent"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 // LogsConnector implements DataSource for log search.

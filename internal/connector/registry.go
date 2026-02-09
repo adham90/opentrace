@@ -3,7 +3,7 @@ package connector
 import (
 	"sync"
 
-	"github.com/opentrace/opentrace/internal/agent"
+	"github.com/adham90/opentrace/internal/agent"
 )
 
 // Registry manages active data source connectors.

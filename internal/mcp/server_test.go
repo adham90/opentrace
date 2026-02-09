@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/opentrace/opentrace/internal/agent"
-	"github.com/opentrace/opentrace/internal/connector"
-	"github.com/opentrace/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/agent"
+	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 // --- helpers ---

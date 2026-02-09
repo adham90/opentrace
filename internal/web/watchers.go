@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/opentrace/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 type createWatcherRequest struct {

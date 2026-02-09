@@ -1,4 +1,4 @@
-module github.com/opentrace/opentrace
+module github.com/adham90/opentrace
 
 go 1.25
 

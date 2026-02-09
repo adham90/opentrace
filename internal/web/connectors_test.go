@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/opentrace/opentrace/internal/connector"
-	"github.com/opentrace/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 func setupTestServer() (*Server, *mockDataSourceStore) {

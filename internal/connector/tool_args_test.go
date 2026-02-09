@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/opentrace/opentrace/internal/agent"
-	"github.com/opentrace/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/agent"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 // callTool simulates the agent loop: validate+coerce args, then call handler.

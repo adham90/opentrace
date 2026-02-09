@@ -3,7 +3,7 @@ package llm
 import (
 	"testing"
 
-	"github.com/opentrace/opentrace/internal/config"
+	"github.com/adham90/opentrace/internal/config"
 )
 
 func TestNewLLMProvider_Ollama(t *testing.T) {

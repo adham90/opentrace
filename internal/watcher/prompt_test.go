@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/opentrace/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 func TestBuildQuery_Basic(t *testing.T) {

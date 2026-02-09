@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/opentrace/opentrace/internal/agent"
+	"github.com/adham90/opentrace/internal/agent"
 )
 
 type mockDataSource struct {

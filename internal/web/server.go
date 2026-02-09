@@ -14,10 +14,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/opentrace/opentrace/internal/config"
-	"github.com/opentrace/opentrace/internal/connector"
-	"github.com/opentrace/opentrace/internal/store"
-	"github.com/opentrace/opentrace/internal/watcher"
+	"github.com/adham90/opentrace/internal/config"
+	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/watcher"
 )
 
 // Server holds the HTTP server and its dependencies.

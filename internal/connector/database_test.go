@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/opentrace/opentrace/internal/guardrail"
+	"github.com/adham90/opentrace/internal/guardrail"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"

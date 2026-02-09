@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/opentrace/opentrace/internal/agent"
-	"github.com/opentrace/opentrace/internal/guardrail"
+	"github.com/adham90/opentrace/internal/agent"
+	"github.com/adham90/opentrace/internal/guardrail"
 )
 
 // schemaCacheEntry holds a cached schema query result with its fetch time.

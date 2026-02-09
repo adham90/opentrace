@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/opentrace/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/connector"
 )
 
 func TestHealthCheck(t *testing.T) {

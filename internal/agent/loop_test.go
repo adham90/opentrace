@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/opentrace/opentrace/internal/llm"
+	"github.com/adham90/opentrace/internal/llm"
 )
 
 // mockLLM returns pre-programmed responses in order.

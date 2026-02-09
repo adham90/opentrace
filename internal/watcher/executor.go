@@ -6,10 +6,10 @@ import (
 	"log"
 	"time"
 
-	"github.com/opentrace/opentrace/internal/agent"
-	"github.com/opentrace/opentrace/internal/connector"
-	"github.com/opentrace/opentrace/internal/llm"
-	"github.com/opentrace/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/agent"
+	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/llm"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 // Executor runs a single watcher evaluation.

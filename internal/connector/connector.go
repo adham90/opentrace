@@ -3,7 +3,7 @@ package connector
 import (
 	"context"
 
-	"github.com/opentrace/opentrace/internal/agent"
+	"github.com/adham90/opentrace/internal/agent"
 )
 
 // ConnectorType identifies a connector category.

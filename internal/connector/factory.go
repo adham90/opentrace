@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/opentrace/opentrace/internal/config"
-	"github.com/opentrace/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/config"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 // CreateConnector builds the appropriate DataSource from a store.DataSource record.

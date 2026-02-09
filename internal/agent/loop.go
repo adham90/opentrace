@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/opentrace/opentrace/internal/llm"
+	"github.com/adham90/opentrace/internal/llm"
 )
 
 // RunConfig holds limits for the agent loop.
