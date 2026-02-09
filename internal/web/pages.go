@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -22,6 +23,7 @@ var tmplFuncs = template.FuncMap{
 }
 
 var (
+	overviewTmpl    *template.Template
 	connectorsTmpl  *template.Template
 	logsTmpl        *template.Template
 	alertsTmpl      *template.Template
@@ -32,6 +34,8 @@ var (
 
 func init() {
 	// Each page gets layout + its own content template
+	overviewTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/overview.html"))
 	connectorsTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/connectors.html"))
 	logsTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
@@ -293,4 +297,107 @@ func (s *Server) handleConnectorsPage(w http.ResponseWriter, r *http.Request) {
 		"internal/web/templates/layout.html",
 		"internal/web/templates/connectors.html")
 	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleOverviewPage(w http.ResponseWriter, r *http.Request) {
+	data := pageData{
+		Title:   "Overview",
+		Nav:     "overview",
+		DevMode: s.isDevMode(),
+	}
+	tmpl := s.getTemplate(overviewTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/overview.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	type overviewStats struct {
+		Alerts     map[string]int `json:"alerts"`
+		Watchers   map[string]int `json:"watchers"`
+		Logs       map[string]int `json:"logs"`
+		Connectors map[string]int `json:"connectors"`
+	}
+
+	stats := overviewStats{
+		Alerts:     map[string]int{"total": 0, "critical": 0, "warning": 0, "info": 0},
+		Watchers:   map[string]int{"total": 0, "active": 0, "paused": 0, "error": 0},
+		Logs:       map[string]int{"last_hour": 0, "errors_last_hour": 0},
+		Connectors: map[string]int{"total": 0, "connected": 0, "error": 0},
+	}
+
+	// Alerts stats
+	if s.alertStore != nil {
+		alerts, err := s.alertStore.List(ctx, store.ListAlertParams{Limit: 500})
+		if err == nil {
+			for _, a := range alerts {
+				if !a.Dismissed {
+					stats.Alerts["total"]++
+					switch a.Severity {
+					case store.SeverityCritical:
+						stats.Alerts["critical"]++
+					case store.SeverityWarning:
+						stats.Alerts["warning"]++
+					case store.SeverityInfo:
+						stats.Alerts["info"]++
+					}
+				}
+			}
+		}
+	}
+
+	// Watchers stats
+	if s.watcherStore != nil {
+		watchers, err := s.watcherStore.List(ctx)
+		if err == nil {
+			stats.Watchers["total"] = len(watchers)
+			for _, w := range watchers {
+				switch w.Status {
+				case store.WatcherActive:
+					stats.Watchers["active"]++
+				case store.WatcherPaused:
+					stats.Watchers["paused"]++
+				case store.WatcherError:
+					stats.Watchers["error"]++
+				}
+			}
+		}
+	}
+
+	// Logs stats (last hour)
+	if s.logStore != nil {
+		oneHourAgo := time.Now().Add(-1 * time.Hour)
+		logs, err := s.logStore.Search(ctx, store.LogSearchParams{
+			Start: &oneHourAgo,
+			Limit: 10000,
+		})
+		if err == nil {
+			stats.Logs["last_hour"] = len(logs)
+			for _, l := range logs {
+				if l.Level == "ERROR" {
+					stats.Logs["errors_last_hour"]++
+				}
+			}
+		}
+	}
+
+	// Connectors stats
+	if s.dsStore != nil {
+		connectors, err := s.dsStore.List(ctx)
+		if err == nil {
+			stats.Connectors["total"] = len(connectors)
+			for _, c := range connectors {
+				switch c.Status {
+				case store.StatusConnected:
+					stats.Connectors["connected"]++
+				case store.StatusError:
+					stats.Connectors["error"]++
+				}
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, stats)
 }

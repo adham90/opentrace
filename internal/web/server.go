@@ -93,7 +93,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	}
 
 	// Pages
-	router.Get("/", srv.handleAlertsPage)
+	router.Get("/", srv.handleOverviewPage)
+	router.Get("/alerts", srv.handleAlertsPage)
 	router.Get("/watchers", srv.handleWatchersPage)
 	router.Get("/watchers/{id}/runs", srv.handleWatcherRunsPage)
 	router.Get("/logs", srv.handleLogsPage)
@@ -135,6 +136,9 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Get("/alerts/count", srv.handleAlertCount)
 		r.Post("/alerts/{id}/read", srv.handleMarkAlertRead)
 		r.Post("/alerts/{id}/dismiss", srv.handleDismissAlert)
+
+		// Overview
+		r.Get("/overview", srv.handleOverviewAPI)
 
 		// Dev-mode live-reload endpoint
 		if cfg != nil && cfg.DevMode {

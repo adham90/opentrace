@@ -1,0 +1,157 @@
+{{define "content"}}
+<div class="page-header">
+  <h1><span class="prompt">$</span> overview</h1>
+</div>
+
+<div class="stat-grid" id="stat-grid">
+  <a href="/alerts" class="stat-card" id="stat-alerts">
+    <div class="stat-number" id="stat-alerts-num">—</div>
+    <div class="stat-label">alerts</div>
+    <div class="stat-detail" id="stat-alerts-detail">loading...</div>
+  </a>
+  <a href="/watchers" class="stat-card" id="stat-watchers">
+    <div class="stat-number" id="stat-watchers-num">—</div>
+    <div class="stat-label">watchers</div>
+    <div class="stat-detail" id="stat-watchers-detail">loading...</div>
+  </a>
+  <a href="/logs" class="stat-card" id="stat-logs">
+    <div class="stat-number" id="stat-logs-num">—</div>
+    <div class="stat-label">logs / 1h</div>
+    <div class="stat-detail" id="stat-logs-detail">loading...</div>
+  </a>
+  <a href="/connectors" class="stat-card" id="stat-connectors">
+    <div class="stat-number" id="stat-connectors-num">—</div>
+    <div class="stat-label">connectors</div>
+    <div class="stat-detail" id="stat-connectors-detail">loading...</div>
+  </a>
+</div>
+
+<div class="overview-panels">
+  <div class="overview-panel">
+    <div class="overview-panel-header">
+      <span>recent alerts</span>
+      <a href="/alerts" class="panel-link">view all &rarr;</a>
+    </div>
+    <div class="overview-panel-body" id="recent-alerts">
+      <div class="empty-state"><p>no alerts</p></div>
+    </div>
+  </div>
+  <div class="overview-panel">
+    <div class="overview-panel-header">
+      <span>log stream</span>
+      <a href="/logs" class="panel-link">view all &rarr;</a>
+    </div>
+    <div class="overview-panel-body" id="recent-logs">
+      <div class="empty-state"><p>no recent logs</p></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  function loadStats() {
+    fetch('/api/overview').then(function(r){ return r.json(); }).then(function(d){
+      // Alerts
+      var an = document.getElementById('stat-alerts-num');
+      var ad = document.getElementById('stat-alerts-detail');
+      an.textContent = d.alerts.total;
+      an.className = 'stat-number' + (d.alerts.critical > 0 ? ' status-error' : d.alerts.total > 0 ? ' status-warn' : ' status-ok');
+      var parts = [];
+      if (d.alerts.critical > 0) parts.push(d.alerts.critical + ' critical');
+      if (d.alerts.warning > 0) parts.push(d.alerts.warning + ' warning');
+      if (d.alerts.info > 0) parts.push(d.alerts.info + ' info');
+      ad.textContent = parts.length > 0 ? parts.join(', ') : 'all clear';
+
+      // Watchers
+      var wn = document.getElementById('stat-watchers-num');
+      var wd = document.getElementById('stat-watchers-detail');
+      wn.textContent = d.watchers.total;
+      wn.className = 'stat-number' + (d.watchers.error > 0 ? ' status-error' : d.watchers.active > 0 ? ' status-ok' : '');
+      var wParts = [];
+      if (d.watchers.active > 0) wParts.push(d.watchers.active + ' active');
+      if (d.watchers.paused > 0) wParts.push(d.watchers.paused + ' paused');
+      if (d.watchers.error > 0) wParts.push(d.watchers.error + ' error');
+      wd.textContent = wParts.length > 0 ? wParts.join(', ') : 'none configured';
+
+      // Logs
+      var ln = document.getElementById('stat-logs-num');
+      var ld = document.getElementById('stat-logs-detail');
+      ln.textContent = d.logs.last_hour;
+      ln.className = 'stat-number' + (d.logs.errors_last_hour > 0 ? ' status-warn' : '');
+      ld.textContent = d.logs.errors_last_hour > 0 ? d.logs.errors_last_hour + ' errors' : 'no errors';
+
+      // Connectors
+      var cn = document.getElementById('stat-connectors-num');
+      var cd = document.getElementById('stat-connectors-detail');
+      cn.textContent = d.connectors.connected + ' / ' + d.connectors.total;
+      cn.className = 'stat-number' + (d.connectors.error > 0 ? ' status-error' : d.connectors.connected === d.connectors.total && d.connectors.total > 0 ? ' status-ok' : '');
+      cd.textContent = d.connectors.error > 0 ? d.connectors.error + ' error' : d.connectors.total > 0 ? 'all connected' : 'none configured';
+    }).catch(function(){});
+  }
+
+  function loadRecentAlerts() {
+    fetch('/api/alerts?limit=5').then(function(r){ return r.json(); }).then(function(alerts){
+      var container = document.getElementById('recent-alerts');
+      if (!alerts || alerts.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>no alerts</p></div>';
+        return;
+      }
+      var html = '';
+      alerts.forEach(function(a){
+        var sevIcon = a.severity === 'critical' ? '!!' : a.severity === 'warning' ? '!' : 'i';
+        var timeAgo = getTimeAgo(a.created_at);
+        html += '<div class="overview-alert severity-' + a.severity + '">';
+        html += '  <span class="severity-badge severity-' + a.severity + '">' + sevIcon + '</span>';
+        html += '  <span class="overview-alert-title">' + escapeHtml(a.title) + '</span>';
+        html += '  <span class="overview-alert-time">' + timeAgo + '</span>';
+        html += '</div>';
+      });
+      container.innerHTML = html;
+    }).catch(function(){});
+  }
+
+  function loadRecentLogs() {
+    fetch('/api/logs/poll?since_id=0&limit=10').then(function(r){ return r.text(); }).then(function(html){
+      // Poll endpoint returns HTML fragments — use a different approach
+    }).catch(function(){});
+
+    // Use the search endpoint in JSON mode instead (not available, it's HTML)
+    // Let's just link to the logs page for now and show recent log count
+    var container = document.getElementById('recent-logs');
+    fetch('/api/overview').then(function(r){ return r.json(); }).then(function(d){
+      if (d.logs.last_hour === 0) {
+        container.innerHTML = '<div class="empty-state"><p>no recent logs</p></div>';
+        return;
+      }
+      container.innerHTML = '<div class="overview-log-summary">' +
+        '<div class="stat-number">' + d.logs.last_hour + '</div>' +
+        '<div class="stat-label">logs in the last hour</div>' +
+        (d.logs.errors_last_hour > 0 ? '<div class="stat-detail status-warn">' + d.logs.errors_last_hour + ' errors detected</div>' : '<div class="stat-detail status-ok">no errors</div>') +
+        '<a href="/logs" class="btn btn-primary btn-sm" style="margin-top:12px">open log viewer</a>' +
+        '</div>';
+    }).catch(function(){});
+  }
+
+  function getTimeAgo(dateStr) {
+    var now = new Date();
+    var date = new Date(dateStr);
+    var diff = Math.floor((now - date) / 1000);
+    if (diff < 60) return diff + 's ago';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+  }
+
+  function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.textContent = str || '';
+    return div.innerHTML;
+  }
+
+  loadStats();
+  loadRecentAlerts();
+  loadRecentLogs();
+  setInterval(function(){ loadStats(); loadRecentAlerts(); }, 30000);
+})();
+</script>
+{{end}}
