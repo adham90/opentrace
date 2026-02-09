@@ -64,6 +64,20 @@ func (r *Registry) CloseAll() {
 	}
 }
 
+// HasDataConnectors returns true if at least one non-system data connector
+// (logs, database, codebase, etc.) is registered.
+func (r *Registry) HasDataConnectors() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for ct := range r.connectors {
+		if ct != ConnectorSystem {
+			return true
+		}
+	}
+	return false
+}
+
 // AllTools aggregates tools from all registered connectors.
 // Returns an empty slice (not nil) if no connectors are registered.
 func (r *Registry) AllTools() []agent.Tool {

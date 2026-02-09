@@ -45,12 +45,12 @@ func (s *Server) handleInvestigateSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get tools from registry
-	tools := s.registry.AllTools()
-	if len(tools) == 0 {
-		sendEvent("error", "No connectors configured. Add and test a connector first.", "")
+	// Get tools from registry — verify at least one data connector exists
+	if !s.registry.HasDataConnectors() {
+		sendEvent("error", "No data connectors configured. Add a logs, database, or codebase connector first.", "")
 		return
 	}
+	tools := s.registry.AllTools()
 
 	// Resolve or create chat
 	var chatID uuid.UUID

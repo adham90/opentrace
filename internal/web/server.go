@@ -25,8 +25,8 @@ type Server struct {
 	registry          *connector.Registry
 	cfg               *config.Config
 	embedder          llm.EmbeddingProvider
-	llmProvider       llm.LLMProvider
-	logsConnectorOnce sync.Once
+	llmProvider  llm.LLMProvider
+	logsConnMu  sync.Mutex
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
