@@ -25,41 +25,87 @@
       <div class="modal-body">
         <input type="hidden" id="watcher-id" value="">
 
-        <div class="modal-section">
+        <!-- 01 What to Monitor -->
+        <div class="modal-section modal-section-primary">
+          <div class="modal-section-label"><span class="section-number">01</span> What to Monitor</div>
           <div class="form-group">
-            <label>Title</label>
+            <label>Watcher Name</label>
             <input type="text" id="watcher-title" required placeholder="e.g. Payment failures spike">
           </div>
           <div class="form-group">
-            <label>Prompt (instructions for the AI agent)</label>
+            <label>Analysis Instructions</label>
             <textarea id="watcher-description" rows="3" required placeholder="Check if payment gateway errors exceed normal rate. Look for patterns in failing merchant IDs."></textarea>
+            <details class="form-tips">
+              <summary>$ tips</summary>
+              <ul>
+                <li><span class="text-green">--</span> Good: "Alert if error count > 50 in the time window"</li>
+                <li><span class="text-green">--</span> Good: "Look for repeated 503s from the same upstream"</li>
+                <li><span class="text-red">--</span> Bad: "Check for errors" (too vague for the AI)</li>
+              </ul>
+            </details>
+          </div>
+
+          <div class="form-subsection">
+            <div class="form-subsection-label">Log Scope</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Service</label>
+                <input type="text" id="filter-service" placeholder="e.g. payment-api">
+              </div>
+              <div class="form-group">
+                <label>Log Level</label>
+                <select id="filter-level">
+                  <option value="">Any</option>
+                  <option value="error">error</option>
+                  <option value="warn">warn</option>
+                  <option value="info">info</option>
+                  <option value="debug">debug</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Environment</label>
+                <input type="text" id="filter-env" placeholder="e.g. production">
+              </div>
+              <div class="form-group">
+                <label>Search Query</label>
+                <input type="text" id="filter-query" placeholder="e.g. timeout OR refused">
+              </div>
+            </div>
           </div>
         </div>
 
+        <!-- 02 Schedule -->
         <div class="modal-section">
-          <div class="modal-section-label">Schedule &amp; Severity</div>
+          <div class="modal-section-label"><span class="section-number">02</span> Schedule</div>
+          <div class="form-group">
+            <label>Run Every</label>
+            <select id="watcher-timerange">
+              <option value="5m">Every 5 min</option>
+              <option value="15m" selected>Every 15 min</option>
+              <option value="30m">Every 30 min</option>
+              <option value="1h">Every 1 hour</option>
+              <option value="6h">Every 6 hours</option>
+              <option value="24h">Every 24 hours</option>
+            </select>
+            <div class="form-hint">How often this watcher runs AND the log window it analyzes. "Every 15 min" = check the last 15 minutes of logs, every 15 minutes.</div>
+          </div>
+        </div>
+
+        <!-- 03 Alert Behavior -->
+        <div class="modal-section">
+          <div class="modal-section-label"><span class="section-number">03</span> Alert Behavior</div>
           <div class="form-grid">
             <div class="form-group">
-              <label>Time Range</label>
-              <select id="watcher-timerange">
-                <option value="5m">Every 5 min</option>
-                <option value="15m" selected>Every 15 min</option>
-                <option value="30m">Every 30 min</option>
-                <option value="1h">Every 1 hour</option>
-                <option value="6h">Every 6 hours</option>
-                <option value="24h">Every 24 hours</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Severity</label>
+              <label>Alert Severity</label>
               <select id="watcher-severity">
                 <option value="info">Info</option>
                 <option value="warning" selected>Warning</option>
                 <option value="critical">Critical</option>
               </select>
+              <div class="form-hint">Priority level for alerts. Only affects display, not AI analysis.</div>
             </div>
             <div class="form-group">
-              <label>LLM Model</label>
+              <label>AI Model</label>
               <select id="watcher-model">
                 <option value="">Default (global)</option>
               </select>
@@ -67,36 +113,9 @@
           </div>
         </div>
 
+        <!-- 04 Notifications -->
         <div class="modal-section">
-          <div class="modal-section-label">Filters</div>
-          <div class="form-grid">
-            <div class="form-group">
-              <label>Service</label>
-              <input type="text" id="filter-service" placeholder="e.g. payment-api">
-            </div>
-            <div class="form-group">
-              <label>Level</label>
-              <select id="filter-level">
-                <option value="">Any</option>
-                <option value="error">error</option>
-                <option value="warn">warn</option>
-                <option value="info">info</option>
-                <option value="debug">debug</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Environment</label>
-              <input type="text" id="filter-env" placeholder="e.g. production">
-            </div>
-            <div class="form-group">
-              <label>Query</label>
-              <input type="text" id="filter-query" placeholder="e.g. timeout OR refused">
-            </div>
-          </div>
-        </div>
-
-        <div class="modal-section">
-          <div class="modal-section-label">Notifications</div>
+          <div class="modal-section-label"><span class="section-number">04</span> Notifications</div>
           <div class="notify-channels">
             <div class="notify-channel">
               <span class="notify-channel-icon">&#9632;</span>

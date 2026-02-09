@@ -762,3 +762,71 @@ select:focus { outline: none; border-color: var(--green); }
 
 .copy-btn:hover { color: var(--text-bright); border-color: var(--text-dim); }
 .copy-btn.copied { color: var(--green); border-color: var(--green); }
+
+/* ===== Watcher Modal Enhancements ===== */
+.form-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+.modal-section-primary {
+  border-left: 2px solid var(--green);
+  padding-left: 14px;
+}
+
+.section-number {
+  color: var(--green);
+  font-weight: 700;
+  margin-right: 6px;
+}
+
+.form-subsection {
+  border-top: 1px dashed var(--border);
+  margin-top: 14px;
+  padding-top: 10px;
+}
+
+.form-subsection-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.form-tips {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.form-tips summary {
+  cursor: pointer;
+  color: var(--green);
+  font-size: 11px;
+  user-select: none;
+  list-style: none;
+}
+
+.form-tips summary::-webkit-details-marker { display: none; }
+
+.form-tips summary::before {
+  content: '▸ ';
+}
+
+.form-tips[open] summary::before {
+  content: '▾ ';
+}
+
+.form-tips ul {
+  list-style: none;
+  padding: 6px 0 0 4px;
+}
+
+.form-tips ul li {
+  margin-bottom: 3px;
+  font-size: 11px;
+}
