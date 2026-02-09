@@ -12,7 +12,7 @@ func TestCreateConnector_Logs(t *testing.T) {
 		Type:   store.ConnectorLogs,
 		Config: map[string]any{},
 	}
-	c, err := CreateConnector(context.Background(), ds, &mockLogStore{}, nil, nil, nil)
+	c, err := CreateConnector(context.Background(), ds, &mockLogStore{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -27,21 +27,9 @@ func TestCreateConnector_Database(t *testing.T) {
 		Type:   store.ConnectorDatabase,
 		Config: map[string]any{},
 	}
-	_, err := CreateConnector(context.Background(), ds, nil, nil, nil, nil)
+	_, err := CreateConnector(context.Background(), ds, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for missing connection_string")
-	}
-}
-
-func TestCreateConnector_Codebase(t *testing.T) {
-	// Without an embedder, should fail
-	ds := store.DataSource{
-		Type:   store.ConnectorCodebase,
-		Config: map[string]any{"repo_path": "/tmp"},
-	}
-	_, err := CreateConnector(context.Background(), ds, nil, nil, nil, nil)
-	if err == nil {
-		t.Fatal("expected error for missing embedding provider")
 	}
 }
 
@@ -50,7 +38,7 @@ func TestCreateConnector_Unknown(t *testing.T) {
 		Type:   "unknown_type",
 		Config: map[string]any{},
 	}
-	_, err := CreateConnector(context.Background(), ds, nil, nil, nil, nil)
+	_, err := CreateConnector(context.Background(), ds, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for unknown type")
 	}

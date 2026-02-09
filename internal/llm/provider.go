@@ -50,9 +50,3 @@ type ChatResponse struct {
 type LLMProvider interface {
 	ChatCompletion(ctx context.Context, req ChatRequest) (ChatResponse, error)
 }
-
-// EmbeddingProvider abstracts text embedding across different backends.
-type EmbeddingProvider interface {
-	Embed(ctx context.Context, text string) ([]float64, error)
-	Dimension() int
-}

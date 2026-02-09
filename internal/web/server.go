@@ -16,7 +16,6 @@ import (
 
 	"github.com/opentrace/opentrace/internal/config"
 	"github.com/opentrace/opentrace/internal/connector"
-	"github.com/opentrace/opentrace/internal/llm"
 	"github.com/opentrace/opentrace/internal/store"
 	"github.com/opentrace/opentrace/internal/watcher"
 )
@@ -26,13 +25,11 @@ type Server struct {
 	Router       chi.Router
 	dsStore      store.DataSourceStore
 	logStore     store.LogStore
-	embStore     store.EmbeddingStore
 	watcherStore store.WatcherStore
 	runStore     store.WatcherRunStore
 	alertStore   store.AlertStore
 	registry     *connector.Registry
 	cfg          *config.Config
-	embedder     llm.EmbeddingProvider
 	executor     *watcher.Executor
 	logsConnMu   sync.Mutex
 }
@@ -41,25 +38,21 @@ type Server struct {
 type ServerDeps struct {
 	DSStore      store.DataSourceStore
 	LogStore     store.LogStore
-	EmbStore     store.EmbeddingStore
 	WatcherStore store.WatcherStore
 	RunStore     store.WatcherRunStore
 	AlertStore   store.AlertStore
 	Registry     *connector.Registry
 	Cfg          *config.Config
-	Embedder     llm.EmbeddingProvider
 	Executor     *watcher.Executor
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
-func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, embStore store.EmbeddingStore, registry *connector.Registry, cfg *config.Config, embedder llm.EmbeddingProvider) *Server {
+func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, registry *connector.Registry, cfg *config.Config) *Server {
 	return NewServerWithDeps(ServerDeps{
 		DSStore:  dsStore,
 		LogStore: logStore,
-		EmbStore: embStore,
 		Registry: registry,
 		Cfg:      cfg,
-		Embedder: embedder,
 	})
 }
 
@@ -68,13 +61,11 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	srv := &Server{
 		dsStore:      deps.DSStore,
 		logStore:     deps.LogStore,
-		embStore:     deps.EmbStore,
 		watcherStore: deps.WatcherStore,
 		runStore:     deps.RunStore,
 		alertStore:   deps.AlertStore,
 		registry:     deps.Registry,
 		cfg:          deps.Cfg,
-		embedder:     deps.Embedder,
 		executor:     deps.Executor,
 	}
 

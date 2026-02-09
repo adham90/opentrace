@@ -26,33 +26,6 @@ type LogStore interface {
 	Search(ctx context.Context, params LogSearchParams) ([]LogEntry, error)
 }
 
-// ChatStore defines operations for chat persistence.
-type ChatStore interface {
-	CreateChat(ctx context.Context, title string) (*Chat, error)
-	GetChat(ctx context.Context, id uuid.UUID) (*Chat, error)
-	ListChats(ctx context.Context) ([]Chat, error)
-	DeleteChat(ctx context.Context, id uuid.UUID) error
-	UpdateChatTitle(ctx context.Context, id uuid.UUID, title string) error
-	AddMessage(ctx context.Context, msg Message) error
-	GetMessages(ctx context.Context, chatID uuid.UUID) ([]Message, error)
-}
-
-// MemoryStore defines operations for the agent's cross-conversation knowledge base.
-type MemoryStore interface {
-	AddMemory(ctx context.Context, category, content, source string) error
-	ListMemories(ctx context.Context, category string) ([]MemoryEntry, error)
-	SearchMemories(ctx context.Context, query string) ([]MemoryEntry, error)
-	DeleteMemory(ctx context.Context, id uuid.UUID) error
-}
-
-// EmbeddingStore defines operations for code embedding storage and search.
-type EmbeddingStore interface {
-	UpsertChunks(ctx context.Context, chunks []CodeChunk) error
-	Search(ctx context.Context, embedding []float64, limit int) ([]CodeSearchResult, error)
-	DeleteByPath(ctx context.Context, filePath string) error
-	DeleteAll(ctx context.Context) error
-}
-
 // WatcherStore manages watcher definitions.
 type WatcherStore interface {
 	Create(ctx context.Context, params CreateWatcherParams) (*Watcher, error)

@@ -11,8 +11,6 @@ func clearEnv(t *testing.T) {
 		"OPENTRACE_APP_DATABASE_URL",
 		"OPENTRACE_LLM_PROVIDER",
 		"OPENTRACE_OLLAMA_URL",
-		"OPENTRACE_EMBEDDING_PROVIDER",
-		"OPENTRACE_EMBEDDING_MODEL",
 		"OPENTRACE_LISTEN_ADDR",
 		"OPENTRACE_MAX_QUERY_ROWS",
 		"OPENTRACE_STATEMENT_TIMEOUT_MS",
@@ -49,12 +47,6 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if cfg.OllamaURL != "http://localhost:11434" {
 		t.Errorf("OllamaURL = %q, want %q", cfg.OllamaURL, "http://localhost:11434")
-	}
-	if cfg.EmbeddingProvider != "ollama" {
-		t.Errorf("EmbeddingProvider = %q, want %q", cfg.EmbeddingProvider, "ollama")
-	}
-	if cfg.EmbeddingModel != "nomic-embed-text" {
-		t.Errorf("EmbeddingModel = %q, want %q", cfg.EmbeddingModel, "nomic-embed-text")
 	}
 	if cfg.ListenAddr != ":8080" {
 		t.Errorf("ListenAddr = %q, want %q", cfg.ListenAddr, ":8080")
@@ -100,8 +92,6 @@ func TestLoad_AllOverrides(t *testing.T) {
 		"OPENTRACE_APP_DATABASE_URL":      "postgres://prod/opentrace",
 		"OPENTRACE_LLM_PROVIDER":          "anthropic",
 		"OPENTRACE_OLLAMA_URL":            "http://gpu-server:11434",
-		"OPENTRACE_EMBEDDING_PROVIDER":    "openai",
-		"OPENTRACE_EMBEDDING_MODEL":       "text-embedding-3-small",
 		"OPENTRACE_LISTEN_ADDR":           ":9090",
 		"OPENTRACE_MAX_QUERY_ROWS":        "1000",
 		"OPENTRACE_STATEMENT_TIMEOUT_MS":  "10000",
@@ -133,12 +123,6 @@ func TestLoad_AllOverrides(t *testing.T) {
 	}
 	if cfg.OllamaURL != "http://gpu-server:11434" {
 		t.Errorf("OllamaURL = %q", cfg.OllamaURL)
-	}
-	if cfg.EmbeddingProvider != "openai" {
-		t.Errorf("EmbeddingProvider = %q", cfg.EmbeddingProvider)
-	}
-	if cfg.EmbeddingModel != "text-embedding-3-small" {
-		t.Errorf("EmbeddingModel = %q", cfg.EmbeddingModel)
 	}
 	if cfg.ListenAddr != ":9090" {
 		t.Errorf("ListenAddr = %q", cfg.ListenAddr)

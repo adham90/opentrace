@@ -10,25 +10,21 @@ import (
 	"time"
 )
 
-// OpenAIProvider implements LLMProvider and EmbeddingProvider using the OpenAI API.
+// OpenAIProvider implements LLMProvider using the OpenAI API.
 type OpenAIProvider struct {
-	baseURL        string
-	model          string
-	embeddingModel string
-	dimension      int
-	apiKey         string
-	client         *http.Client
+	baseURL string
+	model   string
+	apiKey  string
+	client  *http.Client
 }
 
 // NewOpenAIProvider creates a new OpenAI provider.
-func NewOpenAIProvider(baseURL, model, embeddingModel string, dimension int, apiKey string) *OpenAIProvider {
+func NewOpenAIProvider(baseURL, model, apiKey string) *OpenAIProvider {
 	return &OpenAIProvider{
-		baseURL:        baseURL,
-		model:          model,
-		embeddingModel: embeddingModel,
-		dimension:      dimension,
-		apiKey:         apiKey,
-		client:         &http.Client{Timeout: 120 * time.Second},
+		baseURL: baseURL,
+		model:   model,
+		apiKey:  apiKey,
+		client:  &http.Client{Timeout: 120 * time.Second},
 	}
 }
 
@@ -220,62 +216,4 @@ func buildJSONSchema(params []ToolParamDef) json.RawMessage {
 	}
 	b, _ := json.Marshal(schema)
 	return json.RawMessage(b)
-}
-
-// --- Embeddings (unchanged) ---
-
-type openAIEmbedRequest struct {
-	Model string `json:"model"`
-	Input string `json:"input"`
-}
-
-type openAIEmbedResponse struct {
-	Data []struct {
-		Embedding []float64 `json:"embedding"`
-	} `json:"data"`
-}
-
-// Embed generates an embedding vector using the OpenAI Embeddings API.
-func (o *OpenAIProvider) Embed(ctx context.Context, text string) ([]float64, error) {
-	body, err := json.Marshal(openAIEmbedRequest{
-		Model: o.embeddingModel,
-		Input: text,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("openai: marshal embed request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+"/v1/embeddings", bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("openai: create embed request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
-
-	resp, err := o.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("openai: embed request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("openai: embed returned status %d: %s", resp.StatusCode, string(errBody))
-	}
-
-	var embedResp openAIEmbedResponse
-	if err := json.NewDecoder(resp.Body).Decode(&embedResp); err != nil {
-		return nil, fmt.Errorf("openai: decode embed response: %w", err)
-	}
-
-	if len(embedResp.Data) == 0 {
-		return nil, fmt.Errorf("openai: empty embeddings response")
-	}
-
-	return embedResp.Data[0].Embedding, nil
-}
-
-// Dimension returns the configured embedding dimension.
-func (o *OpenAIProvider) Dimension() int {
-	return o.dimension
 }

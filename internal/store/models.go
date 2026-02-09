@@ -12,7 +12,6 @@ type ConnectorType string
 const (
 	ConnectorLogs       ConnectorType = "logs"
 	ConnectorDatabase   ConnectorType = "database"
-	ConnectorCodebase   ConnectorType = "codebase"
 	ConnectorMonitoring ConnectorType = "monitoring"
 )
 
@@ -71,50 +70,6 @@ type LogSearchParams struct {
 	Start       *time.Time `json:"start,omitempty"`
 	End         *time.Time `json:"end,omitempty"`
 	Limit       int        `json:"limit,omitempty"`
-}
-
-// Chat represents a conversation session.
-type Chat struct {
-	ID        uuid.UUID `json:"id"`
-	Title     string    `json:"title"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-// Message represents a single message within a chat.
-type Message struct {
-	ID        uuid.UUID `json:"id"`
-	ChatID    uuid.UUID `json:"chat_id"`
-	Role      string    `json:"role"` // "user", "assistant", "tool_call", "observation"
-	Content   string    `json:"content"`
-	ToolName  string    `json:"tool_name,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-// MemoryEntry represents a fact in the agent's cross-conversation knowledge base.
-type MemoryEntry struct {
-	ID        uuid.UUID `json:"id"`
-	Category  string    `json:"category"` // "schema", "pattern", "error", "data", "query"
-	Content   string    `json:"content"`
-	Source    string    `json:"source,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-// CodeChunk represents a chunk of source code with its embedding.
-type CodeChunk struct {
-	FilePath   string    `json:"file_path"`
-	ChunkIndex int       `json:"chunk_index"`
-	Content    string    `json:"content"`
-	Embedding  []float64 `json:"embedding,omitempty"`
-}
-
-// CodeSearchResult represents a code chunk returned by similarity search.
-type CodeSearchResult struct {
-	FilePath   string  `json:"file_path"`
-	ChunkIndex int     `json:"chunk_index"`
-	Content    string  `json:"content"`
-	Similarity float64 `json:"similarity"`
 }
 
 // WatcherSeverity represents the severity level of a watcher.

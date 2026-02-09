@@ -8,11 +8,9 @@ import (
 
 func TestNewLLMProvider_Ollama(t *testing.T) {
 	cfg := &config.Config{
-		LLMProvider:        "ollama",
-		OllamaURL:          "http://localhost:11434",
-		OllamaModel:        "llama3.2",
-		EmbeddingModel:     "nomic-embed-text",
-		EmbeddingDimension: 768,
+		LLMProvider: "ollama",
+		OllamaURL:   "http://localhost:11434",
+		OllamaModel: "llama3.2",
 	}
 
 	p, err := NewLLMProvider(cfg)
@@ -71,12 +69,10 @@ func TestNewLLMProvider_Anthropic_MissingKey(t *testing.T) {
 
 func TestNewLLMProvider_OpenAI(t *testing.T) {
 	cfg := &config.Config{
-		LLMProvider:        "openai",
-		OpenAIAPIKey:       "sk-openai-test",
-		OpenAIModel:        "gpt-4o",
-		OpenAIURL:          "https://api.openai.com",
-		EmbeddingModel:     "text-embedding-3-small",
-		EmbeddingDimension: 1536,
+		LLMProvider:  "openai",
+		OpenAIAPIKey: "sk-openai-test",
+		OpenAIModel:  "gpt-4o",
+		OpenAIURL:    "https://api.openai.com",
 	}
 
 	p, err := NewLLMProvider(cfg)
@@ -114,79 +110,6 @@ func TestNewLLMProvider_Unknown(t *testing.T) {
 	}
 
 	_, err := NewLLMProvider(cfg)
-	if err == nil {
-		t.Fatal("expected error for unknown provider, got nil")
-	}
-}
-
-func TestNewEmbeddingProvider_Ollama(t *testing.T) {
-	cfg := &config.Config{
-		EmbeddingProvider:  "ollama",
-		OllamaURL:          "http://localhost:11434",
-		OllamaModel:        "llama3.2",
-		EmbeddingModel:     "nomic-embed-text",
-		EmbeddingDimension: 768,
-	}
-
-	p, err := NewEmbeddingProvider(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	ollama, ok := p.(*OllamaProvider)
-	if !ok {
-		t.Fatalf("expected *OllamaProvider, got %T", p)
-	}
-	if ollama.embeddingModel != "nomic-embed-text" {
-		t.Errorf("got embeddingModel %q, want %q", ollama.embeddingModel, "nomic-embed-text")
-	}
-	if ollama.Dimension() != 768 {
-		t.Errorf("got dimension %d, want 768", ollama.Dimension())
-	}
-}
-
-func TestNewEmbeddingProvider_OpenAI(t *testing.T) {
-	cfg := &config.Config{
-		EmbeddingProvider:  "openai",
-		OpenAIAPIKey:       "sk-openai-test",
-		OpenAIURL:          "https://api.openai.com",
-		OpenAIModel:        "gpt-4o",
-		EmbeddingModel:     "text-embedding-3-small",
-		EmbeddingDimension: 1536,
-	}
-
-	p, err := NewEmbeddingProvider(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	op, ok := p.(*OpenAIProvider)
-	if !ok {
-		t.Fatalf("expected *OpenAIProvider, got %T", p)
-	}
-	if op.Dimension() != 1536 {
-		t.Errorf("got dimension %d, want 1536", op.Dimension())
-	}
-}
-
-func TestNewEmbeddingProvider_OpenAI_MissingKey(t *testing.T) {
-	cfg := &config.Config{
-		EmbeddingProvider: "openai",
-		// No API key
-	}
-
-	_, err := NewEmbeddingProvider(cfg)
-	if err == nil {
-		t.Fatal("expected error for missing API key, got nil")
-	}
-}
-
-func TestNewEmbeddingProvider_Unknown(t *testing.T) {
-	cfg := &config.Config{
-		EmbeddingProvider: "deepmind",
-	}
-
-	_, err := NewEmbeddingProvider(cfg)
 	if err == nil {
 		t.Fatal("expected error for unknown provider, got nil")
 	}
