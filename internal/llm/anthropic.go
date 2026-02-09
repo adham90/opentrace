@@ -29,9 +29,36 @@ func NewAnthropicProvider(baseURL, model, apiKey string) *AnthropicProvider {
 	}
 }
 
+// --- Anthropic API types ---
+
+type anthropicContentBlock struct {
+	Type  string          `json:"type"`            // "text" or "tool_use"
+	Text  string          `json:"text,omitempty"`  // for type=text
+	ID    string          `json:"id,omitempty"`    // for type=tool_use
+	Name  string          `json:"name,omitempty"`  // for type=tool_use
+	Input json.RawMessage `json:"input,omitempty"` // for type=tool_use
+}
+
 type anthropicMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string        `json:"role"`
+	Content any           `json:"content"` // string or []anthropicContentBlock
+}
+
+type anthropicToolInputSchema struct {
+	Type       string                          `json:"type"` // "object"
+	Properties map[string]anthropicToolProp    `json:"properties,omitempty"`
+	Required   []string                        `json:"required,omitempty"`
+}
+
+type anthropicToolProp struct {
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
+}
+
+type anthropicToolDef struct {
+	Name        string                   `json:"name"`
+	Description string                   `json:"description"`
+	InputSchema anthropicToolInputSchema `json:"input_schema"`
 }
 
 type anthropicRequest struct {
@@ -39,18 +66,16 @@ type anthropicRequest struct {
 	Messages  []anthropicMessage `json:"messages"`
 	System    string             `json:"system,omitempty"`
 	MaxTokens int                `json:"max_tokens"`
+	Tools     []anthropicToolDef `json:"tools,omitempty"`
 }
 
 type anthropicResponse struct {
-	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"content"`
+	Content    []anthropicContentBlock `json:"content"`
+	StopReason string                  `json:"stop_reason"`
 }
 
 // ChatCompletion sends a chat request to the Anthropic Messages API.
 func (a *AnthropicProvider) ChatCompletion(ctx context.Context, req ChatRequest) (ChatResponse, error) {
-	// Extract system messages into top-level system field
 	var systemParts []string
 	var messages []anthropicMessage
 
@@ -59,37 +84,56 @@ func (a *AnthropicProvider) ChatCompletion(ctx context.Context, req ChatRequest)
 			if m.Content != "" {
 				systemParts = append(systemParts, m.Content)
 			}
+			continue
+		}
+
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			// Assistant message with tool calls → content blocks
+			var blocks []anthropicContentBlock
+			if m.Content != "" {
+				blocks = append(blocks, anthropicContentBlock{Type: "text", Text: m.Content})
+			}
+			for _, tc := range m.ToolCalls {
+				inputJSON, _ := json.Marshal(tc.Args)
+				blocks = append(blocks, anthropicContentBlock{
+					Type:  "tool_use",
+					ID:    tc.ID,
+					Name:  tc.Name,
+					Input: json.RawMessage(inputJSON),
+				})
+			}
+			messages = append(messages, anthropicMessage{Role: "assistant", Content: blocks})
+		} else if m.Role == "tool" {
+			// Tool result → user message with tool_result content block
+			block := []map[string]any{{
+				"type":        "tool_result",
+				"tool_use_id": m.ToolCallID,
+				"content":     m.Content,
+			}}
+			messages = append(messages, anthropicMessage{Role: "user", Content: block})
 		} else if m.Content != "" {
-			// Skip empty-content messages (Anthropic rejects them)
-			messages = append(messages, anthropicMessage{
-				Role:    m.Role,
-				Content: m.Content,
-			})
+			messages = append(messages, anthropicMessage{Role: m.Role, Content: m.Content})
 		}
 	}
 
-	// Merge adjacent same-role messages (Anthropic requires strict alternation)
-	messages = mergeAdjacentMessages(messages)
+	// Merge adjacent same-role messages
+	messages = mergeAdjacentAnthropicMessages(messages)
 
-	// Ensure we have at least one message (Anthropic requires non-empty messages)
 	if len(messages) == 0 {
 		messages = []anthropicMessage{{Role: "user", Content: "Hello."}}
 	}
-
-	// Ensure messages start with a user message (Anthropic requirement)
-	if messages[0].Role != "user" {
+	// Anthropic requires first message to be user role
+	if msg, ok := messages[0].Content.(string); ok && messages[0].Role != "user" {
+		_ = msg
 		messages = append([]anthropicMessage{{Role: "user", Content: "Continue."}}, messages...)
-	}
-
-	// Ensure messages end with a user message (Anthropic requirement)
-	if messages[len(messages)-1].Role != "user" {
-		messages = append(messages, anthropicMessage{Role: "user", Content: "Continue."})
+	} else if messages[0].Role != "user" {
+		messages = append([]anthropicMessage{{Role: "user", Content: "Continue."}}, messages...)
 	}
 
 	systemPrompt := strings.Join(systemParts, "\n\n")
 
-	// JSON mode: reinforce in system prompt since Anthropic has no native JSON mode
-	if req.JSONMode {
+	// JSON mode reinforcement (for non-tool-calling requests)
+	if req.JSONMode && len(req.Tools) == 0 {
 		reinforcement := "IMPORTANT: You must respond with valid JSON only. No markdown, no explanation, just JSON."
 		if systemPrompt != "" {
 			systemPrompt += "\n\n" + reinforcement
@@ -108,6 +152,37 @@ func (a *AnthropicProvider) ChatCompletion(ctx context.Context, req ChatRequest)
 		Messages:  messages,
 		System:    systemPrompt,
 		MaxTokens: maxTokens,
+	}
+
+	// Convert tools
+	if len(req.Tools) > 0 {
+		anthropicReq.Tools = make([]anthropicToolDef, len(req.Tools))
+		for i, t := range req.Tools {
+			props := make(map[string]anthropicToolProp, len(t.Parameters))
+			var required []string
+			for _, p := range t.Parameters {
+				jsonType := p.Type
+				if jsonType == "int" {
+					jsonType = "integer"
+				}
+				if jsonType == "bool" {
+					jsonType = "boolean"
+				}
+				props[p.Name] = anthropicToolProp{Type: jsonType}
+				if p.Required {
+					required = append(required, p.Name)
+				}
+			}
+			anthropicReq.Tools[i] = anthropicToolDef{
+				Name:        t.Name,
+				Description: t.Description,
+				InputSchema: anthropicToolInputSchema{
+					Type:       "object",
+					Properties: props,
+					Required:   required,
+				},
+			}
+		}
 	}
 
 	body, err := json.Marshal(anthropicReq)
@@ -139,18 +214,33 @@ func (a *AnthropicProvider) ChatCompletion(ctx context.Context, req ChatRequest)
 		return ChatResponse{}, fmt.Errorf("anthropic: decode response: %w", err)
 	}
 
-	// Extract text from first text content block
+	// Parse content blocks into our unified response
+	var result ChatResponse
+	result.StopReason = anthropicResp.StopReason
+
 	for _, block := range anthropicResp.Content {
-		if block.Type == "text" {
-			return ChatResponse{Content: block.Text}, nil
+		switch block.Type {
+		case "text":
+			result.Content += block.Text
+		case "tool_use":
+			var args map[string]any
+			if len(block.Input) > 0 {
+				json.Unmarshal(block.Input, &args)
+			}
+			result.ToolCalls = append(result.ToolCalls, ToolCall{
+				ID:   block.ID,
+				Name: block.Name,
+				Args: args,
+			})
 		}
 	}
 
-	return ChatResponse{}, fmt.Errorf("anthropic: no text content in response")
+	return result, nil
 }
 
-// mergeAdjacentMessages combines consecutive messages with the same role.
-func mergeAdjacentMessages(msgs []anthropicMessage) []anthropicMessage {
+// mergeAdjacentAnthropicMessages combines consecutive messages with the same role
+// when both have string content. Messages with structured content (tool results) are not merged.
+func mergeAdjacentAnthropicMessages(msgs []anthropicMessage) []anthropicMessage {
 	if len(msgs) <= 1 {
 		return msgs
 	}
@@ -159,14 +249,16 @@ func mergeAdjacentMessages(msgs []anthropicMessage) []anthropicMessage {
 	current := msgs[0]
 
 	for i := 1; i < len(msgs); i++ {
-		if msgs[i].Role == current.Role {
-			current.Content += "\n\n" + msgs[i].Content
+		curStr, curIsStr := current.Content.(string)
+		nextStr, nextIsStr := msgs[i].Content.(string)
+
+		if msgs[i].Role == current.Role && curIsStr && nextIsStr {
+			current.Content = curStr + "\n\n" + nextStr
 		} else {
 			merged = append(merged, current)
 			current = msgs[i]
 		}
 	}
 	merged = append(merged, current)
-
 	return merged
 }

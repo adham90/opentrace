@@ -29,19 +29,16 @@ func (s *Server) handleInvestigateSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
-	sendSSE := func(evt sseEvent) {
-		data, _ := json.Marshal(evt)
-		fmt.Fprintf(w, "data: %s\n\n", data)
-		flusher.Flush()
-	}
-
 	sendEvent := func(stepType, content, toolName string, args map[string]any) {
-		sendSSE(sseEvent{
+		evt := sseEvent{
 			StepType: stepType,
 			Content:  content,
 			ToolName: toolName,
 			Args:     args,
-		})
+		}
+		data, _ := json.Marshal(evt)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
 	}
 
 	// Select LLM provider: query param > default
@@ -133,33 +130,12 @@ func (s *Server) handleInvestigateSSE(w http.ResponseWriter, r *http.Request) {
 	// Run with callback for SSE events, persisting messages as they happen
 	ctx := r.Context()
 	_, err := ag.RunWithCallback(ctx, query, tools, func(evt agent.Event) {
-		switch evt.Type {
-		case "plan":
-			steps := make([]planStepDTO, len(evt.Steps))
-			for i, s := range evt.Steps {
-				steps[i] = planStepDTO{ID: s.ID, Description: s.Description}
-			}
-			sendSSE(sseEvent{StepType: "plan", Steps: steps})
-		case "plan_update":
-			sendSSE(sseEvent{StepType: "plan_update", StepID: evt.StepID, Status: evt.Status})
-		default:
-			sendEvent(evt.Type, evt.Content, evt.ToolName, evt.Args)
-		}
+		sendEvent(evt.Type, evt.Content, evt.ToolName, evt.Args)
 
 		// Persist agent messages to chat
 		if s.chatStore != nil && chatID != uuid.Nil {
 			switch evt.Type {
-			case "plan":
-				// Persist plan steps as JSON content with role "plan"
-				stepsJSON, _ := json.Marshal(evt.Steps)
-				_ = s.chatStore.AddMessage(ctx, store.Message{
-					ID:      uuid.New(),
-					ChatID:  chatID,
-					Role:    "plan",
-					Content: string(stepsJSON),
-				})
 			case "tool_call":
-				// Persist args as JSON so chat history can render them
 				toolContent := evt.Content
 				if len(evt.Args) > 0 {
 					if argsJSON, err := json.Marshal(evt.Args); err == nil {
@@ -188,7 +164,6 @@ func (s *Server) handleInvestigateSSE(w http.ResponseWriter, r *http.Request) {
 					Role:    "assistant",
 					Content: evt.Content,
 				})
-			// plan_update is ephemeral — no persistence needed
 			}
 		}
 	}, history)
@@ -212,17 +187,12 @@ func messagesToChatHistory(msgs []store.Message) []llm.ChatMessage {
 		case "assistant":
 			history = append(history, llm.ChatMessage{Role: "assistant", Content: m.Content})
 		case "tool_call":
-			// Tool calls were assistant responses (JSON)
 			history = append(history, llm.ChatMessage{Role: "assistant", Content: m.Content})
 		case "observation":
-			// Tool results were fed back as user messages
 			history = append(history, llm.ChatMessage{
 				Role:    "user",
 				Content: fmt.Sprintf("Tool %q returned:\n%s", m.ToolName, m.Content),
 			})
-		case "plan":
-			// Plans were assistant responses — include so LLM has context
-			history = append(history, llm.ChatMessage{Role: "assistant", Content: m.Content})
 		}
 	}
 	return history

@@ -21,23 +21,25 @@ func TestBuildSystemPrompt_WithTools(t *testing.T) {
 		{Name: "db_search", Description: "Query the database"},
 	}
 	prompt := BuildSystemPrompt(tools)
+	// Strategy section should include conditional guidance for log_search and db_search
 	if !strings.Contains(prompt, "log_search") {
-		t.Error("expected prompt to contain 'log_search'")
+		t.Error("expected prompt to reference 'log_search' in strategy")
 	}
-	if !strings.Contains(prompt, "db_search") {
-		t.Error("expected prompt to contain 'db_search'")
+	if !strings.Contains(prompt, "db_schema") {
+		t.Error("expected prompt to reference 'db_schema' in strategy when db_search is present")
 	}
-	if !strings.Contains(prompt, "Search logs by keyword") {
-		t.Error("expected prompt to contain tool description")
+	// Tool definitions should NOT be listed in the prompt text (native API handles that)
+	if strings.Contains(prompt, "## Available tools:") {
+		t.Error("expected no '## Available tools:' section — native tool calling handles tool definitions")
 	}
 }
 
-func TestBuildSystemPrompt_ContainsResponseFormat(t *testing.T) {
+func TestBuildSystemPrompt_ContainsRules(t *testing.T) {
 	prompt := BuildSystemPrompt(nil)
-	if !strings.Contains(prompt, "final_answer") {
-		t.Error("expected prompt to contain 'final_answer' format instruction")
+	if !strings.Contains(prompt, "## Rules") {
+		t.Error("expected prompt to contain '## Rules' section")
 	}
-	if !strings.Contains(prompt, "tool_call") {
-		t.Error("expected prompt to contain 'tool_call' format instruction")
+	if !strings.Contains(prompt, "final answer") {
+		t.Error("expected prompt to contain 'final answer' guidance")
 	}
 }

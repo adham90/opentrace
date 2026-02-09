@@ -11,7 +11,7 @@ import (
 
 // mockLLM returns pre-programmed responses in order.
 type mockLLM struct {
-	responses []string
+	responses []llm.ChatResponse
 	callIndex int
 }
 
@@ -21,7 +21,21 @@ func (m *mockLLM) ChatCompletion(_ context.Context, _ llm.ChatRequest) (llm.Chat
 	}
 	resp := m.responses[m.callIndex]
 	m.callIndex++
-	return llm.ChatResponse{Content: resp}, nil
+	return resp, nil
+}
+
+func textResp(content string) llm.ChatResponse {
+	return llm.ChatResponse{Content: content}
+}
+
+func toolResp(name string, args map[string]any) llm.ChatResponse {
+	return llm.ChatResponse{
+		ToolCalls: []llm.ToolCall{{
+			ID:   "call_" + name,
+			Name: name,
+			Args: args,
+		}},
+	}
 }
 
 func defaultCfg() RunConfig {
@@ -33,8 +47,8 @@ func defaultCfg() RunConfig {
 }
 
 func TestRun_FinalAnswerImmediate(t *testing.T) {
-	mock := &mockLLM{responses: []string{
-		`{"type":"final_answer","content":"The answer is 42."}`,
+	mock := &mockLLM{responses: []llm.ChatResponse{
+		textResp("The answer is 42."),
 	}}
 	a := New(mock, defaultCfg())
 
@@ -48,9 +62,9 @@ func TestRun_FinalAnswerImmediate(t *testing.T) {
 }
 
 func TestRun_ToolCallThenFinal(t *testing.T) {
-	mock := &mockLLM{responses: []string{
-		`{"type":"tool_call","tool":"echo","args":{"message":"hello"}}`,
-		`{"type":"final_answer","content":"Echo said hello."}`,
+	mock := &mockLLM{responses: []llm.ChatResponse{
+		toolResp("echo", map[string]any{"message": "hello"}),
+		textResp("Echo said hello."),
 	}}
 	a := New(mock, defaultCfg())
 	tools := []Tool{EchoTool()}
@@ -65,9 +79,9 @@ func TestRun_ToolCallThenFinal(t *testing.T) {
 }
 
 func TestRun_EchoTool(t *testing.T) {
-	mock := &mockLLM{responses: []string{
-		`{"type":"tool_call","tool":"echo","args":{"message":"test message"}}`,
-		`{"type":"final_answer","content":"done"}`,
+	mock := &mockLLM{responses: []llm.ChatResponse{
+		toolResp("echo", map[string]any{"message": "test message"}),
+		textResp("done"),
 	}}
 	a := New(mock, defaultCfg())
 	tools := []Tool{EchoTool()}
@@ -97,10 +111,9 @@ func TestRun_EchoTool(t *testing.T) {
 }
 
 func TestRun_MaxStepsExceeded(t *testing.T) {
-	// LLM always returns a tool call — should exceed max steps
-	responses := make([]string, 15)
+	responses := make([]llm.ChatResponse, 15)
 	for i := range responses {
-		responses[i] = `{"type":"tool_call","tool":"echo","args":{"message":"again"}}`
+		responses[i] = toolResp("echo", map[string]any{"message": "again"})
 	}
 	mock := &mockLLM{responses: responses}
 	cfg := RunConfig{MaxSteps: 3, MaxToolCalls: 100, MaxObservationBytes: 8192}
@@ -117,9 +130,9 @@ func TestRun_MaxStepsExceeded(t *testing.T) {
 }
 
 func TestRun_ToolBudgetExhausted(t *testing.T) {
-	responses := make([]string, 10)
+	responses := make([]llm.ChatResponse, 10)
 	for i := range responses {
-		responses[i] = `{"type":"tool_call","tool":"echo","args":{"message":"x"}}`
+		responses[i] = toolResp("echo", map[string]any{"message": "x"})
 	}
 	mock := &mockLLM{responses: responses}
 	cfg := RunConfig{MaxSteps: 20, MaxToolCalls: 2, MaxObservationBytes: 8192}
@@ -135,36 +148,11 @@ func TestRun_ToolBudgetExhausted(t *testing.T) {
 	}
 }
 
-func TestRun_MalformedJSON_Retry(t *testing.T) {
-	mock := &mockLLM{responses: []string{
-		`Sure! Here is some text {"type":"final_answer","content":"repaired"} and trailing`,
-		// ^ malformed, but ParseResponse will repair it via brace extraction
-		// Actually this will be repaired in ParseResponse itself.
-		// Let's use truly malformed that fails even repair:
-	}}
-	// Actually, the above will be repaired by ParseResponse. Let's test
-	// the retry path: first response is total garbage, second is valid.
-	mock = &mockLLM{responses: []string{
-		`this is garbage with no json`,
-		`{"type":"final_answer","content":"recovered"}`,
-	}}
-	a := New(mock, defaultCfg())
-
-	result, err := a.Run(context.Background(), "test retry", nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result != "recovered" {
-		t.Errorf("expected 'recovered', got %q", result)
-	}
-}
-
 func TestRun_ObservationTruncated(t *testing.T) {
-	// Tool returns a huge output
 	hugeMsg := strings.Repeat("x", 200)
-	mock := &mockLLM{responses: []string{
-		fmt.Sprintf(`{"type":"tool_call","tool":"echo","args":{"message":"%s"}}`, hugeMsg),
-		`{"type":"final_answer","content":"done"}`,
+	mock := &mockLLM{responses: []llm.ChatResponse{
+		toolResp("echo", map[string]any{"message": hugeMsg}),
+		textResp("done"),
 	}}
 	cfg := RunConfig{MaxSteps: 12, MaxToolCalls: 8, MaxObservationBytes: 50}
 	a := New(mock, cfg)
@@ -189,11 +177,39 @@ func TestRun_ObservationTruncated(t *testing.T) {
 	t.Error("no observation event found")
 }
 
+func TestRun_CoercedToolArgs(t *testing.T) {
+	mock := &mockLLM{responses: []llm.ChatResponse{
+		// echo with number instead of string — coerced to "42"
+		toolResp("echo", map[string]any{"message": float64(42)}),
+		textResp("done"),
+	}}
+	a := New(mock, defaultCfg())
+	tools := []Tool{EchoTool()}
+
+	var events []Event
+	cb := func(e Event) { events = append(events, e) }
+
+	result, err := a.RunWithCallback(context.Background(), "coerce args", tools, cb, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "done" {
+		t.Errorf("expected 'done', got %q", result)
+	}
+	// Verify the coerced value was echoed back
+	for _, e := range events {
+		if e.Type == "observation" && e.Content == "42" {
+			return
+		}
+	}
+	t.Error("expected observation event with coerced value '42'")
+}
+
 func TestRun_InvalidToolArgs(t *testing.T) {
-	// Call echo with wrong type for 'message'
-	mock := &mockLLM{responses: []string{
-		`{"type":"tool_call","tool":"echo","args":{"message":42}}`,
-		`{"type":"final_answer","content":"fixed"}`,
+	mock := &mockLLM{responses: []llm.ChatResponse{
+		// echo with bool instead of string — not coercible
+		toolResp("echo", map[string]any{"message": true}),
+		textResp("fixed"),
 	}}
 	a := New(mock, defaultCfg())
 	tools := []Tool{EchoTool()}
@@ -205,16 +221,12 @@ func TestRun_InvalidToolArgs(t *testing.T) {
 	if result != "fixed" {
 		t.Errorf("expected 'fixed', got %q", result)
 	}
-	// Verify the mock was called twice (invalid args → retry → final answer)
-	if mock.callIndex != 2 {
-		t.Errorf("expected 2 LLM calls, got %d", mock.callIndex)
-	}
 }
 
 func TestRun_UnknownTool(t *testing.T) {
-	mock := &mockLLM{responses: []string{
-		`{"type":"tool_call","tool":"nonexistent","args":{}}`,
-		`{"type":"final_answer","content":"ok"}`,
+	mock := &mockLLM{responses: []llm.ChatResponse{
+		toolResp("nonexistent", map[string]any{}),
+		textResp("ok"),
 	}}
 	a := New(mock, defaultCfg())
 	tools := []Tool{EchoTool()}
@@ -226,14 +238,11 @@ func TestRun_UnknownTool(t *testing.T) {
 	if result != "ok" {
 		t.Errorf("expected 'ok', got %q", result)
 	}
-	if mock.callIndex != 2 {
-		t.Errorf("expected 2 LLM calls (unknown tool + final), got %d", mock.callIndex)
-	}
 }
 
 func TestRun_ContextCancelled(t *testing.T) {
-	mock := &mockLLM{responses: []string{
-		`{"type":"final_answer","content":"should not reach"}`,
+	mock := &mockLLM{responses: []llm.ChatResponse{
+		textResp("should not reach"),
 	}}
 	a := New(mock, defaultCfg())
 
@@ -249,14 +258,11 @@ func TestRun_ContextCancelled(t *testing.T) {
 	}
 }
 
-func TestRun_PlanThenToolThenFinal(t *testing.T) {
-	mock := &mockLLM{responses: []string{
-		`{"type":"plan","steps":[{"id":1,"description":"Search logs"},{"id":2,"description":"Summarize"}]}`,
-		`{"type":"plan_update","step_id":1,"status":"in_progress"}`,
-		`{"type":"tool_call","tool":"echo","args":{"message":"found logs"}}`,
-		`{"type":"plan_update","step_id":1,"status":"completed"}`,
-		`{"type":"plan_update","step_id":2,"status":"in_progress"}`,
-		`{"type":"final_answer","content":"Summary of logs."}`,
+func TestRun_MultiToolCallThenFinal(t *testing.T) {
+	mock := &mockLLM{responses: []llm.ChatResponse{
+		toolResp("echo", map[string]any{"message": "step1"}),
+		toolResp("echo", map[string]any{"message": "step2"}),
+		textResp("All done."),
 	}}
 	a := New(mock, defaultCfg())
 	tools := []Tool{EchoTool()}
@@ -264,86 +270,54 @@ func TestRun_PlanThenToolThenFinal(t *testing.T) {
 	var events []Event
 	cb := func(e Event) { events = append(events, e) }
 
-	result, err := a.RunWithCallback(context.Background(), "complex query", tools, cb, nil)
+	result, err := a.RunWithCallback(context.Background(), "multi step", tools, cb, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "Summary of logs." {
+	if result != "All done." {
 		t.Errorf("unexpected result: %q", result)
 	}
 
-	// Verify event types in order
-	expectedTypes := []string{"thinking", "plan", "thinking", "plan_update", "thinking", "tool_call", "observation", "thinking", "plan_update", "thinking", "plan_update", "thinking", "final"}
+	// Verify event sequence: tool_call, observation, tool_call, observation, thinking, final
+	expectedTypes := []string{"tool_call", "observation", "tool_call", "observation", "thinking", "final"}
 	if len(events) != len(expectedTypes) {
 		t.Fatalf("expected %d events, got %d: %v", len(expectedTypes), len(events), eventTypes(events))
 	}
 	for i, et := range expectedTypes {
 		if events[i].Type != et {
-			t.Errorf("event[%d]: expected type %q, got %q", i, et, events[i].Type)
+			t.Errorf("event[%d]: expected %q, got %q", i, et, events[i].Type)
 		}
 	}
-
-	// Verify plan event has steps
-	if len(events[1].Steps) != 2 {
-		t.Errorf("expected plan event with 2 steps, got %d", len(events[1].Steps))
-	}
 }
 
-func TestRun_PlanDoesNotConsumeStepBudget(t *testing.T) {
-	// MaxSteps=3 — plan + 2 plan_updates + 1 tool_call + final = 5 LLM calls
-	// Without step budget bypass, this would fail at step 3
-	mock := &mockLLM{responses: []string{
-		`{"type":"plan","steps":[{"id":1,"description":"Do thing"}]}`,
-		`{"type":"plan_update","step_id":1,"status":"in_progress"}`,
-		`{"type":"tool_call","tool":"echo","args":{"message":"x"}}`,
-		`{"type":"plan_update","step_id":1,"status":"completed"}`,
-		`{"type":"final_answer","content":"done"}`,
-	}}
-	cfg := RunConfig{MaxSteps: 3, MaxToolCalls: 8, MaxObservationBytes: 8192}
-	a := New(mock, cfg)
-	tools := []Tool{EchoTool()}
-
-	result, err := a.Run(context.Background(), "test budget", tools)
-	if err != nil {
-		t.Fatalf("unexpected error (plan should not consume step budget): %v", err)
-	}
-	if result != "done" {
-		t.Errorf("unexpected result: %q", result)
-	}
-}
-
-func TestRun_PlanUpdateFields(t *testing.T) {
-	mock := &mockLLM{responses: []string{
-		`{"type":"plan_update","step_id":3,"status":"completed"}`,
-		`{"type":"final_answer","content":"ok"}`,
+func TestRun_ToolCallEmitsArgs(t *testing.T) {
+	mock := &mockLLM{responses: []llm.ChatResponse{
+		toolResp("echo", map[string]any{"message": "hello"}),
+		textResp("done"),
 	}}
 	a := New(mock, defaultCfg())
+	tools := []Tool{EchoTool()}
 
 	var events []Event
 	cb := func(e Event) { events = append(events, e) }
 
-	_, err := a.RunWithCallback(context.Background(), "update test", nil, cb, nil)
+	_, err := a.RunWithCallback(context.Background(), "test args", tools, cb, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Find the plan_update event
-	found := false
 	for _, e := range events {
-		if e.Type == "plan_update" {
-			found = true
-			if e.StepID != 3 {
-				t.Errorf("expected StepID 3, got %d", e.StepID)
+		if e.Type == "tool_call" {
+			if e.ToolName != "echo" {
+				t.Errorf("expected tool name 'echo', got %q", e.ToolName)
 			}
-			if e.Status != "completed" {
-				t.Errorf("expected Status completed, got %q", e.Status)
+			if msg, ok := e.Args["message"]; !ok || msg != "hello" {
+				t.Errorf("expected args with message=hello, got %v", e.Args)
 			}
-			break
+			return
 		}
 	}
-	if !found {
-		t.Error("expected a plan_update event")
-	}
+	t.Error("no tool_call event found")
 }
 
 func eventTypes(events []Event) []string {

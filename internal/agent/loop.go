@@ -16,13 +16,10 @@ type RunConfig struct {
 
 // Event represents an observable event from the agent loop.
 type Event struct {
-	Type     string         // "thinking", "tool_call", "observation", "final", "error", "plan", "plan_update"
+	Type     string         // "thinking", "tool_call", "observation", "final", "error"
 	Content  string
 	ToolName string
 	Args     map[string]any
-	Steps    []PlanStep // for "plan"
-	StepID   int        // for "plan_update"
-	Status   string     // for "plan_update"
 }
 
 // EventCallback is a function that receives agent events for observability.
@@ -54,10 +51,24 @@ func (a *Agent) RunWithCallback(ctx context.Context, query string, tools []Tool,
 		}
 	}
 
-	// Build tool lookup map
+	// Build tool lookup map and LLM tool definitions
 	toolMap := make(map[string]Tool, len(tools))
+	var toolDefs []llm.ToolDef
 	for _, t := range tools {
 		toolMap[t.Name] = t
+		var params []llm.ToolParamDef
+		for _, p := range t.Params {
+			params = append(params, llm.ToolParamDef{
+				Name:     p.Name,
+				Type:     p.Type,
+				Required: p.Required,
+			})
+		}
+		toolDefs = append(toolDefs, llm.ToolDef{
+			Name:        t.Name,
+			Description: t.Description,
+			Parameters:  params,
+		})
 	}
 
 	// Build initial messages
@@ -65,7 +76,6 @@ func (a *Agent) RunWithCallback(ctx context.Context, query string, tools []Tool,
 	messages := []llm.ChatMessage{
 		{Role: "system", Content: systemPrompt},
 	}
-	// Append prior conversation history if available
 	if len(history) > 0 {
 		messages = append(messages, history...)
 	}
@@ -74,80 +84,65 @@ func (a *Agent) RunWithCallback(ctx context.Context, query string, tools []Tool,
 	toolCallCount := 0
 
 	for step := 0; step < a.cfg.MaxSteps; step++ {
-		// Check context cancellation
 		if err := ctx.Err(); err != nil {
 			return "", fmt.Errorf("agent: %w", err)
 		}
 
-		// Call LLM
+		// Call LLM with native tool definitions
 		resp, err := a.llm.ChatCompletion(ctx, llm.ChatRequest{
 			Messages: messages,
-			JSONMode: true,
+			Tools:    toolDefs,
 		})
 		if err != nil {
 			return "", fmt.Errorf("agent: llm call failed: %w", err)
 		}
 
-		emit(Event{Type: "thinking", Content: resp.Content})
-
-		// Parse response
-		parsed, err := ParseResponse(resp.Content)
-		if err != nil {
-			// Malformed JSON — add error to history and let LLM retry
-			errMsg := fmt.Sprintf("Your response was not valid JSON. Error: %s. Please respond with valid JSON.", err)
-			messages = append(messages,
-				llm.ChatMessage{Role: "assistant", Content: resp.Content},
-				llm.ChatMessage{Role: "user", Content: errMsg},
-			)
-			emit(Event{Type: "error", Content: errMsg})
-			continue
+		// Emit thinking if the LLM returned text content
+		if resp.Content != "" {
+			emit(Event{Type: "thinking", Content: resp.Content})
 		}
 
-		switch parsed.Type {
-		case "final_answer":
-			emit(Event{Type: "final", Content: parsed.Content})
-			return parsed.Content, nil
+		// No tool calls → treat text content as final answer
+		if len(resp.ToolCalls) == 0 {
+			if resp.Content == "" {
+				return "", fmt.Errorf("agent: empty response from LLM (no content and no tool calls)")
+			}
+			emit(Event{Type: "final", Content: resp.Content})
+			return resp.Content, nil
+		}
 
-		case "plan":
-			emit(Event{Type: "plan", Steps: parsed.Steps})
-			messages = append(messages,
-				llm.ChatMessage{Role: "assistant", Content: resp.Content},
-				llm.ChatMessage{Role: "user", Content: "Good plan. Now execute step 1."},
-			)
-			step-- // free — don't consume step budget
-			continue
+		// Process each tool call in the response
+		// First, append the assistant message with tool calls to history
+		messages = append(messages, llm.ChatMessage{
+			Role:      "assistant",
+			Content:   resp.Content,
+			ToolCalls: resp.ToolCalls,
+		})
 
-		case "plan_update":
-			emit(Event{Type: "plan_update", StepID: parsed.StepID, Status: parsed.Status})
-			messages = append(messages,
-				llm.ChatMessage{Role: "assistant", Content: resp.Content},
-				llm.ChatMessage{Role: "user", Content: "Noted. Continue."},
-			)
-			step-- // free — don't consume step budget
-			continue
-
-		case "tool_call":
+		for _, tc := range resp.ToolCalls {
 			// Look up tool
-			tool, ok := toolMap[parsed.Tool]
+			tool, ok := toolMap[tc.Name]
 			if !ok {
-				errMsg := fmt.Sprintf("Unknown tool %q. You can ONLY use these tools: %s. Pick the most relevant tool from this list.", parsed.Tool, toolNames(tools))
-				messages = append(messages,
-					llm.ChatMessage{Role: "assistant", Content: resp.Content},
-					llm.ChatMessage{Role: "user", Content: errMsg},
-				)
+				errMsg := fmt.Sprintf("Unknown tool %q. Available: %s", tc.Name, toolNames(tools))
 				emit(Event{Type: "error", Content: errMsg})
-				continue // doesn't burn tool budget
+				messages = append(messages, llm.ChatMessage{
+					Role:       "tool",
+					Content:    errMsg,
+					ToolCallID: tc.ID,
+				})
+				continue
 			}
 
 			// Validate args
-			if err := ValidateArgs(tool.Params, parsed.Args); err != nil {
-				errMsg := fmt.Sprintf("Invalid arguments for tool %q: %s", parsed.Tool, err)
-				messages = append(messages,
-					llm.ChatMessage{Role: "assistant", Content: resp.Content},
-					llm.ChatMessage{Role: "user", Content: errMsg},
-				)
+			if err := ValidateArgs(tool.Params, tc.Args); err != nil {
+				errMsg := fmt.Sprintf("Invalid arguments for tool %q: %s", tc.Name, err)
 				emit(Event{Type: "error", Content: errMsg})
-				continue // doesn't burn tool budget
+				messages = append(messages, llm.ChatMessage{
+					Role:       "tool",
+					Content:    errMsg,
+					ToolCallID: tc.ID,
+				})
+				continue
 			}
 
 			// Check tool budget
@@ -156,24 +151,23 @@ func (a *Agent) RunWithCallback(ctx context.Context, query string, tools []Tool,
 			}
 			toolCallCount++
 
-			emit(Event{Type: "tool_call", ToolName: parsed.Tool, Args: parsed.Args})
+			emit(Event{Type: "tool_call", ToolName: tc.Name, Args: tc.Args})
 
 			// Execute tool
-			result, err := tool.Handler(ctx, parsed.Args)
+			result, err := tool.Handler(ctx, tc.Args)
 			if err != nil {
 				result = fmt.Sprintf("Tool error: %s", err)
 			}
 
-			// Truncate observation
 			result = TruncateObservation(result, a.cfg.MaxObservationBytes)
+			emit(Event{Type: "observation", Content: result, ToolName: tc.Name})
 
-			emit(Event{Type: "observation", Content: result, ToolName: parsed.Tool})
-
-			// Append to history
-			messages = append(messages,
-				llm.ChatMessage{Role: "assistant", Content: resp.Content},
-				llm.ChatMessage{Role: "user", Content: fmt.Sprintf("Tool %q returned:\n%s", parsed.Tool, result)},
-			)
+			// Append tool result to history
+			messages = append(messages, llm.ChatMessage{
+				Role:       "tool",
+				Content:    result,
+				ToolCallID: tc.ID,
+			})
 		}
 	}
 

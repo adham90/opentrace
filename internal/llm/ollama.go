@@ -29,30 +29,79 @@ func NewOllamaProvider(baseURL, chatModel, embeddingModel string, dimension int)
 	}
 }
 
-// ollamaChatRequest is the JSON body sent to POST /api/chat.
-type ollamaChatRequest struct {
-	Model    string        `json:"model"`
-	Messages []ChatMessage `json:"messages"`
-	Stream   bool          `json:"stream"`
-	Format   string        `json:"format,omitempty"`
+// --- Ollama chat API types ---
+
+type ollamaToolCall struct {
+	Function struct {
+		Name      string         `json:"name"`
+		Arguments map[string]any `json:"arguments"`
+	} `json:"function"`
 }
 
-// ollamaChatResponse is the JSON body returned from POST /api/chat.
+type ollamaChatMessage struct {
+	Role      string           `json:"role"`
+	Content   string           `json:"content"`
+	ToolCalls []ollamaToolCall `json:"tool_calls,omitempty"`
+}
+
+type ollamaToolDef struct {
+	Type     string       `json:"type"` // "function"
+	Function ollamaFunc   `json:"function"`
+}
+
+type ollamaFunc struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters"`
+}
+
+type ollamaChatRequest struct {
+	Model    string              `json:"model"`
+	Messages []ollamaChatMessage `json:"messages"`
+	Stream   bool                `json:"stream"`
+	Format   string              `json:"format,omitempty"`
+	Tools    []ollamaToolDef     `json:"tools,omitempty"`
+}
+
 type ollamaChatResponse struct {
-	Message struct {
-		Content string `json:"content"`
-	} `json:"message"`
+	Message ollamaChatMessage `json:"message"`
 }
 
 // ChatCompletion sends a chat request to Ollama and returns the response.
 func (o *OllamaProvider) ChatCompletion(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+	var messages []ollamaChatMessage
+	for _, m := range req.Messages {
+		msg := ollamaChatMessage{
+			Role:    m.Role,
+			Content: m.Content,
+		}
+		messages = append(messages, msg)
+	}
+
 	ollamaReq := ollamaChatRequest{
 		Model:    o.model,
-		Messages: req.Messages,
+		Messages: messages,
 		Stream:   false,
 	}
-	if req.JSONMode {
+
+	if req.JSONMode && len(req.Tools) == 0 {
 		ollamaReq.Format = "json"
+	}
+
+	// Convert tools (Ollama uses OpenAI-compatible format)
+	if len(req.Tools) > 0 {
+		ollamaReq.Tools = make([]ollamaToolDef, len(req.Tools))
+		for i, t := range req.Tools {
+			params := buildJSONSchema(t.Parameters)
+			ollamaReq.Tools[i] = ollamaToolDef{
+				Type: "function",
+				Function: ollamaFunc{
+					Name:        t.Name,
+					Description: t.Description,
+					Parameters:  params,
+				},
+			}
+		}
 	}
 
 	body, err := json.Marshal(ollamaReq)
@@ -81,16 +130,33 @@ func (o *OllamaProvider) ChatCompletion(ctx context.Context, req ChatRequest) (C
 		return ChatResponse{}, fmt.Errorf("ollama: decode chat response: %w", err)
 	}
 
-	return ChatResponse{Content: ollamaResp.Message.Content}, nil
+	result := ChatResponse{
+		Content: ollamaResp.Message.Content,
+	}
+
+	// Parse tool calls
+	for _, tc := range ollamaResp.Message.ToolCalls {
+		result.ToolCalls = append(result.ToolCalls, ToolCall{
+			ID:   fmt.Sprintf("ollama_%s_%d", tc.Function.Name, time.Now().UnixNano()),
+			Name: tc.Function.Name,
+			Args: tc.Function.Arguments,
+		})
+	}
+
+	if len(result.ToolCalls) > 0 {
+		result.StopReason = "tool_use"
+	}
+
+	return result, nil
 }
 
-// ollamaEmbedRequest is the JSON body sent to POST /api/embed.
+// --- Embeddings ---
+
 type ollamaEmbedRequest struct {
 	Model string `json:"model"`
 	Input string `json:"input"`
 }
 
-// ollamaEmbedResponse is the JSON body returned from POST /api/embed.
 type ollamaEmbedResponse struct {
 	Embeddings [][]float64 `json:"embeddings"`
 }

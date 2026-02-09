@@ -7,19 +7,11 @@ import (
 	"time"
 )
 
-type planStepDTO struct {
-	ID          int    `json:"id"`
-	Description string `json:"description"`
-}
-
 type sseEvent struct {
 	StepType string         `json:"step_type"`
 	Content  string         `json:"content"`
 	ToolName string         `json:"tool_name,omitempty"`
 	Args     map[string]any `json:"args,omitempty"`
-	Steps    []planStepDTO  `json:"steps,omitempty"`
-	StepID   int            `json:"step_id,omitempty"`
-	Status   string         `json:"status,omitempty"`
 }
 
 var demoEvents = []sseEvent{
