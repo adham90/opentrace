@@ -23,14 +23,16 @@ import (
 
 // appDeps holds shared application dependencies initialized by initApp.
 type appDeps struct {
-	pool        *pgxpool.Pool
-	dsStore     store.DataSourceStore
-	logStore    store.LogStore
-	embStore    store.EmbeddingStore
-	memoryStore store.MemoryStore
-	registry    *connector.Registry
-	cfg         *config.Config
-	embedder    llm.EmbeddingProvider
+	pool         *pgxpool.Pool
+	dsStore      store.DataSourceStore
+	logStore     store.LogStore
+	embStore     store.EmbeddingStore
+	memoryStore  store.MemoryStore
+	watcherStore store.WatcherStore
+	alertStore   store.AlertStore
+	registry     *connector.Registry
+	cfg          *config.Config
+	embedder     llm.EmbeddingProvider
 }
 
 func main() {
@@ -81,6 +83,8 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	logStore := store.NewPgLogStore(pool)
 	embStore := store.NewPgEmbeddingStore(pool)
 	memoryStore := store.NewPgMemoryStore(pool)
+	watcherStore := store.NewPgWatcherStore(pool)
+	alertStore := store.NewPgAlertStore(pool)
 
 	// Initialize embedding provider (may be nil if not configured)
 	var embedder llm.EmbeddingProvider
@@ -99,14 +103,16 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	registry.Register(connector.NewSystemConnector(memoryStore))
 
 	return &appDeps{
-		pool:        pool,
-		dsStore:     dsStore,
-		logStore:    logStore,
-		embStore:    embStore,
-		memoryStore: memoryStore,
-		registry:    registry,
-		cfg:         cfg,
-		embedder:    embedder,
+		pool:         pool,
+		dsStore:      dsStore,
+		logStore:     logStore,
+		embStore:     embStore,
+		memoryStore:  memoryStore,
+		watcherStore: watcherStore,
+		alertStore:   alertStore,
+		registry:     registry,
+		cfg:          cfg,
+		embedder:     embedder,
 	}, nil
 }
 
@@ -123,7 +129,11 @@ func runMCP() error {
 	defer deps.pool.Close()
 	defer deps.registry.CloseAll()
 
-	return mcpserver.Serve(deps.registry)
+	return mcpserver.Serve(mcpserver.Deps{
+		Registry:     deps.registry,
+		WatcherStore: deps.watcherStore,
+		AlertStore:   deps.alertStore,
+	})
 }
 
 func run() error {

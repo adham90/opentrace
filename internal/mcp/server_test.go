@@ -2,12 +2,16 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/opentrace/opentrace/internal/agent"
 	"github.com/opentrace/opentrace/internal/connector"
+	"github.com/opentrace/opentrace/internal/store"
 )
 
 // --- helpers ---
@@ -312,4 +316,283 @@ func searchString(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// --- Mock stores for watcher/alert tests ---
+
+type mockWatcherStore struct {
+	watchers []store.Watcher
+	created  *store.Watcher
+	err      error
+}
+
+func (m *mockWatcherStore) List(ctx context.Context) ([]store.Watcher, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.watchers, nil
+}
+
+func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatcherParams) (*store.Watcher, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	w := &store.Watcher{
+		ID:              uuid.New(),
+		Title:           params.Title,
+		Description:     params.Description,
+		Severity:        params.Severity,
+		Filters:         params.Filters,
+		IntervalSeconds: params.IntervalSeconds,
+		Status:          store.WatcherActive,
+		Notify:          params.Notify,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+	m.created = w
+	return w, nil
+}
+
+func (m *mockWatcherStore) GetByID(ctx context.Context, id uuid.UUID) (*store.Watcher, error) {
+	return nil, nil
+}
+func (m *mockWatcherStore) Update(ctx context.Context, id uuid.UUID, params store.UpdateWatcherParams) (*store.Watcher, error) {
+	return nil, nil
+}
+func (m *mockWatcherStore) UpdateStatus(ctx context.Context, id uuid.UUID, status store.WatcherStatus) (*store.Watcher, error) {
+	return nil, nil
+}
+func (m *mockWatcherStore) Delete(ctx context.Context, id uuid.UUID) error { return nil }
+func (m *mockWatcherStore) GetDueWatchers(ctx context.Context) ([]store.Watcher, error) {
+	return nil, nil
+}
+func (m *mockWatcherStore) UpdateRunTime(ctx context.Context, id uuid.UUID, lastRun, nextRun time.Time) error {
+	return nil
+}
+
+type mockAlertStore struct {
+	alerts []store.Alert
+	err    error
+}
+
+func (m *mockAlertStore) List(ctx context.Context, params store.ListAlertParams) ([]store.Alert, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.alerts, nil
+}
+
+func (m *mockAlertStore) Create(ctx context.Context, params store.CreateAlertParams) (*store.Alert, error) {
+	return nil, nil
+}
+func (m *mockAlertStore) CountUnread(ctx context.Context) (int, error)          { return 0, nil }
+func (m *mockAlertStore) MarkRead(ctx context.Context, id uuid.UUID) error      { return nil }
+func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error       { return nil }
+
+// --- listWatchersHandler tests ---
+
+func TestListWatchersHandler_Empty(t *testing.T) {
+	ws := &mockWatcherStore{}
+	handler := listWatchersHandler(ws)
+
+	result, err := handler(context.Background(), makeRequest(nil))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := resultText(t, result)
+	if text != "No watchers configured." {
+		t.Errorf("text = %q, want %q", text, "No watchers configured.")
+	}
+}
+
+func TestListWatchersHandler_WithWatchers(t *testing.T) {
+	ws := &mockWatcherStore{
+		watchers: []store.Watcher{
+			{ID: uuid.New(), Title: "Error Monitor", Status: store.WatcherActive},
+			{ID: uuid.New(), Title: "Timeout Watcher", Status: store.WatcherPaused},
+		},
+	}
+	handler := listWatchersHandler(ws)
+
+	result, err := handler(context.Background(), makeRequest(nil))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatal("expected success result")
+	}
+
+	text := resultText(t, result)
+	if !contains(text, "Error Monitor") {
+		t.Error("expected output to contain 'Error Monitor'")
+	}
+	if !contains(text, "Timeout Watcher") {
+		t.Error("expected output to contain 'Timeout Watcher'")
+	}
+}
+
+func TestListWatchersHandler_Error(t *testing.T) {
+	ws := &mockWatcherStore{err: errors.New("db error")}
+	handler := listWatchersHandler(ws)
+
+	result, err := handler(context.Background(), makeRequest(nil))
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+}
+
+// --- createWatcherHandler tests ---
+
+func TestCreateWatcherHandler_Success(t *testing.T) {
+	ws := &mockWatcherStore{}
+	handler := createWatcherHandler(ws)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"title":            "Error Monitor",
+		"description":      "Watch for error spikes in production",
+		"service":          "api",
+		"level":            "error",
+		"environment":      "production",
+		"interval_minutes": float64(10),
+		"severity":         "critical",
+	}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+
+	text := resultText(t, result)
+	if !contains(text, "Watcher created successfully") {
+		t.Errorf("text = %q, want it to contain 'Watcher created successfully'", text)
+	}
+
+	// Verify the watcher was created with correct params
+	if ws.created == nil {
+		t.Fatal("watcher was not created")
+	}
+	if ws.created.Title != "Error Monitor" {
+		t.Errorf("title = %q, want %q", ws.created.Title, "Error Monitor")
+	}
+	if ws.created.IntervalSeconds != 600 {
+		t.Errorf("interval = %d, want 600", ws.created.IntervalSeconds)
+	}
+	if ws.created.Severity != store.SeverityCritical {
+		t.Errorf("severity = %q, want %q", ws.created.Severity, store.SeverityCritical)
+	}
+
+	// Verify filters
+	var filters map[string]string
+	json.Unmarshal(ws.created.Filters, &filters)
+	if filters["service"] != "api" {
+		t.Errorf("filter service = %q, want %q", filters["service"], "api")
+	}
+	if filters["level"] != "error" {
+		t.Errorf("filter level = %q, want %q", filters["level"], "error")
+	}
+}
+
+func TestCreateWatcherHandler_MissingTitle(t *testing.T) {
+	ws := &mockWatcherStore{}
+	handler := createWatcherHandler(ws)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"description": "some description",
+	}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for missing title")
+	}
+}
+
+func TestCreateWatcherHandler_Defaults(t *testing.T) {
+	ws := &mockWatcherStore{}
+	handler := createWatcherHandler(ws)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"title":       "Simple Watcher",
+		"description": "Just watch",
+	}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+
+	if ws.created.IntervalSeconds != 300 {
+		t.Errorf("default interval = %d, want 300", ws.created.IntervalSeconds)
+	}
+	if ws.created.Severity != store.SeverityWarning {
+		t.Errorf("default severity = %q, want %q", ws.created.Severity, store.SeverityWarning)
+	}
+}
+
+// --- listAlertsHandler tests ---
+
+func TestListAlertsHandler_Empty(t *testing.T) {
+	as := &mockAlertStore{}
+	handler := listAlertsHandler(as)
+
+	result, err := handler(context.Background(), makeRequest(nil))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := resultText(t, result)
+	if text != "No alerts found." {
+		t.Errorf("text = %q, want %q", text, "No alerts found.")
+	}
+}
+
+func TestListAlertsHandler_WithAlerts(t *testing.T) {
+	as := &mockAlertStore{
+		alerts: []store.Alert{
+			{ID: uuid.New(), Title: "Error spike detected", Severity: store.SeverityCritical},
+			{ID: uuid.New(), Title: "High latency", Severity: store.SeverityWarning},
+		},
+	}
+	handler := listAlertsHandler(as)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"limit": float64(5),
+	}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatal("expected success result")
+	}
+
+	text := resultText(t, result)
+	if !contains(text, "Error spike detected") {
+		t.Error("expected output to contain 'Error spike detected'")
+	}
+	if !contains(text, "High latency") {
+		t.Error("expected output to contain 'High latency'")
+	}
+}
+
+func TestListAlertsHandler_Error(t *testing.T) {
+	as := &mockAlertStore{err: errors.New("db error")}
+	handler := listAlertsHandler(as)
+
+	result, err := handler(context.Background(), makeRequest(nil))
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
 }
