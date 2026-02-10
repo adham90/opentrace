@@ -38,11 +38,12 @@
 </div>
 
 <div id="alerts-list">
+  <div class="loading-state" id="alerts-loading">loading alerts</div>
   <div class="empty-state" id="alerts-empty" style="display:none">
     <div class="empty-icon">--</div>
-    <p id="empty-title">no alerts yet</p>
-    <p id="empty-desc">watchers will generate alerts when conditions are met</p>
-    <a href="/watchers" class="btn btn-primary" id="empty-action">set up a watcher</a>
+    <p class="empty-state-title" id="empty-title">No alerts yet</p>
+    <p class="empty-state-desc" id="empty-desc">Alerts are generated when your monitors detect an issue. Set up a monitor to start receiving alerts.</p>
+    <a href="/watchers" class="btn btn-primary" id="empty-action">Set up a monitor</a>
   </div>
 </div>
 
@@ -169,6 +170,8 @@ function updateActionBtns() {
 function renderAlerts() {
   var container = document.getElementById('alerts-list');
   var empty = document.getElementById('alerts-empty');
+  var loading = document.getElementById('alerts-loading');
+  if (loading) loading.style.display = 'none';
   var status = document.getElementById('statusFilter').getAttribute('data-value');
   var grouped = document.getElementById('groupToggle').checked;
 
@@ -188,20 +191,20 @@ function renderAlerts() {
 
     var severity = document.getElementById('severityFilter').getAttribute('data-value');
     if (status === 'dismissed') {
-      title.textContent = 'no dismissed alerts';
-      desc.textContent = 'dismissed alerts appear here for reference';
+      title.textContent = 'No dismissed alerts';
+      desc.textContent = 'Dismissed alerts appear here for reference.';
       action.style.display = 'none';
     } else if (alertCounts.total > 0 && status === 'unread' && !severity) {
-      title.textContent = 'all caught up';
-      desc.textContent = 'no unread alerts \u2014 switch to "all" to see history';
+      title.textContent = 'All caught up';
+      desc.textContent = 'No unread alerts \u2014 switch to "all" to see history.';
       action.style.display = 'none';
     } else if (alertCounts.total > 0) {
-      title.textContent = 'no matching alerts';
-      desc.textContent = 'try adjusting your filters';
+      title.textContent = 'No matching alerts';
+      desc.textContent = 'Try adjusting your filters to see more results.';
       action.style.display = 'none';
     } else {
-      title.textContent = 'no alerts yet';
-      desc.textContent = 'watchers will generate alerts when conditions are met';
+      title.textContent = 'No alerts yet';
+      desc.textContent = 'Alerts are generated when your monitors detect an issue. Set up a monitor to start receiving alerts.';
       action.style.display = '';
     }
     return;

@@ -8,11 +8,7 @@
   </div>
 
   <div id="watchers-list" class="watchers-list">
-    <div class="empty-state" id="watchers-empty">
-      <div class="empty-icon">--</div>
-      <p>no monitors configured</p>
-      <p>create one to start automated monitoring</p>
-    </div>
+    <div class="loading-state">loading monitors</div>
   </div>
 </div>
 
@@ -621,7 +617,7 @@ function loadWatchers() {
   fetch('/api/watchers' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r) { return r.json(); }).then(function(watchers) {
     var container = document.getElementById('watchers-list');
     if (!watchers || watchers.length === 0) {
-      container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no monitors configured</p><p>create one to start automated monitoring</p></div>';
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No monitors yet</p><p class="empty-state-desc">Monitors watch your databases and logs for problems, then alert you when something needs attention.</p>' + (isAdmin ? '<button class="btn btn-primary" onclick="showNewMonitorModal()">+ Create your first monitor</button>' : '') + '</div>';
       return;
     }
 

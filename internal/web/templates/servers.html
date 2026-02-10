@@ -26,7 +26,7 @@
 </div>
 
 <div id="servers-container">
-  <div class="empty-state"><div class="empty-icon">--</div><p>loading...</p></div>
+  <div class="loading-state">loading servers</div>
 </div>
 
 <script>
@@ -70,7 +70,7 @@ function copyAndFlash(btn, text) {
     fetch('/api/servers').then(function(r){ return r.json(); }).then(function(servers){
       var container = document.getElementById('servers-container');
       if (!servers || servers.length === 0) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no servers monitored</p><p class="text-dim text-xs">run <code>opentrace agent</code> on a server to start collecting metrics</p></div>';
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No servers monitored</p><p class="empty-state-desc">Install the OpenTrace agent on your servers to collect CPU, memory, and disk metrics in real time.</p><button class="btn btn-primary" onclick="toggleInstall()">+ Add a server</button></div>';
         return;
       }
 
@@ -118,7 +118,7 @@ function copyAndFlash(btn, text) {
         }).catch(function(){});
       });
     }).catch(function(){
-      document.getElementById('servers-container').innerHTML = '<div class="empty-state"><div class="empty-icon">!!</div><p>failed to load servers</p></div>';
+      document.getElementById('servers-container').innerHTML = '<div class="empty-state"><div class="empty-icon">!!</div><p class="empty-state-title">Failed to load servers</p><p class="empty-state-desc">There was a network error loading server data. Try refreshing the page.</p></div>';
     });
   }
 

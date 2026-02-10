@@ -4,9 +4,7 @@
     <h1><span class="prompt">$</span> tools <span class="dim">— MCP tool reference</span></h1>
   </div>
 
-  <div id="tools-loading" class="empty-state">
-    <p>loading tools<span class="spinner"></span></p>
-  </div>
+  <div id="tools-loading" class="loading-state">loading tools</div>
 
   <div id="tools-content" style="display:none"></div>
 </div>
@@ -56,7 +54,9 @@
     el.innerHTML = renderTools(data);
     el.style.display = 'block';
   }).catch(function() {
-    document.getElementById('tools-loading').innerHTML = '<p>failed to load tools</p>';
+    var el = document.getElementById('tools-loading');
+    el.className = 'empty-state';
+    el.innerHTML = '<div class="empty-icon">!!</div><p>Failed to load tools</p>';
   });
 })();
 </script>

@@ -8,11 +8,7 @@
   </div>
 
   <div id="connectors-list" class="connectors-list">
-    <div class="empty-state" id="connectors-empty">
-      <div class="empty-icon">--</div>
-      <p>no connectors configured</p>
-      <p>click + new connector to connect a data source</p>
-    </div>
+    <div class="loading-state">loading connectors</div>
   </div>
 </div>
 
@@ -81,7 +77,7 @@ function loadConnectors() {
   fetch('/api/connectors' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r) { return r.json(); }).then(function(connectors) {
     var container = document.getElementById('connectors-list');
     if (!connectors || connectors.length === 0) {
-      container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no connectors configured</p><p>click + new connector to connect a data source</p></div>';
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No connectors yet</p><p class="empty-state-desc">Connectors link OpenTrace to your databases and log sources so monitors can query them.</p>' + (isAdmin ? '<button class="btn btn-primary" onclick="showCreateModal()">+ Add your first connector</button>' : '') + '</div>';
       return;
     }
 
@@ -244,6 +240,6 @@ window.loadPageData = loadConnectors;
   {{end}}
 </div>
 {{else}}
-<div class="empty-state"><div class="empty-icon">--</div><p>no connectors configured</p><p>click + new connector to connect a data source</p></div>
+<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No connectors yet</p><p class="empty-state-desc">Connectors link OpenTrace to your databases and log sources so monitors can query them.</p></div>
 {{end}}
 {{end}}

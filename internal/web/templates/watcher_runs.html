@@ -19,7 +19,7 @@
   </div>
 
   <div id="runs-list" class="runs-list">
-    <div class="empty-state">Loading...</div>
+    <div class="loading-state">loading runs</div>
   </div>
 </div>
 
@@ -54,7 +54,7 @@ function loadRuns() {
   fetch('/api/watchers/' + watcherId + '/runs').then(function(r) { return r.json(); }).then(function(runs) {
     var container = document.getElementById('runs-list');
     if (!runs || runs.length === 0) {
-      container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no runs yet</p><p>this watcher has not executed</p></div>';
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No runs yet</p><p class="empty-state-desc">This monitor has not executed yet. Runs appear here once the scheduler triggers it or you click Run Now.</p></div>';
       hasRunning = false;
       schedulePoll();
       return;

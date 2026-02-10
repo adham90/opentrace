@@ -4,7 +4,7 @@
 </div>
 
 <div class="digest-latest" id="digest-latest">
-  <div class="empty-state"><div class="empty-icon">--</div><p>loading...</p></div>
+  <div class="loading-state">loading latest digest</div>
 </div>
 
 <div class="overview-panel" style="margin-top:24px">
@@ -12,7 +12,7 @@
     <span>digest history</span>
   </div>
   <div class="overview-panel-body" id="digest-history">
-    <div class="empty-state"><div class="empty-icon">--</div><p>loading...</p></div>
+    <div class="loading-state">loading history</div>
   </div>
 </div>
 
@@ -52,7 +52,7 @@
     fetch('/api/digests/latest' + envParam).then(function(r){ return r.json(); }).then(function(d){
       var el = document.getElementById('digest-latest');
       if (!d || d.status === 'empty' || d.status === 'unavailable') {
-        el.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>' + (d.message || 'no digests yet') + '</p></div>';
+        el.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No digests yet</p><p class="empty-state-desc">Digests are periodic summaries of your system health, including alert counts and monitor status. They are generated automatically.</p></div>';
         return;
       }
       var html = '<div class="digest-card digest-card-latest">';
@@ -70,7 +70,7 @@
       html += '</div></div>';
       el.innerHTML = html;
     }).catch(function(){
-      document.getElementById('digest-latest').innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>failed to load</p></div>';
+      document.getElementById('digest-latest').innerHTML = '<div class="empty-state"><div class="empty-icon">!!</div><p class="empty-state-title">Failed to load digest</p></div>';
     });
   }
 
@@ -79,26 +79,61 @@
     fetch('/api/digests' + envParam).then(function(r){ return r.json(); }).then(function(digests){
       var el = document.getElementById('digest-history');
       if (!digests || digests.length === 0) {
-        el.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no digest history</p></div>';
+        el.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No digest history</p><p class="empty-state-desc">Past digests will appear here once the first one is generated.</p></div>';
         return;
       }
-      var html = '<table class="data-table"><thead><tr><th>status</th><th>period</th><th>alerts</th><th>monitors</th><th>failed runs</th><th>generated</th></tr></thead><tbody>';
+      var html = '<table class="data-table" id="digest-table"><thead><tr>';
+      html += '<th class="sortable" data-col="0" data-type="text" onclick="sortDigestTable(this)">status</th>';
+      html += '<th class="sortable" data-col="1" data-type="number" onclick="sortDigestTable(this)">period</th>';
+      html += '<th class="sortable" data-col="2" data-type="number" onclick="sortDigestTable(this)">alerts</th>';
+      html += '<th class="sortable" data-col="3" data-type="number" onclick="sortDigestTable(this)">monitors</th>';
+      html += '<th class="sortable" data-col="4" data-type="number" onclick="sortDigestTable(this)">failed runs</th>';
+      html += '<th class="sortable sort-desc" data-col="5" data-type="date" onclick="sortDigestTable(this)">generated</th>';
+      html += '</tr></thead><tbody>';
       digests.forEach(function(d){
         html += '<tr>';
         html += '<td><span class="severity-badge ' + statusClass(d.status) + '">' + statusIcon(d.status) + '</span> ' + d.status + '</td>';
-        html += '<td>' + fmtDuration(d.period_start, d.period_end) + '</td>';
-        html += '<td>' + d.alert_total + ' <span class="dim">(' + d.alert_critical + ' crit)</span></td>';
-        html += '<td>' + d.monitor_total + ' <span class="dim">(' + d.monitor_errored + ' err)</span></td>';
-        html += '<td>' + d.failed_runs + '</td>';
-        html += '<td>' + fmtTime(d.created_at) + '</td>';
+        html += '<td data-sort="' + (new Date(d.period_end) - new Date(d.period_start)) + '">' + fmtDuration(d.period_start, d.period_end) + '</td>';
+        html += '<td data-sort="' + d.alert_total + '">' + d.alert_total + ' <span class="dim">(' + d.alert_critical + ' crit)</span></td>';
+        html += '<td data-sort="' + d.monitor_total + '">' + d.monitor_total + ' <span class="dim">(' + d.monitor_errored + ' err)</span></td>';
+        html += '<td data-sort="' + d.failed_runs + '">' + d.failed_runs + '</td>';
+        html += '<td data-sort="' + (new Date(d.created_at).getTime()) + '">' + fmtTime(d.created_at) + '</td>';
         html += '</tr>';
       });
       html += '</tbody></table>';
       el.innerHTML = html;
     }).catch(function(){
-      document.getElementById('digest-history').innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>failed to load</p></div>';
+      document.getElementById('digest-history').innerHTML = '<div class="empty-state"><div class="empty-icon">!!</div><p class="empty-state-title">Failed to load history</p></div>';
     });
   }
+
+  window.sortDigestTable = function(th) {
+    var table = document.getElementById('digest-table');
+    if (!table) return;
+    var col = parseInt(th.getAttribute('data-col'));
+    var type = th.getAttribute('data-type') || 'text';
+    var asc = th.classList.contains('sort-asc');
+    // Toggle direction
+    table.querySelectorAll('th.sortable').forEach(function(h) {
+      h.classList.remove('sort-asc', 'sort-desc');
+    });
+    if (asc) { th.classList.add('sort-desc'); } else { th.classList.add('sort-asc'); }
+    var dir = asc ? -1 : 1;
+
+    var tbody = table.querySelector('tbody');
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b) {
+      var aCell = a.cells[col];
+      var bCell = b.cells[col];
+      var aVal = aCell.getAttribute('data-sort') || aCell.textContent.trim();
+      var bVal = bCell.getAttribute('data-sort') || bCell.textContent.trim();
+      if (type === 'number' || type === 'date') {
+        return (parseFloat(aVal) - parseFloat(bVal)) * dir;
+      }
+      return aVal.localeCompare(bVal) * dir;
+    });
+    rows.forEach(function(row) { tbody.appendChild(row); });
+  };
 
   loadLatest();
   loadHistory();
