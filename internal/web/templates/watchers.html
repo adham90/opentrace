@@ -1,26 +1,222 @@
 {{define "content"}}
 <div class="watchers-page">
   <div class="page-header">
-    <h1><span class="prompt">$</span> watchers</h1>
+    <h1><span class="prompt">$</span> monitors</h1>
     <div class="actions">
-      {{if .IsAdmin}}<button class="btn btn-primary" onclick="showCreateModal()">+ New Watcher</button>{{end}}
+      {{if .IsAdmin}}<button class="btn btn-primary" onclick="showNewMonitorModal()">+ New Monitor</button>{{end}}
     </div>
   </div>
 
   <div id="watchers-list" class="watchers-list">
     <div class="empty-state" id="watchers-empty">
       <div class="empty-icon">--</div>
-      <p>no watchers configured</p>
+      <p>no monitors configured</p>
       <p>create one to start automated monitoring</p>
     </div>
   </div>
 </div>
 
-<!-- Create/Edit Modal -->
+<!-- New Monitor Type Selection Modal -->
+<div id="new-monitor-modal" class="modal" style="display:none" onclick="if(event.target===this)hideNewMonitorModal()">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3><span class="prompt">$</span> new-monitor</h3>
+      <button class="btn-close" onclick="hideNewMonitorModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="margin-bottom:16px;color:var(--text-dim)">What would you like to monitor?</p>
+      <div class="monitor-type-grid">
+        <button class="monitor-type-card" onclick="showRuleModal('query')">
+          <div class="monitor-type-icon">&#8689;</div>
+          <div class="monitor-type-name">Query</div>
+          <div class="monitor-type-desc">Run SQL against your DB</div>
+        </button>
+        <button class="monitor-type-card" onclick="showRuleModal('logs')">
+          <div class="monitor-type-icon">&#9776;</div>
+          <div class="monitor-type-name">Logs</div>
+          <div class="monitor-type-desc">Watch log patterns &amp; volume</div>
+        </button>
+        <button class="monitor-type-card" onclick="showRuleModal('health')">
+          <div class="monitor-type-icon">&#9829;</div>
+          <div class="monitor-type-name">Health</div>
+          <div class="monitor-type-desc">Check if databases are alive</div>
+        </button>
+        <button class="monitor-type-card" onclick="hideNewMonitorModal();showCreateModal()">
+          <div class="monitor-type-icon">&#10023;</div>
+          <div class="monitor-type-name">AI</div>
+          <div class="monitor-type-desc">Let AI analyze your data</div>
+        </button>
+      </div>
+
+      <div id="templates-section" style="margin-top:24px">
+        <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:12px;color:var(--text-dim)">Or start from a template</div>
+        <div id="templates-list" class="templates-grid"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Rule Monitor Modal (query/logs/health) -->
+<div id="rule-modal" class="modal" style="display:none" onclick="if(event.target===this)hideRuleModal()">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3><span class="prompt">$</span> <span id="rule-modal-title">new-query-monitor</span></h3>
+      <button class="btn-close" onclick="hideRuleModal()">&times;</button>
+    </div>
+    <form id="rule-form" onsubmit="saveRuleMonitor(event)">
+      <div class="modal-body">
+        <input type="hidden" id="rule-source" value="query">
+        <input type="hidden" id="rule-watcher-id" value="">
+
+        <div class="modal-section modal-section-primary">
+          <div class="modal-section-label"><span class="section-number">01</span> Monitor</div>
+          <div class="form-group">
+            <label>Name</label>
+            <input type="text" id="rule-title" required placeholder="e.g. Stuck transactions on production">
+          </div>
+          <div class="form-group">
+            <label>Environment</label>
+            <input type="text" id="rule-env" placeholder="e.g. production">
+          </div>
+        </div>
+
+        <!-- Query source fields -->
+        <div id="rule-query-section" class="modal-section">
+          <div class="modal-section-label"><span class="section-number">02</span> Query</div>
+          <div class="form-group">
+            <label>Data Source</label>
+            <select id="rule-datasource"><option value="">Select data source...</option></select>
+          </div>
+          <div class="form-group">
+            <label>SQL Query</label>
+            <textarea id="rule-query" rows="4" placeholder="SELECT count(*) FROM pg_stat_activity WHERE state = 'idle in transaction'"></textarea>
+          </div>
+          <div id="rule-preview-result" style="display:none;padding:8px 12px;margin-bottom:12px;border:1px solid var(--border);border-radius:4px;font-size:13px"></div>
+          <button type="button" class="btn btn-sm" onclick="runPreview()" id="rule-preview-btn">Run Preview</button>
+        </div>
+
+        <!-- Log source fields -->
+        <div id="rule-logs-section" class="modal-section" style="display:none">
+          <div class="modal-section-label"><span class="section-number">02</span> Log Filter</div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Service</label>
+              <input type="text" id="rule-log-service" placeholder="e.g. payments-service">
+            </div>
+            <div class="form-group">
+              <label>Level</label>
+              <select id="rule-log-level">
+                <option value="">Any</option>
+                <option value="ERROR">ERROR</option>
+                <option value="WARN">WARN</option>
+                <option value="INFO">INFO</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Message Contains</label>
+              <input type="text" id="rule-log-query" placeholder="e.g. connection refused">
+            </div>
+            <div class="form-group">
+              <label>Environment</label>
+              <input type="text" id="rule-log-env" placeholder="e.g. production">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Time Window</label>
+            <select id="rule-log-window">
+              <option value="5m">Last 5 min</option>
+              <option value="15m">Last 15 min</option>
+              <option value="30m">Last 30 min</option>
+              <option value="1h">Last 1 hour</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Health source fields -->
+        <div id="rule-health-section" class="modal-section" style="display:none">
+          <div class="modal-section-label"><span class="section-number">02</span> Health Checks</div>
+          <div class="form-group">
+            <label>Data Source</label>
+            <select id="rule-health-datasource"><option value="">Select data source...</option></select>
+          </div>
+          <div class="form-group">
+            <label>Checks</label>
+            <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="rule-check-connection" checked> Connection reachable</label>
+            <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="rule-check-latency"> Ping latency threshold</label>
+          </div>
+          <div class="form-group" id="rule-latency-group" style="display:none">
+            <label>Max Latency (ms)</label>
+            <input type="number" id="rule-latency-threshold" value="2000" min="100">
+          </div>
+        </div>
+
+        <!-- Alert condition -->
+        <div id="rule-condition-section" class="modal-section">
+          <div class="modal-section-label"><span class="section-number">03</span> Alert When</div>
+          <div class="form-grid" style="grid-template-columns: 1fr 1fr 1fr">
+            <div class="form-group">
+              <label>Metric</label>
+              <select id="rule-metric">
+                <option value="value">Value (first row)</option>
+                <option value="row_count">Row count</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Operator</label>
+              <select id="rule-operator">
+                <option value="gt">is greater than</option>
+                <option value="gte">is greater than or equal</option>
+                <option value="lt">is less than</option>
+                <option value="lte">is less than or equal</option>
+                <option value="eq">equals</option>
+                <option value="neq">does not equal</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Threshold</label>
+              <input type="number" id="rule-threshold" value="0" step="any">
+            </div>
+          </div>
+        </div>
+
+        <!-- Schedule & Severity -->
+        <div class="modal-section">
+          <div class="modal-section-label"><span class="section-number">04</span> Schedule &amp; Severity</div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Check Every</label>
+              <select id="rule-timerange">
+                <option value="1m">Every 1 min</option>
+                <option value="5m" selected>Every 5 min</option>
+                <option value="15m">Every 15 min</option>
+                <option value="30m">Every 30 min</option>
+                <option value="1h">Every 1 hour</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Severity</label>
+              <select id="rule-severity">
+                <option value="info">Info</option>
+                <option value="warning" selected>Warning</option>
+                <option value="critical">Critical</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn" onclick="hideRuleModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="rule-save-btn">Create Monitor</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- AI Create/Edit Modal (existing) -->
 <div id="watcher-modal" class="modal" style="display:none" onclick="if(event.target===this)hideModal()">
   <div class="modal-content">
     <div class="modal-header">
-      <h3><span class="prompt">$</span> <span id="modal-title">new-watcher</span></h3>
+      <h3><span class="prompt">$</span> <span id="modal-title">new-ai-monitor</span></h3>
       <button class="btn-close" onclick="hideModal()">&times;</button>
     </div>
     <form id="watcher-form" onsubmit="saveWatcher(event)">
@@ -94,7 +290,7 @@
               <option value="6h">Every 6 hours</option>
               <option value="24h">Every 24 hours</option>
             </select>
-            <div class="form-hint">How often this watcher runs AND the log window it analyzes. "Every 15 min" = check the last 15 minutes of logs, every 15 minutes.</div>
+            <div class="form-hint">How often this watcher runs AND the log window it analyzes.</div>
           </div>
         </div>
 
@@ -109,7 +305,6 @@
                 <option value="warning" selected>Warning</option>
                 <option value="critical">Critical</option>
               </select>
-              <div class="form-hint">Priority level for alerts. Only affects display, not AI analysis.</div>
             </div>
             <div class="form-group">
               <label>AI Model</label>
@@ -124,7 +319,6 @@
                 <option value="medium" selected>Medium — balanced</option>
                 <option value="high">High — deep analysis</option>
               </select>
-              <div class="form-hint">Controls how thorough the AI analysis is. Low = fast &amp; cheap, High = detailed &amp; costly.</div>
             </div>
           </div>
         </div>
@@ -157,7 +351,7 @@
 
       <div class="modal-footer">
         <button type="button" class="btn" onclick="hideModal()">Cancel</button>
-        <button type="submit" class="btn btn-primary" id="modal-save-btn">Create Watcher</button>
+        <button type="submit" class="btn btn-primary" id="modal-save-btn">Create Monitor</button>
       </div>
     </form>
   </div>
@@ -165,10 +359,10 @@
 
 <script>
 var isAdmin = {{.IsAdmin}};
+
 function loadModels() {
   fetch('/api/models').then(function(r) { return r.json(); }).then(function(models) {
     var sel = document.getElementById('watcher-model');
-    // Keep the first "Default" option, remove the rest
     while (sel.options.length > 1) sel.remove(1);
     if (models && models.length) {
       models.forEach(function(m) {
@@ -181,11 +375,65 @@ function loadModels() {
   });
 }
 
+function loadDataSources() {
+  fetch('/api/connectors').then(function(r) { return r.json(); }).then(function(list) {
+    if (!list) return;
+    var selectors = [document.getElementById('rule-datasource'), document.getElementById('rule-health-datasource')];
+    selectors.forEach(function(sel) {
+      if (!sel) return;
+      while (sel.options.length > 1) sel.remove(1);
+      list.forEach(function(ds) {
+        if (ds.type === 'database') {
+          var opt = document.createElement('option');
+          opt.value = ds.id;
+          opt.textContent = ds.name + (ds.environment ? ' (' + ds.environment + ')' : '');
+          sel.appendChild(opt);
+        }
+      });
+    });
+  });
+}
+
+function loadTemplates() {
+  fetch('/api/monitors/templates').then(function(r) { return r.json(); }).then(function(templates) {
+    var container = document.getElementById('templates-list');
+    if (!templates || !templates.length) { container.innerHTML = ''; return; }
+    var byCategory = {};
+    templates.forEach(function(t) {
+      if (!byCategory[t.category]) byCategory[t.category] = [];
+      byCategory[t.category].push(t);
+    });
+    var html = '';
+    Object.keys(byCategory).forEach(function(cat) {
+      html += '<div class="template-category"><div class="template-category-label">' + escapeHtml(cat) + '</div><div class="template-row">';
+      byCategory[cat].forEach(function(t) {
+        html += '<button class="template-card" onclick=\'applyTemplate(' + JSON.stringify(t).replace(/'/g, "&#39;") + ')\'>';
+        html += '<div class="template-name">' + escapeHtml(t.name) + '</div>';
+        html += '<div class="template-desc">' + escapeHtml(t.description) + '</div>';
+        html += '</button>';
+      });
+      html += '</div></div>';
+    });
+    container.innerHTML = html;
+  });
+}
+
+function getMonitorTypeBadge(w) {
+  if (w.monitor_type === 'rule' && w.rule_config) {
+    var src = w.rule_config.source;
+    if (src === 'query') return '<span class="badge badge-type badge-query">query</span>';
+    if (src === 'logs') return '<span class="badge badge-type badge-logs">logs</span>';
+    if (src === 'health') return '<span class="badge badge-type badge-health">health</span>';
+    return '<span class="badge badge-type">rule</span>';
+  }
+  return '<span class="badge badge-type badge-ai">AI</span>';
+}
+
 function loadWatchers() {
   fetch('/api/watchers' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r) { return r.json(); }).then(function(watchers) {
     var container = document.getElementById('watchers-list');
     if (!watchers || watchers.length === 0) {
-      container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no watchers configured</p><p>create one to start automated monitoring</p></div>';
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no monitors configured</p><p>create one to start automated monitoring</p></div>';
       return;
     }
 
@@ -197,13 +445,11 @@ function loadWatchers() {
 
       html += '<div class="watcher-card">';
       html += '  <div class="watcher-header">';
+      html += '    ' + getMonitorTypeBadge(w);
       html += '    <span class="watcher-title">' + escapeHtml(w.title) + '</span>';
       html += '    <span class="watcher-meta">every ' + escapeHtml(w.time_range || '15m') + '</span>';
-      if (w.model) {
+      if (w.monitor_type !== 'rule' && w.model) {
         html += '    <span class="watcher-meta">' + escapeHtml(w.model) + '</span>';
-      }
-      if (w.effort && w.effort !== 'medium') {
-        html += '    <span class="watcher-meta">' + escapeHtml(w.effort) + ' effort</span>';
       }
       html += '    <span class="watcher-status ' + statusClass + '">' + statusIcon + ' ' + w.status + '</span>';
       html += '  </div>';
@@ -214,7 +460,11 @@ function loadWatchers() {
       html += '  </div>';
       html += '  <div class="watcher-actions">';
       if (isAdmin) {
-        html += '    <button class="btn btn-sm" onclick="editWatcher(\'' + w.id + '\')">Edit</button>';
+        if (w.monitor_type === 'rule') {
+          html += '    <button class="btn btn-sm" onclick="editRuleMonitor(\'' + w.id + '\')">Edit</button>';
+        } else {
+          html += '    <button class="btn btn-sm" onclick="editWatcher(\'' + w.id + '\')">Edit</button>';
+        }
         if (w.status === 'active') {
           html += '    <button class="btn btn-sm" onclick="pauseWatcher(\'' + w.id + '\')">Pause</button>';
         } else {
@@ -233,9 +483,223 @@ function loadWatchers() {
   });
 }
 
+// New monitor modal
+function showNewMonitorModal() {
+  loadDataSources();
+  loadTemplates();
+  document.getElementById('new-monitor-modal').style.display = 'flex';
+}
+function hideNewMonitorModal() {
+  document.getElementById('new-monitor-modal').style.display = 'none';
+}
+
+// Rule monitor modal
+function showRuleModal(source) {
+  hideNewMonitorModal();
+  document.getElementById('rule-source').value = source;
+  document.getElementById('rule-watcher-id').value = '';
+  document.getElementById('rule-form').reset();
+  document.getElementById('rule-source').value = source;
+  document.getElementById('rule-preview-result').style.display = 'none';
+  document.getElementById('rule-save-btn').textContent = 'Create Monitor';
+
+  var titles = {query: 'new-query-monitor', logs: 'new-log-monitor', health: 'new-health-monitor'};
+  document.getElementById('rule-modal-title').textContent = titles[source] || 'new-monitor';
+
+  // Show/hide source-specific sections
+  document.getElementById('rule-query-section').style.display = source === 'query' ? '' : 'none';
+  document.getElementById('rule-logs-section').style.display = source === 'logs' ? '' : 'none';
+  document.getElementById('rule-health-section').style.display = source === 'health' ? '' : 'none';
+  document.getElementById('rule-condition-section').style.display = source !== 'health' ? '' : 'none';
+
+  if (source === 'logs') {
+    document.getElementById('rule-metric').innerHTML = '<option value="count">Count</option>';
+  } else {
+    document.getElementById('rule-metric').innerHTML = '<option value="value">Value (first row)</option><option value="row_count">Row count</option>';
+  }
+
+  loadDataSources();
+  document.getElementById('rule-modal').style.display = 'flex';
+}
+function hideRuleModal() {
+  document.getElementById('rule-modal').style.display = 'none';
+}
+
+function applyTemplate(t) {
+  hideNewMonitorModal();
+  var rc = t.rule_config;
+  showRuleModal(rc.source);
+  document.getElementById('rule-title').value = t.name;
+  document.getElementById('rule-severity').value = t.severity || 'warning';
+  document.getElementById('rule-timerange').value = t.time_range || '5m';
+
+  if (rc.source === 'query') {
+    document.getElementById('rule-query').value = rc.query || '';
+    document.getElementById('rule-metric').value = rc.metric || 'value';
+    document.getElementById('rule-operator').value = rc.operator || 'gt';
+    document.getElementById('rule-threshold').value = rc.threshold || 0;
+  } else if (rc.source === 'logs') {
+    if (rc.filter) {
+      document.getElementById('rule-log-service').value = rc.filter.service || '';
+      document.getElementById('rule-log-level').value = rc.filter.level || '';
+      document.getElementById('rule-log-query').value = rc.filter.query || '';
+      document.getElementById('rule-log-env').value = rc.filter.environment || '';
+    }
+    document.getElementById('rule-log-window').value = rc.time_window || '5m';
+    document.getElementById('rule-operator').value = rc.operator || 'gt';
+    document.getElementById('rule-threshold').value = rc.threshold || 0;
+  } else if (rc.source === 'health') {
+    if (rc.checks) {
+      document.getElementById('rule-check-connection').checked = rc.checks.indexOf('connection') >= 0;
+      document.getElementById('rule-check-latency').checked = rc.checks.indexOf('latency') >= 0;
+    }
+    if (rc.latency_threshold_ms) {
+      document.getElementById('rule-latency-threshold').value = rc.latency_threshold_ms;
+    }
+    toggleLatency();
+  }
+}
+
+function toggleLatency() {
+  var show = document.getElementById('rule-check-latency').checked;
+  document.getElementById('rule-latency-group').style.display = show ? '' : 'none';
+}
+document.getElementById('rule-check-latency').addEventListener('change', toggleLatency);
+
+function buildRuleConfig() {
+  var source = document.getElementById('rule-source').value;
+  var cfg = {source: source};
+
+  if (source === 'query') {
+    cfg.query = document.getElementById('rule-query').value;
+    cfg.metric = document.getElementById('rule-metric').value;
+    cfg.operator = document.getElementById('rule-operator').value;
+    cfg.threshold = parseFloat(document.getElementById('rule-threshold').value) || 0;
+  } else if (source === 'logs') {
+    cfg.metric = 'count';
+    cfg.operator = document.getElementById('rule-operator').value;
+    cfg.threshold = parseFloat(document.getElementById('rule-threshold').value) || 0;
+    cfg.time_window = document.getElementById('rule-log-window').value;
+    var filter = {};
+    var s = document.getElementById('rule-log-service').value; if (s) filter.service = s;
+    var l = document.getElementById('rule-log-level').value; if (l) filter.level = l;
+    var q = document.getElementById('rule-log-query').value; if (q) filter.query = q;
+    var e = document.getElementById('rule-log-env').value; if (e) filter.environment = e;
+    if (Object.keys(filter).length) cfg.filter = filter;
+  } else if (source === 'health') {
+    var checks = [];
+    if (document.getElementById('rule-check-connection').checked) checks.push('connection');
+    if (document.getElementById('rule-check-latency').checked) checks.push('latency');
+    cfg.checks = checks;
+    if (document.getElementById('rule-check-latency').checked) {
+      cfg.latency_threshold_ms = parseInt(document.getElementById('rule-latency-threshold').value) || 2000;
+    }
+  }
+  return cfg;
+}
+
+function runPreview() {
+  var btn = document.getElementById('rule-preview-btn');
+  var result = document.getElementById('rule-preview-result');
+  btn.disabled = true; btn.textContent = 'Running...';
+  result.style.display = 'none';
+
+  var body = {
+    monitor_type: 'rule',
+    rule_config: buildRuleConfig(),
+    data_source_id: document.getElementById('rule-datasource').value || undefined
+  };
+
+  fetch('/api/monitors/preview', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    btn.disabled = false; btn.textContent = 'Run Preview';
+    var color = data.would_alert ? 'var(--red)' : 'var(--green)';
+    var icon = data.would_alert ? '!' : '&#10003;';
+    result.innerHTML = '<span style="color:' + color + '">' + icon + '</span> ' + escapeHtml(data.summary) + ' <span style="color:var(--text-dim)">(' + data.query_time_ms + 'ms)</span>';
+    result.style.display = '';
+  }).catch(function() {
+    btn.disabled = false; btn.textContent = 'Run Preview';
+    result.innerHTML = '<span style="color:var(--red)">Preview failed</span>';
+    result.style.display = '';
+  });
+}
+
+function saveRuleMonitor(e) {
+  e.preventDefault();
+  var id = document.getElementById('rule-watcher-id').value;
+  var source = document.getElementById('rule-source').value;
+  var dsId = source === 'health' ? document.getElementById('rule-health-datasource').value : document.getElementById('rule-datasource').value;
+
+  var body = {
+    title: document.getElementById('rule-title').value,
+    monitor_type: 'rule',
+    rule_config: buildRuleConfig(),
+    severity: document.getElementById('rule-severity').value,
+    time_range: document.getElementById('rule-timerange').value,
+    environment: document.getElementById('rule-env').value
+  };
+  if (dsId) body.data_source_id = dsId;
+
+  var method = id ? 'PUT' : 'POST';
+  var url = id ? '/api/watchers/' + id : '/api/watchers';
+
+  fetch(url, {
+    method: method,
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  }).then(function() {
+    hideRuleModal();
+    loadWatchers();
+  });
+}
+
+function editRuleMonitor(id) {
+  fetch('/api/watchers/' + id).then(function(r) { return r.json(); }).then(function(w) {
+    var rc = w.rule_config || {};
+    showRuleModal(rc.source || 'query');
+    document.getElementById('rule-watcher-id').value = w.id;
+    document.getElementById('rule-title').value = w.title;
+    document.getElementById('rule-env').value = w.environment || '';
+    document.getElementById('rule-severity').value = w.severity || 'warning';
+    document.getElementById('rule-timerange').value = w.time_range || '5m';
+    document.getElementById('rule-save-btn').textContent = 'Save Changes';
+    document.getElementById('rule-modal-title').textContent = 'edit-monitor';
+
+    if (rc.source === 'query') {
+      document.getElementById('rule-query').value = rc.query || '';
+      document.getElementById('rule-metric').value = rc.metric || 'value';
+      document.getElementById('rule-operator').value = rc.operator || 'gt';
+      document.getElementById('rule-threshold').value = rc.threshold || 0;
+      if (w.data_source_id) document.getElementById('rule-datasource').value = w.data_source_id;
+    } else if (rc.source === 'logs') {
+      if (rc.filter) {
+        document.getElementById('rule-log-service').value = rc.filter.service || '';
+        document.getElementById('rule-log-level').value = rc.filter.level || '';
+        document.getElementById('rule-log-query').value = rc.filter.query || '';
+        document.getElementById('rule-log-env').value = rc.filter.environment || '';
+      }
+      document.getElementById('rule-log-window').value = rc.time_window || '5m';
+      document.getElementById('rule-operator').value = rc.operator || 'gt';
+      document.getElementById('rule-threshold').value = rc.threshold || 0;
+    } else if (rc.source === 'health') {
+      if (rc.checks) {
+        document.getElementById('rule-check-connection').checked = rc.checks.indexOf('connection') >= 0;
+        document.getElementById('rule-check-latency').checked = rc.checks.indexOf('latency') >= 0;
+      }
+      if (rc.latency_threshold_ms) document.getElementById('rule-latency-threshold').value = rc.latency_threshold_ms;
+      if (w.data_source_id) document.getElementById('rule-health-datasource').value = w.data_source_id;
+      toggleLatency();
+    }
+  });
+}
+
+// AI watcher modal (existing)
 function showCreateModal() {
-  document.getElementById('modal-title').textContent = 'new-watcher';
-  document.getElementById('modal-save-btn').textContent = 'Create Watcher';
+  document.getElementById('modal-title').textContent = 'new-ai-monitor';
+  document.getElementById('modal-save-btn').textContent = 'Create Monitor';
   document.getElementById('watcher-id').value = '';
   document.getElementById('watcher-form').reset();
   document.getElementById('webhook-url-group').classList.remove('show');
@@ -271,16 +735,15 @@ function saveWatcher(e) {
     if (url) notify.push({type: 'webhook', url: url});
   }
 
-  var watcherEnv = document.getElementById('watcher-env').value;
-
   var body = {
     title: document.getElementById('watcher-title').value,
     description: document.getElementById('watcher-description').value,
+    monitor_type: 'ai',
     severity: document.getElementById('watcher-severity').value,
     time_range: document.getElementById('watcher-timerange').value,
     model: document.getElementById('watcher-model').value,
     effort: document.getElementById('watcher-effort').value,
-    environment: watcherEnv,
+    environment: document.getElementById('watcher-env').value,
     filters: filters,
     notify: notify
   };
@@ -300,7 +763,7 @@ function saveWatcher(e) {
 
 function editWatcher(id) {
   fetch('/api/watchers/' + id).then(function(r) { return r.json(); }).then(function(w) {
-    document.getElementById('modal-title').textContent = 'edit-watcher';
+    document.getElementById('modal-title').textContent = 'edit-ai-monitor';
     document.getElementById('modal-save-btn').textContent = 'Save Changes';
     document.getElementById('watcher-id').value = w.id;
     document.getElementById('watcher-title').value = w.title;
@@ -317,7 +780,6 @@ function editWatcher(id) {
     document.getElementById('filter-env').value = f.environment || '';
     document.getElementById('filter-query').value = f.query || '';
 
-    // Restore webhook state
     var notify = w.notify || [];
     var hasWebhook = false;
     var webhookUrl = '';
@@ -342,13 +804,11 @@ function resumeWatcher(id) {
 }
 
 function runNow(id) {
-  fetch('/api/watchers/' + id + '/run', { method: 'POST' }).then(function() {
-    loadWatchers();
-  });
+  fetch('/api/watchers/' + id + '/run', { method: 'POST' }).then(function() { loadWatchers(); });
 }
 
 function deleteWatcher(id) {
-  if (!confirm('Delete this watcher?')) return;
+  if (!confirm('Delete this monitor?')) return;
   fetch('/api/watchers/' + id, { method: 'DELETE' }).then(function() { loadWatchers(); });
 }
 

@@ -1,111 +1,239 @@
 {{define "content"}}
-<div class="alerts-page">
-  <div class="page-header">
-    <h1><span class="prompt">$</span> alerts</h1>
-    <div class="actions">
-      <select id="alertFilter" onchange="filterAlerts()">
-        <option value="all">All alerts</option>
-        <option value="unread" selected>Unread</option>
-        <option value="critical">Critical only</option>
-      </select>
-    </div>
+<div class="page-header">
+  <h1><span class="prompt">$</span> alerts <span class="dim" id="alerts-count"></span></h1>
+  <div class="actions">
+    <button id="mark-all-read-btn" class="btn btn-sm" onclick="markAllRead()" style="display:none">mark all read</button>
   </div>
+</div>
 
-  <div id="alerts-list" class="alerts-list">
-    <div class="empty-state" id="alerts-empty">
-      <div class="empty-icon">--</div>
-      <p>no alerts yet</p>
-      <p>watchers will generate alerts when conditions are met</p>
-      <a href="/watchers" class="btn btn-primary">set up a watcher</a>
-    </div>
+<div class="alert-filters">
+  <div class="filter-group">
+    <select id="statusFilter" onchange="onFilterChange()">
+      <option value="all">all alerts</option>
+      <option value="unread">unread</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <select id="severityFilter" onchange="onFilterChange()">
+      <option value="">all severities</option>
+      <option value="critical">critical</option>
+      <option value="warning">warning</option>
+      <option value="info">info</option>
+    </select>
+  </div>
+</div>
+
+<div id="alerts-list">
+  <div class="empty-state" id="alerts-empty" style="display:none">
+    <div class="empty-icon">--</div>
+    <p id="empty-title">no alerts yet</p>
+    <p id="empty-desc">watchers will generate alerts when conditions are met</p>
+    <a href="/watchers" class="btn btn-primary" id="empty-action">set up a watcher</a>
   </div>
 </div>
 
 <script>
 var allAlerts = [];
+var alertCounts = { count: 0, total: 0 };
 var isAdmin = {{.IsAdmin}};
 
+function getUrlParams() {
+  var params = new URLSearchParams(window.location.search);
+  return {
+    status: params.get('status') || 'unread',
+    severity: params.get('severity') || ''
+  };
+}
+
+function setUrlParams(status, severity) {
+  var params = new URLSearchParams();
+  if (status && status !== 'unread') params.set('status', status);
+  if (severity) params.set('severity', severity);
+  var qs = params.toString();
+  var url = window.location.pathname + (qs ? '?' + qs : '');
+  history.replaceState(null, '', url);
+}
+
+function initFilters() {
+  var p = getUrlParams();
+  document.getElementById('statusFilter').value = p.status;
+  document.getElementById('severityFilter').value = p.severity;
+}
+
+function onFilterChange() {
+  var status = document.getElementById('statusFilter').value;
+  var severity = document.getElementById('severityFilter').value;
+  setUrlParams(status, severity);
+  loadAlerts();
+}
+
 function loadAlerts() {
-  var filter = document.getElementById('alertFilter').value;
-  var url = '/api/alerts?';
-  if (filter === 'unread') url += 'unread=true&';
-  url += 'limit=50';
+  var status = document.getElementById('statusFilter').value;
+  var severity = document.getElementById('severityFilter').value;
+  var url = '/api/alerts?limit=50';
+  if (status === 'unread') url += '&unread=true';
+  if (severity) url += '&severity=' + encodeURIComponent(severity);
   url += (getGlobalEnv() ? '&env=' + encodeURIComponent(getGlobalEnv()) : '');
 
   fetch(url).then(function(r) { return r.json(); }).then(function(alerts) {
     allAlerts = alerts || [];
-    if (filter === 'critical') {
-      allAlerts = allAlerts.filter(function(a) { return a.severity === 'critical'; });
-    }
     renderAlerts();
   });
+
+  loadCounts();
+}
+
+function loadCounts() {
+  var url = '/api/alerts/count';
+  url += (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '');
+  fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+    alertCounts = data;
+    updateHeaderCount();
+    updateBadge();
+    updateMarkAllBtn();
+  });
+}
+
+function updateHeaderCount() {
+  var el = document.getElementById('alerts-count');
+  if (!el) return;
+  if (alertCounts.total === 0) {
+    el.textContent = '';
+    return;
+  }
+  var parts = [];
+  parts.push(alertCounts.total + ' total');
+  if (alertCounts.count > 0) parts.push(alertCounts.count + ' unread');
+  el.textContent = parts.join(', ');
+}
+
+function updateMarkAllBtn() {
+  var btn = document.getElementById('mark-all-read-btn');
+  if (!btn) return;
+  btn.style.display = (isAdmin && alertCounts.count > 0) ? '' : 'none';
 }
 
 function renderAlerts() {
   var container = document.getElementById('alerts-list');
   var empty = document.getElementById('alerts-empty');
+  var status = document.getElementById('statusFilter').value;
+
+  // Preserve expanded rows across re-renders
+  var expandedIDs = {};
+  container.querySelectorAll('.alert-row.expanded').forEach(function(el) {
+    expandedIDs[el.getAttribute('data-id')] = true;
+  });
 
   if (allAlerts.length === 0) {
     container.innerHTML = '';
     container.appendChild(empty);
     empty.style.display = 'block';
+
+    var title = document.getElementById('empty-title');
+    var desc = document.getElementById('empty-desc');
+    var action = document.getElementById('empty-action');
+
+    if (alertCounts.total > 0 && status === 'unread') {
+      title.textContent = 'all caught up';
+      desc.textContent = 'no unread alerts — switch to "all alerts" to see history';
+      action.style.display = 'none';
+    } else {
+      title.textContent = 'no alerts yet';
+      desc.textContent = 'watchers will generate alerts when conditions are met';
+      action.style.display = '';
+    }
     return;
   }
 
-  var html = '';
+  var html = '<div class="alert-list">';
   allAlerts.forEach(function(a) {
     var sevClass = 'severity-' + a.severity;
-    var sevIcon = a.severity === 'critical' ? '!!' : a.severity === 'warning' ? '!' : 'i';
+    var sevLabel = a.severity === 'critical' ? 'CRIT' : a.severity === 'warning' ? 'WARN' : 'INFO';
     var timeAgo = getTimeAgo(a.created_at);
     var readClass = a.read ? ' alert-read' : '';
+    var expandClass = expandedIDs[a.id] ? ' expanded' : '';
 
-    html += '<div class="alert-card ' + sevClass + readClass + '" data-id="' + a.id + '">';
-    html += '  <div class="alert-header">';
-    html += '    <span class="severity-badge ' + sevClass + '">' + sevIcon + '</span>';
-    html += (a.environment ? '<span class="badge badge-env">' + escapeHtml(a.environment) + '</span>' : '');
-    html += '    <span class="alert-title">' + escapeHtml(a.title) + '</span>';
-    html += '    <span class="alert-time">' + timeAgo + '</span>';
+    html += '<div class="alert-row ' + sevClass + readClass + expandClass + '" data-id="' + a.id + '">';
+    html += '  <div class="alert-row-main" onclick="toggleAlert(this)">';
+    html += '    <span class="alert-ts">' + formatTimestamp(a.created_at) + '</span>';
+    html += '    <span class="badge badge-' + a.severity + '">' + sevLabel + '</span>';
+    if (a.environment) {
+      html += '    <span class="alert-env">' + escapeHtml(a.environment) + '</span>';
+    }
+    html += '    <span class="alert-title-text">' + escapeHtml(a.title) + '</span>';
+    html += '    <span class="alert-time-ago">' + timeAgo + '</span>';
     html += '  </div>';
-    html += '  <div class="alert-summary">' + escapeHtml(a.summary).substring(0, 200) + '</div>';
-    html += '  <div class="alert-actions">';
+    html += '  <div class="alert-detail">';
+    html += '    <div class="alert-detail-summary">' + escapeHtml(a.summary) + '</div>';
+    html += '    <div class="alert-detail-meta">';
+    if (a.watcher_title) {
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key">watcher</span><a href="/watchers" class="alert-detail-val alert-link">' + escapeHtml(a.watcher_title) + '</a></div>';
+    }
+    if (a.environment) {
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key">env</span><span class="alert-detail-val">' + escapeHtml(a.environment) + '</span></div>';
+    }
+    html += '      <div class="alert-detail-row"><span class="alert-detail-key">severity</span><span class="alert-detail-val">' + a.severity + '</span></div>';
+    html += '      <div class="alert-detail-row"><span class="alert-detail-key">time</span><span class="alert-detail-val">' + new Date(a.created_at).toLocaleString() + '</span></div>';
+    if (a.read) {
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key">status</span><span class="alert-detail-val dim">read</span></div>';
+    }
+    html += '    </div>';
     if (isAdmin) {
+      html += '    <div class="alert-detail-actions">';
       if (!a.read) {
-        html += '    <button class="btn btn-sm" onclick="markRead(\'' + a.id + '\')">Mark read</button>';
+        html += '      <button class="btn btn-sm" onclick="event.stopPropagation();markRead(\'' + a.id + '\')">mark read</button>';
       }
-      html += '    <button class="btn btn-sm btn-danger" onclick="dismissAlert(\'' + a.id + '\')">Dismiss</button>';
+      html += '      <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();dismissAlert(\'' + a.id + '\')">dismiss</button>';
+      html += '    </div>';
     }
     html += '  </div>';
     html += '</div>';
   });
+  html += '</div>';
   container.innerHTML = html;
+}
+
+function toggleAlert(el) {
+  var row = el.closest('.alert-row');
+  if (row.classList.contains('expanded')) {
+    row.classList.remove('expanded');
+  } else {
+    row.classList.add('expanded');
+  }
 }
 
 function markRead(id) {
   fetch('/api/alerts/' + id + '/read', { method: 'POST' }).then(function() {
     loadAlerts();
-    updateBadge();
+  });
+}
+
+function markAllRead() {
+  var url = '/api/alerts/read-all';
+  url += (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '');
+  fetch(url, { method: 'POST' }).then(function() {
+    loadAlerts();
   });
 }
 
 function dismissAlert(id) {
   fetch('/api/alerts/' + id + '/dismiss', { method: 'POST' }).then(function() {
     loadAlerts();
-    updateBadge();
   });
-}
-
-function filterAlerts() {
-  loadAlerts();
 }
 
 function updateBadge() {
-  fetch('/api/alerts/count').then(function(r) { return r.json(); }).then(function(data) {
-    var badge = document.getElementById('alert-badge');
-    if (badge) {
-      badge.textContent = data.count;
-      badge.style.display = data.count > 0 ? 'inline' : 'none';
-    }
-  });
+  var badge = document.getElementById('alert-badge');
+  if (badge) {
+    badge.textContent = alertCounts.count;
+    badge.style.display = alertCounts.count > 0 ? 'inline' : 'none';
+  }
+}
+
+function formatTimestamp(dateStr) {
+  var d = new Date(dateStr);
+  var pad = function(n) { return n < 10 ? '0' + n : n; };
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
 }
 
 function getTimeAgo(dateStr) {
@@ -124,8 +252,11 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-loadAlerts();
-setInterval(function() { loadAlerts(); updateBadge(); }, 30000);
 window.loadPageData = loadAlerts;
+document.addEventListener('DOMContentLoaded', function() {
+  initFilters();
+  loadAlerts();
+  setInterval(function() { loadAlerts(); }, 30000);
+});
 </script>
 {{end}}

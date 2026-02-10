@@ -55,7 +55,9 @@ type AlertStore interface {
 	Create(ctx context.Context, params CreateAlertParams) (*Alert, error)
 	List(ctx context.Context, params ListAlertParams) ([]Alert, error)
 	CountUnread(ctx context.Context, environment string) (int, error)
+	CountTotal(ctx context.Context, environment string) (int, error)
 	MarkRead(ctx context.Context, id uuid.UUID) error
+	MarkAllRead(ctx context.Context, environment string) error
 	Dismiss(ctx context.Context, id uuid.UUID) error
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
 }

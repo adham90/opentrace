@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
 	"github.com/adham90/opentrace/internal/store"
 )
 
@@ -20,6 +21,10 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 
 	if r.URL.Query().Get("unread") == "true" {
 		params.UnreadOnly = true
+	}
+
+	if sev := r.URL.Query().Get("severity"); sev != "" {
+		params.Severity = store.WatcherSeverity(sev)
 	}
 
 	if wID := r.URL.Query().Get("watcher_id"); wID != "" {
@@ -41,12 +46,17 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAlertCount(w http.ResponseWriter, r *http.Request) {
 	env := r.URL.Query().Get("env")
-	count, err := s.alertStore.CountUnread(r.Context(), env)
+	unread, err := s.alertStore.CountUnread(r.Context(), env)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to count alerts")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]int{"count": count})
+	total, err := s.alertStore.CountTotal(r.Context(), env)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to count alerts")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"count": unread, "total": total})
 }
 
 func (s *Server) handleMarkAlertRead(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +72,15 @@ func (s *Server) handleMarkAlertRead(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to mark alert read")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleMarkAllAlertsRead(w http.ResponseWriter, r *http.Request) {
+	env := r.URL.Query().Get("env")
+	if err := s.alertStore.MarkAllRead(r.Context(), env); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark all alerts read")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
