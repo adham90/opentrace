@@ -155,6 +155,15 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 		dbActivityHandler(deps.Registry, deps.WatcherStore),
 	)
 
+	// Lock contention (read-only — queries system catalogs).
+	s.AddTool(
+		mcp.NewTool("db_locks",
+			mcp.WithDescription("Show current lock contention: blocking chains, lock types, and waiting queries. Use when db_activity shows long-running or idle-in-transaction sessions, or when users report the database is stuck."),
+			mcp.WithBoolean("blocking_only", mcp.Description("Only show lock chains where one query is blocking another (default: true). Set to false to see all held locks.")),
+		),
+		dbLocksHandler(deps.Registry),
+	)
+
 	// Server metrics read tools.
 	if deps.ServerStore != nil && deps.MetricStore != nil {
 		s.AddTool(
@@ -192,6 +201,18 @@ func addWriteTools(s *server.MCPServer, deps Deps) {
 	for _, t := range deps.Registry.AllTools() {
 		s.AddTool(convertTool(t), bridgeHandler(t))
 	}
+
+	// Explain query (admin — executes queries).
+	s.AddTool(
+		mcp.NewTool("explain_query",
+			mcp.WithDescription("Run EXPLAIN ANALYZE on a SQL query to show the execution plan, actual vs estimated rows, and timing. Use when investigating slow queries identified by db_query_stats. The query is validated as SELECT-only."),
+			mcp.WithString("query", mcp.Required(), mcp.Description("The SQL SELECT query to analyze")),
+			mcp.WithString("format", mcp.Description("Output format: 'text' (default) or 'json'")),
+			mcp.WithBoolean("analyze", mcp.Description("Actually execute the query for real timing (default: true). Set to false for estimated-only plan.")),
+			mcp.WithBoolean("buffers", mcp.Description("Include buffer usage statistics (default: true). Requires analyze=true.")),
+		),
+		explainQueryHandler(deps.Registry),
+	)
 
 	// Create monitor.
 	if deps.WatcherStore != nil {
