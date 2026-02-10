@@ -83,6 +83,56 @@ type LogSearchParams struct {
 	SinceID     int64      `json:"since_id,omitempty"`
 }
 
+// MonitorType represents the evaluation strategy.
+type MonitorType string
+
+const (
+	MonitorTypeAI   MonitorType = "ai"
+	MonitorTypeRule MonitorType = "rule"
+)
+
+// RuleSource identifies what the rule evaluates.
+type RuleSource string
+
+const (
+	RuleSourceQuery  RuleSource = "query"
+	RuleSourceLogs   RuleSource = "logs"
+	RuleSourceHealth RuleSource = "health"
+)
+
+// RuleOperator defines comparison operators.
+type RuleOperator string
+
+const (
+	OpGreaterThan      RuleOperator = "gt"
+	OpGreaterThanEqual RuleOperator = "gte"
+	OpLessThan         RuleOperator = "lt"
+	OpLessThanEqual    RuleOperator = "lte"
+	OpEqual            RuleOperator = "eq"
+	OpNotEqual         RuleOperator = "neq"
+)
+
+// RuleConfig is the top-level rule configuration.
+type RuleConfig struct {
+	Source           RuleSource   `json:"source"`
+	Query            string       `json:"query,omitempty"`
+	Metric           string       `json:"metric,omitempty"`
+	Operator         RuleOperator `json:"operator,omitempty"`
+	Threshold        float64      `json:"threshold"`
+	Filter           *LogFilter   `json:"filter,omitempty"`
+	TimeWindow       string       `json:"time_window,omitempty"`
+	Checks           []string     `json:"checks,omitempty"`
+	LatencyThreshold int          `json:"latency_threshold_ms,omitempty"`
+}
+
+// LogFilter defines log search criteria for rule monitors.
+type LogFilter struct {
+	Service     string `json:"service,omitempty"`
+	Level       string `json:"level,omitempty"`
+	Query       string `json:"query,omitempty"`
+	Environment string `json:"environment,omitempty"`
+}
+
 // WatcherSeverity represents the severity level of a watcher.
 type WatcherSeverity string
 
@@ -112,48 +162,57 @@ const (
 
 // Watcher represents an automated monitoring rule.
 type Watcher struct {
-	ID          uuid.UUID       `json:"id"`
-	Title       string          `json:"title"`
-	Description string          `json:"description"`
-	Environment string          `json:"environment,omitempty"`
-	Severity    WatcherSeverity `json:"severity"`
-	Filters     json.RawMessage `json:"filters"`
-	TimeRange   string          `json:"time_range"`
-	Model       string          `json:"model"`
-	Effort      WatcherEffort   `json:"effort"`
-	Status      WatcherStatus   `json:"status"`
-	Notify      json.RawMessage `json:"notify"`
-	LastRunAt   *time.Time      `json:"last_run_at,omitempty"`
-	NextRunAt   *time.Time      `json:"next_run_at,omitempty"`
-	LastError   *string         `json:"last_error,omitempty"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
+	ID           uuid.UUID       `json:"id"`
+	Title        string          `json:"title"`
+	Description  string          `json:"description"`
+	Environment  string          `json:"environment,omitempty"`
+	Severity     WatcherSeverity `json:"severity"`
+	Filters      json.RawMessage `json:"filters"`
+	TimeRange    string          `json:"time_range"`
+	Model        string          `json:"model"`
+	Effort       WatcherEffort   `json:"effort"`
+	Status       WatcherStatus   `json:"status"`
+	Notify       json.RawMessage `json:"notify"`
+	MonitorType  MonitorType     `json:"monitor_type"`
+	RuleConfig   *RuleConfig     `json:"rule_config,omitempty"`
+	DataSourceID *string         `json:"data_source_id,omitempty"`
+	LastRunAt    *time.Time      `json:"last_run_at,omitempty"`
+	NextRunAt    *time.Time      `json:"next_run_at,omitempty"`
+	LastError    *string         `json:"last_error,omitempty"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
 }
 
 // CreateWatcherParams defines the input for creating a watcher.
 type CreateWatcherParams struct {
-	Title       string          `json:"title"`
-	Description string          `json:"description"`
-	Environment string          `json:"environment,omitempty"`
-	Severity    WatcherSeverity `json:"severity"`
-	Filters     json.RawMessage `json:"filters"`
-	TimeRange   string          `json:"time_range"`
-	Model       string          `json:"model"`
-	Effort      WatcherEffort   `json:"effort"`
-	Notify      json.RawMessage `json:"notify"`
+	Title        string          `json:"title"`
+	Description  string          `json:"description"`
+	Environment  string          `json:"environment,omitempty"`
+	Severity     WatcherSeverity `json:"severity"`
+	Filters      json.RawMessage `json:"filters"`
+	TimeRange    string          `json:"time_range"`
+	Model        string          `json:"model"`
+	Effort       WatcherEffort   `json:"effort"`
+	Notify       json.RawMessage `json:"notify"`
+	MonitorType  MonitorType     `json:"monitor_type"`
+	RuleConfig   *RuleConfig     `json:"rule_config,omitempty"`
+	DataSourceID *string         `json:"data_source_id,omitempty"`
 }
 
 // UpdateWatcherParams defines the input for updating a watcher.
 type UpdateWatcherParams struct {
-	Title       *string          `json:"title,omitempty"`
-	Description *string          `json:"description,omitempty"`
-	Environment *string          `json:"environment,omitempty"`
-	Severity    *WatcherSeverity `json:"severity,omitempty"`
-	Filters     json.RawMessage  `json:"filters,omitempty"`
-	TimeRange   *string          `json:"time_range,omitempty"`
-	Model       *string          `json:"model,omitempty"`
-	Effort      *WatcherEffort   `json:"effort,omitempty"`
-	Notify      json.RawMessage  `json:"notify,omitempty"`
+	Title        *string          `json:"title,omitempty"`
+	Description  *string          `json:"description,omitempty"`
+	Environment  *string          `json:"environment,omitempty"`
+	Severity     *WatcherSeverity `json:"severity,omitempty"`
+	Filters      json.RawMessage  `json:"filters,omitempty"`
+	TimeRange    *string          `json:"time_range,omitempty"`
+	Model        *string          `json:"model,omitempty"`
+	Effort       *WatcherEffort   `json:"effort,omitempty"`
+	Notify       json.RawMessage  `json:"notify,omitempty"`
+	MonitorType  *MonitorType     `json:"monitor_type,omitempty"`
+	RuleConfig   *RuleConfig      `json:"rule_config,omitempty"`
+	DataSourceID *string          `json:"data_source_id,omitempty"`
 }
 
 // ListWatcherParams defines filters for listing watchers.

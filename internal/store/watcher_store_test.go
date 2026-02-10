@@ -256,6 +256,128 @@ func TestWatcherStore_EffortField(t *testing.T) {
 	}
 }
 
+func TestWatcherStore_MonitorType(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewWatcherStore(db)
+	ctx := context.Background()
+
+	// Default monitor_type is "ai"
+	w, err := s.Create(ctx, CreateWatcherParams{
+		Title:       "AI Watcher",
+		Description: "Uses AI evaluation",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if w.MonitorType != MonitorTypeAI {
+		t.Errorf("default monitor_type = %q, want %q", w.MonitorType, MonitorTypeAI)
+	}
+	if w.RuleConfig != nil {
+		t.Error("expected nil RuleConfig for AI watcher")
+	}
+	if w.DataSourceID != nil {
+		t.Error("expected nil DataSourceID for AI watcher")
+	}
+
+	// Create a rule monitor with rule_config
+	dsID := "ds-123"
+	ruleW, err := s.Create(ctx, CreateWatcherParams{
+		Title:       "Query Monitor",
+		Description: "Checks connection count",
+		MonitorType: MonitorTypeRule,
+		RuleConfig: &RuleConfig{
+			Source:    RuleSourceQuery,
+			Query:     "SELECT count(*) FROM pg_stat_activity",
+			Metric:    "value",
+			Operator:  OpGreaterThan,
+			Threshold: 80,
+		},
+		DataSourceID: &dsID,
+	})
+	if err != nil {
+		t.Fatalf("Create rule watcher: %v", err)
+	}
+	if ruleW.MonitorType != MonitorTypeRule {
+		t.Errorf("monitor_type = %q, want %q", ruleW.MonitorType, MonitorTypeRule)
+	}
+	if ruleW.RuleConfig == nil {
+		t.Fatal("expected non-nil RuleConfig")
+	}
+	if ruleW.RuleConfig.Source != RuleSourceQuery {
+		t.Errorf("rule source = %q, want %q", ruleW.RuleConfig.Source, RuleSourceQuery)
+	}
+	if ruleW.RuleConfig.Operator != OpGreaterThan {
+		t.Errorf("operator = %q, want %q", ruleW.RuleConfig.Operator, OpGreaterThan)
+	}
+	if ruleW.RuleConfig.Threshold != 80 {
+		t.Errorf("threshold = %f, want 80", ruleW.RuleConfig.Threshold)
+	}
+	if ruleW.DataSourceID == nil || *ruleW.DataSourceID != dsID {
+		t.Errorf("data_source_id = %v, want %q", ruleW.DataSourceID, dsID)
+	}
+
+	// GetByID preserves rule_config
+	got, err := s.GetByID(ctx, ruleW.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.RuleConfig == nil {
+		t.Fatal("GetByID: expected non-nil RuleConfig")
+	}
+	if got.RuleConfig.Query != "SELECT count(*) FROM pg_stat_activity" {
+		t.Errorf("GetByID rule query = %q", got.RuleConfig.Query)
+	}
+
+	// List returns monitor_type
+	list, err := s.List(ctx, ListWatcherParams{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("List len = %d, want 2", len(list))
+	}
+	// Check both types are present (order depends on timestamp resolution)
+	types := map[MonitorType]bool{}
+	for _, w := range list {
+		types[w.MonitorType] = true
+	}
+	if !types[MonitorTypeAI] || !types[MonitorTypeRule] {
+		t.Errorf("expected both ai and rule in list, got %v", types)
+	}
+
+	// Update rule_config
+	newType := MonitorTypeRule
+	updated, err := s.Update(ctx, w.ID, UpdateWatcherParams{
+		MonitorType: &newType,
+		RuleConfig: &RuleConfig{
+			Source:    RuleSourceLogs,
+			Metric:    "count",
+			Operator:  OpGreaterThan,
+			Threshold: 10,
+			Filter: &LogFilter{
+				Service: "payments",
+				Level:   "ERROR",
+			},
+			TimeWindow: "5m",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.MonitorType != MonitorTypeRule {
+		t.Errorf("updated monitor_type = %q, want rule", updated.MonitorType)
+	}
+	if updated.RuleConfig == nil {
+		t.Fatal("expected updated RuleConfig")
+	}
+	if updated.RuleConfig.Source != RuleSourceLogs {
+		t.Errorf("updated rule source = %q, want logs", updated.RuleConfig.Source)
+	}
+	if updated.RuleConfig.Filter == nil || updated.RuleConfig.Filter.Service != "payments" {
+		t.Error("expected filter service = payments")
+	}
+}
+
 func TestWatcherStore_GetDueWatchers(t *testing.T) {
 	db := setupTestDB(t)
 	s := NewWatcherStore(db)
