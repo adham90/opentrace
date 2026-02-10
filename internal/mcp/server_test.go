@@ -1175,7 +1175,7 @@ func TestAddReadOnlyTools_RegistersExpectedTools(t *testing.T) {
 	addReadOnlyTools(s, deps)
 
 	tools := s.ListTools()
-	expectedTools := []string{"list_connectors", "list_monitors", "list_alerts", "get_digest", "db_locks", "log_stats", "db_index_analysis", "compare_periods"}
+	expectedTools := []string{"list_connectors", "list_monitors", "list_alerts", "get_digest", "db_locks", "log_stats", "trace_lookup", "db_index_analysis", "compare_periods"}
 	for _, name := range expectedTools {
 		if _, ok := tools[name]; !ok {
 			t.Errorf("expected read-only tool %q to be registered", name)

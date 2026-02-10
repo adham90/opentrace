@@ -206,6 +206,18 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 		)
 	}
 
+	// Distributed trace lookup.
+	if deps.LogStore != nil {
+		s.AddTool(
+			mcp.NewTool("trace_lookup",
+				mcp.WithDescription("Follow a distributed trace across services. Given a trace ID, assembles all log entries from that trace ordered by timestamp, showing the request journey through services, timing between hops, and where errors occurred. Use when investigating a specific request failure or latency issue."),
+				mcp.WithString("trace_id", mcp.Required(), mcp.Description("The trace/correlation ID to look up (from log entries or error reports)")),
+				mcp.WithBoolean("include_context", mcp.Description("Include surrounding log entries (+/- 2 seconds) from each service for additional context (default: false)")),
+			),
+			traceLookupHandler(deps.LogStore),
+		)
+	}
+
 	// Index health analysis (read-only — queries system catalogs).
 	s.AddTool(
 		mcp.NewTool("db_index_analysis",
