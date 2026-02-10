@@ -334,6 +334,10 @@ func (m *mockRunStore) Prune(ctx context.Context, olderThan time.Duration) (int6
 	return 0, nil
 }
 
+func (m *mockRunStore) CountRuns(ctx context.Context, params store.CountRunParams) (int, error) {
+	return 0, nil
+}
+
 func (m *mockRunStore) List(ctx context.Context, watcherID uuid.UUID, limit int) ([]store.WatcherRun, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -426,6 +430,10 @@ func (m *mockAlertStore) MarkAllRead(ctx context.Context, environment string) er
 func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error       { return nil }
 func (m *mockAlertStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	return 0, nil
+}
+
+func (m *mockAlertStore) CountBySeverity(ctx context.Context, since, until time.Time, environment string) (map[string]int, error) {
+	return make(map[string]int), nil
 }
 
 func (m *mockAlertStore) getAlerts() []store.Alert {

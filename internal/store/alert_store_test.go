@@ -209,6 +209,101 @@ func TestAlertStore_Prune(t *testing.T) {
 	}
 }
 
+func TestAlertStore_CountBySeverity(t *testing.T) {
+	db := setupTestDB(t)
+	as := NewAlertStore(db)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	periodStart := now.Add(-24 * time.Hour)
+
+	// Insert alerts with backdated created_at in period
+	for _, s := range []struct {
+		sev string
+		age time.Duration
+	}{
+		{"critical", 2 * time.Hour},
+		{"warning", 3 * time.Hour},
+		{"warning", 4 * time.Hour},
+		{"info", 5 * time.Hour},
+	} {
+		_, err := db.ExecContext(ctx,
+			`INSERT INTO alerts (id, title, summary, severity, created_at) VALUES (?, ?, ?, ?, ?)`,
+			uuid.New().String(), "test", "test", s.sev,
+			now.Add(-s.age).Format(time.RFC3339),
+		)
+		if err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+
+	// Insert alert outside period (48h ago)
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO alerts (id, title, summary, severity, created_at) VALUES (?, ?, ?, ?, ?)`,
+		uuid.New().String(), "old", "old", "critical",
+		now.Add(-48*time.Hour).Format(time.RFC3339),
+	)
+	if err != nil {
+		t.Fatalf("insert old: %v", err)
+	}
+
+	counts, err := as.CountBySeverity(ctx, periodStart, now, "")
+	if err != nil {
+		t.Fatalf("CountBySeverity: %v", err)
+	}
+
+	if counts["critical"] != 1 {
+		t.Errorf("critical = %d, want 1", counts["critical"])
+	}
+	if counts["warning"] != 2 {
+		t.Errorf("warning = %d, want 2", counts["warning"])
+	}
+	if counts["info"] != 1 {
+		t.Errorf("info = %d, want 1", counts["info"])
+	}
+}
+
+func TestAlertStore_CountBySeverity_Environment(t *testing.T) {
+	db := setupTestDB(t)
+	as := NewAlertStore(db)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	periodStart := now.Add(-24 * time.Hour)
+
+	// Production alert
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO alerts (id, title, summary, severity, environment, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		uuid.New().String(), "prod", "prod", "critical", "production",
+		now.Add(-1*time.Hour).Format(time.RFC3339),
+	)
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	// Staging alert
+	_, err = db.ExecContext(ctx,
+		`INSERT INTO alerts (id, title, summary, severity, environment, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		uuid.New().String(), "stag", "stag", "warning", "staging",
+		now.Add(-2*time.Hour).Format(time.RFC3339),
+	)
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	counts, err := as.CountBySeverity(ctx, periodStart, now, "production")
+	if err != nil {
+		t.Fatalf("CountBySeverity: %v", err)
+	}
+
+	if counts["critical"] != 1 {
+		t.Errorf("critical = %d, want 1", counts["critical"])
+	}
+	if counts["warning"] != 0 {
+		t.Errorf("warning = %d, want 0 (staging filtered out)", counts["warning"])
+	}
+}
+
 func TestAlertStore_DefaultSeverity(t *testing.T) {
 	db := setupTestDB(t)
 	as := NewAlertStore(db)

@@ -162,6 +162,92 @@ func TestWatcherRunStore_Prune(t *testing.T) {
 	}
 }
 
+func TestWatcherRunStore_CountRuns(t *testing.T) {
+	db := setupTestDB(t)
+	ws := NewWatcherStore(db)
+	rs := NewWatcherRunStore(db)
+	ctx := context.Background()
+
+	w, err := ws.Create(ctx, CreateWatcherParams{
+		Title:       "Count Test",
+		Description: "For count tests",
+	})
+	if err != nil {
+		t.Fatalf("Create watcher: %v", err)
+	}
+
+	now := time.Now().UTC()
+	periodStart := now.Add(-24 * time.Hour)
+
+	// Insert runs with backdated started_at within period
+	for _, r := range []struct {
+		status string
+		age    time.Duration
+	}{
+		{"completed", 2 * time.Hour},
+		{"completed", 4 * time.Hour},
+		{"error", 6 * time.Hour},
+	} {
+		_, err := db.ExecContext(ctx,
+			`INSERT INTO watcher_runs (id, watcher_id, started_at, status, created_at) VALUES (?, ?, ?, ?, ?)`,
+			uuid.New().String(), w.ID.String(),
+			now.Add(-r.age).Format(time.RFC3339), r.status,
+			now.Add(-r.age).Format(time.RFC3339),
+		)
+		if err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+
+	// Insert run outside period (48h ago)
+	_, err = db.ExecContext(ctx,
+		`INSERT INTO watcher_runs (id, watcher_id, started_at, status, created_at) VALUES (?, ?, ?, ?, ?)`,
+		uuid.New().String(), w.ID.String(),
+		now.Add(-48*time.Hour).Format(time.RFC3339), "completed",
+		now.Add(-48*time.Hour).Format(time.RFC3339),
+	)
+	if err != nil {
+		t.Fatalf("insert old: %v", err)
+	}
+
+	// Count all in period
+	total, err := rs.CountRuns(ctx, CountRunParams{Since: periodStart, Until: now})
+	if err != nil {
+		t.Fatalf("CountRuns total: %v", err)
+	}
+	if total != 3 {
+		t.Errorf("total = %d, want 3", total)
+	}
+
+	// Count errors only
+	errors, err := rs.CountRuns(ctx, CountRunParams{Since: periodStart, Until: now, Status: "error"})
+	if err != nil {
+		t.Fatalf("CountRuns errors: %v", err)
+	}
+	if errors != 1 {
+		t.Errorf("errors = %d, want 1", errors)
+	}
+
+	// Count by watcher
+	byWatcher, err := rs.CountRuns(ctx, CountRunParams{Since: periodStart, Until: now, WatcherID: &w.ID})
+	if err != nil {
+		t.Fatalf("CountRuns by watcher: %v", err)
+	}
+	if byWatcher != 3 {
+		t.Errorf("by watcher = %d, want 3", byWatcher)
+	}
+
+	// Count with unknown watcher
+	unknown := uuid.New()
+	byUnknown, err := rs.CountRuns(ctx, CountRunParams{Since: periodStart, Until: now, WatcherID: &unknown})
+	if err != nil {
+		t.Fatalf("CountRuns unknown: %v", err)
+	}
+	if byUnknown != 0 {
+		t.Errorf("unknown = %d, want 0", byUnknown)
+	}
+}
+
 func TestWatcherRunStore_CompleteNotFound(t *testing.T) {
 	db := setupTestDB(t)
 	rs := NewWatcherRunStore(db)

@@ -420,6 +420,9 @@ func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error     { 
 func (m *mockAlertStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	return 0, nil
 }
+func (m *mockAlertStore) CountBySeverity(ctx context.Context, since, until time.Time, environment string) (map[string]int, error) {
+	return make(map[string]int), nil
+}
 
 // --- listMonitorsHandler tests ---
 

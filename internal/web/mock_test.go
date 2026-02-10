@@ -313,6 +313,10 @@ func (m *mockWatcherRunStore) Prune(ctx context.Context, olderThan time.Duration
 	return 0, nil
 }
 
+func (m *mockWatcherRunStore) CountRuns(ctx context.Context, params store.CountRunParams) (int, error) {
+	return 0, nil
+}
+
 func (m *mockWatcherRunStore) List(ctx context.Context, watcherID uuid.UUID, limit int) ([]store.WatcherRun, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -442,6 +446,25 @@ func (m *mockAlertStore) MarkAllRead(ctx context.Context, environment string) er
 
 func (m *mockAlertStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	return 0, nil
+}
+
+func (m *mockAlertStore) CountBySeverity(ctx context.Context, since, until time.Time, environment string) (map[string]int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make(map[string]int)
+	for _, a := range m.alerts {
+		if a.Dismissed {
+			continue
+		}
+		if a.CreatedAt.Before(since) || !a.CreatedAt.Before(until) {
+			continue
+		}
+		if environment != "" && a.Environment != environment {
+			continue
+		}
+		result[string(a.Severity)]++
+	}
+	return result, nil
 }
 
 // mockServerStore implements store.ServerStore for testing.

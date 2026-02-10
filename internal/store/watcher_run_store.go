@@ -184,6 +184,28 @@ func (s *watcherRunStore) Prune(ctx context.Context, olderThan time.Duration) (i
 	return result.RowsAffected()
 }
 
+func (s *watcherRunStore) CountRuns(ctx context.Context, params CountRunParams) (int, error) {
+	query := `SELECT COUNT(*) FROM watcher_runs WHERE started_at >= ? AND started_at < ?`
+	args := []any{params.Since.UTC().Format(time.RFC3339), params.Until.UTC().Format(time.RFC3339)}
+
+	if params.Status != "" {
+		query += ` AND status = ?`
+		args = append(args, params.Status)
+	}
+
+	if params.WatcherID != nil {
+		query += ` AND watcher_id = ?`
+		args = append(args, params.WatcherID.String())
+	}
+
+	var count int
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("counting runs: %w", err)
+	}
+	return count, nil
+}
+
 // scanWatcherRun scans a WatcherRun from a rows iterator.
 func scanWatcherRun(rows *sql.Rows) (*WatcherRun, error) {
 	r := &WatcherRun{}

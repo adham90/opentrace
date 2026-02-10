@@ -185,6 +185,35 @@ func (s *alertStore) CountTotal(ctx context.Context, environment string) (int, e
 	return count, nil
 }
 
+func (s *alertStore) CountBySeverity(ctx context.Context, since, until time.Time, environment string) (map[string]int, error) {
+	query := `SELECT severity, COUNT(*) FROM alerts WHERE dismissed = 0 AND created_at >= ? AND created_at < ?`
+	args := []any{since.UTC().Format(time.RFC3339), until.UTC().Format(time.RFC3339)}
+
+	if environment != "" {
+		query += ` AND environment = ?`
+		args = append(args, environment)
+	}
+
+	query += ` GROUP BY severity`
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("counting alerts by severity: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]int)
+	for rows.Next() {
+		var severity string
+		var count int
+		if err := rows.Scan(&severity, &count); err != nil {
+			return nil, fmt.Errorf("scanning severity count: %w", err)
+		}
+		result[severity] = count
+	}
+	return result, rows.Err()
+}
+
 func (s *alertStore) MarkRead(ctx context.Context, id uuid.UUID) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE alerts SET read = 1 WHERE id = ?`, id.String())
 	if err != nil {
