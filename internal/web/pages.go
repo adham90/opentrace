@@ -98,6 +98,12 @@ type LogFilters struct {
 	Environment string
 }
 
+// Breadcrumb represents a single navigation breadcrumb.
+type Breadcrumb struct {
+	Label string
+	URL   string // empty for the last (current) item
+}
+
 type pageData struct {
 	Title          string
 	Nav            string
@@ -117,6 +123,7 @@ type pageData struct {
 	RetentionDays  int
 	APIKey         string
 	EnvKeyOverride bool
+	Breadcrumbs    []Breadcrumb
 }
 
 func (s *Server) isDevMode() bool {

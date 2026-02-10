@@ -608,12 +608,12 @@ function getMonitorTypeBadge(w) {
 function getAdaptiveBadge(w) {
   if (!w.adaptive_config || !w.adaptive_config.enabled) return '';
   var s = w.adaptive_state || 'normal';
-  if (s === 'normal') return '';
-  if (s === 'escalated') return '<span class="badge badge-adaptive badge-escalated" title="Checking more frequently due to alerts">&#8593; escalated</span>';
-  if (s === 'sustained') return '<span class="badge badge-adaptive badge-sustained" title="Alert persists at normal interval">&#8252; sustained</span>';
-  if (s === 'relaxed') return '<span class="badge badge-adaptive badge-relaxed" title="Checking less frequently — no issues detected">&#8595; relaxed</span>';
-  if (s === 'backing_off') return '<span class="badge badge-adaptive badge-backoff" title="Backing off after errors (consecutive: ' + (w.consecutive_errors || 0) + ')">&#8634; backoff</span>';
-  if (s === 'error') return '<span class="badge badge-adaptive badge-adaptive-error" title="Paused after ' + (w.consecutive_errors || 0) + ' consecutive errors">&#9888; paused</span>';
+  if (s === 'normal') return '<span class="badge badge-adaptive" title="Running on regular schedule">normal</span>';
+  if (s === 'escalated') return '<span class="badge badge-adaptive badge-escalated" title="Anomaly detected \u2014 checking more frequently to track the issue">&#8593; escalated</span>';
+  if (s === 'sustained') return '<span class="badge badge-adaptive badge-sustained" title="Alert ongoing \u2014 returned to normal check frequency while issue persists">&#8252; sustained</span>';
+  if (s === 'relaxed') return '<span class="badge badge-adaptive badge-relaxed" title="All clear for a while \u2014 checking less often to save resources">&#8595; relaxed</span>';
+  if (s === 'backing_off') return '<span class="badge badge-adaptive badge-backoff" title="Repeated failures (' + (w.consecutive_errors || 0) + ' errors) \u2014 reducing check frequency to avoid overload">&#8634; backoff</span>';
+  if (s === 'error') return '<span class="badge badge-adaptive badge-adaptive-error" title="Paused after ' + (w.consecutive_errors || 0) + ' consecutive errors \u2014 click Resume to restart">&#9888; paused</span>';
   return '';
 }
 
