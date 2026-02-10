@@ -7,19 +7,15 @@
 </div>
 
 <div class="alert-filters">
-  <div class="filter-group">
-    <select id="statusFilter" onchange="onFilterChange()">
-      <option value="all">all alerts</option>
-      <option value="unread">unread</option>
-    </select>
+  <div class="filter-tabs" id="statusFilter" data-value="unread">
+    <button class="filter-tab" data-value="all" onclick="setFilter('statusFilter','all')">all</button>
+    <button class="filter-tab active" data-value="unread" onclick="setFilter('statusFilter','unread')">unread</button>
   </div>
-  <div class="filter-group">
-    <select id="severityFilter" onchange="onFilterChange()">
-      <option value="">all severities</option>
-      <option value="critical">critical</option>
-      <option value="warning">warning</option>
-      <option value="info">info</option>
-    </select>
+  <div class="filter-tabs" id="severityFilter" data-value="">
+    <button class="filter-tab active" data-value="" onclick="setFilter('severityFilter','')">all</button>
+    <button class="filter-tab sev-critical" data-value="critical" onclick="setFilter('severityFilter','critical')">crit</button>
+    <button class="filter-tab sev-warning" data-value="warning" onclick="setFilter('severityFilter','warning')">warn</button>
+    <button class="filter-tab sev-info" data-value="info" onclick="setFilter('severityFilter','info')">info</button>
   </div>
 </div>
 
@@ -56,20 +52,28 @@ function setUrlParams(status, severity) {
 
 function initFilters() {
   var p = getUrlParams();
-  document.getElementById('statusFilter').value = p.status;
-  document.getElementById('severityFilter').value = p.severity;
+  setFilter('statusFilter', p.status, true);
+  setFilter('severityFilter', p.severity, true);
 }
 
-function onFilterChange() {
-  var status = document.getElementById('statusFilter').value;
-  var severity = document.getElementById('severityFilter').value;
-  setUrlParams(status, severity);
-  loadAlerts();
+function setFilter(groupId, value, silent) {
+  var group = document.getElementById(groupId);
+  group.setAttribute('data-value', value);
+  var tabs = group.querySelectorAll('.filter-tab');
+  tabs.forEach(function(t) {
+    t.classList.toggle('active', t.getAttribute('data-value') === value);
+  });
+  if (!silent) {
+    var status = document.getElementById('statusFilter').getAttribute('data-value');
+    var severity = document.getElementById('severityFilter').getAttribute('data-value');
+    setUrlParams(status, severity);
+    loadAlerts();
+  }
 }
 
 function loadAlerts() {
-  var status = document.getElementById('statusFilter').value;
-  var severity = document.getElementById('severityFilter').value;
+  var status = document.getElementById('statusFilter').getAttribute('data-value');
+  var severity = document.getElementById('severityFilter').getAttribute('data-value');
   var url = '/api/alerts?limit=50';
   if (status === 'unread') url += '&unread=true';
   if (severity) url += '&severity=' + encodeURIComponent(severity);
@@ -91,6 +95,8 @@ function loadCounts() {
     updateHeaderCount();
     updateBadge();
     updateMarkAllBtn();
+    // Re-render to update empty state with correct counts
+    if (allAlerts.length === 0) renderAlerts();
   });
 }
 
@@ -116,7 +122,7 @@ function updateMarkAllBtn() {
 function renderAlerts() {
   var container = document.getElementById('alerts-list');
   var empty = document.getElementById('alerts-empty');
-  var status = document.getElementById('statusFilter').value;
+  var status = document.getElementById('statusFilter').getAttribute('data-value');
 
   // Preserve expanded rows across re-renders
   var expandedIDs = {};
@@ -133,9 +139,14 @@ function renderAlerts() {
     var desc = document.getElementById('empty-desc');
     var action = document.getElementById('empty-action');
 
-    if (alertCounts.total > 0 && status === 'unread') {
+    var severity = document.getElementById('severityFilter').getAttribute('data-value');
+    if (alertCounts.total > 0 && status === 'unread' && !severity) {
       title.textContent = 'all caught up';
       desc.textContent = 'no unread alerts — switch to "all alerts" to see history';
+      action.style.display = 'none';
+    } else if (alertCounts.total > 0) {
+      title.textContent = 'no matching alerts';
+      desc.textContent = 'try adjusting your filters';
       action.style.display = 'none';
     } else {
       title.textContent = 'no alerts yet';

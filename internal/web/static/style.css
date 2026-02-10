@@ -727,28 +727,41 @@ select:focus { outline: none; border-color: var(--green); }
 /* ===== Alerts Page ===== */
 .alert-filters {
   display: flex;
-  gap: 8px;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 16px;
-  align-items: stretch;
 }
-.alert-filters .filter-group { min-width: 0; }
-.alert-filters .filter-group select {
-  width: 100%;
-  height: 100%;
+
+.filter-tabs {
+  display: flex;
+  gap: 2px;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  color: var(--text);
-  padding: 8px 10px;
-  font-family: inherit;
-  font-size: 13px;
-  border-radius: 3px;
-  padding-right: 28px;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: var(--select-arrow);
-  background-repeat: no-repeat;
-  background-position: right 8px center;
+  border-radius: 4px;
+  padding: 2px;
 }
+
+.filter-tab {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 10px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.filter-tab:hover { color: var(--text-bright); }
+.filter-tab.active {
+  background: var(--bg-tertiary);
+  color: var(--text-bright);
+}
+
+/* Severity color hints on active */
+.filter-tab.sev-critical.active { color: var(--red); }
+.filter-tab.sev-warning.active { color: var(--yellow); }
+.filter-tab.sev-info.active { color: var(--blue); }
 
 .alert-list { display: flex; flex-direction: column; gap: 1px; }
 
