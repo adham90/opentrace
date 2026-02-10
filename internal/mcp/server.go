@@ -126,6 +126,13 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 		queryStatsHandler(deps.Registry),
 	)
 
+	s.AddTool(
+		mcp.NewTool("db_activity",
+			mcp.WithDescription("Show current database activity: connection summary, long-running queries (>10s), idle-in-transaction sessions (>1min), and connection utilization"),
+		),
+		dbActivityHandler(deps.Registry),
+	)
+
 	// Server metrics read tools.
 	if deps.ServerStore != nil && deps.MetricStore != nil {
 		s.AddTool(
