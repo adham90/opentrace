@@ -267,6 +267,12 @@ func (m *mockWatcherStore) getRunTime(id uuid.UUID) (time.Time, time.Time) {
 	defer m.mu.Unlock()
 	return m.lastRuns[id], m.nextRuns[id]
 }
+func (m *mockWatcherStore) UpdateAdaptiveState(ctx context.Context, id uuid.UUID, params store.UpdateAdaptiveParams) error {
+	return nil
+}
+func (m *mockWatcherStore) ResumeMonitor(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
 
 // mockRunStore tracks created runs and their status updates
 type mockRunStore struct {

@@ -27,6 +27,16 @@ type LogStore interface {
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
 }
 
+// UpdateAdaptiveParams defines the input for updating adaptive scheduling state.
+type UpdateAdaptiveParams struct {
+	AdaptiveState        AdaptiveState
+	ConsecutiveCleanRuns int
+	ConsecutiveErrors    int
+	EscalatedAt          *time.Time
+	TimeRange            string // current effective time_range
+	BaseTimeRange        string // original time_range (set once on first escalation)
+}
+
 // WatcherStore manages watcher definitions.
 type WatcherStore interface {
 	Create(ctx context.Context, params CreateWatcherParams) (*Watcher, error)
@@ -37,6 +47,8 @@ type WatcherStore interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 	GetDueWatchers(ctx context.Context) ([]Watcher, error)
 	UpdateRunTime(ctx context.Context, id uuid.UUID, lastRun, nextRun time.Time) error
+	UpdateAdaptiveState(ctx context.Context, id uuid.UUID, params UpdateAdaptiveParams) error
+	ResumeMonitor(ctx context.Context, id uuid.UUID) error
 }
 
 // CountRunParams defines filters for counting watcher runs in a time period.

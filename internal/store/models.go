@@ -160,6 +160,33 @@ const (
 	WatcherError  WatcherStatus = "error"
 )
 
+// AdaptiveState represents the adaptive scheduling state of a monitor.
+type AdaptiveState string
+
+const (
+	AdaptiveNormal    AdaptiveState = "normal"
+	AdaptiveEscalated AdaptiveState = "escalated"
+	AdaptiveSustained AdaptiveState = "sustained"
+	AdaptiveRelaxed   AdaptiveState = "relaxed"
+	AdaptiveBackoff   AdaptiveState = "backing_off"
+	AdaptiveError     AdaptiveState = "error"
+)
+
+// AdaptiveConfig configures adaptive scheduling for a monitor.
+type AdaptiveConfig struct {
+	Enabled            bool    `json:"enabled"`
+	EscalatedInterval  string  `json:"escalated_interval,omitempty"`
+	EscalationDuration string  `json:"escalation_duration,omitempty"`
+	CooldownRuns       int     `json:"cooldown_runs,omitempty"`
+	RelaxEnabled       bool    `json:"relax_enabled,omitempty"`
+	RelaxedInterval    string  `json:"relaxed_interval,omitempty"`
+	RelaxAfterRuns     int     `json:"relax_after_runs,omitempty"`
+	RelaxSkipRuns      int     `json:"relax_skip_runs,omitempty"`
+	BackoffMultiplier  float64 `json:"backoff_multiplier,omitempty"`
+	MaxBackoffInterval string  `json:"max_backoff_interval,omitempty"`
+	MaxConsecErrors    int     `json:"max_consecutive_errors,omitempty"`
+}
+
 // Watcher represents an automated monitoring rule.
 type Watcher struct {
 	ID           uuid.UUID       `json:"id"`
@@ -182,6 +209,14 @@ type Watcher struct {
 	LastError    *string         `json:"last_error,omitempty"`
 	CreatedAt    time.Time       `json:"created_at"`
 	UpdatedAt    time.Time       `json:"updated_at"`
+
+	// Adaptive scheduling fields
+	AdaptiveConfig       *AdaptiveConfig `json:"adaptive_config,omitempty"`
+	AdaptiveState        AdaptiveState   `json:"adaptive_state"`
+	ConsecutiveCleanRuns int             `json:"consecutive_clean_runs"`
+	ConsecutiveErrors    int             `json:"consecutive_errors"`
+	EscalatedAt          *time.Time      `json:"escalated_at,omitempty"`
+	BaseTimeRange        string          `json:"base_time_range,omitempty"`
 }
 
 // CreateWatcherParams defines the input for creating a watcher.

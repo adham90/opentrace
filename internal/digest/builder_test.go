@@ -147,6 +147,12 @@ func (m *mockWatcherStore) GetDueWatchers(_ context.Context) ([]store.Watcher, e
 func (m *mockWatcherStore) UpdateRunTime(_ context.Context, _ uuid.UUID, _, _ time.Time) error {
 	return nil
 }
+func (m *mockWatcherStore) UpdateAdaptiveState(ctx context.Context, id uuid.UUID, params store.UpdateAdaptiveParams) error {
+	return nil
+}
+func (m *mockWatcherStore) ResumeMonitor(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
 
 type mockRunStore struct {
 	runs []store.WatcherRun

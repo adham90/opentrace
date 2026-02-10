@@ -263,6 +263,44 @@ func (m *mockWatcherStore) UpdateRunTime(ctx context.Context, id uuid.UUID, last
 	return nil
 }
 
+func (m *mockWatcherStore) UpdateAdaptiveState(ctx context.Context, id uuid.UUID, params store.UpdateAdaptiveParams) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	w, ok := m.watchers[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	w.AdaptiveState = params.AdaptiveState
+	w.ConsecutiveCleanRuns = params.ConsecutiveCleanRuns
+	w.ConsecutiveErrors = params.ConsecutiveErrors
+	w.EscalatedAt = params.EscalatedAt
+	if params.BaseTimeRange != "" {
+		w.BaseTimeRange = params.BaseTimeRange
+	}
+	if params.TimeRange != "" {
+		w.TimeRange = params.TimeRange
+	}
+	return nil
+}
+
+func (m *mockWatcherStore) ResumeMonitor(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	w, ok := m.watchers[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	if w.AdaptiveState != store.AdaptiveError {
+		return store.ErrNotFound
+	}
+	w.AdaptiveState = store.AdaptiveNormal
+	w.ConsecutiveErrors = 0
+	w.ConsecutiveCleanRuns = 0
+	w.EscalatedAt = nil
+	w.Status = store.WatcherActive
+	return nil
+}
+
 // mockWatcherRunStore implements store.WatcherRunStore for testing.
 type mockWatcherRunStore struct {
 	mu   sync.Mutex

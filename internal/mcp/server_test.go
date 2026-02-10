@@ -393,6 +393,14 @@ func (m *mockWatcherStore) UpdateRunTime(ctx context.Context, id uuid.UUID, last
 	return nil
 }
 
+func (m *mockWatcherStore) UpdateAdaptiveState(ctx context.Context, id uuid.UUID, params store.UpdateAdaptiveParams) error {
+	return nil
+}
+
+func (m *mockWatcherStore) ResumeMonitor(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
 type mockAlertStore struct {
 	alerts []store.Alert
 	err    error

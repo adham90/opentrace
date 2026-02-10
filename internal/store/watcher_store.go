@@ -78,7 +78,8 @@ func (s *watcherStore) Create(ctx context.Context, params CreateWatcherParams) (
 // watcherColumns is the SELECT column list for watcher queries.
 const watcherColumns = `id, title, description, environment, severity, filters, time_range, schedule, model, effort, status, notify,
 	monitor_type, rule_config, data_source_id,
-	last_run_at, next_run_at, last_error, created_at, updated_at`
+	last_run_at, next_run_at, last_error, created_at, updated_at,
+	adaptive_config, adaptive_state, consecutive_clean_runs, consecutive_errors, escalated_at, base_time_range`
 
 // scanWatcher scans a watcher row into a Watcher struct.
 func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
@@ -88,6 +89,7 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 	var lastRunAt, nextRunAt sql.NullString
 	var monitorTypeStr string
 	var ruleConfigStr, dataSourceID sql.NullString
+	var adaptiveConfigStr, escalatedAt, baseTimeRange sql.NullString
 
 	err := sc.Scan(
 		&w.ID, &w.Title, &w.Description, &w.Environment, &w.Severity, &filtersStr,
@@ -95,6 +97,8 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 		&monitorTypeStr, &ruleConfigStr, &dataSourceID,
 		&lastRunAt, &nextRunAt, &w.LastError,
 		&createdAt, &updatedAt,
+		&adaptiveConfigStr, &w.AdaptiveState, &w.ConsecutiveCleanRuns, &w.ConsecutiveErrors,
+		&escalatedAt, &baseTimeRange,
 	)
 	if err != nil {
 		return nil, err
@@ -122,6 +126,19 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 	if nextRunAt.Valid {
 		t, _ := time.Parse(time.RFC3339, nextRunAt.String)
 		w.NextRunAt = &t
+	}
+	if adaptiveConfigStr.Valid {
+		var ac AdaptiveConfig
+		if err := json.Unmarshal([]byte(adaptiveConfigStr.String), &ac); err == nil {
+			w.AdaptiveConfig = &ac
+		}
+	}
+	if escalatedAt.Valid {
+		t, _ := time.Parse(time.RFC3339, escalatedAt.String)
+		w.EscalatedAt = &t
+	}
+	if baseTimeRange.Valid {
+		w.BaseTimeRange = baseTimeRange.String
 	}
 
 	return w, nil
@@ -322,6 +339,77 @@ func (s *watcherStore) UpdateRunTime(ctx context.Context, id uuid.UUID, lastRun,
 	)
 	if err != nil {
 		return fmt.Errorf("updating watcher run time: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *watcherStore) UpdateAdaptiveState(ctx context.Context, id uuid.UUID, params UpdateAdaptiveParams) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	var escalatedAtStr *string
+	if params.EscalatedAt != nil {
+		s := params.EscalatedAt.UTC().Format(time.RFC3339)
+		escalatedAtStr = &s
+	}
+
+	var baseTimeRangeStr *string
+	if params.BaseTimeRange != "" {
+		baseTimeRangeStr = &params.BaseTimeRange
+	}
+
+	var timeRangeStr *string
+	if params.TimeRange != "" {
+		timeRangeStr = &params.TimeRange
+	}
+
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE watchers
+		 SET adaptive_state = ?,
+		     consecutive_clean_runs = ?,
+		     consecutive_errors = ?,
+		     escalated_at = COALESCE(?, escalated_at),
+		     base_time_range = COALESCE(?, base_time_range),
+		     time_range = COALESCE(?, time_range),
+		     updated_at = ?
+		 WHERE id = ?`,
+		string(params.AdaptiveState),
+		params.ConsecutiveCleanRuns,
+		params.ConsecutiveErrors,
+		escalatedAtStr,
+		baseTimeRangeStr,
+		timeRangeStr,
+		now, id.String(),
+	)
+	if err != nil {
+		return fmt.Errorf("updating adaptive state: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *watcherStore) ResumeMonitor(ctx context.Context, id uuid.UUID) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE watchers
+		 SET adaptive_state = 'normal',
+		     consecutive_errors = 0,
+		     consecutive_clean_runs = 0,
+		     escalated_at = NULL,
+		     next_run_at = ?,
+		     status = 'active',
+		     updated_at = ?
+		 WHERE id = ? AND adaptive_state = 'error'`,
+		now, now, id.String(),
+	)
+	if err != nil {
+		return fmt.Errorf("resuming monitor: %w", err)
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {

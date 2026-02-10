@@ -30,6 +30,12 @@ func (s *schedulerWatcherStore) GetDueWatchers(ctx context.Context) ([]store.Wat
 	}
 	return nil, nil
 }
+func (s *schedulerWatcherStore) UpdateAdaptiveState(ctx context.Context, id uuid.UUID, params store.UpdateAdaptiveParams) error {
+	return nil
+}
+func (s *schedulerWatcherStore) ResumeMonitor(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
 
 func TestScheduler_StartStop(t *testing.T) {
 	ws := &schedulerWatcherStore{
