@@ -7,25 +7,30 @@
   </div>
 </div>
 
-<div class="alert-filters">
-  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-    <div class="filter-tabs" id="statusFilter" data-value="unread">
-      <button class="filter-tab" data-value="all" onclick="setFilter('statusFilter','all')">all</button>
-      <button class="filter-tab active" data-value="unread" onclick="setFilter('statusFilter','unread')">unread</button>
-      <button class="filter-tab" data-value="dismissed" onclick="setFilter('statusFilter','dismissed')">dismissed</button>
+<div class="filter-bar" id="alert-filter-bar">
+  <div class="filter-bar-tags">
+    <div class="filter-tag" id="tag-status" onclick="toggleAlertDropdown('status',event)" title="status — key: s">
+      <span class="filter-tag-key">s:</span>
+      <span class="filter-tag-val" id="tag-status-val">unread</span>
+      <div class="filter-dropdown" id="drop-status"></div>
     </div>
-    <div class="filter-tabs" id="severityFilter" data-value="">
-      <button class="filter-tab active" data-value="" onclick="setFilter('severityFilter','')">all</button>
-      <button class="filter-tab sev-critical" data-value="critical" onclick="setFilter('severityFilter','critical')">crit</button>
-      <button class="filter-tab sev-warning" data-value="warning" onclick="setFilter('severityFilter','warning')">warn</button>
-      <button class="filter-tab sev-info" data-value="info" onclick="setFilter('severityFilter','info')">info</button>
+    <div class="filter-tag" id="tag-severity" onclick="toggleAlertDropdown('severity',event)" title="severity — key: v">
+      <span class="filter-tag-key">v:</span>
+      <span class="filter-tag-val" id="tag-severity-val">all</span>
+      <div class="filter-dropdown" id="drop-severity"></div>
     </div>
-    <select id="watcherFilter" class="alert-filter-select" onchange="loadAlerts()">
-      <option value="">all monitors</option>
-    </select>
-    <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);cursor:pointer;">
-      <input type="checkbox" id="groupToggle" onchange="renderAlerts()" style="accent-color:var(--green)"> group by monitor
-    </label>
+    <div class="filter-tag" id="tag-monitor" onclick="toggleAlertDropdown('monitor',event)" title="monitor — key: m">
+      <span class="filter-tag-key">m:</span>
+      <span class="filter-tag-val" id="tag-monitor-val">all</span>
+      <div class="filter-dropdown" id="drop-monitor"></div>
+    </div>
+    <div class="filter-tag" id="tag-group" onclick="toggleGrouping(event)" title="group by monitor — key: g">
+      <span class="filter-tag-key">g:</span>
+      <span class="filter-tag-val" id="tag-group-val">off</span>
+    </div>
+  </div>
+  <div class="filter-bar-actions">
+    <button type="button" class="filter-bar-btn btn-clear" onclick="clearAlertFilters()">clear</button>
   </div>
 </div>
 
@@ -52,71 +57,223 @@ var allAlerts = [];
 var alertCounts = { count: 0, total: 0 };
 var isAdmin = {{.IsAdmin}};
 var selectedAlerts = {};
-var watcherList = [];
 
-function getUrlParams() {
+// ── Filter state ──────────────────────────────────────────
+var STATUS_OPTIONS = ['unread', 'all', 'dismissed'];
+var STATUS_LABELS  = ['unread', 'all', 'dismissed'];
+var SEV_OPTIONS = ['', 'critical', 'warning', 'info'];
+var SEV_LABELS  = ['all', 'crit', 'warn', 'info'];
+var monitorList = [{id:'', title:'all'}];
+var currentStatusIdx = 0;
+var currentSevIdx = 0;
+var currentMonitorIdx = 0;
+var grouped = false;
+
+// ── URL sync ──────────────────────────────────────────────
+function initFromUrl() {
   var params = new URLSearchParams(window.location.search);
-  return {
-    status: params.get('status') || 'unread',
-    severity: params.get('severity') || '',
-    watcher_id: params.get('watcher_id') || ''
-  };
+  var s = params.get('status') || 'unread';
+  var idx = STATUS_OPTIONS.indexOf(s);
+  if (idx >= 0) currentStatusIdx = idx;
+  var sev = params.get('severity') || '';
+  var si = SEV_OPTIONS.indexOf(sev);
+  if (si >= 0) currentSevIdx = si;
+  var wid = params.get('watcher_id') || '';
+  if (wid) {
+    for (var i = 0; i < monitorList.length; i++) {
+      if (monitorList[i].id === wid) { currentMonitorIdx = i; break; }
+    }
+  }
+  updateTagDisplay('tag-status-val', STATUS_LABELS[currentStatusIdx], currentStatusIdx !== 0);
+  updateTagDisplay('tag-severity-val', SEV_LABELS[currentSevIdx], currentSevIdx !== 0);
+  updateTagDisplay('tag-monitor-val', monitorList[currentMonitorIdx].title, currentMonitorIdx !== 0);
+  updateTagDisplay('tag-group-val', grouped ? 'on' : 'off', grouped);
 }
 
-function setUrlParams(status, severity, watcherId) {
+function syncToUrl() {
   var params = new URLSearchParams();
-  if (status && status !== 'unread') params.set('status', status);
-  if (severity) params.set('severity', severity);
-  if (watcherId) params.set('watcher_id', watcherId);
+  if (STATUS_OPTIONS[currentStatusIdx] !== 'unread') params.set('status', STATUS_OPTIONS[currentStatusIdx]);
+  if (SEV_OPTIONS[currentSevIdx]) params.set('severity', SEV_OPTIONS[currentSevIdx]);
+  if (monitorList[currentMonitorIdx].id) params.set('watcher_id', monitorList[currentMonitorIdx].id);
   var qs = params.toString();
   var url = window.location.pathname + (qs ? '?' + qs : '');
   history.replaceState(null, '', url);
 }
 
-function initFilters() {
-  var p = getUrlParams();
-  setFilter('statusFilter', p.status, true);
-  setFilter('severityFilter', p.severity, true);
-  if (p.watcher_id) {
-    document.getElementById('watcherFilter').value = p.watcher_id;
-  }
+// ── Tag display & flash ───────────────────────────────────
+function updateTagDisplay(elId, text, isActive) {
+  var el = document.getElementById(elId);
+  el.textContent = text;
+  el.className = 'filter-tag-val' + (isActive ? ' val-active' : ' val-all');
 }
 
-function setFilter(groupId, value, silent) {
-  var group = document.getElementById(groupId);
-  group.setAttribute('data-value', value);
-  var tabs = group.querySelectorAll('.filter-tab');
-  tabs.forEach(function(t) {
-    t.classList.toggle('active', t.getAttribute('data-value') === value);
+function flashTag(tagId) {
+  var el = document.getElementById(tagId);
+  el.classList.remove('filter-flash');
+  void el.offsetWidth;
+  el.classList.add('filter-flash');
+}
+
+// ── Dropdown menus ────────────────────────────────────────
+var openDrop = null;
+
+function closeAllAlertDropdowns() {
+  document.querySelectorAll('#alert-filter-bar .filter-dropdown.show').forEach(function(d){ d.classList.remove('show'); });
+  openDrop = null;
+}
+
+function renderDropdown(dropId, options, labels, currentIdx, selectFn) {
+  var drop = document.getElementById(dropId);
+  var html = '';
+  for (var i = 0; i < options.length; i++) {
+    var cls = i === currentIdx ? 'filter-drop-item drop-active' : 'filter-drop-item';
+    html += '<button type="button" class="' + cls + '" data-idx="' + i + '">' + escapeHtml(labels[i]) + '</button>';
+  }
+  drop.innerHTML = html;
+  drop.querySelectorAll('.filter-drop-item').forEach(function(btn){
+    btn.addEventListener('click', function(e){
+      e.stopPropagation();
+      selectFn(parseInt(btn.getAttribute('data-idx')));
+      closeAllAlertDropdowns();
+    });
   });
-  if (!silent) {
-    selectedAlerts = {};
-    updateBulkBar();
-    var status = document.getElementById('statusFilter').getAttribute('data-value');
-    var severity = document.getElementById('severityFilter').getAttribute('data-value');
-    var watcherId = document.getElementById('watcherFilter').value;
-    setUrlParams(status, severity, watcherId);
-    loadAlerts();
-  }
 }
 
+function toggleAlertDropdown(name, e) {
+  e.stopPropagation();
+  var dropId = 'drop-' + name;
+  var drop = document.getElementById(dropId);
+  var wasOpen = drop.classList.contains('show');
+  closeAllAlertDropdowns();
+  if (wasOpen) return;
+
+  if (name === 'status') renderDropdown(dropId, STATUS_OPTIONS, STATUS_LABELS, currentStatusIdx, selectStatus);
+  else if (name === 'severity') renderDropdown(dropId, SEV_OPTIONS, SEV_LABELS, currentSevIdx, selectSeverity);
+  else if (name === 'monitor') {
+    var ids = monitorList.map(function(m){ return m.id; });
+    var mLabels = monitorList.map(function(m){ return m.title; });
+    renderDropdown(dropId, ids, mLabels, currentMonitorIdx, selectMonitor);
+  }
+  drop.classList.add('show');
+  openDrop = dropId;
+}
+window.toggleAlertDropdown = toggleAlertDropdown;
+
+document.addEventListener('click', function(){ closeAllAlertDropdowns(); });
+
+// ── Select functions ──────────────────────────────────────
+function selectStatus(idx) {
+  currentStatusIdx = idx;
+  updateTagDisplay('tag-status-val', STATUS_LABELS[idx], idx !== 0);
+  flashTag('tag-status');
+  selectedAlerts = {};
+  updateBulkBar();
+  syncToUrl();
+  loadAlerts();
+}
+
+function selectSeverity(idx) {
+  currentSevIdx = idx;
+  updateTagDisplay('tag-severity-val', SEV_LABELS[idx], idx !== 0);
+  flashTag('tag-severity');
+  selectedAlerts = {};
+  updateBulkBar();
+  syncToUrl();
+  loadAlerts();
+}
+
+function selectMonitor(idx) {
+  currentMonitorIdx = idx;
+  updateTagDisplay('tag-monitor-val', monitorList[idx].title, idx !== 0);
+  flashTag('tag-monitor');
+  selectedAlerts = {};
+  updateBulkBar();
+  syncToUrl();
+  loadAlerts();
+}
+
+function toggleGrouping(e) {
+  if (e) e.stopPropagation();
+  grouped = !grouped;
+  updateTagDisplay('tag-group-val', grouped ? 'on' : 'off', grouped);
+  flashTag('tag-group');
+  renderAlerts();
+}
+window.toggleGrouping = toggleGrouping;
+
+// ── Cycle functions (keyboard) ────────────────────────────
+function cycleStatus(dir) {
+  selectStatus((currentStatusIdx + dir + STATUS_OPTIONS.length) % STATUS_OPTIONS.length);
+}
+function cycleSeverity(dir) {
+  selectSeverity((currentSevIdx + dir + SEV_OPTIONS.length) % SEV_OPTIONS.length);
+}
+function cycleMonitor(dir) {
+  selectMonitor((currentMonitorIdx + dir + monitorList.length) % monitorList.length);
+}
+
+// ── Clear all ─────────────────────────────────────────────
+function clearAlertFilters() {
+  currentStatusIdx = 0;
+  currentSevIdx = 0;
+  currentMonitorIdx = 0;
+  grouped = false;
+  updateTagDisplay('tag-status-val', STATUS_LABELS[0], false);
+  updateTagDisplay('tag-severity-val', SEV_LABELS[0], false);
+  updateTagDisplay('tag-monitor-val', monitorList[0].title, false);
+  updateTagDisplay('tag-group-val', 'off', false);
+  selectedAlerts = {};
+  updateBulkBar();
+  syncToUrl();
+  loadAlerts();
+}
+window.clearAlertFilters = clearAlertFilters;
+
+// ── Keyboard shortcuts ────────────────────────────────────
+document.addEventListener('keydown', function(e){
+  var tag = document.activeElement.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  var overlay = document.getElementById('shortcut-overlay');
+  if (overlay && overlay.style.display !== 'none') return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  closeAllAlertDropdowns();
+  switch(e.key) {
+    case 's': e.preventDefault(); cycleStatus(1); break;
+    case 'S': e.preventDefault(); cycleStatus(-1); break;
+    case 'v': e.preventDefault(); cycleSeverity(1); break;
+    case 'V': e.preventDefault(); cycleSeverity(-1); break;
+    case 'm': e.preventDefault(); cycleMonitor(1); break;
+    case 'M': e.preventDefault(); cycleMonitor(-1); break;
+    case 'g': e.preventDefault(); toggleGrouping(null); break;
+    case 'c': e.preventDefault(); clearAlertFilters(); break;
+  }
+});
+
+// ── Load watchers into monitorList ────────────────────────
 function loadWatchers() {
   fetch('/api/watchers' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r) { return r.json(); }).then(function(watchers) {
-    watcherList = watchers || [];
-    var sel = document.getElementById('watcherFilter');
-    var current = sel.value;
-    sel.innerHTML = '<option value="">all monitors</option>';
-    watcherList.forEach(function(w) {
-      sel.innerHTML += '<option value="' + w.id + '">' + escapeHtml(w.title) + '</option>';
+    monitorList = [{id:'', title:'all'}];
+    (watchers || []).forEach(function(w) {
+      monitorList.push({id: w.id, title: w.title});
     });
-    sel.value = current;
+    // Re-resolve currentMonitorIdx from URL
+    var params = new URLSearchParams(window.location.search);
+    var wid = params.get('watcher_id') || '';
+    if (wid) {
+      for (var i = 0; i < monitorList.length; i++) {
+        if (monitorList[i].id === wid) { currentMonitorIdx = i; break; }
+      }
+    }
+    updateTagDisplay('tag-monitor-val', monitorList[currentMonitorIdx].title, currentMonitorIdx !== 0);
   }).catch(function() {});
 }
 
+// ── Load alerts ───────────────────────────────────────────
 function loadAlerts() {
-  var status = document.getElementById('statusFilter').getAttribute('data-value');
-  var severity = document.getElementById('severityFilter').getAttribute('data-value');
-  var watcherId = document.getElementById('watcherFilter').value;
+  var status = STATUS_OPTIONS[currentStatusIdx];
+  var severity = SEV_OPTIONS[currentSevIdx];
+  var watcherId = monitorList[currentMonitorIdx].id;
   var url = '/api/alerts?limit=100';
   if (status === 'unread') url += '&unread=true';
   if (status === 'dismissed') url += '&dismissed=true';
@@ -124,8 +281,7 @@ function loadAlerts() {
   if (watcherId) url += '&watcher_id=' + encodeURIComponent(watcherId);
   url += (getGlobalEnv() ? '&env=' + encodeURIComponent(getGlobalEnv()) : '');
 
-  var wId = watcherId;
-  setUrlParams(status, severity, wId);
+  syncToUrl();
 
   fetch(url).then(function(r) { return r.json(); }).then(function(alerts) {
     allAlerts = alerts || [];
@@ -172,8 +328,7 @@ function renderAlerts() {
   var empty = document.getElementById('alerts-empty');
   var loading = document.getElementById('alerts-loading');
   if (loading) loading.style.display = 'none';
-  var status = document.getElementById('statusFilter').getAttribute('data-value');
-  var grouped = document.getElementById('groupToggle').checked;
+  var status = STATUS_OPTIONS[currentStatusIdx];
 
   var expandedIDs = {};
   container.querySelectorAll('.alert-row.expanded').forEach(function(el) {
@@ -189,7 +344,7 @@ function renderAlerts() {
     var desc = document.getElementById('empty-desc');
     var action = document.getElementById('empty-action');
 
-    var severity = document.getElementById('severityFilter').getAttribute('data-value');
+    var severity = SEV_OPTIONS[currentSevIdx];
     if (status === 'dismissed') {
       title.textContent = 'No dismissed alerts';
       desc.textContent = 'Dismissed alerts appear here for reference.';
@@ -424,7 +579,7 @@ function escapeHtml(str) {
 
 window.loadPageData = loadAlerts;
 document.addEventListener('DOMContentLoaded', function() {
-  initFilters();
+  initFromUrl();
   loadWatchers();
   loadAlerts();
   setInterval(function() { loadAlerts(); }, 30000);

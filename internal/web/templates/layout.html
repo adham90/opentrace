@@ -103,6 +103,16 @@
         <div class="shortcut-row"><kbd>p</kbd><span>Toggle live/paused</span></div>
       </div>
       {{end}}
+      {{if eq .Nav "alerts"}}
+      <div class="shortcut-section">
+        <div class="shortcut-section-label">Alert Filters</div>
+        <div class="shortcut-row"><kbd>s</kbd> / <kbd>S</kbd><span>Cycle status</span></div>
+        <div class="shortcut-row"><kbd>v</kbd> / <kbd>V</kbd><span>Cycle severity</span></div>
+        <div class="shortcut-row"><kbd>m</kbd> / <kbd>M</kbd><span>Cycle monitor</span></div>
+        <div class="shortcut-row"><kbd>g</kbd><span>Toggle grouping</span></div>
+        <div class="shortcut-row"><kbd>c</kbd><span>Clear all filters</span></div>
+      </div>
+      {{end}}
       <div class="shortcut-section">
         <div class="shortcut-section-label">General</div>
         <div class="shortcut-row"><kbd>?</kbd><span>Show this help</span></div>

@@ -1039,14 +1039,7 @@ select:focus { outline: none; border-color: var(--green); }
   margin-bottom: 4px;
 }
 
-/* ===== Alerts Page ===== */
-.alert-filters {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
+/* Tab-style filter buttons (used by watcher runs) */
 .filter-tabs {
   display: flex;
   gap: 2px;
@@ -1073,11 +1066,7 @@ select:focus { outline: none; border-color: var(--green); }
   color: var(--text-bright);
 }
 
-/* Severity color hints on active */
-.filter-tab.sev-critical.active { color: var(--red); }
-.filter-tab.sev-warning.active { color: var(--yellow); }
-.filter-tab.sev-info.active { color: var(--blue); }
-
+/* ===== Alerts Page ===== */
 .alert-list { display: flex; flex-direction: column; gap: 1px; }
 
 .alert-row {
@@ -1167,24 +1156,6 @@ select:focus { outline: none; border-color: var(--green); }
   gap: 6px;
   margin-top: 8px;
 }
-
-/* Alert watcher filter dropdown */
-.alert-filter-select {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 4px 24px 4px 8px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  cursor: pointer;
-  appearance: none;
-  background-image: var(--select-arrow);
-  background-repeat: no-repeat;
-  background-position: right 6px center;
-  max-width: 200px;
-}
-.alert-filter-select:focus { border-color: var(--green); outline: none; }
 
 /* Bulk action bar */
 .bulk-bar {
