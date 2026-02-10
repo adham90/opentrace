@@ -1691,6 +1691,7 @@ select:focus { outline: none; border-color: var(--green); }
 .mt-8 { margin-top: 8px; }
 .mt-16 { margin-top: 16px; }
 .mb-8 { margin-bottom: 8px; }
+.dim { color: var(--text-dim); }
 .text-dim { color: var(--text-dim); }
 .text-green { color: var(--green); }
 .text-red { color: var(--red); }
@@ -1699,9 +1700,15 @@ select:focus { outline: none; border-color: var(--green); }
 /* ===== Overview Page ===== */
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 12px;
   margin-bottom: 24px;
+}
+@media (min-width: 700px) {
+  .stat-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (min-width: 1000px) {
+  .stat-grid { grid-template-columns: repeat(5, 1fr); }
 }
 
 .stat-card {
@@ -1744,8 +1751,11 @@ select:focus { outline: none; border-color: var(--green); }
 
 .overview-panels {
   display: grid;
-  grid-template-columns: 3fr 2fr;
+  grid-template-columns: 1fr;
   gap: 16px;
+}
+@media (min-width: 700px) {
+  .overview-panels { grid-template-columns: 3fr 2fr; }
 }
 
 .overview-panel {
@@ -1779,28 +1789,42 @@ select:focus { outline: none; border-color: var(--green); }
   font-size: 11px;
 }
 
+.panel-link {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.panel-link:hover { color: var(--cyan); text-decoration: none; }
+
+.digest-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+}
+
 .overview-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--border);
   font-size: 12px;
 }
 .overview-alert:last-child { border-bottom: none; }
-.overview-alert-header { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
-.overview-alert-title { color: var(--text-bright); flex: 1; font-weight: 500; }
-.overview-alert-time { color: var(--text-dim); font-size: 11px; }
-.overview-alert-meta { color: var(--text-dim); font-size: 11px; }
-
-.overview-log {
-  padding: 4px 16px;
-  font-size: 11px;
-  border-bottom: 1px solid var(--border);
+.overview-alert-title {
+  color: var(--text-bright);
+  flex: 1;
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.overview-log:last-child { border-bottom: none; }
-.overview-log-ts { color: var(--text-dim); }
-.overview-log-msg { color: var(--text); }
+.overview-alert-time { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
 
 /* ===== Setup Page ===== */
 .setup-section { margin-bottom: 28px; }

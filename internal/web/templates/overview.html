@@ -32,13 +32,13 @@
 </div>
 
 <div class="overview-panels">
-  <div class="overview-panel" id="digest-panel" style="grid-column:1/-1">
+  <div class="overview-panel" id="digest-panel">
     <div class="overview-panel-header">
       <span>health digest</span>
       <a href="/digests" class="panel-link">history &rarr;</a>
     </div>
     <div class="overview-panel-body" id="digest-summary">
-      <div class="empty-state"><div class="empty-icon">--</div><p>loading...</p></div>
+      <div class="loading-state">loading digest</div>
     </div>
   </div>
   <div class="overview-panel">
@@ -47,16 +47,7 @@
       <a href="/alerts" class="panel-link">view all &rarr;</a>
     </div>
     <div class="overview-panel-body" id="recent-alerts">
-      <div class="empty-state"><div class="empty-icon">--</div><p>no alerts</p></div>
-    </div>
-  </div>
-  <div class="overview-panel">
-    <div class="overview-panel-header">
-      <span>log stream</span>
-      <a href="/logs" class="panel-link">view all &rarr;</a>
-    </div>
-    <div class="overview-panel-body" id="recent-logs">
-      <div class="empty-state"><div class="empty-icon">--</div><p>no recent logs</p></div>
+      <div class="loading-state">loading alerts</div>
     </div>
   </div>
 </div>
@@ -117,7 +108,7 @@
     fetch('/api/alerts?limit=5' + (getGlobalEnv() ? '&env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r){ return r.json(); }).then(function(alerts){
       var container = document.getElementById('recent-alerts');
       if (!alerts || alerts.length === 0) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no alerts</p></div>';
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">no recent alerts</p><p class="empty-state-desc">Alerts from your monitors will appear here when issues are detected.</p></div>';
         return;
       }
       var html = '';
@@ -131,29 +122,9 @@
         html += '</div>';
       });
       container.innerHTML = html;
-    }).catch(function(){});
-  }
-
-  function loadRecentLogs() {
-    fetch('/api/logs/poll?since_id=0&limit=10').then(function(r){ return r.text(); }).then(function(html){
-      // Poll endpoint returns HTML fragments — use a different approach
-    }).catch(function(){});
-
-    // Use the search endpoint in JSON mode instead (not available, it's HTML)
-    // Let's just link to the logs page for now and show recent log count
-    var container = document.getElementById('recent-logs');
-    fetch('/api/overview' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r){ return r.json(); }).then(function(d){
-      if (d.logs.last_hour === 0) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no recent logs</p></div>';
-        return;
-      }
-      container.innerHTML = '<div class="overview-log-summary">' +
-        '<div class="stat-number">' + d.logs.last_hour + '</div>' +
-        '<div class="stat-label">logs in the last hour</div>' +
-        (d.logs.errors_last_hour > 0 ? '<div class="stat-detail status-warn">' + d.logs.errors_last_hour + ' errors detected</div>' : '<div class="stat-detail status-ok">no errors</div>') +
-        '<a href="/logs" class="btn btn-primary btn-sm" style="margin-top:12px">open log viewer</a>' +
-        '</div>';
-    }).catch(function(){});
+    }).catch(function(){
+      document.getElementById('recent-alerts').innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">could not load alerts</p><p class="empty-state-desc">Check your connection and try refreshing.</p></div>';
+    });
   }
 
   function getTimeAgo(dateStr) {
@@ -176,12 +147,12 @@
     fetch('/api/digests/latest' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r){ return r.json(); }).then(function(d){
       var container = document.getElementById('digest-summary');
       if (!d || d.status === 'empty' || d.status === 'unavailable') {
-        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no digest yet</p></div>';
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">no digest yet</p><p class="empty-state-desc">Health digests are generated periodically from your monitor results.</p></div>';
         return;
       }
       var sc = d.status === 'critical' || d.status === 'degraded' ? 'status-error' : d.status === 'needs_attention' ? 'status-warn' : d.status === 'healthy' ? 'status-ok' : '';
       var icon = d.status === 'critical' ? '!!' : d.status === 'degraded' ? '!~' : d.status === 'needs_attention' ? '!' : d.status === 'healthy' ? 'ok' : 'i';
-      var html = '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">';
+      var html = '<div class="digest-summary-row">';
       html += '<span class="severity-badge ' + sc + '">' + icon + '</span>';
       html += '<strong>' + d.status + '</strong>';
       html += '<span class="dim">|</span>';
@@ -193,13 +164,12 @@
       html += '</div>';
       container.innerHTML = html;
     }).catch(function(){
-      document.getElementById('digest-summary').innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>digest unavailable</p></div>';
+      document.getElementById('digest-summary').innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">digest unavailable</p><p class="empty-state-desc">Check your connection and try refreshing.</p></div>';
     });
   }
 
   loadStats();
   loadRecentAlerts();
-  loadRecentLogs();
   loadDigestSummary();
   setInterval(function(){ loadStats(); loadRecentAlerts(); loadDigestSummary(); }, 30000);
 
