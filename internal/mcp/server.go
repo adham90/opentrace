@@ -455,9 +455,35 @@ func previewMonitorHandler(re *watcher.RuleEvaluator) server.ToolHandlerFunc {
 			"would_alert":   result.HasAlert,
 			"summary":       result.Summary,
 			"query_time_ms": elapsed,
+			"threshold":     rc.Threshold,
+			"operator":      rc.Operator,
 		}
 		if result.Value != nil {
 			resp["current_value"] = *result.Value
+		}
+
+		// Extract query result sample from details if available.
+		if details, ok := result.Details.(map[string]any); ok {
+			sample := make(map[string]any)
+			for _, key := range []string{"query", "metric", "value", "triggered"} {
+				if v, exists := details[key]; exists {
+					sample[key] = v
+				}
+			}
+			if len(sample) > 0 {
+				resp["query_result_sample"] = sample
+			}
+		}
+
+		// Add recommendation based on result.
+		if result.HasAlert {
+			resp["recommendation"] = fmt.Sprintf("This rule WOULD trigger an alert. Current value (%.2f) exceeds threshold (%.2f). Consider adjusting the threshold or creating this monitor.", *result.Value, rc.Threshold)
+		} else {
+			if result.Value != nil {
+				resp["recommendation"] = fmt.Sprintf("This rule would NOT trigger. Current value (%.2f) is within threshold (%.2f). The rule is correctly configured for normal conditions.", *result.Value, rc.Threshold)
+			} else {
+				resp["recommendation"] = "This rule would NOT trigger. The rule is correctly configured for normal conditions."
+			}
 		}
 
 		data, err := json.MarshalIndent(resp, "", "  ")

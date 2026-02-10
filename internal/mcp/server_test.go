@@ -694,6 +694,106 @@ func TestPreviewMonitorHandler_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestPreviewMonitorHandler_EnhancedResponse(t *testing.T) {
+	// Set up a registry with a mock QueryExecutor that returns a value.
+	registry := connector.NewRegistry()
+	registry.Register(&previewMockQE{
+		mockDataSource: mockDataSource{connType: connector.ConnectorDatabase},
+		result: &connector.QueryResult{
+			Columns:  []string{"count"},
+			Rows:     [][]any{{int64(42)}},
+			RowCount: 1,
+		},
+	})
+
+	re := watcher.NewRuleEvaluator(registry, nil, nil)
+	handler := previewMonitorHandler(re)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"rule_config": `{"source":"query","query":"SELECT count(*) FROM pg_stat_activity","metric":"value","operator":"gt","threshold":100}`,
+	}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+
+	text := resultText(t, result)
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	// Check new fields exist.
+	if resp["threshold"] != float64(100) {
+		t.Errorf("threshold = %v, want 100", resp["threshold"])
+	}
+	if resp["operator"] != "gt" {
+		t.Errorf("operator = %v, want gt", resp["operator"])
+	}
+	if _, ok := resp["recommendation"]; !ok {
+		t.Error("expected recommendation field")
+	}
+	if _, ok := resp["query_result_sample"]; !ok {
+		t.Error("expected query_result_sample field")
+	}
+	// 42 < 100, so should NOT trigger.
+	if resp["would_alert"] != false {
+		t.Errorf("would_alert = %v, want false", resp["would_alert"])
+	}
+	if !contains(resp["recommendation"].(string), "would NOT trigger") {
+		t.Errorf("expected NOT-trigger recommendation, got: %s", resp["recommendation"])
+	}
+}
+
+func TestPreviewMonitorHandler_WouldAlert(t *testing.T) {
+	registry := connector.NewRegistry()
+	registry.Register(&previewMockQE{
+		mockDataSource: mockDataSource{connType: connector.ConnectorDatabase},
+		result: &connector.QueryResult{
+			Columns:  []string{"count"},
+			Rows:     [][]any{{int64(150)}},
+			RowCount: 1,
+		},
+	})
+
+	re := watcher.NewRuleEvaluator(registry, nil, nil)
+	handler := previewMonitorHandler(re)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"rule_config": `{"source":"query","query":"SELECT count(*) FROM pg_stat_activity","metric":"value","operator":"gt","threshold":100}`,
+	}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := resultText(t, result)
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	if resp["would_alert"] != true {
+		t.Errorf("would_alert = %v, want true", resp["would_alert"])
+	}
+	if !contains(resp["recommendation"].(string), "WOULD trigger") {
+		t.Errorf("expected WOULD-trigger recommendation, got: %s", resp["recommendation"])
+	}
+}
+
+// previewMockQE implements DataSource + QueryExecutor for preview tests.
+type previewMockQE struct {
+	mockDataSource
+	result *connector.QueryResult
+}
+
+func (m *previewMockQE) ExecuteReadQuery(ctx context.Context, query string) (*connector.QueryResult, error) {
+	return m.result, nil
+}
+
 // --- listAlertsHandler tests ---
 
 func TestListAlertsHandler_Empty(t *testing.T) {
