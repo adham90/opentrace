@@ -10,12 +10,13 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 // dbActivityHandler returns a handler that queries pg_stat_activity to show
 // current database activity: connection summary, long-running queries, and
 // idle-in-transaction sessions.
-func dbActivityHandler(registry *connector.Registry) server.ToolHandlerFunc {
+func dbActivityHandler(registry *connector.Registry, ws store.WatcherStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		ds := registry.Get(connector.ConnectorDatabase)
 		if ds == nil {
@@ -178,6 +179,8 @@ LIMIT 20`
 			resp["max_connections"] = maxConns
 			resp["utilization_percent"] = float64(totalConns) / float64(maxConns) * 100
 		}
+
+		appendExistingMonitors(resp, fetchExistingMonitors(ctx, ws))
 
 		data, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {

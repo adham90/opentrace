@@ -10,11 +10,12 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 // queryStatsHandler returns a handler that queries pg_stat_statements for
 // the top SQL queries by the requested metric (calls, total_exec_time, etc.).
-func queryStatsHandler(registry *connector.Registry) server.ToolHandlerFunc {
+func queryStatsHandler(registry *connector.Registry, ws store.WatcherStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 
@@ -115,6 +116,8 @@ LIMIT %d`, orderBy, limit)
 			"queries":     rows,
 			"hint":        "Use these stats to identify slow queries, high-frequency queries, or queries with poor cache hit ratios. Consider creating monitors for the most impactful ones.",
 		}
+
+		appendExistingMonitors(resp, fetchExistingMonitors(ctx, ws))
 
 		data, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {

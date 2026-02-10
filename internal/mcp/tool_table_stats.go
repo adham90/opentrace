@@ -9,11 +9,12 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 // dbTableStatsHandler returns a handler that queries pg_stat_user_tables and
 // pg_statio_user_tables for table-level statistics with health warnings.
-func dbTableStatsHandler(registry *connector.Registry) server.ToolHandlerFunc {
+func dbTableStatsHandler(registry *connector.Registry, ws store.WatcherStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 
@@ -155,6 +156,8 @@ LEFT JOIN pg_statio_user_tables io
 			"warnings":     warnings,
 			"hint":         "Tables with high dead tuple ratios, low index usage, or low cache hit ratios are good candidates for monitors.",
 		}
+
+		appendExistingMonitors(resp, fetchExistingMonitors(ctx, ws))
 
 		data, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {

@@ -123,7 +123,7 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 			mcp.WithString("order_by", mcp.Description("Sort by: calls, total_exec_time (default), mean_exec_time, rows, shared_blks_hit, shared_blks_read")),
 			mcp.WithNumber("limit", mcp.Description("Number of queries to return (default: 20, max: 100)")),
 		),
-		queryStatsHandler(deps.Registry),
+		queryStatsHandler(deps.Registry, deps.WatcherStore),
 	)
 
 	s.AddTool(
@@ -131,14 +131,14 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 			mcp.WithDescription("Show table-level statistics: row counts, dead tuples, sequential vs index scans, cache hit ratios, and vacuum status"),
 			mcp.WithString("table_name", mcp.Description("Filter to a specific table name")),
 		),
-		dbTableStatsHandler(deps.Registry),
+		dbTableStatsHandler(deps.Registry, deps.WatcherStore),
 	)
 
 	s.AddTool(
 		mcp.NewTool("db_activity",
 			mcp.WithDescription("Show current database activity: connection summary, long-running queries (>10s), idle-in-transaction sessions (>1min), and connection utilization"),
 		),
-		dbActivityHandler(deps.Registry),
+		dbActivityHandler(deps.Registry, deps.WatcherStore),
 	)
 
 	// Server metrics read tools.

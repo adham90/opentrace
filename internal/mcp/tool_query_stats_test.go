@@ -6,7 +6,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 // mockQueryExecutor implements both connector.DataSource and connector.QueryExecutor.
@@ -37,7 +39,7 @@ func TestQueryStatsHandler_Success(t *testing.T) {
 		},
 	})
 
-	handler := queryStatsHandler(registry)
+	handler := queryStatsHandler(registry, nil)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"order_by": "calls",
 		"limit":    float64(10),
@@ -84,7 +86,7 @@ func TestQueryStatsHandler_Empty(t *testing.T) {
 		},
 	})
 
-	handler := queryStatsHandler(registry)
+	handler := queryStatsHandler(registry, nil)
 	result, err := handler(context.Background(), makeRequest(nil))
 
 	if err != nil {
@@ -104,7 +106,7 @@ func TestQueryStatsHandler_ExtensionNotInstalled(t *testing.T) {
 		err:            errors.New("relation \"pg_stat_statements\" does not exist"),
 	})
 
-	handler := queryStatsHandler(registry)
+	handler := queryStatsHandler(registry, nil)
 	result, err := handler(context.Background(), makeRequest(nil))
 
 	if err != nil {
@@ -122,7 +124,7 @@ func TestQueryStatsHandler_ExtensionNotInstalled(t *testing.T) {
 
 func TestQueryStatsHandler_NoConnector(t *testing.T) {
 	registry := connector.NewRegistry()
-	handler := queryStatsHandler(registry)
+	handler := queryStatsHandler(registry, nil)
 
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {
@@ -143,7 +145,7 @@ func TestQueryStatsHandler_NotQueryExecutor(t *testing.T) {
 	// Register a plain mockDataSource without QueryExecutor
 	registry.Register(&mockDataSource{connType: connector.ConnectorDatabase})
 
-	handler := queryStatsHandler(registry)
+	handler := queryStatsHandler(registry, nil)
 	result, err := handler(context.Background(), makeRequest(nil))
 
 	if err != nil {
@@ -156,5 +158,55 @@ func TestQueryStatsHandler_NotQueryExecutor(t *testing.T) {
 	text := resultText(t, result)
 	if !contains(text, "does not support direct queries") {
 		t.Errorf("expected not-supported message, got: %s", text)
+	}
+}
+
+func TestQueryStatsHandler_WithExistingMonitors(t *testing.T) {
+	registry := connector.NewRegistry()
+	registry.Register(&mockQueryExecutor{
+		mockDataSource: mockDataSource{connType: connector.ConnectorDatabase},
+		result: &connector.QueryResult{
+			Columns: []string{"queryid", "query_preview", "calls", "total_exec_time", "mean_exec_time", "rows", "shared_blks_hit", "shared_blks_read"},
+			Rows: [][]any{
+				{int64(123), "SELECT * FROM users", int64(500), 1234.5, 2.469, int64(5000), int64(9000), int64(100)},
+			},
+			RowCount: 1,
+		},
+	})
+
+	ws := &mockWatcherStore{
+		watchers: []store.Watcher{
+			{ID: uuid.New(), Title: "Slow query monitor", Status: store.WatcherActive, MonitorType: store.MonitorTypeRule,
+				RuleConfig: &store.RuleConfig{Source: store.RuleSourceQuery, Query: "SELECT count(*) FROM pg_stat_activity"}},
+			{ID: uuid.New(), Title: "Error log monitor", Status: store.WatcherActive, MonitorType: store.MonitorTypeAI},
+		},
+	}
+
+	handler := queryStatsHandler(registry, ws)
+	result, err := handler(context.Background(), makeRequest(nil))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+
+	text := resultText(t, result)
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	monitors, ok := resp["existing_monitors"].([]any)
+	if !ok {
+		t.Fatal("expected existing_monitors array in response")
+	}
+	if len(monitors) != 2 {
+		t.Errorf("len(existing_monitors) = %d, want 2", len(monitors))
+	}
+
+	if _, ok := resp["existing_monitors_hint"]; !ok {
+		t.Error("expected existing_monitors_hint in response")
 	}
 }

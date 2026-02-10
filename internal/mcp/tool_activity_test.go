@@ -62,7 +62,7 @@ func TestDBActivityHandler_Success(t *testing.T) {
 		},
 	})
 
-	handler := dbActivityHandler(registry)
+	handler := dbActivityHandler(registry, nil)
 	result, err := handler(context.Background(), makeRequest(nil))
 
 	if err != nil {
@@ -116,7 +116,7 @@ func TestDBActivityHandler_HighUtilization(t *testing.T) {
 		},
 	})
 
-	handler := dbActivityHandler(registry)
+	handler := dbActivityHandler(registry, nil)
 	result, err := handler(context.Background(), makeRequest(nil))
 
 	if err != nil {
@@ -159,7 +159,7 @@ func TestDBActivityHandler_HighUtilization(t *testing.T) {
 
 func TestDBActivityHandler_NoConnector(t *testing.T) {
 	registry := connector.NewRegistry()
-	handler := dbActivityHandler(registry)
+	handler := dbActivityHandler(registry, nil)
 
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {
@@ -179,7 +179,7 @@ func TestDBActivityHandler_NotQueryExecutor(t *testing.T) {
 	registry := connector.NewRegistry()
 	registry.Register(&mockDataSource{connType: connector.ConnectorDatabase})
 
-	handler := dbActivityHandler(registry)
+	handler := dbActivityHandler(registry, nil)
 	result, err := handler(context.Background(), makeRequest(nil))
 
 	if err != nil {
