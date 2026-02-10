@@ -34,6 +34,11 @@
         <a href="/setup" class="nav-item {{if eq .Nav "setup"}}active{{end}}">setup</a>
       </nav>
       <div class="topbar-right">
+        <div class="env-selector">
+          <select id="env-select" onchange="setGlobalEnv(this.value)" title="Filter by environment">
+            <option value="">all envs</option>
+          </select>
+        </div>
         {{if .User}}
         <div class="user-dropdown">
           <button class="user-dropdown-toggle" onclick="toggleUserMenu()">
@@ -62,16 +67,47 @@
     </div>
   </main>
   <script>
-  (function(){
-    function updateBadge() {
-      fetch('/api/alerts/count').then(function(r){return r.json()}).then(function(d){
-        var b=document.getElementById('alert-badge');
-        if(b){b.textContent=d.count;b.style.display=d.count>0?'inline':'none';}
-      }).catch(function(){});
+  // Global environment management
+  function getGlobalEnv() {
+    return localStorage.getItem('opentrace-env') || '';
+  }
+  function setGlobalEnv(val) {
+    if (val) {
+      localStorage.setItem('opentrace-env', val);
+    } else {
+      localStorage.removeItem('opentrace-env');
     }
+    if (typeof window.loadPageData === 'function') {
+      window.loadPageData();
+    }
+    // Reload alert badge with new env
     updateBadge();
-    setInterval(updateBadge, 30000);
-  })();
+  }
+  function loadEnvironments() {
+    fetch('/api/environments').then(function(r){return r.json()}).then(function(envs){
+      var sel = document.getElementById('env-select');
+      if (!sel) return;
+      var current = getGlobalEnv();
+      // Clear all except first "all envs" option
+      while (sel.options.length > 1) sel.remove(1);
+      (envs || []).forEach(function(e){
+        var opt = document.createElement('option');
+        opt.value = e;
+        opt.textContent = e;
+        if (e === current) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    }).catch(function(){});
+  }
+  function updateBadge() {
+    fetch('/api/alerts/count' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r){return r.json()}).then(function(d){
+      var b=document.getElementById('alert-badge');
+      if(b){b.textContent=d.count;b.style.display=d.count>0?'inline':'none';}
+    }).catch(function(){});
+  }
+  updateBadge();
+  loadEnvironments();
+  setInterval(updateBadge, 30000);
 
   (function(){
     var themes = ['system', 'dark', 'light'];

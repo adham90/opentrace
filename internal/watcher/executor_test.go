@@ -199,7 +199,9 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 func (m *mockWatcherStore) GetByID(ctx context.Context, id uuid.UUID) (*store.Watcher, error) {
 	return nil, nil
 }
-func (m *mockWatcherStore) List(ctx context.Context) ([]store.Watcher, error) { return nil, nil }
+func (m *mockWatcherStore) List(ctx context.Context, params store.ListWatcherParams) ([]store.Watcher, error) {
+	return nil, nil
+}
 func (m *mockWatcherStore) Update(ctx context.Context, id uuid.UUID, params store.UpdateWatcherParams) (*store.Watcher, error) {
 	return nil, nil
 }
@@ -358,7 +360,7 @@ func (m *mockAlertStore) List(ctx context.Context, params store.ListAlertParams)
 	return m.alerts, nil
 }
 
-func (m *mockAlertStore) CountUnread(ctx context.Context) (int, error) {
+func (m *mockAlertStore) CountUnread(ctx context.Context, environment string) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	count := 0

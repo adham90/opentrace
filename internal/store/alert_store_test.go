@@ -46,7 +46,7 @@ func TestAlertStore_CRUD(t *testing.T) {
 	}
 
 	// CountUnread
-	count, err := as.CountUnread(ctx)
+	count, err := as.CountUnread(ctx, "")
 	if err != nil {
 		t.Fatalf("CountUnread: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestAlertStore_CRUD(t *testing.T) {
 		t.Fatalf("MarkRead: %v", err)
 	}
 
-	count, _ = as.CountUnread(ctx)
+	count, _ = as.CountUnread(ctx, "")
 	if count != 1 {
 		t.Errorf("unread after MarkRead = %d, want 1", count)
 	}
@@ -92,7 +92,7 @@ func TestAlertStore_CRUD(t *testing.T) {
 		t.Fatalf("Dismiss: %v", err)
 	}
 
-	count, _ = as.CountUnread(ctx)
+	count, _ = as.CountUnread(ctx, "")
 	if count != 0 {
 		t.Errorf("unread after Dismiss = %d, want 0", count)
 	}

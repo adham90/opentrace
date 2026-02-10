@@ -208,6 +208,7 @@ func run() error {
 
 	// Create server
 	srv := web.NewServerWithDeps(web.ServerDeps{
+		DB:            deps.db,
 		DSStore:       deps.dsStore,
 		LogStore:      deps.logStore,
 		WatcherStore:  deps.watcherStore,

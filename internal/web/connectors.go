@@ -13,9 +13,10 @@ import (
 )
 
 type createConnectorRequest struct {
-	Type   store.ConnectorType `json:"type"`
-	Name   string              `json:"name"`
-	Config map[string]any      `json:"config"`
+	Type        store.ConnectorType `json:"type"`
+	Name        string              `json:"name"`
+	Environment string              `json:"environment"`
+	Config      map[string]any      `json:"config"`
 }
 
 func isHTMX(r *http.Request) bool {
@@ -24,7 +25,7 @@ func isHTMX(r *http.Request) bool {
 
 // renderConnectorList sends an HTML fragment of the connector list (for HTMX swaps).
 func (s *Server) renderConnectorList(w http.ResponseWriter, r *http.Request) {
-	connectors, err := s.dsStore.List(r.Context())
+	connectors, err := s.dsStore.List(r.Context(), store.ListDataSourceParams{})
 	if err != nil {
 		http.Error(w, "failed to list connectors", http.StatusInternalServerError)
 		return
@@ -45,12 +46,13 @@ func (s *Server) handleCreateConnectorAPI(w http.ResponseWriter, r *http.Request
 		}
 		connType := store.ConnectorType(r.FormValue("type"))
 		name := r.FormValue("name")
+		environment := r.FormValue("environment")
 		if connType == "" || name == "" {
 			http.Error(w, "type and name required", http.StatusBadRequest)
 			return
 		}
 		_, err := s.dsStore.Create(r.Context(), store.CreateDataSourceParams{
-			Type: connType, Name: name, Config: cfg,
+			Type: connType, Name: name, Environment: environment, Config: cfg,
 		})
 		if err != nil {
 			http.Error(w, "failed to create", http.StatusInternalServerError)
@@ -74,7 +76,7 @@ func (s *Server) handleCreateConnectorAPI(w http.ResponseWriter, r *http.Request
 		req.Config = map[string]any{}
 	}
 	ds, err := s.dsStore.Create(r.Context(), store.CreateDataSourceParams{
-		Type: req.Type, Name: req.Name, Config: req.Config,
+		Type: req.Type, Name: req.Name, Environment: req.Environment, Config: req.Config,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create connector")
@@ -84,7 +86,8 @@ func (s *Server) handleCreateConnectorAPI(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleListConnectors(w http.ResponseWriter, r *http.Request) {
-	list, err := s.dsStore.List(r.Context())
+	env := r.URL.Query().Get("env")
+	list, err := s.dsStore.List(r.Context(), store.ListDataSourceParams{Environment: env})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list connectors")
 		return

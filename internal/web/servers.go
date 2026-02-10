@@ -179,7 +179,7 @@ func (s *Server) ensureMetricsConnector(ctx context.Context) {
 	}
 
 	// Create DB row if it doesn't exist
-	sources, err := s.dsStore.List(ctx)
+	sources, err := s.dsStore.List(ctx, store.ListDataSourceParams{})
 	if err != nil {
 		log.Printf("WARN: ensureMetricsConnector: failed to list data sources: %v", err)
 		return

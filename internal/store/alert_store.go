@@ -47,10 +47,10 @@ func (s *alertStore) Create(ctx context.Context, params CreateAlertParams) (*Ale
 	}
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO alerts (id, watcher_id, run_id, title, summary, severity, details, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO alerts (id, watcher_id, run_id, title, summary, environment, severity, details, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id.String(), watcherIDStr, runIDStr, params.Title, params.Summary,
-		string(severity), detailsStr, now,
+		params.Environment, string(severity), detailsStr, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating alert: %w", err)
@@ -66,11 +66,11 @@ func (s *alertStore) getByID(ctx context.Context, id uuid.UUID) (*Alert, error) 
 	var readInt, dismissedInt int
 
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, watcher_id, run_id, title, summary, severity, details, read, dismissed, created_at
+		`SELECT id, watcher_id, run_id, title, summary, environment, severity, details, read, dismissed, created_at
 		 FROM alerts WHERE id = ?`, id.String(),
 	).Scan(
 		&a.ID, &a.WatcherID, &a.RunID, &a.Title, &a.Summary,
-		&a.Severity, &detailsStr, &readInt, &dismissedInt, &createdAt,
+		&a.Environment, &a.Severity, &detailsStr, &readInt, &dismissedInt, &createdAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -95,7 +95,7 @@ func (s *alertStore) List(ctx context.Context, params ListAlertParams) ([]Alert,
 		limit = 50
 	}
 
-	query := `SELECT id, watcher_id, run_id, title, summary, severity, details, read, dismissed, created_at
+	query := `SELECT id, watcher_id, run_id, title, summary, environment, severity, details, read, dismissed, created_at
 		 FROM alerts WHERE 1=1`
 	var args []any
 
@@ -106,6 +106,11 @@ func (s *alertStore) List(ctx context.Context, params ListAlertParams) ([]Alert,
 	if params.WatcherID != nil {
 		query += ` AND watcher_id = ?`
 		args = append(args, params.WatcherID.String())
+	}
+
+	if params.Environment != "" {
+		query += ` AND environment = ?`
+		args = append(args, params.Environment)
 	}
 
 	query += ` ORDER BY created_at DESC`
@@ -127,7 +132,7 @@ func (s *alertStore) List(ctx context.Context, params ListAlertParams) ([]Alert,
 
 		if err := rows.Scan(
 			&a.ID, &a.WatcherID, &a.RunID, &a.Title, &a.Summary,
-			&a.Severity, &detailsStr, &readInt, &dismissedInt, &createdAt,
+			&a.Environment, &a.Severity, &detailsStr, &readInt, &dismissedInt, &createdAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning alert: %w", err)
 		}
@@ -145,11 +150,15 @@ func (s *alertStore) List(ctx context.Context, params ListAlertParams) ([]Alert,
 	return result, rows.Err()
 }
 
-func (s *alertStore) CountUnread(ctx context.Context) (int, error) {
+func (s *alertStore) CountUnread(ctx context.Context, environment string) (int, error) {
 	var count int
-	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM alerts WHERE read = 0 AND dismissed = 0`,
-	).Scan(&count)
+	query := `SELECT COUNT(*) FROM alerts WHERE read = 0 AND dismissed = 0`
+	var args []any
+	if environment != "" {
+		query += ` AND environment = ?`
+		args = append(args, environment)
+	}
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("counting unread alerts: %w", err)
 	}

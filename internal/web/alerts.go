@@ -14,6 +14,10 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 		Limit: 50,
 	}
 
+	if env := r.URL.Query().Get("env"); env != "" {
+		params.Environment = env
+	}
+
 	if r.URL.Query().Get("unread") == "true" {
 		params.UnreadOnly = true
 	}
@@ -36,7 +40,8 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAlertCount(w http.ResponseWriter, r *http.Request) {
-	count, err := s.alertStore.CountUnread(r.Context())
+	env := r.URL.Query().Get("env")
+	count, err := s.alertStore.CountUnread(r.Context(), env)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to count alerts")
 		return

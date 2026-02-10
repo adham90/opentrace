@@ -1435,3 +1435,42 @@ select:focus { outline: none; border-color: var(--green); }
 .trace-stored {
   margin-top: 8px;
 }
+
+/* ===== Environment Selector ===== */
+.env-selector {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 24px 4px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 3px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: var(--select-arrow);
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  cursor: pointer;
+  max-width: 160px;
+  transition: color 0.1s, border-color 0.1s;
+}
+.env-selector:hover {
+  color: var(--text-bright);
+  border-color: var(--text-dim);
+}
+.env-selector:focus {
+  outline: none;
+  border-color: var(--green);
+  color: var(--text-bright);
+}
+
+/* ===== Environment Badge ===== */
+.badge-env {
+  background: var(--blue-dim);
+  color: var(--blue);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+}

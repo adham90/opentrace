@@ -31,12 +31,13 @@
 
 <script>
 var baseURL = window.location.protocol + '//' + window.location.host;
-var installURL = baseURL + '/api/agent/install.sh';
+var apiKey = {{.APIKey}};
+var installURL = baseURL + '/api/agent/install.sh' + (apiKey ? '?key=' + encodeURIComponent(apiKey) : '');
 
 // Set install command URLs
 document.getElementById('install-url').textContent = installURL;
 document.getElementById('manual-cmd').textContent =
-  'OPENTRACE_SERVER_URL=' + baseURL + ' \\\nopentrace agent';
+  'OPENTRACE_SERVER_URL=' + baseURL + (apiKey ? ' \\\nOPENTRACE_API_KEY=' + apiKey : '') + ' \\\nopentrace agent';
 
 function toggleInstall() {
   var panel = document.getElementById('install-panel');
@@ -49,7 +50,7 @@ function copyInstallCmd(btn) {
 }
 
 function copyManualCmd(btn) {
-  var text = 'OPENTRACE_SERVER_URL=' + baseURL + ' opentrace agent';
+  var text = 'OPENTRACE_SERVER_URL=' + baseURL + (apiKey ? ' OPENTRACE_API_KEY=' + apiKey : '') + ' opentrace agent';
   copyAndFlash(btn, text);
 }
 

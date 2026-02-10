@@ -36,6 +36,14 @@
 </div>
 
 <script>
+// Sync global env selector with logs page env filter on load
+(function(){
+  var envInput = document.querySelector('input[name="environment"]') || document.getElementById('environment');
+  if (envInput && !envInput.value && getGlobalEnv()) {
+    envInput.value = getGlobalEnv();
+  }
+})();
+
 (function(){
   var live = true;
   var timer = null;

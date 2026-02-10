@@ -104,7 +104,7 @@ func (s *Server) ensureLogsConnector(ctx context.Context) {
 	}
 
 	// Check if a logs data source row already exists in the DB
-	sources, err := s.dsStore.List(ctx)
+	sources, err := s.dsStore.List(ctx, store.ListDataSourceParams{})
 	if err != nil {
 		log.Printf("WARN: ensureLogsConnector: failed to list data sources: %v", err)
 		return

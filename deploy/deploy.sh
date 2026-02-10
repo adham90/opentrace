@@ -16,7 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ─── Defaults ───
 SERVER_NAME="opentrace"
-SERVER_TYPE="cx22"        # 2 vCPU, 4GB RAM (~€4/mo)
+SERVER_TYPE="cx23"        # 2 vCPU, 4GB RAM (~€4/mo)
 IMAGE="ubuntu-24.04"
 LOCATION="fsn1"           # Falkenstein, Germany
 DOMAIN=""
@@ -25,6 +25,8 @@ ANTHROPIC_API_KEY=""
 ANTHROPIC_MODEL="claude-sonnet-4-5-20250929"
 OPENAI_API_KEY=""
 OPENAI_MODEL="gpt-4o"
+GEMINI_API_KEY=""
+GEMINI_MODEL="gemini-2.5-flash-preview-04-17"
 APP_API_KEY=""
 SSH_KEY=""
 
@@ -36,15 +38,17 @@ Required:
   --domain <domain>              Domain name pointing to the server (e.g. trace.example.com)
 
 LLM Provider (pick one):
-  --llm-provider <provider>      LLM provider: anthropic, openai, ollama (default: anthropic)
+  --llm-provider <provider>      LLM provider: anthropic, openai, gemini, ollama (default: anthropic)
   --anthropic-api-key <key>      Anthropic API key (required if provider is anthropic)
   --anthropic-model <model>      Anthropic model (default: claude-sonnet-4-5-20250929)
   --openai-api-key <key>         OpenAI API key (required if provider is openai)
   --openai-model <model>         OpenAI model (default: gpt-4o)
+  --gemini-api-key <key>         Gemini API key (required if provider is gemini)
+  --gemini-model <model>         Gemini model (default: gemini-2.5-flash-preview-04-17)
 
 Optional:
   --server-name <name>           Server name (default: opentrace)
-  --server-type <type>           Hetzner server type (default: cx22)
+  --server-type <type>           Hetzner server type (default: cx23)
   --location <loc>               Hetzner location: fsn1, nbg1, hel1 (default: fsn1)
   --app-api-key <key>            Bearer token to protect the API (auto-generated if empty)
   --ssh-key <name>               SSH key name in Hetzner (uses first available if empty)
@@ -53,6 +57,7 @@ Optional:
 Examples:
   $(basename "$0") --domain trace.example.com --anthropic-api-key sk-ant-xxx
   $(basename "$0") --domain trace.example.com --llm-provider openai --openai-api-key sk-xxx
+  $(basename "$0") --domain trace.example.com --llm-provider gemini --gemini-api-key AIza...
 EOF
   exit 0
 }
@@ -66,6 +71,8 @@ while [[ $# -gt 0 ]]; do
     --anthropic-model)    ANTHROPIC_MODEL="$2"; shift 2 ;;
     --openai-api-key)     OPENAI_API_KEY="$2"; shift 2 ;;
     --openai-model)       OPENAI_MODEL="$2"; shift 2 ;;
+    --gemini-api-key)     GEMINI_API_KEY="$2"; shift 2 ;;
+    --gemini-model)       GEMINI_MODEL="$2"; shift 2 ;;
     --app-api-key)        APP_API_KEY="$2"; shift 2 ;;
     --server-name)        SERVER_NAME="$2"; shift 2 ;;
     --server-type)        SERVER_TYPE="$2"; shift 2 ;;
@@ -98,6 +105,11 @@ if [[ "$LLM_PROVIDER" == "openai" && -z "$OPENAI_API_KEY" ]]; then
   exit 1
 fi
 
+if [[ "$LLM_PROVIDER" == "gemini" && -z "$GEMINI_API_KEY" ]]; then
+  echo "Error: --gemini-api-key is required when using gemini provider"
+  exit 1
+fi
+
 # Auto-generate app API key if not provided
 if [[ -z "$APP_API_KEY" ]]; then
   APP_API_KEY="$(openssl rand -hex 32)"
@@ -107,7 +119,7 @@ fi
 
 # Find SSH key
 if [[ -z "$SSH_KEY" ]]; then
-  SSH_KEY="$(hcloud ssh-key list -o noheader -o columns=name | head -1)"
+  SSH_KEY="$(hcloud ssh-key list -o noheader -o columns=name | head -1 | xargs)"
   if [[ -z "$SSH_KEY" ]]; then
     echo "Error: No SSH keys found in Hetzner. Add one with:"
     echo "  hcloud ssh-key create --name mykey --public-key-from-file ~/.ssh/id_ed25519.pub"
@@ -124,6 +136,8 @@ CLOUD_INIT="${CLOUD_INIT//\$\{ANTHROPIC_API_KEY\}/$ANTHROPIC_API_KEY}"
 CLOUD_INIT="${CLOUD_INIT//\$\{ANTHROPIC_MODEL\}/$ANTHROPIC_MODEL}"
 CLOUD_INIT="${CLOUD_INIT//\$\{OPENAI_API_KEY\}/$OPENAI_API_KEY}"
 CLOUD_INIT="${CLOUD_INIT//\$\{OPENAI_MODEL\}/$OPENAI_MODEL}"
+CLOUD_INIT="${CLOUD_INIT//\$\{GEMINI_API_KEY\}/$GEMINI_API_KEY}"
+CLOUD_INIT="${CLOUD_INIT//\$\{GEMINI_MODEL\}/$GEMINI_MODEL}"
 CLOUD_INIT="${CLOUD_INIT//\$\{APP_API_KEY\}/$APP_API_KEY}"
 
 TMPFILE=$(mktemp)
@@ -139,21 +153,17 @@ echo "  Image:    $IMAGE"
 echo "  Domain:   $DOMAIN"
 echo ""
 
-SERVER_IP=$(hcloud server create \
+hcloud server create \
   --name "$SERVER_NAME" \
   --type "$SERVER_TYPE" \
   --image "$IMAGE" \
   --location "$LOCATION" \
   --ssh-key "$SSH_KEY" \
-  --user-data-from-file "$TMPFILE" \
-  --format json | grep -o '"ipv4_address":"[^"]*"' | cut -d'"' -f4)
+  --user-data-from-file "$TMPFILE"
 
 rm -f "$TMPFILE"
 
-if [[ -z "$SERVER_IP" ]]; then
-  # Fallback: get IP from server list
-  SERVER_IP=$(hcloud server ip "$SERVER_NAME" 2>/dev/null || echo "")
-fi
+SERVER_IP=$(hcloud server ip "$SERVER_NAME" 2>/dev/null || echo "")
 
 echo ""
 echo "================================================"

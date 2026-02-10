@@ -40,6 +40,10 @@
               <label>Name</label>
               <input type="text" id="conn-name" placeholder="e.g. Production Logs" required>
             </div>
+            <div class="form-group">
+              <label>Environment <small>(optional)</small></label>
+              <input type="text" id="conn-env" placeholder="e.g. production, staging">
+            </div>
           </div>
         </div>
 
@@ -74,7 +78,7 @@
 <script>
 var isAdmin = {{.IsAdmin}};
 function loadConnectors() {
-  fetch('/api/connectors').then(function(r) { return r.json(); }).then(function(connectors) {
+  fetch('/api/connectors' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r) { return r.json(); }).then(function(connectors) {
     var container = document.getElementById('connectors-list');
     if (!connectors || connectors.length === 0) {
       container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no connectors configured</p><p>click + new connector to connect a data source</p></div>';
@@ -90,6 +94,7 @@ function loadConnectors() {
       html += '  <div class="connector-header">';
       html += '    <span class="connector-name">' + escapeHtml(c.name) + '</span>';
       html += '    <span class="badge badge-type">' + escapeHtml(c.type) + '</span>';
+      html += (c.environment ? '    <span class="badge badge-env">' + escapeHtml(c.environment) + '</span>' : '');
       html += '    <span class="badge ' + statusClass + '">' + escapeHtml(c.status || 'unknown') + '</span>';
       html += '  </div>';
 
@@ -133,6 +138,7 @@ function saveConnector(e) {
   e.preventDefault();
   var type = document.getElementById('conn-type').value;
   var name = document.getElementById('conn-name').value;
+  var environment = document.getElementById('conn-env').value;
   var config = {};
 
   if (type === 'database') {
@@ -143,10 +149,13 @@ function saveConnector(e) {
     if (rp) config.repo_path = rp;
   }
 
+  var body = {type: type, name: name, config: config};
+  if (environment) body.environment = environment;
+
   fetch('/api/connectors', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({type: type, name: name, config: config})
+    body: JSON.stringify(body)
   }).then(function(r) {
     if (r.ok) {
       hideModal();
@@ -190,6 +199,7 @@ function escapeHtml(str) {
 }
 
 loadConnectors();
+window.loadPageData = loadConnectors;
 </script>
 {{end}}
 

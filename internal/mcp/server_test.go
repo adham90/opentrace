@@ -327,9 +327,18 @@ type mockWatcherStore struct {
 	err      error
 }
 
-func (m *mockWatcherStore) List(ctx context.Context) ([]store.Watcher, error) {
+func (m *mockWatcherStore) List(ctx context.Context, params store.ListWatcherParams) ([]store.Watcher, error) {
 	if m.err != nil {
 		return nil, m.err
+	}
+	if params.Environment != "" {
+		var filtered []store.Watcher
+		for _, w := range m.watchers {
+			if w.Environment == params.Environment {
+				filtered = append(filtered, w)
+			}
+		}
+		return filtered, nil
 	}
 	return m.watchers, nil
 }
@@ -391,7 +400,9 @@ func (m *mockAlertStore) List(ctx context.Context, params store.ListAlertParams)
 func (m *mockAlertStore) Create(ctx context.Context, params store.CreateAlertParams) (*store.Alert, error) {
 	return nil, nil
 }
-func (m *mockAlertStore) CountUnread(ctx context.Context) (int, error)          { return 0, nil }
+func (m *mockAlertStore) CountUnread(ctx context.Context, environment string) (int, error) {
+	return 0, nil
+}
 func (m *mockAlertStore) MarkRead(ctx context.Context, id uuid.UUID) error      { return nil }
 func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error       { return nil }
 func (m *mockAlertStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {

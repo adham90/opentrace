@@ -47,6 +47,11 @@
             </details>
           </div>
 
+          <div class="form-group">
+            <label>Environment <small>(watcher scope)</small></label>
+            <input type="text" id="watcher-env" placeholder="e.g. production, staging">
+          </div>
+
           <div class="form-subsection">
             <div class="form-subsection-label">Log Scope</div>
             <div class="form-grid">
@@ -177,7 +182,7 @@ function loadModels() {
 }
 
 function loadWatchers() {
-  fetch('/api/watchers').then(function(r) { return r.json(); }).then(function(watchers) {
+  fetch('/api/watchers' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r) { return r.json(); }).then(function(watchers) {
     var container = document.getElementById('watchers-list');
     if (!watchers || watchers.length === 0) {
       container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no watchers configured</p><p>create one to start automated monitoring</p></div>';
@@ -205,6 +210,7 @@ function loadWatchers() {
       html += '  <div class="watcher-info">';
       html += '    <span>Last run: ' + lastRun + '</span>';
       html += '    <span class="severity-badge severity-' + w.severity + '">' + w.severity + '</span>';
+      html += (w.environment ? '    <span class="badge badge-env">' + escapeHtml(w.environment) + '</span>' : '');
       html += '  </div>';
       html += '  <div class="watcher-actions">';
       if (isAdmin) {
@@ -265,6 +271,8 @@ function saveWatcher(e) {
     if (url) notify.push({type: 'webhook', url: url});
   }
 
+  var watcherEnv = document.getElementById('watcher-env').value;
+
   var body = {
     title: document.getElementById('watcher-title').value,
     description: document.getElementById('watcher-description').value,
@@ -272,6 +280,7 @@ function saveWatcher(e) {
     time_range: document.getElementById('watcher-timerange').value,
     model: document.getElementById('watcher-model').value,
     effort: document.getElementById('watcher-effort').value,
+    environment: watcherEnv,
     filters: filters,
     notify: notify
   };
@@ -300,6 +309,7 @@ function editWatcher(id) {
     document.getElementById('watcher-timerange').value = w.time_range || '15m';
     document.getElementById('watcher-model').value = w.model || '';
     document.getElementById('watcher-effort').value = w.effort || 'medium';
+    document.getElementById('watcher-env').value = w.environment || '';
 
     var f = w.filters || {};
     document.getElementById('filter-service').value = f.service || '';
@@ -361,5 +371,6 @@ function escapeHtml(str) {
 
 loadWatchers();
 loadModels();
+window.loadPageData = loadWatchers;
 </script>
 {{end}}

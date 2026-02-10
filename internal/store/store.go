@@ -15,7 +15,7 @@ var ErrNotFound = errors.New("not found")
 type DataSourceStore interface {
 	Create(ctx context.Context, params CreateDataSourceParams) (*DataSource, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*DataSource, error)
-	List(ctx context.Context) ([]DataSource, error)
+	List(ctx context.Context, params ListDataSourceParams) ([]DataSource, error)
 	Update(ctx context.Context, id uuid.UUID, params UpdateDataSourceParams) (*DataSource, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 }
@@ -31,7 +31,7 @@ type LogStore interface {
 type WatcherStore interface {
 	Create(ctx context.Context, params CreateWatcherParams) (*Watcher, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*Watcher, error)
-	List(ctx context.Context) ([]Watcher, error)
+	List(ctx context.Context, params ListWatcherParams) ([]Watcher, error)
 	Update(ctx context.Context, id uuid.UUID, params UpdateWatcherParams) (*Watcher, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status WatcherStatus) (*Watcher, error)
 	Delete(ctx context.Context, id uuid.UUID) error
@@ -54,7 +54,7 @@ type WatcherRunStore interface {
 type AlertStore interface {
 	Create(ctx context.Context, params CreateAlertParams) (*Alert, error)
 	List(ctx context.Context, params ListAlertParams) ([]Alert, error)
-	CountUnread(ctx context.Context) (int, error)
+	CountUnread(ctx context.Context, environment string) (int, error)
 	MarkRead(ctx context.Context, id uuid.UUID) error
 	Dismiss(ctx context.Context, id uuid.UUID) error
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)

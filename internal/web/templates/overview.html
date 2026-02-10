@@ -55,7 +55,7 @@
 <script>
 (function(){
   function loadStats() {
-    fetch('/api/overview').then(function(r){ return r.json(); }).then(function(d){
+    fetch('/api/overview' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r){ return r.json(); }).then(function(d){
       // Alerts
       var an = document.getElementById('stat-alerts-num');
       var ad = document.getElementById('stat-alerts-detail');
@@ -105,7 +105,7 @@
   }
 
   function loadRecentAlerts() {
-    fetch('/api/alerts?limit=5').then(function(r){ return r.json(); }).then(function(alerts){
+    fetch('/api/alerts?limit=5' + (getGlobalEnv() ? '&env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r){ return r.json(); }).then(function(alerts){
       var container = document.getElementById('recent-alerts');
       if (!alerts || alerts.length === 0) {
         container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no alerts</p></div>';
@@ -133,7 +133,7 @@
     // Use the search endpoint in JSON mode instead (not available, it's HTML)
     // Let's just link to the logs page for now and show recent log count
     var container = document.getElementById('recent-logs');
-    fetch('/api/overview').then(function(r){ return r.json(); }).then(function(d){
+    fetch('/api/overview' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r){ return r.json(); }).then(function(d){
       if (d.logs.last_hour === 0) {
         container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no recent logs</p></div>';
         return;
@@ -167,6 +167,8 @@
   loadRecentAlerts();
   loadRecentLogs();
   setInterval(function(){ loadStats(); loadRecentAlerts(); }, 30000);
+
+  window.loadPageData = function() { loadStats(); loadRecentAlerts(); };
 })();
 </script>
 {{end}}

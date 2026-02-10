@@ -94,6 +94,15 @@
   <div class="setup-section">
     <h2 class="setup-heading">VM Metrics Agent</h2>
     <p class="setup-desc">OpenTrace includes a lightweight agent that collects system metrics (CPU, memory, disk, network, load) from your servers and pushes them to the dashboard.</p>
+    <h3 class="setup-heading">One-line install</h3>
+    <p class="setup-desc">Run this on the server you want to monitor:</p>
+    <div class="code-block">
+      <button class="copy-btn" onclick="copyInstallCmd(this)">copy</button>
+      <pre><code id="agent-install-cmd">loading...</code></pre>
+    </div>
+    <details style="margin-top: 1rem;">
+      <summary class="setup-desc" style="cursor: pointer;"><strong>Manual setup</strong></summary>
+      <div style="margin-top: 0.75rem;">
     <ol class="setup-steps">
       <li>
         <strong>Install the binary on your server</strong>
@@ -105,10 +114,8 @@
       <li>
         <strong>Run the agent</strong>
         <div class="code-block">
-          <button class="copy-btn" onclick="copyCode(this)">copy</button>
-          <pre><code>OPENTRACE_SERVER_URL=http://your-opentrace-host:8080 \
-OPENTRACE_API_KEY=your-api-key \
-opentrace agent</code></pre>
+          <button class="copy-btn" onclick="copyManualRunCmd(this)">copy</button>
+          <pre><code id="agent-manual-cmd">loading...</code></pre>
         </div>
       </li>
       <li>
@@ -144,22 +151,11 @@ opentrace agent</code></pre>
     </table>
     <p class="setup-desc">Running as a systemd service:</p>
     <div class="code-block">
-      <button class="copy-btn" onclick="copyCode(this)">copy</button>
-      <pre><code>[Unit]
-Description=OpenTrace Agent
-After=network.target
-
-[Service]
-Type=simple
-Environment=OPENTRACE_SERVER_URL=http://your-opentrace-host:8080
-Environment=OPENTRACE_API_KEY=your-api-key
-ExecStart=/usr/local/bin/opentrace agent
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target</code></pre>
+      <button class="copy-btn" onclick="copySystemdCmd(this)">copy</button>
+      <pre><code id="agent-systemd-cmd">loading...</code></pre>
     </div>
+      </div>
+    </details>
   </div>
 
   <!-- Available Tools -->
@@ -281,9 +277,59 @@ WantedBy=multi-user.target</code></pre>
 </div>
 
 <script>
+var baseURL = window.location.protocol + '//' + window.location.host;
+var apiKey = {{.APIKey}};
+var installURL = baseURL + '/api/agent/install.sh' + (apiKey ? '?key=' + encodeURIComponent(apiKey) : '');
+
+// Populate agent install commands
+(function() {
+  var installEl = document.getElementById('agent-install-cmd');
+  if (installEl) {
+    installEl.textContent = 'curl -fsSL ' + installURL + ' | sudo bash';
+  }
+
+  var manualEl = document.getElementById('agent-manual-cmd');
+  if (manualEl) {
+    manualEl.textContent = 'OPENTRACE_SERVER_URL=' + baseURL +
+      (apiKey ? ' \\\nOPENTRACE_API_KEY=' + apiKey : '') +
+      ' \\\nopentrace agent';
+  }
+
+  var systemdEl = document.getElementById('agent-systemd-cmd');
+  if (systemdEl) {
+    systemdEl.textContent = '[Unit]\nDescription=OpenTrace Agent\nAfter=network.target\n\n[Service]\nType=simple\nEnvironment=OPENTRACE_SERVER_URL=' + baseURL +
+      '\nEnvironment=OPENTRACE_API_KEY=' + (apiKey || 'your-api-key') +
+      '\nExecStart=/usr/local/bin/opentrace agent\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target';
+  }
+})();
+
 function copyCode(btn) {
   var code = btn.parentElement.querySelector('code');
   navigator.clipboard.writeText(code.textContent).then(function() {
+    btn.textContent = 'copied!';
+    btn.classList.add('copied');
+    setTimeout(function() {
+      btn.textContent = 'copy';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+}
+
+function copyInstallCmd(btn) {
+  copyAndFlash(btn, 'curl -fsSL ' + installURL + ' | sudo bash');
+}
+
+function copyManualRunCmd(btn) {
+  copyAndFlash(btn, 'OPENTRACE_SERVER_URL=' + baseURL + (apiKey ? ' OPENTRACE_API_KEY=' + apiKey : '') + ' opentrace agent');
+}
+
+function copySystemdCmd(btn) {
+  var code = btn.parentElement.querySelector('code');
+  copyAndFlash(btn, code.textContent);
+}
+
+function copyAndFlash(btn, text) {
+  navigator.clipboard.writeText(text).then(function() {
     btn.textContent = 'copied!';
     btn.classList.add('copied');
     setTimeout(function() {

@@ -16,6 +16,7 @@ import (
 type createWatcherRequest struct {
 	Title       string               `json:"title"`
 	Description string               `json:"description"`
+	Environment string               `json:"environment"`
 	Severity    store.WatcherSeverity `json:"severity"`
 	Filters     json.RawMessage      `json:"filters"`
 	TimeRange   string               `json:"time_range"`
@@ -27,6 +28,7 @@ type createWatcherRequest struct {
 type updateWatcherRequest struct {
 	Title       *string                `json:"title,omitempty"`
 	Description *string                `json:"description,omitempty"`
+	Environment *string                `json:"environment,omitempty"`
 	Severity    *store.WatcherSeverity `json:"severity,omitempty"`
 	Filters     json.RawMessage        `json:"filters,omitempty"`
 	TimeRange   *string                `json:"time_range,omitempty"`
@@ -49,6 +51,7 @@ func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
 	watcher, err := s.watcherStore.Create(r.Context(), store.CreateWatcherParams{
 		Title:       req.Title,
 		Description: req.Description,
+		Environment: req.Environment,
 		Severity:    req.Severity,
 		Filters:     req.Filters,
 		TimeRange:   req.TimeRange,
@@ -64,7 +67,8 @@ func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListWatchers(w http.ResponseWriter, r *http.Request) {
-	list, err := s.watcherStore.List(r.Context())
+	env := r.URL.Query().Get("env")
+	list, err := s.watcherStore.List(r.Context(), store.ListWatcherParams{Environment: env})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list watchers")
 		return
@@ -107,6 +111,7 @@ func (s *Server) handleUpdateWatcher(w http.ResponseWriter, r *http.Request) {
 	watcher, err := s.watcherStore.Update(r.Context(), id, store.UpdateWatcherParams{
 		Title:       req.Title,
 		Description: req.Description,
+		Environment: req.Environment,
 		Severity:    req.Severity,
 		Filters:     req.Filters,
 		TimeRange:   req.TimeRange,

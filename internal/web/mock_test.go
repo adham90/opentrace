@@ -26,11 +26,12 @@ func (m *mockDataSourceStore) Create(ctx context.Context, params store.CreateDat
 	defer m.mu.Unlock()
 
 	ds := &store.DataSource{
-		ID:     uuid.New(),
-		Type:   params.Type,
-		Name:   params.Name,
-		Config: params.Config,
-		Status: store.StatusDisconnected,
+		ID:          uuid.New(),
+		Type:        params.Type,
+		Name:        params.Name,
+		Environment: params.Environment,
+		Config:      params.Config,
+		Status:      store.StatusDisconnected,
 	}
 	m.sources[ds.ID] = ds
 	return ds, nil
@@ -47,12 +48,15 @@ func (m *mockDataSourceStore) GetByID(ctx context.Context, id uuid.UUID) (*store
 	return ds, nil
 }
 
-func (m *mockDataSourceStore) List(ctx context.Context) ([]store.DataSource, error) {
+func (m *mockDataSourceStore) List(ctx context.Context, params store.ListDataSourceParams) ([]store.DataSource, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	result := make([]store.DataSource, 0, len(m.sources))
 	for _, ds := range m.sources {
+		if params.Environment != "" && ds.Environment != params.Environment {
+			continue
+		}
 		result = append(result, *ds)
 	}
 	return result, nil
@@ -163,6 +167,7 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 	now := time.Now()
 	w := &store.Watcher{
 		ID: uuid.New(), Title: params.Title, Description: params.Description,
+		Environment: params.Environment,
 		Severity: sev, Filters: filters, TimeRange: timeRange,
 		Model: params.Model, Effort: effort, Status: store.WatcherActive, Notify: notify,
 		NextRunAt: &now, CreatedAt: now, UpdatedAt: now,
@@ -181,11 +186,14 @@ func (m *mockWatcherStore) GetByID(ctx context.Context, id uuid.UUID) (*store.Wa
 	return w, nil
 }
 
-func (m *mockWatcherStore) List(ctx context.Context) ([]store.Watcher, error) {
+func (m *mockWatcherStore) List(ctx context.Context, params store.ListWatcherParams) ([]store.Watcher, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	result := make([]store.Watcher, 0, len(m.watchers))
 	for _, w := range m.watchers {
+		if params.Environment != "" && w.Environment != params.Environment {
+			continue
+		}
 		result = append(result, *w)
 	}
 	return result, nil
@@ -203,6 +211,9 @@ func (m *mockWatcherStore) Update(ctx context.Context, id uuid.UUID, params stor
 	}
 	if params.Description != nil {
 		w.Description = *params.Description
+	}
+	if params.Environment != nil {
+		w.Environment = *params.Environment
 	}
 	if params.Severity != nil {
 		w.Severity = *params.Severity
@@ -338,8 +349,8 @@ func (m *mockAlertStore) Create(ctx context.Context, params store.CreateAlertPar
 	}
 	a := &store.Alert{
 		ID: uuid.New(), WatcherID: params.WatcherID, RunID: params.RunID,
-		Title: params.Title, Summary: params.Summary, Severity: sev,
-		Details: params.Details, CreatedAt: time.Now(),
+		Title: params.Title, Summary: params.Summary, Environment: params.Environment,
+		Severity: sev, Details: params.Details, CreatedAt: time.Now(),
 	}
 	m.alerts[a.ID] = a
 	return a, nil
@@ -358,12 +369,15 @@ func (m *mockAlertStore) List(ctx context.Context, params store.ListAlertParams)
 	return result, nil
 }
 
-func (m *mockAlertStore) CountUnread(ctx context.Context) (int, error) {
+func (m *mockAlertStore) CountUnread(ctx context.Context, environment string) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	count := 0
 	for _, a := range m.alerts {
 		if !a.Read && !a.Dismissed {
+			if environment != "" && a.Environment != environment {
+				continue
+			}
 			count++
 		}
 	}

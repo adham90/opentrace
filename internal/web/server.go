@@ -2,6 +2,7 @@ package web
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"io/fs"
@@ -24,6 +25,7 @@ import (
 // Server holds the HTTP server and its dependencies.
 type Server struct {
 	Router        chi.Router
+	db            *sql.DB
 	dsStore       store.DataSourceStore
 	logStore      store.LogStore
 	watcherStore  store.WatcherStore
@@ -45,6 +47,7 @@ type Server struct {
 
 // ServerDeps holds all dependencies for the web server.
 type ServerDeps struct {
+	DB            *sql.DB
 	DSStore       store.DataSourceStore
 	LogStore      store.LogStore
 	WatcherStore  store.WatcherStore
@@ -75,6 +78,7 @@ func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, registry 
 // NewServerWithDeps creates a new Server using the ServerDeps struct.
 func NewServerWithDeps(deps ServerDeps) *Server {
 	srv := &Server{
+		db:            deps.DB,
 		dsStore:       deps.DSStore,
 		logStore:      deps.LogStore,
 		watcherStore:  deps.WatcherStore,
@@ -163,6 +167,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		// Read API — require auth when users exist
 		r.Group(func(r chi.Router) {
 			r.Use(srv.requireAuthIfEnabledAPI)
+			r.Get("/environments", srv.handleListEnvironments)
 			r.Get("/connectors", srv.handleListConnectors)
 			r.Get("/models", srv.handleListModels)
 			r.Get("/watchers", srv.handleListWatchers)

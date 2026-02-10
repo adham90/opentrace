@@ -106,6 +106,7 @@ type pageData struct {
 	User          *store.User
 	IsAdmin       bool
 	RetentionDays int
+	APIKey        string
 }
 
 func (s *Server) isDevMode() bool {
@@ -116,12 +117,17 @@ func (s *Server) isDevMode() bool {
 func (s *Server) newPageData(r *http.Request, title, nav string) pageData {
 	user := UserFromContext(r.Context())
 	isAdmin := user != nil && user.Role == store.RoleAdmin
+	var apiKey string
+	if isAdmin && s.cfg != nil {
+		apiKey = s.cfg.APIKey
+	}
 	return pageData{
 		Title:   title,
 		Nav:     nav,
 		DevMode: s.isDevMode(),
 		User:    user,
 		IsAdmin: isAdmin,
+		APIKey:  apiKey,
 	}
 }
 
@@ -316,7 +322,7 @@ func (s *Server) handleSetupPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleConnectorsPage(w http.ResponseWriter, r *http.Request) {
-	connectors, err := s.dsStore.List(r.Context())
+	connectors, err := s.dsStore.List(r.Context(), store.ListDataSourceParams{})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list connectors")
 		return
@@ -341,6 +347,7 @@ func (s *Server) handleOverviewPage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	env := r.URL.Query().Get("env")
 
 	type overviewStats struct {
 		Alerts     map[string]int `json:"alerts"`
@@ -360,7 +367,7 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 
 	// Alerts stats
 	if s.alertStore != nil {
-		alerts, err := s.alertStore.List(ctx, store.ListAlertParams{Limit: 500})
+		alerts, err := s.alertStore.List(ctx, store.ListAlertParams{Limit: 500, Environment: env})
 		if err == nil {
 			for _, a := range alerts {
 				if !a.Dismissed {
@@ -380,7 +387,7 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 
 	// Watchers stats
 	if s.watcherStore != nil {
-		watchers, err := s.watcherStore.List(ctx)
+		watchers, err := s.watcherStore.List(ctx, store.ListWatcherParams{Environment: env})
 		if err == nil {
 			stats.Watchers["total"] = len(watchers)
 			for _, w := range watchers {
@@ -400,8 +407,9 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 	if s.logStore != nil {
 		oneHourAgo := time.Now().Add(-1 * time.Hour)
 		logs, err := s.logStore.Search(ctx, store.LogSearchParams{
-			Start: &oneHourAgo,
-			Limit: 10000,
+			Start:       &oneHourAgo,
+			Environment: env,
+			Limit:       10000,
 		})
 		if err == nil {
 			stats.Logs["last_hour"] = len(logs)
@@ -415,7 +423,7 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 
 	// Connectors stats
 	if s.dsStore != nil {
-		connectors, err := s.dsStore.List(ctx)
+		connectors, err := s.dsStore.List(ctx, store.ListDataSourceParams{Environment: env})
 		if err == nil {
 			stats.Connectors["total"] = len(connectors)
 			for _, c := range connectors {
@@ -446,6 +454,22 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, stats)
+}
+
+func (s *Server) handleListEnvironments(w http.ResponseWriter, r *http.Request) {
+	if s.db == nil {
+		writeJSON(w, http.StatusOK, []string{})
+		return
+	}
+	envs, err := store.ListEnvironments(r.Context(), s.db)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list environments")
+		return
+	}
+	if envs == nil {
+		envs = []string{}
+	}
+	writeJSON(w, http.StatusOK, envs)
 }
 
 func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {

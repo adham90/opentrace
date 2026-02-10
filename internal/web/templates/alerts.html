@@ -30,6 +30,7 @@ function loadAlerts() {
   var url = '/api/alerts?';
   if (filter === 'unread') url += 'unread=true&';
   url += 'limit=50';
+  url += (getGlobalEnv() ? '&env=' + encodeURIComponent(getGlobalEnv()) : '');
 
   fetch(url).then(function(r) { return r.json(); }).then(function(alerts) {
     allAlerts = alerts || [];
@@ -61,6 +62,7 @@ function renderAlerts() {
     html += '<div class="alert-card ' + sevClass + readClass + '" data-id="' + a.id + '">';
     html += '  <div class="alert-header">';
     html += '    <span class="severity-badge ' + sevClass + '">' + sevIcon + '</span>';
+    html += (a.environment ? '<span class="badge badge-env">' + escapeHtml(a.environment) + '</span>' : '');
     html += '    <span class="alert-title">' + escapeHtml(a.title) + '</span>';
     html += '    <span class="alert-time">' + timeAgo + '</span>';
     html += '  </div>';
@@ -124,5 +126,6 @@ function escapeHtml(str) {
 
 loadAlerts();
 setInterval(function() { loadAlerts(); updateBadge(); }, 30000);
+window.loadPageData = loadAlerts;
 </script>
 {{end}}

@@ -94,6 +94,7 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 		s.AddTool(
 			mcp.NewTool("list_watchers",
 				mcp.WithDescription("List all configured watchers with their status"),
+				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production, staging)")),
 			),
 			listWatchersHandler(deps.WatcherStore),
 		)
@@ -106,6 +107,7 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 				mcp.WithDescription("List recent alerts from watchers"),
 				mcp.WithNumber("limit", mcp.Description("Maximum number of alerts to return (default: 10)")),
 				mcp.WithBoolean("unread_only", mcp.Description("Only show unread alerts (default: false)")),
+				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production, staging)")),
 			),
 			listAlertsHandler(deps.AlertStore),
 		)
@@ -164,6 +166,7 @@ func addWriteTools(s *server.MCPServer, deps Deps) {
 				mcp.WithString("severity", mcp.Description("Alert severity: info, warning, or critical (default: warning)")),
 				mcp.WithString("model", mcp.Description("LLM model variant name (e.g. anthropic-sonnet, openai-gpt4o). Empty for global default")),
 				mcp.WithString("effort", mcp.Description("Analysis effort level: low (quick check), medium (default), or high (deep analysis)")),
+				mcp.WithString("watcher_environment", mcp.Description("Environment to assign to the watcher itself (e.g. production, staging)")),
 			),
 			createWatcherHandler(deps.WatcherStore),
 		)
@@ -238,7 +241,12 @@ func listConnectorsHandler(registry *connector.Registry) server.ToolHandlerFunc 
 // listWatchersHandler returns a handler that lists all watchers.
 func listWatchersHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		watchers, err := ws.List(ctx, store.ListWatcherParams{})
+		args := request.GetArguments()
+		var params store.ListWatcherParams
+		if v, ok := args["environment"].(string); ok && v != "" {
+			params.Environment = v
+		}
+		watchers, err := ws.List(ctx, params)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to list watchers: %v", err)), nil
 		}
@@ -301,9 +309,12 @@ func createWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 			effort = store.WatcherEffort(v)
 		}
 
+		watcherEnv, _ := args["watcher_environment"].(string)
+
 		params := store.CreateWatcherParams{
 			Title:       title,
 			Description: description,
+			Environment: watcherEnv,
 			Severity:    severity,
 			Filters:     filtersJSON,
 			TimeRange:   timeRange,
@@ -445,9 +456,15 @@ func listAlertsHandler(as store.AlertStore) server.ToolHandlerFunc {
 			unreadOnly = v
 		}
 
+		var environment string
+		if v, ok := args["environment"].(string); ok {
+			environment = v
+		}
+
 		alerts, err := as.List(ctx, store.ListAlertParams{
-			UnreadOnly: unreadOnly,
-			Limit:      limit,
+			UnreadOnly:  unreadOnly,
+			Environment: environment,
+			Limit:       limit,
 		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to list alerts: %v", err)), nil

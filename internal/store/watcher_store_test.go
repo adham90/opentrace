@@ -60,7 +60,7 @@ func TestWatcherStore_CRUD(t *testing.T) {
 	}
 
 	// List
-	list, err := s.List(ctx)
+	list, err := s.List(ctx, ListWatcherParams{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestWatcherStore_ModelField(t *testing.T) {
 	}
 
 	// List should include model
-	list, err := s.List(ctx)
+	list, err := s.List(ctx, ListWatcherParams{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestWatcherStore_EffortField(t *testing.T) {
 	}
 
 	// List includes effort
-	list, err := s.List(ctx)
+	list, err := s.List(ctx, ListWatcherParams{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

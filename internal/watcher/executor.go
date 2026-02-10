@@ -139,11 +139,12 @@ func (e *Executor) Execute(ctx context.Context, w store.Watcher) {
 	// 9. Create alert and notify if needed
 	if hasAlert {
 		alert, err := e.alertStore.Create(ctx, store.CreateAlertParams{
-			WatcherID: &w.ID,
-			RunID:     &run.ID,
-			Title:     w.Title,
-			Summary:   answer,
-			Severity:  w.Severity,
+			WatcherID:   &w.ID,
+			RunID:       &run.ID,
+			Title:       w.Title,
+			Summary:     answer,
+			Environment: w.Environment,
+			Severity:    w.Severity,
 		})
 		if err != nil {
 			log.Printf("watcher %s: failed to create alert: %v", w.ID, err)

@@ -91,7 +91,7 @@ func TestListDataSources(t *testing.T) {
 	s.Create(ctx, CreateDataSourceParams{Type: ConnectorLogs, Name: "Logs", Config: map[string]any{}})
 	s.Create(ctx, CreateDataSourceParams{Type: ConnectorDatabase, Name: "DB", Config: map[string]any{}})
 
-	list, err := s.List(ctx)
+	list, err := s.List(ctx, ListDataSourceParams{})
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestListDataSources_Empty(t *testing.T) {
 	s := NewDataSourceStore(db)
 	ctx := context.Background()
 
-	list, err := s.List(ctx)
+	list, err := s.List(ctx, ListDataSourceParams{})
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
 	}
@@ -116,6 +116,40 @@ func TestListDataSources_Empty(t *testing.T) {
 	}
 	if len(list) != 0 {
 		t.Fatalf("len = %d, want 0", len(list))
+	}
+}
+
+func TestListDataSources_EnvironmentFilter(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewDataSourceStore(db)
+	ctx := context.Background()
+
+	s.Create(ctx, CreateDataSourceParams{Type: ConnectorLogs, Name: "Prod Logs", Environment: "production", Config: map[string]any{}})
+	s.Create(ctx, CreateDataSourceParams{Type: ConnectorDatabase, Name: "Staging DB", Environment: "staging", Config: map[string]any{}})
+	s.Create(ctx, CreateDataSourceParams{Type: ConnectorLogs, Name: "No Env", Config: map[string]any{}})
+
+	// All
+	all, err := s.List(ctx, ListDataSourceParams{})
+	if err != nil {
+		t.Fatalf("List all failed: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("len = %d, want 3", len(all))
+	}
+
+	// Filter production
+	prod, err := s.List(ctx, ListDataSourceParams{Environment: "production"})
+	if err != nil {
+		t.Fatalf("List prod failed: %v", err)
+	}
+	if len(prod) != 1 {
+		t.Fatalf("len = %d, want 1", len(prod))
+	}
+	if prod[0].Name != "Prod Logs" {
+		t.Errorf("Name = %q, want %q", prod[0].Name, "Prod Logs")
+	}
+	if prod[0].Environment != "production" {
+		t.Errorf("Environment = %q, want %q", prod[0].Environment, "production")
 	}
 }
 
