@@ -146,6 +146,13 @@ func runSeed() error {
 			TimeRange:   "15m",
 			Effort:      store.EffortHigh,
 			Notify:      json.RawMessage(`["dashboard"]`),
+			AdaptiveConfig: &store.AdaptiveConfig{
+				Enabled:            true,
+				EscalatedInterval:  "1m",
+				EscalationDuration: "30m",
+				CooldownRuns:       3,
+				MaxConsecErrors:    5,
+			},
 		},
 		{
 			Title:       "Slow Query Monitor",
@@ -156,6 +163,16 @@ func runSeed() error {
 			TimeRange:   "30m",
 			Effort:      store.EffortMedium,
 			Notify:      json.RawMessage(`["dashboard"]`),
+			AdaptiveConfig: &store.AdaptiveConfig{
+				Enabled:            true,
+				EscalatedInterval:  "2m",
+				EscalationDuration: "1h",
+				CooldownRuns:       3,
+				RelaxEnabled:       true,
+				RelaxedInterval:    "2h",
+				RelaxAfterRuns:     20,
+				MaxConsecErrors:    5,
+			},
 		},
 		{
 			Title:       "Error Rate Monitor",
@@ -166,6 +183,11 @@ func runSeed() error {
 			TimeRange:   "1h",
 			Effort:      store.EffortMedium,
 			Notify:      json.RawMessage(`["dashboard"]`),
+			AdaptiveConfig: &store.AdaptiveConfig{
+				Enabled:         true,
+				CooldownRuns:    3,
+				MaxConsecErrors: 5,
+			},
 		},
 		{
 			Title:       "Staging Health Check",
@@ -176,6 +198,45 @@ func runSeed() error {
 			TimeRange:   "1h",
 			Effort:      store.EffortLow,
 			Notify:      json.RawMessage(`["dashboard"]`),
+		},
+		{
+			Title:       "Connection Saturation",
+			Description: "Monitor PostgreSQL connection pool usage and alert on saturation",
+			Environment: "production",
+			Severity:    store.SeverityCritical,
+			Filters:     json.RawMessage(`{"service":"gateway"}`),
+			TimeRange:   "5m",
+			Effort:      store.EffortMedium,
+			Notify:      json.RawMessage(`["dashboard"]`),
+			AdaptiveConfig: &store.AdaptiveConfig{
+				Enabled:            true,
+				EscalatedInterval:  "30s",
+				EscalationDuration: "15m",
+				CooldownRuns:       5,
+				RelaxEnabled:       true,
+				RelaxedInterval:    "30m",
+				RelaxAfterRuns:     30,
+				MaxConsecErrors:    3,
+			},
+		},
+		{
+			Title:       "Replication Lag",
+			Description: "Alert when database replication lag exceeds acceptable levels",
+			Environment: "production",
+			Severity:    store.SeverityCritical,
+			Filters:     json.RawMessage(`{"service":"db-replica"}`),
+			TimeRange:   "5m",
+			Effort:      store.EffortLow,
+			Notify:      json.RawMessage(`["dashboard"]`),
+			AdaptiveConfig: &store.AdaptiveConfig{
+				Enabled:            true,
+				EscalatedInterval:  "1m",
+				EscalationDuration: "20m",
+				CooldownRuns:       3,
+				MaxConsecErrors:    5,
+				BackoffMultiplier:  2.0,
+				MaxBackoffInterval: "1h",
+			},
 		},
 	}
 
@@ -193,8 +254,61 @@ func runSeed() error {
 	// Pause one watcher for variety
 	watcherStore.UpdateStatus(ctx, watcherIDs[3], store.WatcherPaused)
 
+	// --- Adaptive states for variety ---
+	// [0] Payment Error Spike → escalated (alert fired, checking every 1m)
+	escalatedAt := now.Add(-12 * time.Minute)
+	watcherStore.UpdateAdaptiveState(ctx, watcherIDs[0], store.UpdateAdaptiveParams{
+		AdaptiveState:        store.AdaptiveEscalated,
+		ConsecutiveCleanRuns: 0,
+		ConsecutiveErrors:    0,
+		EscalatedAt:          &escalatedAt,
+		TimeRange:            "1m",
+		BaseTimeRange:        "15m",
+	})
+
+	// [1] Slow Query Monitor → relaxed (been quiet for a while)
+	watcherStore.UpdateAdaptiveState(ctx, watcherIDs[1], store.UpdateAdaptiveParams{
+		AdaptiveState:        store.AdaptiveRelaxed,
+		ConsecutiveCleanRuns: 25,
+		ConsecutiveErrors:    0,
+		TimeRange:            "2h",
+		BaseTimeRange:        "30m",
+	})
+
+	// [2] Error Rate Monitor → error (paused after 5 consecutive errors)
+	watcherStore.UpdateAdaptiveState(ctx, watcherIDs[2], store.UpdateAdaptiveParams{
+		AdaptiveState:        store.AdaptiveError,
+		ConsecutiveCleanRuns: 0,
+		ConsecutiveErrors:    5,
+	})
+	watcherStore.UpdateStatus(ctx, watcherIDs[2], store.WatcherError)
+
+	// [4] Connection Saturation → sustained (escalation expired but still alerting)
+	sustainedEscalatedAt := now.Add(-45 * time.Minute)
+	watcherStore.UpdateAdaptiveState(ctx, watcherIDs[4], store.UpdateAdaptiveParams{
+		AdaptiveState:        store.AdaptiveSustained,
+		ConsecutiveCleanRuns: 0,
+		ConsecutiveErrors:    0,
+		EscalatedAt:          &sustainedEscalatedAt,
+		TimeRange:            "5m",
+		BaseTimeRange:        "5m",
+	})
+
+	// [5] Replication Lag → backing_off (2 consecutive errors)
+	watcherStore.UpdateAdaptiveState(ctx, watcherIDs[5], store.UpdateAdaptiveParams{
+		AdaptiveState:        store.AdaptiveBackoff,
+		ConsecutiveCleanRuns: 0,
+		ConsecutiveErrors:    2,
+		TimeRange:            "5m",
+		BaseTimeRange:        "5m",
+	})
+
+	log.Println("  adaptive states: escalated, relaxed, error, sustained, backing_off")
+
 	// --- Watcher Runs ---
 	runStore := store.NewWatcherRunStore(deps.db)
+
+	// Standard runs for first 3 watchers
 	for i, wid := range watcherIDs[:3] {
 		for j := 0; j < 3+i; j++ {
 			run, err := runStore.Create(ctx, wid)
@@ -213,7 +327,52 @@ func runSeed() error {
 			}
 		}
 	}
-	log.Println("  watcher runs: created")
+
+	// Escalated monitor (Payment Error Spike) — recent alerting runs
+	for j := 0; j < 8; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[0])
+		if err != nil {
+			continue
+		}
+		if j < 5 {
+			runStore.Complete(ctx, run.ID, "ALERT: Payment error rate at 23/min (threshold: 5/min). Card-declined errors spiking from payment-api.", nil, true)
+		} else {
+			runStore.Complete(ctx, run.ID, "Payment error rate returning to normal: 4/min.", nil, false)
+		}
+	}
+
+	// Error monitor (Error Rate Monitor) — 5 consecutive failures
+	for j := 0; j < 5; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[2])
+		if err != nil {
+			continue
+		}
+		runStore.Fail(ctx, run.ID, "LLM provider returned 503: service temporarily unavailable")
+	}
+
+	// Sustained monitor (Connection Saturation) — long alerting history
+	for j := 0; j < 12; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[4])
+		if err != nil {
+			continue
+		}
+		runStore.Complete(ctx, run.ID, "ALERT: Active connections at 92/100 (threshold: 80). Connection pool nearing exhaustion.", nil, true)
+	}
+
+	// Backing off monitor (Replication Lag) — a few errors
+	for j := 0; j < 4; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[5])
+		if err != nil {
+			continue
+		}
+		if j < 2 {
+			runStore.Complete(ctx, run.ID, "Replication lag within acceptable limits: 120ms.", nil, false)
+		} else {
+			runStore.Fail(ctx, run.ID, "Connection to replica timed out after 10s")
+		}
+	}
+
+	log.Println("  watcher runs: created (including adaptive-state scenarios)")
 
 	// --- Alerts ---
 	alertStore := store.NewAlertStore(deps.db)
@@ -285,6 +444,52 @@ func runSeed() error {
 		dsStore.Update(ctx, ds.ID, store.UpdateDataSourceParams{Status: &status})
 		log.Printf("  connector: %s", p.Name)
 	}
+
+	// --- Digests (historical health summaries) ---
+	digestStore := store.NewDigestStore(deps.db)
+	type digestSeed struct {
+		daysAgo       int
+		status        string
+		alertTotal    int
+		alertCritical int
+		alertWarning  int
+		monitorTotal  int
+		monitorErr    int
+		failedRuns    int
+	}
+	digestSeeds := []digestSeed{
+		{daysAgo: 6, status: "healthy", alertTotal: 1, alertCritical: 0, alertWarning: 1, monitorTotal: 4, monitorErr: 0, failedRuns: 0},
+		{daysAgo: 5, status: "healthy", alertTotal: 0, alertCritical: 0, alertWarning: 0, monitorTotal: 4, monitorErr: 0, failedRuns: 0},
+		{daysAgo: 4, status: "needs_attention", alertTotal: 3, alertCritical: 0, alertWarning: 3, monitorTotal: 4, monitorErr: 0, failedRuns: 1},
+		{daysAgo: 3, status: "critical", alertTotal: 7, alertCritical: 3, alertWarning: 4, monitorTotal: 4, monitorErr: 1, failedRuns: 2},
+		{daysAgo: 2, status: "needs_attention", alertTotal: 4, alertCritical: 1, alertWarning: 3, monitorTotal: 4, monitorErr: 1, failedRuns: 1},
+		{daysAgo: 1, status: "healthy", alertTotal: 2, alertCritical: 0, alertWarning: 2, monitorTotal: 4, monitorErr: 0, failedRuns: 0},
+		{daysAgo: 0, status: "critical", alertTotal: 5, alertCritical: 2, alertWarning: 3, monitorTotal: 4, monitorErr: 0, failedRuns: 1},
+	}
+
+	for _, ds := range digestSeeds {
+		periodEnd := now.AddDate(0, 0, -ds.daysAgo)
+		periodStart := periodEnd.Add(-24 * time.Hour)
+		data := fmt.Sprintf(`{"status":"%s","alert_summary":{"total":%d,"critical":%d,"warning":%d},"monitor_summary":{"total":%d,"in_error":%d,"failed_runs":%d}}`,
+			ds.status, ds.alertTotal, ds.alertCritical, ds.alertWarning, ds.monitorTotal, ds.monitorErr, ds.failedRuns)
+		if err := digestStore.Save(ctx, store.SaveDigestParams{
+			ID:             uuid.New().String(),
+			Environment:    "",
+			Status:         ds.status,
+			PeriodStart:    periodStart,
+			PeriodEnd:      periodEnd,
+			AlertTotal:     ds.alertTotal,
+			AlertCritical:  ds.alertCritical,
+			AlertWarning:   ds.alertWarning,
+			MonitorTotal:   ds.monitorTotal,
+			MonitorErrored: ds.monitorErr,
+			FailedRuns:     ds.failedRuns,
+			Data:           data,
+		}); err != nil {
+			return fmt.Errorf("creating digest: %w", err)
+		}
+	}
+	log.Printf("  digests: %d daily summaries", len(digestSeeds))
 
 	log.Println("seed complete!")
 	return nil
