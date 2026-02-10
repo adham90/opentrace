@@ -46,9 +46,10 @@
         <a href="/tools" class="nav-item {{if eq .Nav "tools"}}active{{end}}">7:tools</a>
       </nav>
       <div class="topbar-right">
-        <select id="env-select" class="topbar-select" onchange="setGlobalEnv(this.value)" title="Filter by environment">
-          <option value="">all envs</option>
-        </select>
+        <div class="topbar-env-tag" id="topbar-env-tag" onclick="toggleTopbarEnv(event)" title="Filter by environment">
+          <span class="topbar-env-key">env:</span><span class="topbar-env-val" id="topbar-env-val">all</span>
+          <div class="filter-dropdown" id="topbar-env-drop"></div>
+        </div>
         {{if .User}}
         <div class="user-dropdown">
           <button class="user-dropdown-toggle" onclick="toggleUserMenu()">
@@ -146,22 +147,68 @@
     </div>
   </main>
   <script>
+  var topbarEnvList = [''];
+  var topbarEnvOpen = false;
+
   function loadEnvironments() {
     fetch('/api/environments').then(function(r){return r.json()}).then(function(envs){
-      var sel = document.getElementById('env-select');
-      if (!sel) return;
-      var current = getGlobalEnv();
-      // Clear all except first "all envs" option
-      while (sel.options.length > 1) sel.remove(1);
-      (envs || []).forEach(function(e){
-        var opt = document.createElement('option');
-        opt.value = e;
-        opt.textContent = e;
-        if (e === current) opt.selected = true;
-        sel.appendChild(opt);
-      });
+      topbarEnvList = [''];
+      (envs || []).forEach(function(e){ topbarEnvList.push(e); });
+      updateTopbarEnvDisplay();
     }).catch(function(){});
   }
+
+  function updateTopbarEnvDisplay() {
+    var val = document.getElementById('topbar-env-val');
+    var tag = document.getElementById('topbar-env-tag');
+    if (!val) return;
+    var current = getGlobalEnv();
+    val.textContent = current || 'all';
+    if (current) {
+      val.classList.add('val-active');
+      val.classList.remove('val-all');
+    } else {
+      val.classList.remove('val-active');
+      val.classList.add('val-all');
+    }
+  }
+
+  function toggleTopbarEnv(e) {
+    e.stopPropagation();
+    var drop = document.getElementById('topbar-env-drop');
+    var wasOpen = drop.classList.contains('show');
+    closeTopbarEnvDrop();
+    if (wasOpen) return;
+    var current = getGlobalEnv();
+    var html = '';
+    for (var i = 0; i < topbarEnvList.length; i++) {
+      var v = topbarEnvList[i];
+      var label = v || 'all';
+      var cls = 'filter-drop-item' + (v === current ? ' drop-active' : '');
+      html += '<button class="' + cls + '" onclick="selectTopbarEnv(\'' + v.replace(/'/g, "\\'") + '\',event)">' + label + '</button>';
+    }
+    drop.innerHTML = html;
+    drop.classList.add('show');
+    topbarEnvOpen = true;
+  }
+  window.toggleTopbarEnv = toggleTopbarEnv;
+
+  function selectTopbarEnv(val, e) {
+    e.stopPropagation();
+    setGlobalEnv(val);
+    updateTopbarEnvDisplay();
+    closeTopbarEnvDrop();
+    updateBadge();
+  }
+  window.selectTopbarEnv = selectTopbarEnv;
+
+  function closeTopbarEnvDrop() {
+    var drop = document.getElementById('topbar-env-drop');
+    if (drop) drop.classList.remove('show');
+    topbarEnvOpen = false;
+  }
+
+  document.addEventListener('click', function() { closeTopbarEnvDrop(); });
   function updateBadge() {
     fetch('/api/alerts/count' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r){return r.json()}).then(function(d){
       var b=document.getElementById('alert-badge');

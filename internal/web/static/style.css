@@ -200,26 +200,32 @@ button:focus-visible, .btn:focus-visible {
   display: flex;
   align-items: center;
   flex-shrink: 0;
+  gap: 8px;
 }
 
-.topbar-select {
+/* Topbar env tag */
+.topbar-env-tag {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 3px 8px;
   font-family: var(--font-mono);
   font-size: 11px;
-  padding: 2px 22px 2px 8px;
-  background: transparent;
-  border: none;
   color: var(--text-dim);
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: var(--select-arrow);
-  background-repeat: no-repeat;
-  background-position: right 4px center;
+  border: 1px solid var(--border);
+  border-radius: 3px;
   cursor: pointer;
-  max-width: 140px;
-  transition: color 0.15s;
+  user-select: none;
+  position: relative;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
 }
-.topbar-select:hover { color: var(--text-bright); }
-.topbar-select:focus { outline: none; color: var(--text-bright); }
+.topbar-env-tag:hover { color: var(--text-bright); border-color: var(--text-dim); }
+.topbar-env-key { color: var(--text-dim); margin-right: 1px; }
+.topbar-env-val { color: var(--text); font-weight: 500; }
+.topbar-env-val.val-all { color: var(--text-dim); font-weight: 400; }
+.topbar-env-val.val-active { color: var(--cyan); font-weight: 600; }
+.topbar-env-tag .filter-dropdown { left: auto; right: 0; }
 
 /* User Dropdown */
 .user-dropdown {
