@@ -139,6 +139,7 @@ func runMCP() error {
 		MetricStore:  deps.metricStore,
 		UserStore:    deps.userStore,
 		MCPToken:     os.Getenv("OPENTRACE_MCP_TOKEN"),
+		ServerName:   os.Getenv("OPENTRACE_MCP_NAME"),
 	})
 }
 
@@ -357,7 +358,7 @@ func run() error {
 
 // reconnectConnectors re-registers connectors that were previously connected.
 func reconnectConnectors(ctx context.Context, dsStore store.DataSourceStore, logStore store.LogStore, registry *connector.Registry, cfg *config.Config) {
-	dataSources, err := dsStore.List(ctx)
+	dataSources, err := dsStore.List(ctx, store.ListDataSourceParams{})
 	if err != nil {
 		log.Printf("warning: failed to list connectors for reconnect: %v", err)
 		return

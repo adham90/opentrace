@@ -24,6 +24,7 @@ type Deps struct {
 	MetricStore  store.MetricStore
 	UserStore    store.UserStore
 	MCPToken     string // OPENTRACE_MCP_TOKEN from environment
+	ServerName   string // OPENTRACE_MCP_NAME — custom server name (default: "opentrace")
 }
 
 // Serve starts a stdio-based MCP server that exposes all tools from the
@@ -36,8 +37,13 @@ type Deps struct {
 // get all tools. When no UserStore is provided (backward compat), all tools
 // are registered.
 func Serve(deps Deps) error {
+	name := deps.ServerName
+	if name == "" {
+		name = "opentrace"
+	}
+
 	s := server.NewMCPServer(
-		"opentrace",
+		name,
 		"0.1.0",
 		server.WithToolCapabilities(false),
 	)
@@ -232,7 +238,7 @@ func listConnectorsHandler(registry *connector.Registry) server.ToolHandlerFunc 
 // listWatchersHandler returns a handler that lists all watchers.
 func listWatchersHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		watchers, err := ws.List(ctx)
+		watchers, err := ws.List(ctx, store.ListWatcherParams{})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to list watchers: %v", err)), nil
 		}
