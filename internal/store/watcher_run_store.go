@@ -173,6 +173,17 @@ func (s *watcherRunStore) GetByID(ctx context.Context, id uuid.UUID) (*WatcherRu
 	return r, nil
 }
 
+func (s *watcherRunStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
+	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
+	result, err := s.db.ExecContext(ctx,
+		`DELETE FROM watcher_runs WHERE created_at < ?`, cutoff,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("pruning watcher runs: %w", err)
+	}
+	return result.RowsAffected()
+}
+
 // scanWatcherRun scans a WatcherRun from a rows iterator.
 func scanWatcherRun(rows *sql.Rows) (*WatcherRun, error) {
 	r := &WatcherRun{}

@@ -148,3 +148,14 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 
 	return result, rows.Err()
 }
+
+func (s *logStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
+	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339Nano)
+	result, err := s.db.ExecContext(ctx,
+		`DELETE FROM logs WHERE timestamp < ?`, cutoff,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("pruning logs: %w", err)
+	}
+	return result.RowsAffected()
+}

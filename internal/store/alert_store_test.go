@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -157,6 +158,54 @@ func TestAlertStore_WithWatcher(t *testing.T) {
 	}
 	if len(empty) != 0 {
 		t.Errorf("other watcher len = %d, want 0", len(empty))
+	}
+}
+
+func TestAlertStore_Prune(t *testing.T) {
+	db := setupTestDB(t)
+	as := NewAlertStore(db)
+	ctx := context.Background()
+
+	// Insert an alert with a backdated created_at
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO alerts (id, title, summary, severity, created_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		"old-alert-1", "Old alert", "Very old", "warning",
+		time.Now().Add(-48*time.Hour).UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		t.Fatalf("inserting old alert: %v", err)
+	}
+
+	// Insert a recent alert
+	_, err = as.Create(ctx, CreateAlertParams{
+		Title:    "Recent alert",
+		Summary:  "Just happened",
+		Severity: SeverityInfo,
+	})
+	if err != nil {
+		t.Fatalf("Create recent alert: %v", err)
+	}
+
+	// Prune alerts older than 24 hours
+	pruned, err := as.Prune(ctx, 24*time.Hour)
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if pruned != 1 {
+		t.Errorf("pruned = %d, want 1", pruned)
+	}
+
+	// Verify only recent remains
+	all, err := as.List(ctx, ListAlertParams{Limit: 10})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("remaining = %d, want 1", len(all))
+	}
+	if all[0].Title != "Recent alert" {
+		t.Errorf("title = %q, want %q", all[0].Title, "Recent alert")
 	}
 }
 

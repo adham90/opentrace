@@ -36,6 +36,7 @@ var (
 	registerTmpl       *template.Template
 	profileTmpl        *template.Template
 	usersTmpl          *template.Template
+	settingsTmpl       *template.Template
 )
 
 func init() {
@@ -66,6 +67,8 @@ func init() {
 		"templates/layout.html", "templates/profile.html"))
 	usersTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/users.html"))
+	settingsTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/settings.html"))
 }
 
 // templates is used for rendering HTMX fragment responses (e.g. connector-list)
@@ -87,21 +90,22 @@ type LogFilters struct {
 }
 
 type pageData struct {
-	Title      string
-	Nav        string
-	Content    string
-	WatcherID  string
-	ServerID   string
-	DevMode    bool
-	Connectors interface{}
-	Logs       []store.LogEntry
-	LogFilters LogFilters
-	LogOffset  int
-	LogLimit   int
-	HasMore    bool
-	MaxLogID   int64
-	User       *store.User
-	IsAdmin    bool
+	Title         string
+	Nav           string
+	Content       string
+	WatcherID     string
+	ServerID      string
+	DevMode       bool
+	Connectors    interface{}
+	Logs          []store.LogEntry
+	LogFilters    LogFilters
+	LogOffset     int
+	LogLimit      int
+	HasMore       bool
+	MaxLogID      int64
+	User          *store.User
+	IsAdmin       bool
+	RetentionDays int
 }
 
 func (s *Server) isDevMode() bool {
@@ -442,4 +446,22 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, stats)
+}
+
+func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
+	data := s.newPageData(r, "Settings", "settings")
+	if s.settingsStore != nil {
+		settings, err := s.settingsStore.GetRetention(r.Context())
+		if err == nil {
+			data.RetentionDays = settings.RetentionDays
+		} else {
+			data.RetentionDays = 30
+		}
+	} else {
+		data.RetentionDays = 30
+	}
+	tmpl := s.getTemplate(settingsTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/settings.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
 }

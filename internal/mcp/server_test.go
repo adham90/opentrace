@@ -394,6 +394,9 @@ func (m *mockAlertStore) Create(ctx context.Context, params store.CreateAlertPar
 func (m *mockAlertStore) CountUnread(ctx context.Context) (int, error)          { return 0, nil }
 func (m *mockAlertStore) MarkRead(ctx context.Context, id uuid.UUID) error      { return nil }
 func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error       { return nil }
+func (m *mockAlertStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
+	return 0, nil
+}
 
 // --- listWatchersHandler tests ---
 

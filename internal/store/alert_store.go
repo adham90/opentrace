@@ -179,3 +179,14 @@ func (s *alertStore) Dismiss(ctx context.Context, id uuid.UUID) error {
 	}
 	return nil
 }
+
+func (s *alertStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
+	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
+	result, err := s.db.ExecContext(ctx,
+		`DELETE FROM alerts WHERE created_at < ?`, cutoff,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("pruning alerts: %w", err)
+	}
+	return result.RowsAffected()
+}

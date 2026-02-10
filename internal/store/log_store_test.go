@@ -140,3 +140,41 @@ func TestLogSearch_NoResults(t *testing.T) {
 		t.Fatalf("len = %d, want 0", len(results))
 	}
 }
+
+func TestLogStore_Prune(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewLogStore(db)
+	ctx := context.Background()
+
+	now := time.Now()
+	entries := []LogEntry{
+		{Timestamp: now.Add(-48 * time.Hour), Level: "INFO", Service: "api", Message: "old msg"},
+		{Timestamp: now.Add(-72 * time.Hour), Level: "ERROR", Service: "api", Message: "very old msg"},
+		{Timestamp: now.Add(-1 * time.Hour), Level: "INFO", Service: "api", Message: "recent msg"},
+	}
+	_, err := s.BatchInsert(ctx, entries)
+	if err != nil {
+		t.Fatalf("BatchInsert: %v", err)
+	}
+
+	// Prune entries older than 24 hours
+	pruned, err := s.Prune(ctx, 24*time.Hour)
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if pruned != 2 {
+		t.Errorf("pruned = %d, want 2", pruned)
+	}
+
+	// Verify only the recent one remains
+	results, err := s.Search(ctx, LogSearchParams{})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("remaining = %d, want 1", len(results))
+	}
+	if results[0].Message != "recent msg" {
+		t.Errorf("message = %q, want %q", results[0].Message, "recent msg")
+	}
+}

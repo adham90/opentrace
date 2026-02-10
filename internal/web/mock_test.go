@@ -123,6 +123,10 @@ func (m *mockLogStore) Search(ctx context.Context, params store.LogSearchParams)
 	return m.entries, nil
 }
 
+func (m *mockLogStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
+	return 0, nil
+}
+
 // mockWatcherStore implements store.WatcherStore for testing.
 type mockWatcherStore struct {
 	mu       sync.Mutex
@@ -289,6 +293,10 @@ func (m *mockWatcherRunStore) FailStaleRuns(ctx context.Context, olderThan time.
 	return 0, nil
 }
 
+func (m *mockWatcherRunStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
+	return 0, nil
+}
+
 func (m *mockWatcherRunStore) List(ctx context.Context, watcherID uuid.UUID, limit int) ([]store.WatcherRun, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -382,6 +390,10 @@ func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error {
 	}
 	a.Dismissed = true
 	return nil
+}
+
+func (m *mockAlertStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
+	return 0, nil
 }
 
 // mockServerStore implements store.ServerStore for testing.
@@ -744,5 +756,31 @@ func (m *mockSessionStore) DeleteAllForUser(ctx context.Context, userID string) 
 			delete(m.sessions, id)
 		}
 	}
+	return nil
+}
+
+// mockSettingsStore implements store.SettingsStore for testing.
+type mockSettingsStore struct {
+	mu        sync.Mutex
+	retention *store.RetentionSettings
+}
+
+func newMockSettingsStore() *mockSettingsStore {
+	return &mockSettingsStore{}
+}
+
+func (m *mockSettingsStore) GetRetention(ctx context.Context) (*store.RetentionSettings, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.retention == nil {
+		return &store.RetentionSettings{RetentionDays: 30}, nil
+	}
+	return m.retention, nil
+}
+
+func (m *mockSettingsStore) SetRetention(ctx context.Context, settings store.RetentionSettings) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.retention = &settings
 	return nil
 }

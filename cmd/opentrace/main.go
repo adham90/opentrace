@@ -24,17 +24,18 @@ import (
 
 // appDeps holds shared application dependencies initialized by initApp.
 type appDeps struct {
-	db           *sql.DB
-	dsStore      store.DataSourceStore
-	logStore     store.LogStore
-	watcherStore store.WatcherStore
-	alertStore   store.AlertStore
-	serverStore  store.ServerStore
-	metricStore  store.MetricStore
-	userStore    store.UserStore
-	sessionStore store.SessionStore
-	registry     *connector.Registry
-	cfg          *config.Config
+	db            *sql.DB
+	dsStore       store.DataSourceStore
+	logStore      store.LogStore
+	watcherStore  store.WatcherStore
+	alertStore    store.AlertStore
+	serverStore   store.ServerStore
+	metricStore   store.MetricStore
+	userStore     store.UserStore
+	sessionStore  store.SessionStore
+	settingsStore store.SettingsStore
+	registry      *connector.Registry
+	cfg           *config.Config
 }
 
 func main() {
@@ -95,23 +96,25 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	metricStore := store.NewMetricStore(db)
 	userStore := store.NewUserStore(db)
 	sessionStore := store.NewSessionStore(db)
+	settingsStore := store.NewSettingsStore(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
 	reconnectConnectors(ctx, dsStore, logStore, registry, cfg)
 
 	return &appDeps{
-		db:           db,
-		dsStore:      dsStore,
-		logStore:     logStore,
-		watcherStore: watcherStore,
-		alertStore:   alertStore,
-		serverStore:  serverStore,
-		metricStore:  metricStore,
-		userStore:    userStore,
-		sessionStore: sessionStore,
-		registry:     registry,
-		cfg:          cfg,
+		db:            db,
+		dsStore:       dsStore,
+		logStore:      logStore,
+		watcherStore:  watcherStore,
+		alertStore:    alertStore,
+		serverStore:   serverStore,
+		metricStore:   metricStore,
+		userStore:     userStore,
+		sessionStore:  sessionStore,
+		settingsStore: settingsStore,
+		registry:      registry,
+		cfg:           cfg,
 	}, nil
 }
 
@@ -213,6 +216,7 @@ func run() error {
 		MetricStore:   deps.metricStore,
 		UserStore:     deps.userStore,
 		SessionStore:  deps.sessionStore,
+		SettingsStore: deps.settingsStore,
 		Registry:      deps.registry,
 		Cfg:           deps.cfg,
 		Executor:      executor,
@@ -271,23 +275,63 @@ func run() error {
 		}
 	}()
 
-	// Background: prune old metrics every hour
+	// Background: unified data retention job every hour
 	go func() {
-		retentionDays := 7
+		// Preserve OPENTRACE_METRIC_RETENTION_DAYS as metric-specific override
+		metricRetentionDays := 0 // 0 means use global setting
 		if v := os.Getenv("OPENTRACE_METRIC_RETENTION_DAYS"); v != "" {
 			var d int
 			if _, err := fmt.Sscanf(v, "%d", &d); err == nil && d > 0 {
-				retentionDays = d
+				metricRetentionDays = d
 			}
 		}
+
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 		for range ticker.C {
-			retention := time.Duration(retentionDays) * 24 * time.Hour
-			if n, err := deps.metricStore.Prune(context.Background(), retention); err != nil {
-				log.Printf("WARN: metric prune: %v", err)
-			} else if n > 0 {
-				log.Printf("pruned %d old metric(s)", n)
+			ctx := context.Background()
+
+			// Read global retention setting from DB each tick
+			settings, err := deps.settingsStore.GetRetention(ctx)
+			if err != nil {
+				log.Printf("WARN: reading retention settings: %v", err)
+				continue
+			}
+
+			globalDays := settings.RetentionDays
+
+			// Prune logs, watcher runs, alerts (skip if 0 = keep forever)
+			if globalDays > 0 {
+				retention := time.Duration(globalDays) * 24 * time.Hour
+				if n, err := deps.logStore.Prune(ctx, retention); err != nil {
+					log.Printf("WARN: log prune: %v", err)
+				} else if n > 0 {
+					log.Printf("pruned %d old log(s)", n)
+				}
+				if n, err := runStore.Prune(ctx, retention); err != nil {
+					log.Printf("WARN: watcher run prune: %v", err)
+				} else if n > 0 {
+					log.Printf("pruned %d old watcher run(s)", n)
+				}
+				if n, err := deps.alertStore.Prune(ctx, retention); err != nil {
+					log.Printf("WARN: alert prune: %v", err)
+				} else if n > 0 {
+					log.Printf("pruned %d old alert(s)", n)
+				}
+			}
+
+			// Prune metrics: use env var override if set, else global setting
+			metricDays := metricRetentionDays
+			if metricDays == 0 {
+				metricDays = globalDays
+			}
+			if metricDays > 0 {
+				retention := time.Duration(metricDays) * 24 * time.Hour
+				if n, err := deps.metricStore.Prune(ctx, retention); err != nil {
+					log.Printf("WARN: metric prune: %v", err)
+				} else if n > 0 {
+					log.Printf("pruned %d old metric(s)", n)
+				}
 			}
 		}
 	}()

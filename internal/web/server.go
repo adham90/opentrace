@@ -33,6 +33,7 @@ type Server struct {
 	metricStore   store.MetricStore
 	userStore     store.UserStore
 	sessionStore  store.SessionStore
+	settingsStore store.SettingsStore
 	registry      *connector.Registry
 	cfg           *config.Config
 	executor      *watcher.Executor
@@ -53,6 +54,7 @@ type ServerDeps struct {
 	MetricStore   store.MetricStore
 	UserStore     store.UserStore
 	SessionStore  store.SessionStore
+	SettingsStore store.SettingsStore
 	Registry      *connector.Registry
 	Cfg           *config.Config
 	Executor      *watcher.Executor
@@ -82,6 +84,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		metricStore:   deps.MetricStore,
 		userStore:     deps.UserStore,
 		sessionStore:  deps.SessionStore,
+		settingsStore: deps.SettingsStore,
 		registry:      deps.Registry,
 		cfg:           deps.Cfg,
 		executor:      deps.Executor,
@@ -136,6 +139,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Use(srv.RequireAuthIfEnabled)
 		r.Use(RequireAdmin)
 		r.Get("/admin/users", srv.handleUsersPage)
+		r.Get("/admin/settings", srv.handleSettingsPage)
 	})
 
 	// API
@@ -197,6 +201,13 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			if srv.serverStore != nil && srv.metricStore != nil {
 				r.Delete("/servers/{id}", srv.handleDeleteServer)
 			}
+		})
+
+		// Settings API (admin only)
+		r.Group(func(r chi.Router) {
+			r.Use(srv.requireAdminIfEnabled)
+			r.Get("/settings/retention", srv.handleGetRetention)
+			r.Put("/settings/retention", srv.handleUpdateRetention)
 		})
 
 		// User management API (admin only)

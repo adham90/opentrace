@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -107,6 +108,57 @@ func TestWatcherRunStore_Fail(t *testing.T) {
 	}
 	if got.Error == nil || *got.Error != "connection timeout" {
 		t.Errorf("error = %v, want %q", got.Error, "connection timeout")
+	}
+}
+
+func TestWatcherRunStore_Prune(t *testing.T) {
+	db := setupTestDB(t)
+	ws := NewWatcherStore(db)
+	rs := NewWatcherRunStore(db)
+	ctx := context.Background()
+
+	w, err := ws.Create(ctx, CreateWatcherParams{
+		Title:       "Prune Test",
+		Description: "For prune tests",
+	})
+	if err != nil {
+		t.Fatalf("Create watcher: %v", err)
+	}
+
+	// Insert a run with backdated created_at
+	_, err = db.ExecContext(ctx,
+		`INSERT INTO watcher_runs (id, watcher_id, started_at, status, created_at)
+		 VALUES (?, ?, ?, 'completed', ?)`,
+		"old-run-1", w.ID.String(),
+		time.Now().Add(-48*time.Hour).UTC().Format(time.RFC3339),
+		time.Now().Add(-48*time.Hour).UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		t.Fatalf("inserting old run: %v", err)
+	}
+
+	// Create a recent run
+	_, err = rs.Create(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("Create run: %v", err)
+	}
+
+	// Prune runs older than 24 hours
+	pruned, err := rs.Prune(ctx, 24*time.Hour)
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if pruned != 1 {
+		t.Errorf("pruned = %d, want 1", pruned)
+	}
+
+	// Verify only recent remains
+	runs, err := rs.List(ctx, w.ID, 10)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("remaining = %d, want 1", len(runs))
 	}
 }
 

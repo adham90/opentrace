@@ -1,0 +1,55 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+)
+
+// settingsStore implements SettingsStore using database/sql (SQLite).
+type settingsStore struct {
+	db *sql.DB
+}
+
+// NewSettingsStore creates a new SettingsStore backed by SQLite.
+func NewSettingsStore(db *sql.DB) SettingsStore {
+	return &settingsStore{db: db}
+}
+
+const retentionKey = "retention"
+
+func (s *settingsStore) GetRetention(ctx context.Context) (*RetentionSettings, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT value FROM app_config WHERE key = ?`, retentionKey,
+	).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return &RetentionSettings{RetentionDays: 30}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying retention setting: %w", err)
+	}
+
+	var settings RetentionSettings
+	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+		return &RetentionSettings{RetentionDays: 30}, nil
+	}
+	return &settings, nil
+}
+
+func (s *settingsStore) SetRetention(ctx context.Context, settings RetentionSettings) error {
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("marshaling retention setting: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO app_config (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		retentionKey, string(raw),
+	)
+	if err != nil {
+		return fmt.Errorf("upserting retention setting: %w", err)
+	}
+	return nil
+}

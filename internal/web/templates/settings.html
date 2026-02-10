@@ -1,0 +1,50 @@
+{{define "content"}}
+<h2>Settings</h2>
+
+<div class="card" style="max-width:600px">
+  <h3>Data Retention</h3>
+  <p class="help-text">
+    Configure how long logs, watcher runs, and alerts are kept.
+    Set to <strong>0</strong> to keep data forever. Default: 30 days.
+  </p>
+
+  <form id="retention-form" onsubmit="return saveRetention(event)">
+    <div class="form-group">
+      <label for="retention-days">Retention period (days)</label>
+      <input type="number" id="retention-days" name="retention_days"
+             min="0" step="1" value="{{.RetentionDays}}"
+             class="form-control" style="max-width:200px">
+    </div>
+    <button type="submit" class="btn btn-primary">Save</button>
+    <span id="save-status" style="margin-left:1em"></span>
+  </form>
+</div>
+
+<script>
+function saveRetention(e) {
+  e.preventDefault();
+  var days = parseInt(document.getElementById('retention-days').value, 10);
+  if (isNaN(days) || days < 0) {
+    document.getElementById('save-status').textContent = 'Invalid value';
+    return false;
+  }
+  var status = document.getElementById('save-status');
+  status.textContent = 'Saving...';
+  fetch('/api/settings/retention', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({retention_days: days})
+  }).then(function(r) {
+    if (r.ok) {
+      status.textContent = 'Saved';
+      setTimeout(function(){ status.textContent = ''; }, 2000);
+    } else {
+      return r.json().then(function(d){ status.textContent = 'Error: ' + (d.error || 'unknown'); });
+    }
+  }).catch(function(err) {
+    status.textContent = 'Error: ' + err.message;
+  });
+  return false;
+}
+</script>
+{{end}}

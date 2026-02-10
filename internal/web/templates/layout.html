@@ -35,13 +35,20 @@
       </nav>
       <div class="topbar-right">
         {{if .User}}
-        <span class="user-info">
-          {{.User.DisplayName}}
-          {{if .IsAdmin}}<span class="badge badge-type">admin</span>{{end}}
-        </span>
-        {{if .IsAdmin}}<a href="/admin/users" class="nav-item">users</a>{{end}}
-        <a href="/profile" class="nav-item">profile</a>
-        <form method="POST" action="/logout" style="display:inline"><button type="submit" class="nav-item btn-link">logout</button></form>
+        <div class="user-dropdown">
+          <button class="user-dropdown-toggle" onclick="toggleUserMenu()">
+            {{.User.DisplayName}}
+            {{if .IsAdmin}}<span class="badge badge-type">admin</span>{{end}}
+            <span class="dropdown-arrow">&#9662;</span>
+          </button>
+          <div class="user-dropdown-menu" id="user-dropdown-menu">
+            {{if .IsAdmin}}<a href="/admin/users" class="dropdown-item">users</a>{{end}}
+            {{if .IsAdmin}}<a href="/admin/settings" class="dropdown-item">settings</a>{{end}}
+            <a href="/profile" class="dropdown-item">profile</a>
+            <div class="dropdown-divider"></div>
+            <form method="POST" action="/logout"><button type="submit" class="dropdown-item dropdown-item-danger">logout</button></form>
+          </div>
+        </div>
         {{end}}
         <button class="theme-toggle" onclick="cycleTheme()" id="theme-btn" title="Toggle theme">
           <span id="theme-icon">&#9684;</span> <span id="theme-label">system</span>
@@ -95,6 +102,20 @@
     };
 
     applyTheme(getTheme());
+  })();
+
+  (function(){
+    window.toggleUserMenu = function() {
+      var menu = document.getElementById('user-dropdown-menu');
+      if (menu) menu.classList.toggle('show');
+    };
+    document.addEventListener('click', function(e) {
+      var dropdown = document.querySelector('.user-dropdown');
+      var menu = document.getElementById('user-dropdown-menu');
+      if (menu && dropdown && !dropdown.contains(e.target)) {
+        menu.classList.remove('show');
+      }
+    });
   })();
   </script>
   {{if .DevMode}}<script>(function(){var h='';setInterval(function(){fetch('/api/dev/hash').then(function(r){return r.text()}).then(function(v){if(h&&v!==h)location.reload();h=v}).catch(function(){})},1000)})();</script>{{end}}

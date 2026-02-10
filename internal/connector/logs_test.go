@@ -24,6 +24,10 @@ func (m *mockLogStore) Search(ctx context.Context, params store.LogSearchParams)
 	return m.entries, nil
 }
 
+func (m *mockLogStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
+	return 0, nil
+}
+
 func TestLogsConnector_Type(t *testing.T) {
 	c := NewLogsConnector(&mockLogStore{})
 	if c.Type() != ConnectorLogs {
