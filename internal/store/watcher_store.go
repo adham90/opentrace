@@ -61,10 +61,10 @@ func (s *watcherStore) Create(ctx context.Context, params CreateWatcherParams) (
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO watchers (id, title, description, environment, severity, filters, time_range, model, effort, notify, monitor_type, rule_config, data_source_id, next_run_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO watchers (id, title, description, environment, severity, filters, time_range, schedule, model, effort, notify, monitor_type, rule_config, data_source_id, next_run_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id.String(), params.Title, params.Description, params.Environment, string(severity),
-		string(filters), timeRange, params.Model, string(effort), string(notify),
+		string(filters), timeRange, params.Schedule, params.Model, string(effort), string(notify),
 		string(monitorType), ruleConfigStr, params.DataSourceID,
 		now, now, now,
 	)
@@ -76,7 +76,7 @@ func (s *watcherStore) Create(ctx context.Context, params CreateWatcherParams) (
 }
 
 // watcherColumns is the SELECT column list for watcher queries.
-const watcherColumns = `id, title, description, environment, severity, filters, time_range, model, effort, status, notify,
+const watcherColumns = `id, title, description, environment, severity, filters, time_range, schedule, model, effort, status, notify,
 	monitor_type, rule_config, data_source_id,
 	last_run_at, next_run_at, last_error, created_at, updated_at`
 
@@ -91,7 +91,7 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 
 	err := sc.Scan(
 		&w.ID, &w.Title, &w.Description, &w.Environment, &w.Severity, &filtersStr,
-		&w.TimeRange, &w.Model, &w.Effort, &w.Status, &notifyStr,
+		&w.TimeRange, &w.Schedule, &w.Model, &w.Effort, &w.Status, &notifyStr,
 		&monitorTypeStr, &ruleConfigStr, &dataSourceID,
 		&lastRunAt, &nextRunAt, &w.LastError,
 		&createdAt, &updatedAt,
@@ -177,7 +177,7 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 
 	var titleStr, descStr, envStr *string
 	var sevStr, effortStr *string
-	var filtersStr, timeRangeStr, modelStr, notifyStr *string
+	var filtersStr, timeRangeStr, scheduleStr, modelStr, notifyStr *string
 	var monitorTypeStr, ruleConfigStr, dataSourceIDStr *string
 	if params.Title != nil {
 		titleStr = params.Title
@@ -198,6 +198,9 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 	}
 	if params.TimeRange != nil {
 		timeRangeStr = params.TimeRange
+	}
+	if params.Schedule != nil {
+		scheduleStr = params.Schedule
 	}
 	if params.Model != nil {
 		modelStr = params.Model
@@ -234,6 +237,7 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 		     severity       = COALESCE(?, severity),
 		     filters        = COALESCE(?, filters),
 		     time_range     = COALESCE(?, time_range),
+		     schedule       = COALESCE(?, schedule),
 		     model          = COALESCE(?, model),
 		     effort         = COALESCE(?, effort),
 		     notify         = COALESCE(?, notify),
@@ -242,7 +246,7 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 		     data_source_id = COALESCE(?, data_source_id),
 		     updated_at     = ?
 		 WHERE id = ?`,
-		titleStr, descStr, envStr, sevStr, filtersStr, timeRangeStr, modelStr, effortStr, notifyStr,
+		titleStr, descStr, envStr, sevStr, filtersStr, timeRangeStr, scheduleStr, modelStr, effortStr, notifyStr,
 		monitorTypeStr, ruleConfigStr, dataSourceIDStr,
 		now, id.String(),
 	)
