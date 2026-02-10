@@ -56,143 +56,154 @@
   </div>
 </div>
 
-<!-- Rule Monitor Modal (query/logs/health) -->
+<!-- Rule Monitor Wizard (query/logs/health) -->
 <div id="rule-modal" class="modal" style="display:none" onclick="if(event.target===this)hideRuleModal()">
   <div class="modal-content">
     <div class="modal-header">
       <h3><span class="prompt">$</span> <span id="rule-modal-title">new-query-monitor</span></h3>
       <button class="btn-close" onclick="hideRuleModal()">&times;</button>
     </div>
+
+    <!-- Wizard Progress Bar -->
+    <div class="wizard-progress" id="rule-wizard-progress">
+      <span class="wizard-step-indicator active" data-step="1" onclick="wizardGoTo(1)"><span class="wizard-step-num">1</span> Name</span>
+      <span class="wizard-step-connector"></span>
+      <span class="wizard-step-indicator" data-step="2" onclick="wizardGoTo(2)"><span class="wizard-step-num">2</span> Source</span>
+      <span class="wizard-step-connector"></span>
+      <span class="wizard-step-indicator" data-step="3" onclick="wizardGoTo(3)"><span class="wizard-step-num">3</span> <span id="wizard-step3-label">Alert</span></span>
+      <span class="wizard-step-connector"></span>
+      <span class="wizard-step-indicator" data-step="4" onclick="wizardGoTo(4)"><span class="wizard-step-num">4</span> Schedule</span>
+      <span class="wizard-step-connector"></span>
+      <span class="wizard-step-indicator" data-step="5" onclick="wizardGoTo(5)"><span class="wizard-step-num">5</span> Review</span>
+    </div>
+
     <form id="rule-form" onsubmit="saveRuleMonitor(event)">
-      <div class="modal-body">
-        <input type="hidden" id="rule-source" value="query">
-        <input type="hidden" id="rule-watcher-id" value="">
+      <input type="hidden" id="rule-source" value="query">
+      <input type="hidden" id="rule-watcher-id" value="">
 
-        <div class="modal-section modal-section-primary">
-          <div class="modal-section-label"><span class="section-number">01</span> Monitor</div>
-          <div class="form-group">
-            <label>Name</label>
-            <input type="text" id="rule-title" required placeholder="e.g. Stuck transactions on production">
-          </div>
-          <div class="form-group">
-            <label>Environment</label>
-            <input type="text" id="rule-env" placeholder="e.g. production">
-          </div>
-        </div>
-
-        <!-- Query source fields -->
-        <div id="rule-query-section" class="modal-section">
-          <div class="modal-section-label"><span class="section-number">02</span> Query</div>
-          <div class="form-group">
-            <label>Data Source</label>
-            <select id="rule-datasource"><option value="">Select data source...</option></select>
-          </div>
-          <div class="form-group">
-            <label>SQL Query</label>
-            <textarea id="rule-query" rows="4" placeholder="SELECT count(*) FROM pg_stat_activity WHERE state = 'idle in transaction'"></textarea>
-          </div>
-          <div id="rule-preview-result" style="display:none;padding:8px 12px;margin-bottom:12px;border:1px solid var(--border);border-radius:4px;font-size:13px"></div>
-          <button type="button" class="btn btn-sm" onclick="runPreview()" id="rule-preview-btn">Run Preview</button>
-        </div>
-
-        <!-- Log source fields -->
-        <div id="rule-logs-section" class="modal-section" style="display:none">
-          <div class="modal-section-label"><span class="section-number">02</span> Log Filter</div>
-          <div class="form-grid">
+      <!-- Step 1: Name & Environment -->
+      <div class="wizard-step-content active" data-step="1">
+        <div class="modal-body">
+          <div class="modal-section modal-section-primary">
+            <div class="modal-section-label"><span class="section-number">01</span> Monitor</div>
             <div class="form-group">
-              <label>Service</label>
-              <input type="text" id="rule-log-service" placeholder="e.g. payments-service">
+              <label>Name</label>
+              <input type="text" id="rule-title" required placeholder="e.g. Stuck transactions on production">
             </div>
             <div class="form-group">
-              <label>Level</label>
-              <select id="rule-log-level">
-                <option value="">Any</option>
-                <option value="ERROR">ERROR</option>
-                <option value="WARN">WARN</option>
-                <option value="INFO">INFO</option>
+              <label>Environment <small>(optional)</small></label>
+              <input type="text" id="rule-env" placeholder="e.g. production">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2: Source Configuration -->
+      <div class="wizard-step-content" data-step="2">
+        <div class="modal-body">
+          <!-- Query source fields -->
+          <div id="rule-query-section" class="modal-section">
+            <div class="modal-section-label"><span class="section-number">02</span> Query</div>
+            <div class="form-group">
+              <label>Data Source</label>
+              <select id="rule-datasource"><option value="">Select data source...</option></select>
+            </div>
+            <div class="form-group">
+              <label>SQL Query</label>
+              <textarea id="rule-query" rows="4" placeholder="SELECT count(*) FROM pg_stat_activity WHERE state = 'idle in transaction'"></textarea>
+            </div>
+            <div id="rule-preview-result" style="display:none;padding:8px 12px;margin-bottom:12px;border:1px solid var(--border);border-radius:4px;font-size:13px"></div>
+            <button type="button" class="btn btn-sm" onclick="runPreview()" id="rule-preview-btn">Run Preview</button>
+          </div>
+
+          <!-- Log source fields -->
+          <div id="rule-logs-section" class="modal-section" style="display:none">
+            <div class="modal-section-label"><span class="section-number">02</span> Log Filter</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Service</label>
+                <input type="text" id="rule-log-service" placeholder="e.g. payments-service">
+              </div>
+              <div class="form-group">
+                <label>Level</label>
+                <select id="rule-log-level">
+                  <option value="">Any</option>
+                  <option value="ERROR">ERROR</option>
+                  <option value="WARN">WARN</option>
+                  <option value="INFO">INFO</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Message Contains</label>
+                <input type="text" id="rule-log-query" placeholder="e.g. connection refused">
+              </div>
+              <div class="form-group">
+                <label>Environment</label>
+                <input type="text" id="rule-log-env" placeholder="e.g. production">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Time Window</label>
+              <select id="rule-log-window">
+                <option value="5m">Last 5 min</option>
+                <option value="15m">Last 15 min</option>
+                <option value="30m">Last 30 min</option>
+                <option value="1h">Last 1 hour</option>
               </select>
             </div>
-            <div class="form-group">
-              <label>Message Contains</label>
-              <input type="text" id="rule-log-query" placeholder="e.g. connection refused">
-            </div>
-            <div class="form-group">
-              <label>Environment</label>
-              <input type="text" id="rule-log-env" placeholder="e.g. production">
-            </div>
           </div>
-          <div class="form-group">
-            <label>Time Window</label>
-            <select id="rule-log-window">
-              <option value="5m">Last 5 min</option>
-              <option value="15m">Last 15 min</option>
-              <option value="30m">Last 30 min</option>
-              <option value="1h">Last 1 hour</option>
-            </select>
-          </div>
-        </div>
 
-        <!-- Health source fields -->
-        <div id="rule-health-section" class="modal-section" style="display:none">
-          <div class="modal-section-label"><span class="section-number">02</span> Health Checks</div>
-          <div class="form-group">
-            <label>Data Source</label>
-            <select id="rule-health-datasource"><option value="">Select data source...</option></select>
-          </div>
-          <div class="form-group">
-            <label>Checks</label>
-            <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="rule-check-connection" checked> Connection reachable</label>
-            <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="rule-check-latency"> Ping latency threshold</label>
-          </div>
-          <div class="form-group" id="rule-latency-group" style="display:none">
-            <label>Max Latency (ms)</label>
-            <input type="number" id="rule-latency-threshold" value="2000" min="100">
-          </div>
-        </div>
-
-        <!-- Alert condition -->
-        <div id="rule-condition-section" class="modal-section">
-          <div class="modal-section-label"><span class="section-number">03</span> Alert When</div>
-          <div class="form-grid" style="grid-template-columns: 1fr 1fr 1fr">
+          <!-- Health source fields -->
+          <div id="rule-health-section" class="modal-section" style="display:none">
+            <div class="modal-section-label"><span class="section-number">02</span> Health Checks</div>
             <div class="form-group">
-              <label>Metric</label>
-              <select id="rule-metric">
-                <option value="value">Value (first row)</option>
-                <option value="row_count">Row count</option>
-              </select>
+              <label>Data Source</label>
+              <select id="rule-health-datasource"><option value="">Select data source...</option></select>
             </div>
             <div class="form-group">
-              <label>Operator</label>
-              <select id="rule-operator">
-                <option value="gt">is greater than</option>
-                <option value="gte">is greater than or equal</option>
-                <option value="lt">is less than</option>
-                <option value="lte">is less than or equal</option>
-                <option value="eq">equals</option>
-                <option value="neq">does not equal</option>
-              </select>
+              <label>Checks</label>
+              <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="rule-check-connection" checked> Connection reachable</label>
+              <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="rule-check-latency"> Ping latency threshold</label>
             </div>
-            <div class="form-group">
-              <label>Threshold</label>
-              <input type="number" id="rule-threshold" value="0" step="any">
+            <div class="form-group" id="rule-latency-group" style="display:none">
+              <label>Max Latency (ms)</label>
+              <input type="number" id="rule-latency-threshold" value="2000" min="100">
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- Schedule & Severity -->
-        <div class="modal-section">
-          <div class="modal-section-label"><span class="section-number">04</span> Schedule &amp; Severity</div>
-          <div class="form-grid">
-            <div class="form-group">
-              <label>Check Every</label>
-              <select id="rule-timerange" onchange="onRuleTimerangeChange()">
-                <option value="1m">Every 1 min</option>
-                <option value="5m" selected>Every 5 min</option>
-                <option value="15m">Every 15 min</option>
-                <option value="30m">Every 30 min</option>
-                <option value="1h">Every 1 hour</option>
-              </select>
+      <!-- Step 3: Alert Condition -->
+      <div class="wizard-step-content" data-step="3">
+        <div class="modal-body">
+          <div id="rule-condition-section" class="modal-section">
+            <div class="modal-section-label"><span class="section-number">03</span> Alert When</div>
+            <div class="form-grid" style="grid-template-columns: 1fr 1fr 1fr">
+              <div class="form-group">
+                <label>Metric</label>
+                <select id="rule-metric">
+                  <option value="value">Value (first row)</option>
+                  <option value="row_count">Row count</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Operator</label>
+                <select id="rule-operator">
+                  <option value="gt">is greater than</option>
+                  <option value="gte">is greater than or equal</option>
+                  <option value="lt">is less than</option>
+                  <option value="lte">is less than or equal</option>
+                  <option value="eq">equals</option>
+                  <option value="neq">does not equal</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Threshold</label>
+                <input type="number" id="rule-threshold" value="0" step="any">
+              </div>
             </div>
+          </div>
+          <div class="modal-section">
             <div class="form-group">
               <label>Severity</label>
               <select id="rule-severity">
@@ -202,63 +213,84 @@
               </select>
             </div>
           </div>
-          <div class="form-group" style="margin-top:8px">
-            <label style="cursor:pointer;font-size:12px;text-transform:none;letter-spacing:0;color:var(--text-dim)" onclick="toggleRuleAdvancedSchedule()">
-              <span id="rule-adv-toggle-icon">&#9654;</span> Advanced: use cron expression
-            </label>
-            <div id="rule-advanced-schedule" style="display:none;margin-top:8px">
-              <input type="text" id="rule-schedule" placeholder="e.g. 0 9 * * 1-5 (weekdays at 9am)" style="font-family:monospace">
-              <div class="form-hint">Standard 5-field cron: min hour dom month dow. Or use @hourly, @daily, @weekly.</div>
-              <div id="rule-schedule-preview" style="margin-top:4px;font-size:12px;color:var(--text-dim)"></div>
-            </div>
-          </div>
         </div>
-        <!-- Adaptive Scheduling (collapsible) -->
-        <div class="modal-section">
-          <div class="modal-section-label" style="cursor:pointer" onclick="toggleAdaptiveSection('rule')">
-            <span id="rule-adaptive-toggle-icon">&#9654;</span> Adaptive Scheduling
-          </div>
-          <div id="rule-adaptive-section" style="display:none">
+      </div>
+
+      <!-- Step 4: Schedule -->
+      <div class="wizard-step-content" data-step="4">
+        <div class="modal-body">
+          <div class="modal-section">
+            <div class="modal-section-label"><span class="section-number">04</span> Schedule</div>
             <div class="form-group">
-              <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="rule-adaptive-enabled"> Enable adaptive scheduling</label>
-              <div class="form-hint">Automatically adjust polling frequency based on alert state</div>
+              <label>How often to check</label>
+              <select id="rule-timerange" onchange="onRuleTimerangeChange()">
+                <option value="1m">Every 1 min</option>
+                <option value="5m" selected>Every 5 min</option>
+                <option value="15m">Every 15 min</option>
+                <option value="30m">Every 30 min</option>
+                <option value="1h">Every 1 hour</option>
+              </select>
+              <div class="form-hint">Sets both the run interval and the lookback window</div>
             </div>
-            <div id="rule-adaptive-fields" style="display:none">
-              <div class="form-grid">
-                <div class="form-group">
-                  <label>Escalated Interval</label>
-                  <input type="text" id="rule-adaptive-escalated" placeholder="e.g. 1m (default: 1/4 of normal)">
-                  <div class="form-hint">How often to check when alerting</div>
-                </div>
-                <div class="form-group">
-                  <label>Escalation Duration</label>
-                  <input type="text" id="rule-adaptive-duration" placeholder="e.g. 30m (default)">
-                  <div class="form-hint">Max time in escalated state</div>
-                </div>
-                <div class="form-group">
-                  <label>Cooldown Runs</label>
-                  <input type="number" id="rule-adaptive-cooldown" placeholder="3" min="1">
-                  <div class="form-hint">Clean runs before returning to normal</div>
-                </div>
-                <div class="form-group">
-                  <label>Max Consecutive Errors</label>
-                  <input type="number" id="rule-adaptive-max-errors" placeholder="5" min="1">
-                  <div class="form-hint">Errors before pausing monitor</div>
-                </div>
+            <div class="form-group" style="margin-top:8px">
+              <label style="cursor:pointer;font-size:12px;text-transform:none;letter-spacing:0;color:var(--text-dim)" onclick="toggleRuleAdvancedSchedule()">
+                <span id="rule-adv-toggle-icon">&#9654;</span> Custom schedule (cron expression)
+              </label>
+              <div id="rule-advanced-schedule" style="display:none;margin-top:8px">
+                <input type="text" id="rule-schedule" placeholder="e.g. 0 9 * * 1-5 (weekdays at 9am)" style="font-family:monospace">
+                <div class="form-hint">Standard 5-field cron: min hour dom month dow. Or use @hourly, @daily, @weekly.</div>
+                <div id="rule-schedule-preview" style="margin-top:4px;font-size:12px;color:var(--text-dim)"></div>
+                <div class="schedule-help">Check interval = how often the monitor runs. The dropdown above becomes the lookback window when a cron schedule is set.</div>
               </div>
-              <div class="form-group" style="margin-top:8px">
-                <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="rule-adaptive-relax"> Enable relaxation (reduce frequency when quiet)</label>
+            </div>
+          </div>
+          <!-- Adaptive Scheduling (collapsible) -->
+          <div class="modal-section">
+            <div class="modal-section-label" style="cursor:pointer" onclick="toggleAdaptiveSection('rule')">
+              <span id="rule-adaptive-toggle-icon">&#9654;</span> Adaptive Scheduling <span style="font-size:10px;color:var(--text-dim);font-weight:400">(optional)</span>
+            </div>
+            <div id="rule-adaptive-section" style="display:none">
+              <div class="form-group">
+                <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="rule-adaptive-enabled"> Enable adaptive scheduling</label>
+                <div class="form-hint">Automatically adjust polling frequency based on alert state</div>
               </div>
-              <div id="rule-relax-fields" style="display:none">
+              <div id="rule-adaptive-fields" style="display:none">
                 <div class="form-grid">
                   <div class="form-group">
-                    <label>Relaxed Interval</label>
-                    <input type="text" id="rule-adaptive-relaxed" placeholder="e.g. 2h">
+                    <label>Escalated Interval</label>
+                    <input type="text" id="rule-adaptive-escalated" placeholder="e.g. 1m (default: 1/4 of normal)">
+                    <div class="form-hint">How often to check when alerting</div>
                   </div>
                   <div class="form-group">
-                    <label>Relax After Runs</label>
-                    <input type="number" id="rule-adaptive-relax-after" placeholder="20" min="1">
-                    <div class="form-hint">Clean runs before relaxing</div>
+                    <label>Escalation Duration</label>
+                    <input type="text" id="rule-adaptive-duration" placeholder="e.g. 30m (default)">
+                    <div class="form-hint">Max time in escalated state</div>
+                  </div>
+                  <div class="form-group">
+                    <label>Cooldown Runs</label>
+                    <input type="number" id="rule-adaptive-cooldown" placeholder="3" min="1">
+                    <div class="form-hint">Clean runs before returning to normal</div>
+                  </div>
+                  <div class="form-group">
+                    <label>Max Consecutive Errors</label>
+                    <input type="number" id="rule-adaptive-max-errors" placeholder="5" min="1">
+                    <div class="form-hint">Errors before pausing monitor</div>
+                  </div>
+                </div>
+                <div class="form-group" style="margin-top:8px">
+                  <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="rule-adaptive-relax"> Enable relaxation (reduce frequency when quiet)</label>
+                </div>
+                <div id="rule-relax-fields" style="display:none">
+                  <div class="form-grid">
+                    <div class="form-group">
+                      <label>Relaxed Interval</label>
+                      <input type="text" id="rule-adaptive-relaxed" placeholder="e.g. 2h">
+                    </div>
+                    <div class="form-group">
+                      <label>Relax After Runs</label>
+                      <input type="number" id="rule-adaptive-relax-after" placeholder="20" min="1">
+                      <div class="form-hint">Clean runs before relaxing</div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -266,9 +298,27 @@
           </div>
         </div>
       </div>
-      <div class="modal-footer">
-        <button type="button" class="btn" onclick="hideRuleModal()">Cancel</button>
-        <button type="submit" class="btn btn-primary" id="rule-save-btn">Create Monitor</button>
+
+      <!-- Step 5: Review & Create -->
+      <div class="wizard-step-content" data-step="5">
+        <div class="modal-body">
+          <div class="modal-section">
+            <div class="modal-section-label">Review Configuration</div>
+            <div id="rule-wizard-summary" class="wizard-summary"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Wizard Footer -->
+      <div class="wizard-footer">
+        <div class="wizard-footer-left">
+          <button type="button" class="btn" onclick="hideRuleModal()">Cancel</button>
+        </div>
+        <div class="wizard-footer-right">
+          <button type="button" class="btn" id="rule-wizard-back" onclick="wizardBack()" style="display:none">Back</button>
+          <button type="button" class="btn btn-primary" id="rule-wizard-next" onclick="wizardNext()">Next</button>
+          <button type="submit" class="btn btn-primary" id="rule-save-btn" style="display:none">Create Monitor</button>
+        </div>
       </div>
     </form>
   </div>
@@ -343,7 +393,7 @@
         <div class="modal-section">
           <div class="modal-section-label"><span class="section-number">02</span> Schedule</div>
           <div class="form-group">
-            <label>Run Every / Log Window</label>
+            <label>How often to check</label>
             <select id="watcher-timerange">
               <option value="5m">Every 5 min</option>
               <option value="15m" selected>Every 15 min</option>
@@ -352,16 +402,17 @@
               <option value="6h">Every 6 hours</option>
               <option value="24h">Every 24 hours</option>
             </select>
-            <div class="form-hint">The log window the AI analyzes. Also the run interval unless an advanced schedule is set below.</div>
+            <div class="form-hint">Sets both the run interval and the log lookback window the AI analyzes</div>
           </div>
           <div class="form-group" style="margin-top:8px">
             <label style="cursor:pointer;font-size:12px;text-transform:none;letter-spacing:0;color:var(--text-dim)" onclick="toggleAiAdvancedSchedule()">
-              <span id="ai-adv-toggle-icon">&#9654;</span> Advanced: use cron expression
+              <span id="ai-adv-toggle-icon">&#9654;</span> Custom schedule (cron expression)
             </label>
             <div id="ai-advanced-schedule" style="display:none;margin-top:8px">
               <input type="text" id="watcher-schedule" placeholder="e.g. 0 9 * * * (daily at 9am)" style="font-family:monospace">
-              <div class="form-hint">When set, controls when the monitor runs. The dropdown above becomes just the log lookback window.</div>
+              <div class="form-hint">Standard 5-field cron: min hour dom month dow. Or use @hourly, @daily, @weekly.</div>
               <div id="ai-schedule-preview" style="margin-top:4px;font-size:12px;color:var(--text-dim)"></div>
+              <div class="schedule-help">When a cron schedule is set, it controls when the monitor runs. The dropdown above becomes just the log lookback window (how far back the AI looks).</div>
             </div>
           </div>
         </div>
@@ -634,6 +685,11 @@ function hideNewMonitorModal() {
   document.getElementById('new-monitor-modal').style.display = 'none';
 }
 
+// Wizard state
+var wizardCurrentStep = 1;
+var wizardTotalSteps = 5;
+var wizardIsEditing = false;
+
 // Rule monitor modal
 function showRuleModal(source) {
   hideNewMonitorModal();
@@ -643,6 +699,7 @@ function showRuleModal(source) {
   document.getElementById('rule-source').value = source;
   document.getElementById('rule-preview-result').style.display = 'none';
   document.getElementById('rule-save-btn').textContent = 'Create Monitor';
+  wizardIsEditing = false;
 
   var titles = {query: 'new-query-monitor', logs: 'new-log-monitor', health: 'new-health-monitor'};
   document.getElementById('rule-modal-title').textContent = titles[source] || 'new-monitor';
@@ -653,6 +710,14 @@ function showRuleModal(source) {
   document.getElementById('rule-health-section').style.display = source === 'health' ? '' : 'none';
   document.getElementById('rule-condition-section').style.display = source !== 'health' ? '' : 'none';
 
+  // For health monitors, skip alert condition step (step 3 becomes severity only)
+  var step3Label = document.getElementById('wizard-step3-label');
+  if (source === 'health') {
+    step3Label.textContent = 'Severity';
+  } else {
+    step3Label.textContent = 'Alert';
+  }
+
   if (source === 'logs') {
     document.getElementById('rule-metric').innerHTML = '<option value="count">Count</option>';
   } else {
@@ -660,16 +725,172 @@ function showRuleModal(source) {
   }
 
   loadDataSources();
+  wizardGoTo(1);
   document.getElementById('rule-modal').style.display = 'flex';
 }
 function hideRuleModal() {
   document.getElementById('rule-modal').style.display = 'none';
 }
 
+// Wizard navigation
+function wizardGoTo(step) {
+  // In edit mode, allow jumping to any step. In create mode, only allow completed or current+1
+  if (!wizardIsEditing && step > wizardCurrentStep + 1) return;
+
+  wizardCurrentStep = step;
+  var steps = document.querySelectorAll('.wizard-step-content');
+  steps.forEach(function(el) {
+    el.classList.toggle('active', parseInt(el.getAttribute('data-step')) === step);
+  });
+
+  // Update progress indicators
+  var indicators = document.querySelectorAll('#rule-wizard-progress .wizard-step-indicator');
+  var connectors = document.querySelectorAll('#rule-wizard-progress .wizard-step-connector');
+  indicators.forEach(function(ind) {
+    var s = parseInt(ind.getAttribute('data-step'));
+    ind.classList.toggle('active', s === step);
+    ind.classList.toggle('completed', s < step);
+  });
+  connectors.forEach(function(conn, i) {
+    conn.classList.toggle('completed', i < step - 1);
+  });
+
+  // Show/hide footer buttons
+  var backBtn = document.getElementById('rule-wizard-back');
+  var nextBtn = document.getElementById('rule-wizard-next');
+  var saveBtn = document.getElementById('rule-save-btn');
+
+  backBtn.style.display = step > 1 ? '' : 'none';
+  nextBtn.style.display = step < wizardTotalSteps ? '' : 'none';
+  saveBtn.style.display = step === wizardTotalSteps ? '' : 'none';
+
+  // Populate summary on step 5
+  if (step === wizardTotalSteps) {
+    renderWizardSummary();
+  }
+}
+
+function wizardNext() {
+  // Validate current step before advancing
+  if (!validateWizardStep(wizardCurrentStep)) return;
+  if (wizardCurrentStep < wizardTotalSteps) {
+    wizardGoTo(wizardCurrentStep + 1);
+  }
+}
+
+function wizardBack() {
+  if (wizardCurrentStep > 1) {
+    wizardGoTo(wizardCurrentStep - 1);
+  }
+}
+
+function validateWizardStep(step) {
+  var source = document.getElementById('rule-source').value;
+  if (step === 1) {
+    var titleInput = document.getElementById('rule-title');
+    return validateField(titleInput, [{required: true, message: 'Monitor name is required'}, {minLength: 3, message: 'Name must be at least 3 characters'}]);
+  }
+  if (step === 2) {
+    if (source === 'query') {
+      var dsOk = true;
+      if (!document.getElementById('rule-datasource').value) {
+        showToast('Please select a data source', 'warning');
+        dsOk = false;
+      }
+      var qOk = validateField(document.getElementById('rule-query'), [{required: true, message: 'SQL query is required'}]);
+      return dsOk && qOk;
+    }
+    if (source === 'health') {
+      if (!document.getElementById('rule-health-datasource').value) {
+        showToast('Please select a data source', 'warning');
+        return false;
+      }
+    }
+    return true;
+  }
+  return true;
+}
+
+function renderWizardSummary() {
+  var source = document.getElementById('rule-source').value;
+  var html = '';
+
+  // Name & Env
+  html += '<div class="summary-section">';
+  html += '<div class="summary-section-label">Monitor</div>';
+  html += '<div class="summary-row"><span class="summary-key">Name</span><span class="summary-val">' + escapeHtml(document.getElementById('rule-title').value) + '</span></div>';
+  html += '<div class="summary-row"><span class="summary-key">Type</span><span class="summary-val">' + source + '</span></div>';
+  var env = document.getElementById('rule-env').value;
+  if (env) html += '<div class="summary-row"><span class="summary-key">Environment</span><span class="summary-val">' + escapeHtml(env) + '</span></div>';
+  html += '</div>';
+
+  // Source config
+  html += '<div class="summary-section">';
+  html += '<div class="summary-section-label">Source</div>';
+  if (source === 'query') {
+    var dsSel = document.getElementById('rule-datasource');
+    var dsName = dsSel.options[dsSel.selectedIndex] ? dsSel.options[dsSel.selectedIndex].textContent : '—';
+    html += '<div class="summary-row"><span class="summary-key">Data Source</span><span class="summary-val">' + escapeHtml(dsName) + '</span></div>';
+    html += '<div class="summary-row"><span class="summary-key">Query</span><span class="summary-val" style="font-size:11px;white-space:pre-wrap">' + escapeHtml(document.getElementById('rule-query').value) + '</span></div>';
+  } else if (source === 'logs') {
+    var logSvc = document.getElementById('rule-log-service').value;
+    var logLvl = document.getElementById('rule-log-level').value;
+    var logQ = document.getElementById('rule-log-query').value;
+    if (logSvc) html += '<div class="summary-row"><span class="summary-key">Service</span><span class="summary-val">' + escapeHtml(logSvc) + '</span></div>';
+    if (logLvl) html += '<div class="summary-row"><span class="summary-key">Level</span><span class="summary-val">' + escapeHtml(logLvl) + '</span></div>';
+    if (logQ) html += '<div class="summary-row"><span class="summary-key">Contains</span><span class="summary-val">' + escapeHtml(logQ) + '</span></div>';
+    html += '<div class="summary-row"><span class="summary-key">Window</span><span class="summary-val">' + document.getElementById('rule-log-window').value + '</span></div>';
+  } else if (source === 'health') {
+    var hdsSel = document.getElementById('rule-health-datasource');
+    var hdsName = hdsSel.options[hdsSel.selectedIndex] ? hdsSel.options[hdsSel.selectedIndex].textContent : '—';
+    html += '<div class="summary-row"><span class="summary-key">Data Source</span><span class="summary-val">' + escapeHtml(hdsName) + '</span></div>';
+    var checks = [];
+    if (document.getElementById('rule-check-connection').checked) checks.push('connection');
+    if (document.getElementById('rule-check-latency').checked) checks.push('latency');
+    html += '<div class="summary-row"><span class="summary-key">Checks</span><span class="summary-val">' + checks.join(', ') + '</span></div>';
+  }
+  html += '</div>';
+
+  // Alert condition (non-health)
+  if (source !== 'health') {
+    var opSel = document.getElementById('rule-operator');
+    var opText = opSel.options[opSel.selectedIndex] ? opSel.options[opSel.selectedIndex].textContent : '';
+    html += '<div class="summary-section">';
+    html += '<div class="summary-section-label">Alert Condition</div>';
+    html += '<div class="summary-row"><span class="summary-key">Condition</span><span class="summary-val">' + document.getElementById('rule-metric').value + ' ' + opText + ' ' + document.getElementById('rule-threshold').value + '</span></div>';
+    html += '<div class="summary-row"><span class="summary-key">Severity</span><span class="summary-val">' + document.getElementById('rule-severity').value + '</span></div>';
+    html += '</div>';
+  } else {
+    html += '<div class="summary-section">';
+    html += '<div class="summary-section-label">Severity</div>';
+    html += '<div class="summary-row"><span class="summary-key">Severity</span><span class="summary-val">' + document.getElementById('rule-severity').value + '</span></div>';
+    html += '</div>';
+  }
+
+  // Schedule
+  html += '<div class="summary-section">';
+  html += '<div class="summary-section-label">Schedule</div>';
+  var cronVal = (document.getElementById('rule-schedule') || {}).value;
+  if (cronVal) {
+    html += '<div class="summary-row"><span class="summary-key">Schedule</span><span class="summary-val">' + escapeHtml(describeSchedule(cronVal)) + '</span></div>';
+    html += '<div class="summary-row"><span class="summary-key">Lookback</span><span class="summary-val">' + document.getElementById('rule-timerange').value + '</span></div>';
+  } else {
+    html += '<div class="summary-row"><span class="summary-key">Interval</span><span class="summary-val">' + document.getElementById('rule-timerange').value + '</span></div>';
+  }
+  var adaptiveEnabled = document.getElementById('rule-adaptive-enabled');
+  if (adaptiveEnabled && adaptiveEnabled.checked) {
+    html += '<div class="summary-row"><span class="summary-key">Adaptive</span><span class="summary-val" style="color:var(--green)">enabled</span></div>';
+  }
+  html += '</div>';
+
+  document.getElementById('rule-wizard-summary').innerHTML = html;
+}
+
 function applyTemplate(t) {
   hideNewMonitorModal();
   var rc = t.rule_config;
   showRuleModal(rc.source);
+  wizardIsEditing = true; // Allow jumping to any step
   document.getElementById('rule-title').value = t.name;
   document.getElementById('rule-severity').value = t.severity || 'warning';
   document.getElementById('rule-timerange').value = t.time_range || '5m';
@@ -699,6 +920,8 @@ function applyTemplate(t) {
     }
     toggleLatency();
   }
+  // Jump to summary step so user can review and modify
+  wizardGoTo(wizardTotalSteps);
 }
 
 function toggleLatency() {
@@ -831,6 +1054,7 @@ function editRuleMonitor(id) {
   fetch('/api/watchers/' + id).then(function(r) { return r.json(); }).then(function(w) {
     var rc = w.rule_config || {};
     showRuleModal(rc.source || 'query');
+    wizardIsEditing = true;
     document.getElementById('rule-watcher-id').value = w.id;
     document.getElementById('rule-title').value = w.title;
     document.getElementById('rule-env').value = w.environment || '';

@@ -1270,6 +1270,154 @@ select:focus { outline: none; border-color: var(--green); }
   position: relative;
 }
 
+/* ===== Wizard Steps ===== */
+.wizard-progress {
+  display: flex;
+  align-items: center;
+  padding: 16px 20px 12px;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.wizard-step-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px 0;
+  white-space: nowrap;
+  transition: color 0.15s;
+}
+.wizard-step-indicator:hover { color: var(--text); }
+
+.wizard-step-indicator.active {
+  color: var(--green);
+  font-weight: 600;
+}
+
+.wizard-step-indicator.completed {
+  color: var(--text);
+}
+
+.wizard-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.wizard-step-indicator.active .wizard-step-num {
+  border-color: var(--green);
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.wizard-step-indicator.completed .wizard-step-num {
+  border-color: var(--green);
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.wizard-step-connector {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+  margin: 0 8px;
+  min-width: 12px;
+}
+
+.wizard-step-connector.completed {
+  background: var(--green-dim);
+}
+
+.wizard-step-content {
+  display: none;
+}
+
+.wizard-step-content.active {
+  display: block;
+}
+
+.wizard-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+  border-radius: 0 0 8px 8px;
+}
+
+.wizard-footer-left {
+  display: flex;
+  gap: 8px;
+}
+
+.wizard-footer-right {
+  display: flex;
+  gap: 8px;
+}
+
+/* Summary card for wizard review step */
+.wizard-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.summary-section {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+}
+
+.summary-section-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.summary-row {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+
+.summary-key {
+  color: var(--text-dim);
+  min-width: 100px;
+  flex-shrink: 0;
+}
+
+.summary-val {
+  color: var(--text);
+  word-break: break-word;
+}
+
+/* Schedule help tooltip */
+.schedule-help {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-top: 8px;
+  line-height: 1.5;
+}
+
 /* ===== Utilities ===== */
 .mt-8 { margin-top: 8px; }
 .mt-16 { margin-top: 16px; }
