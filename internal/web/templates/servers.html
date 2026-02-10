@@ -1,6 +1,28 @@
 {{define "content"}}
 <div class="page-header">
   <h1><span class="prompt">$</span> servers</h1>
+  <button class="btn btn-primary" onclick="toggleInstall()">+ add server</button>
+</div>
+
+<div id="install-panel" class="card" style="display:none; margin-bottom: 1.5rem;">
+  <div style="padding: 1.25rem;">
+    <h3 style="margin: 0 0 0.5rem 0;">Install Agent</h3>
+    <p class="text-dim" style="margin: 0 0 1rem 0;">Run this on the server you want to monitor:</p>
+    <div class="code-block" style="position: relative;">
+      <button class="copy-btn" onclick="copyInstallCmd(this)">copy</button>
+      <pre><code id="install-cmd">curl -fsSL <span id="install-url"></span> | sudo bash</code></pre>
+    </div>
+    <details style="margin-top: 1rem;">
+      <summary class="text-dim" style="cursor: pointer;">manual setup</summary>
+      <div style="margin-top: 0.75rem;">
+        <p class="text-dim" style="margin: 0 0 0.5rem 0;">Or run the agent directly:</p>
+        <div class="code-block" style="position: relative;">
+          <button class="copy-btn" onclick="copyManualCmd(this)">copy</button>
+          <pre><code id="manual-cmd"></code></pre>
+        </div>
+      </div>
+    </details>
+  </div>
 </div>
 
 <div id="servers-container">
@@ -8,6 +30,40 @@
 </div>
 
 <script>
+var baseURL = window.location.protocol + '//' + window.location.host;
+var installURL = baseURL + '/api/agent/install.sh';
+
+// Set install command URLs
+document.getElementById('install-url').textContent = installURL;
+document.getElementById('manual-cmd').textContent =
+  'OPENTRACE_SERVER_URL=' + baseURL + ' \\\nopentrace agent';
+
+function toggleInstall() {
+  var panel = document.getElementById('install-panel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+function copyInstallCmd(btn) {
+  var text = 'curl -fsSL ' + installURL + ' | sudo bash';
+  copyAndFlash(btn, text);
+}
+
+function copyManualCmd(btn) {
+  var text = 'OPENTRACE_SERVER_URL=' + baseURL + ' opentrace agent';
+  copyAndFlash(btn, text);
+}
+
+function copyAndFlash(btn, text) {
+  navigator.clipboard.writeText(text).then(function() {
+    btn.textContent = 'copied!';
+    btn.classList.add('copied');
+    setTimeout(function() {
+      btn.textContent = 'copy';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+}
+
 (function(){
   function loadServers() {
     fetch('/api/servers').then(function(r){ return r.json(); }).then(function(servers){

@@ -183,6 +183,33 @@ func TestHandleDeleteServer(t *testing.T) {
 	}
 }
 
+func TestHandleAgentInstallScript(t *testing.T) {
+	srv := newTestServerWithMetrics()
+
+	req := httptest.NewRequest("GET", "/api/agent/install.sh?key=test-key-123", nil)
+	req.Host = "opentrace.example.com:8080"
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	body := w.Body.String()
+	if ct := w.Header().Get("Content-Type"); ct != "text/plain; charset=utf-8" {
+		t.Errorf("content-type = %q, want text/plain", ct)
+	}
+	if !bytes.Contains([]byte(body), []byte("opentrace.example.com:8080")) {
+		t.Error("script does not contain the server URL")
+	}
+	if !bytes.Contains([]byte(body), []byte("test-key-123")) {
+		t.Error("script does not contain the API key")
+	}
+	if !bytes.Contains([]byte(body), []byte("#!/bin/bash")) {
+		t.Error("script does not start with shebang")
+	}
+}
+
 func TestHandleQueryMetrics(t *testing.T) {
 	srv := newTestServerWithMetrics()
 

@@ -151,6 +151,9 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Post("/alerts/{id}/read", srv.handleMarkAlertRead)
 		r.Post("/alerts/{id}/dismiss", srv.handleDismissAlert)
 
+		// Agent install script (no auth — the script is self-contained)
+		r.Get("/agent/install.sh", srv.handleAgentInstallScript)
+
 		// Server metrics API
 		if srv.serverStore != nil && srv.metricStore != nil {
 			r.With(APIKeyAuth(apiKey)).Post("/servers/register", srv.handleRegisterServer)
