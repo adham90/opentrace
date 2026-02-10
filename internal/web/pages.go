@@ -96,6 +96,29 @@ type LogFilters struct {
 	Service     string
 	Level       string
 	Environment string
+	TimeRange   string // preset: 15m, 1h, 6h, 24h, 7d, or empty (all)
+}
+
+// parseTimeRange converts a time range preset string to a Start time pointer.
+// Returns nil if the preset is empty or unrecognized (meaning "all time").
+func parseTimeRange(preset string) *time.Time {
+	var d time.Duration
+	switch preset {
+	case "15m":
+		d = 15 * time.Minute
+	case "1h":
+		d = time.Hour
+	case "6h":
+		d = 6 * time.Hour
+	case "24h":
+		d = 24 * time.Hour
+	case "7d":
+		d = 7 * 24 * time.Hour
+	default:
+		return nil
+	}
+	t := time.Now().Add(-d)
+	return &t
 }
 
 // Breadcrumb represents a single navigation breadcrumb.
@@ -167,6 +190,7 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		Service:     r.URL.Query().Get("service"),
 		Level:       r.URL.Query().Get("level"),
 		Environment: r.URL.Query().Get("environment"),
+		TimeRange:   r.URL.Query().Get("time_range"),
 	}
 
 	limit := 50
@@ -188,6 +212,7 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		Service:     filters.Service,
 		Level:       filters.Level,
 		Environment: filters.Environment,
+		Start:       parseTimeRange(filters.TimeRange),
 		Limit:       limit + 1, // fetch one extra to detect if there are more
 		Offset:      offset,
 	})
@@ -254,6 +279,7 @@ func (s *Server) handleLogsPoll(w http.ResponseWriter, r *http.Request) {
 		Service:     r.URL.Query().Get("service"),
 		Level:       r.URL.Query().Get("level"),
 		Environment: r.URL.Query().Get("environment"),
+		TimeRange:   r.URL.Query().Get("time_range"),
 	}
 
 	logs, err := s.logStore.Search(r.Context(), store.LogSearchParams{
@@ -261,6 +287,7 @@ func (s *Server) handleLogsPoll(w http.ResponseWriter, r *http.Request) {
 		Service:     filters.Service,
 		Level:       filters.Level,
 		Environment: filters.Environment,
+		Start:       parseTimeRange(filters.TimeRange),
 		SinceID:     sinceID,
 		Limit:       200,
 	})

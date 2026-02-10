@@ -72,8 +72,18 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 		args = append(args, params.Service)
 	}
 	if params.Level != "" {
-		conditions = append(conditions, "l.level = ? COLLATE NOCASE")
-		args = append(args, params.Level)
+		levels := strings.Split(params.Level, ",")
+		if len(levels) == 1 {
+			conditions = append(conditions, "l.level = ? COLLATE NOCASE")
+			args = append(args, levels[0])
+		} else {
+			placeholders := make([]string, len(levels))
+			for i, lv := range levels {
+				placeholders[i] = "?"
+				args = append(args, strings.TrimSpace(lv))
+			}
+			conditions = append(conditions, "l.level COLLATE NOCASE IN ("+strings.Join(placeholders, ",")+")")
+		}
 	}
 	if params.TraceID != "" {
 		conditions = append(conditions, "l.trace_id = ?")

@@ -796,42 +796,136 @@ select:focus { outline: none; border-color: var(--green); }
   color: var(--text-bright);
 }
 
-/* ===== Log Filters ===== */
-.log-filters {
+/* ===== Log Filter Bar (terminal style) ===== */
+.filter-bar {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0;
   margin-bottom: 16px;
-  align-items: stretch;
+  font-size: 12px;
+  overflow: hidden;
   flex-wrap: wrap;
 }
 
-.log-filters .filter-group {
+.filter-bar-search {
+  display: flex;
+  align-items: center;
   flex: 1;
-  min-width: 0;
+  min-width: 180px;
+  border-right: 1px solid var(--border);
 }
-
-.log-filters .filter-search { flex: 2; }
-
-.log-filters .filter-group input,
-.log-filters .filter-group select {
-  width: 100%;
-  height: 100%;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
+.filter-bar-search .filter-prompt {
+  color: var(--green);
+  padding: 8px 0 8px 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+  user-select: none;
+}
+.filter-bar-search input {
+  flex: 1;
+  background: none;
+  border: none;
   color: var(--text);
   padding: 8px 10px;
-  font-family: inherit;
-  font-size: 13px;
-  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  min-width: 0;
+  outline: none;
+}
+.filter-bar-search input::placeholder { color: var(--text-dim); }
+.filter-bar-search.focused {
+  background: rgba(74, 222, 128, 0.05);
 }
 
-.log-filters .filter-group select {
-  padding-right: 28px;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: var(--select-arrow);
-  background-repeat: no-repeat;
-  background-position: right 8px center;
+.filter-bar-tags {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-wrap: wrap;
+}
+
+.filter-tag {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 8px 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-right: 1px solid var(--border);
+  transition: color 0.15s, background 0.15s;
+  white-space: nowrap;
+  user-select: none;
+  font-size: 12px;
+}
+.filter-tag:last-child { border-right: none; }
+.filter-tag:hover { color: var(--text-bright); background: var(--bg-tertiary); }
+
+.filter-tag-key {
+  color: var(--text-dim);
+  margin-right: 2px;
+}
+.filter-tag-val {
+  color: var(--text);
+  font-weight: 500;
+}
+.filter-tag-val.val-all { color: var(--text-dim); font-weight: 400; }
+.filter-tag-val.val-active { color: var(--cyan); font-weight: 600; }
+
+.filter-tag.filter-flash {
+  animation: filter-flash 0.6s ease-out;
+}
+@keyframes filter-flash {
+  0% { background: rgba(74, 222, 128, 0.2); color: var(--green); }
+  100% { background: transparent; }
+}
+
+.filter-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.filter-bar-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.filter-bar-btn:hover { color: var(--text-bright); border-color: var(--border); }
+.filter-bar-btn.btn-clear:hover { color: var(--red); }
+
+/* Keyboard hint shown on filter tags */
+.filter-kbd {
+  font-size: 9px;
+  color: var(--text-dim);
+  opacity: 0.5;
+  margin-left: 6px;
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  line-height: 1.3;
+}
+.filter-tag:hover .filter-kbd { opacity: 0.8; }
+
+/* Responsive: stack on mobile */
+@media (max-width: 699px) {
+  .filter-bar { flex-direction: column; }
+  .filter-bar-search { border-right: none; border-bottom: 1px solid var(--border); width: 100%; }
+  .filter-bar-tags { width: 100%; flex-wrap: wrap; }
+  .filter-tag { border-right: none; border-bottom: 1px solid var(--border); flex: 1; min-width: 50%; justify-content: center; }
+  .filter-bar-actions { width: 100%; justify-content: flex-end; padding: 6px 8px; border-top: 1px solid var(--border); }
 }
 
 /* ===== Log Entries (card-based) ===== */

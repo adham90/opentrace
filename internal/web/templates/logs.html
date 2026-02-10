@@ -10,33 +10,45 @@
 
 <div id="saved-filters" class="saved-filters" style="display:none"></div>
 
-<form class="log-filters" hx-get="/logs" hx-target="#logs-list" hx-swap="innerHTML" hx-trigger="submit" hx-push-url="false"
+<form id="filter-form" class="filter-bar" hx-get="/logs" hx-target="#logs-list" hx-swap="innerHTML" hx-trigger="submit" hx-push-url="false"
       onsubmit="pauseLiveOnFilter()">
-  <div class="filter-group filter-search">
-    <input type="text" name="query" placeholder="search messages..." value="{{.LogFilters.Query}}">
+  <input type="hidden" name="service" id="f-service" value="{{.LogFilters.Service}}">
+  <input type="hidden" name="level" id="f-level" value="{{.LogFilters.Level}}">
+  <input type="hidden" name="environment" id="f-env" value="{{.LogFilters.Environment}}">
+  <input type="hidden" name="time_range" id="f-time-range" value="{{.LogFilters.TimeRange}}">
+
+  <div class="filter-bar-search" id="search-wrap">
+    <span class="filter-prompt">/</span>
+    <input type="text" name="query" id="search-input" placeholder="search..." value="{{.LogFilters.Query}}" autocomplete="off">
   </div>
-  <div class="filter-group">
-    <select name="service" id="service-select">
-      <option value="">all services</option>
-    </select>
-  </div>
-  <div class="filter-group">
-    <div class="level-toggles" id="level-toggles">
-      <input type="hidden" name="level" id="level-hidden" value="{{.LogFilters.Level}}">
-      <button type="button" class="filter-tab" data-level="" onclick="toggleLevel(this)">all</button>
-      <button type="button" class="filter-tab" data-level="ERROR" onclick="toggleLevel(this)">ERROR</button>
-      <button type="button" class="filter-tab" data-level="WARN" onclick="toggleLevel(this)">WARN</button>
-      <button type="button" class="filter-tab" data-level="INFO" onclick="toggleLevel(this)">INFO</button>
-      <button type="button" class="filter-tab" data-level="DEBUG" onclick="toggleLevel(this)">DEBUG</button>
+
+  <div class="filter-bar-tags">
+    <div class="filter-tag" id="tag-time" onclick="cycleTime(1)" title="time range">
+      <span class="filter-tag-key">t:</span>
+      <span class="filter-tag-val" id="tag-time-val">all</span>
+      <span class="filter-kbd">t</span>
+    </div>
+    <div class="filter-tag" id="tag-level" onclick="cycleLevel(1)" title="log level">
+      <span class="filter-tag-key">l:</span>
+      <span class="filter-tag-val" id="tag-level-val">all</span>
+      <span class="filter-kbd">l</span>
+    </div>
+    <div class="filter-tag" id="tag-service" onclick="cycleService(1)" title="service">
+      <span class="filter-tag-key">s:</span>
+      <span class="filter-tag-val" id="tag-service-val">all</span>
+      <span class="filter-kbd">s</span>
+    </div>
+    <div class="filter-tag" id="tag-env" onclick="cycleEnv(1)" title="environment">
+      <span class="filter-tag-key">e:</span>
+      <span class="filter-tag-val" id="tag-env-val">all</span>
+      <span class="filter-kbd">e</span>
     </div>
   </div>
-  <div class="filter-group">
-    <select name="environment" id="env-filter-select">
-      <option value="">all envs</option>
-    </select>
+
+  <div class="filter-bar-actions">
+    <button type="button" class="filter-bar-btn btn-clear" onclick="clearFilters()" title="clear all (c)">clear</button>
+    <button type="button" class="filter-bar-btn" id="save-filter-btn" onclick="saveCurrentFilter()" style="display:none" title="save filter">save</button>
   </div>
-  <button type="submit" class="btn btn-primary btn-sm">filter</button>
-  <button type="button" class="btn btn-sm" id="save-filter-btn" onclick="saveCurrentFilter()" style="display:none" title="Save current filter">save</button>
 </form>
 
 <div id="logs-list" data-max-id="{{.MaxLogID}}">
@@ -44,178 +56,304 @@
 </div>
 
 <script>
-// Level multi-select toggles
-var selectedLevels = {};
 (function(){
-  var initial = '{{.LogFilters.Level}}'.split(',').filter(function(v){return v;});
-  initial.forEach(function(l){ selectedLevels[l] = true; });
-})();
+  // ── Filter state ──────────────────────────────────────────
+  var TIME_OPTIONS = ['', '15m', '1h', '6h', '24h', '7d'];
+  var TIME_LABELS  = ['all', '15m', '1h', '6h', '24h', '7d'];
+  var LEVEL_OPTIONS = ['', 'ERROR', 'WARN', 'INFO', 'DEBUG', 'ERROR,WARN', 'ERROR,WARN,INFO'];
+  var LEVEL_LABELS  = ['all', 'ERR', 'WARN', 'INFO', 'DBG', 'ERR+WARN', 'ERR+WARN+INF'];
 
-function toggleLevel(btn) {
-  var level = btn.getAttribute('data-level');
-  if (level === '') {
-    // "all" — clear selection
-    selectedLevels = {};
-  } else {
-    if (selectedLevels[level]) {
-      delete selectedLevels[level];
-    } else {
-      selectedLevels[level] = true;
-    }
+  var serviceList = [''];
+  var envList = [''];
+  var currentServiceIdx = 0;
+  var currentEnvIdx = 0;
+  var currentTimeIdx = TIME_OPTIONS.indexOf('{{.LogFilters.TimeRange}}');
+  if (currentTimeIdx < 0) currentTimeIdx = 0;
+  var currentLevelIdx = LEVEL_OPTIONS.indexOf('{{.LogFilters.Level}}');
+  if (currentLevelIdx < 0) currentLevelIdx = 0;
+
+  // ── DOM refs ──────────────────────────────────────────────
+  var searchInput = document.getElementById('search-input');
+  var searchWrap = document.getElementById('search-wrap');
+  var form = document.getElementById('filter-form');
+
+  // ── Cycling functions ─────────────────────────────────────
+  function cycleTime(dir) {
+    currentTimeIdx = (currentTimeIdx + dir + TIME_OPTIONS.length) % TIME_OPTIONS.length;
+    document.getElementById('f-time-range').value = TIME_OPTIONS[currentTimeIdx];
+    updateTagDisplay('tag-time-val', TIME_LABELS[currentTimeIdx], currentTimeIdx !== 0);
+    flashTag('tag-time');
+    applyFilters();
   }
-  updateLevelUI();
-}
 
-function updateLevelUI() {
-  var keys = Object.keys(selectedLevels);
-  document.getElementById('level-hidden').value = keys.join(',');
-  var btns = document.querySelectorAll('#level-toggles .filter-tab');
-  btns.forEach(function(b) {
-    var lev = b.getAttribute('data-level');
-    if (lev === '') {
-      b.classList.toggle('active', keys.length === 0);
-    } else {
-      b.classList.toggle('active', !!selectedLevels[lev]);
+  function cycleLevel(dir) {
+    currentLevelIdx = (currentLevelIdx + dir + LEVEL_OPTIONS.length) % LEVEL_OPTIONS.length;
+    document.getElementById('f-level').value = LEVEL_OPTIONS[currentLevelIdx];
+    updateTagDisplay('tag-level-val', LEVEL_LABELS[currentLevelIdx], currentLevelIdx !== 0);
+    flashTag('tag-level');
+    applyFilters();
+  }
+
+  function cycleService(dir) {
+    currentServiceIdx = (currentServiceIdx + dir + serviceList.length) % serviceList.length;
+    document.getElementById('f-service').value = serviceList[currentServiceIdx];
+    var label = serviceList[currentServiceIdx] || 'all';
+    updateTagDisplay('tag-service-val', label, currentServiceIdx !== 0);
+    flashTag('tag-service');
+    applyFilters();
+  }
+
+  function cycleEnv(dir) {
+    currentEnvIdx = (currentEnvIdx + dir + envList.length) % envList.length;
+    document.getElementById('f-env').value = envList[currentEnvIdx];
+    var label = envList[currentEnvIdx] || 'all';
+    updateTagDisplay('tag-env-val', label, currentEnvIdx !== 0);
+    flashTag('tag-env');
+    applyFilters();
+  }
+
+  function updateTagDisplay(elId, text, isActive) {
+    var el = document.getElementById(elId);
+    el.textContent = text;
+    el.className = 'filter-tag-val' + (isActive ? ' val-active' : ' val-all');
+  }
+
+  function flashTag(tagId) {
+    var el = document.getElementById(tagId);
+    el.classList.remove('filter-flash');
+    void el.offsetWidth; // reflow
+    el.classList.add('filter-flash');
+  }
+
+  function applyFilters() {
+    pauseLiveOnFilter();
+    htmx.trigger(form, 'submit');
+    updateSaveBtn();
+  }
+
+  function clearFilters() {
+    searchInput.value = '';
+    currentTimeIdx = 0;
+    currentLevelIdx = 0;
+    currentServiceIdx = 0;
+    currentEnvIdx = 0;
+    document.getElementById('f-time-range').value = '';
+    document.getElementById('f-level').value = '';
+    document.getElementById('f-service').value = '';
+    document.getElementById('f-env').value = '';
+    updateTagDisplay('tag-time-val', 'all', false);
+    updateTagDisplay('tag-level-val', 'all', false);
+    updateTagDisplay('tag-service-val', 'all', false);
+    updateTagDisplay('tag-env-val', 'all', false);
+    applyFilters();
+  }
+
+  // Expose for onclick handlers
+  window.cycleTime = cycleTime;
+  window.cycleLevel = cycleLevel;
+  window.cycleService = cycleService;
+  window.cycleEnv = cycleEnv;
+  window.clearFilters = clearFilters;
+
+  // ── Search focus ──────────────────────────────────────────
+  searchInput.addEventListener('focus', function(){ searchWrap.classList.add('focused'); });
+  searchInput.addEventListener('blur', function(){ searchWrap.classList.remove('focused'); });
+  searchInput.addEventListener('keydown', function(e){
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      applyFilters();
+    }
+    if (e.key === 'Escape') {
+      searchInput.blur();
     }
   });
-  updateSaveFilterBtn();
-}
 
-// Saved filters (localStorage)
-var SAVED_KEY = 'opentrace-saved-filters';
+  // ── Keyboard shortcuts ────────────────────────────────────
+  document.addEventListener('keydown', function(e){
+    // Skip if typing in an input/textarea
+    var tag = document.activeElement.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    // Skip if modal/overlay is open
+    if (document.querySelector('.modal') || document.querySelector('.shortcut-overlay')) return;
 
-function getSavedFilters() {
-  try { return JSON.parse(localStorage.getItem(SAVED_KEY)) || []; } catch(e) { return []; }
-}
-
-function renderSavedFilters() {
-  var filters = getSavedFilters();
-  var container = document.getElementById('saved-filters');
-  if (!filters.length) { container.style.display = 'none'; return; }
-  container.style.display = 'flex';
-  var html = '';
-  filters.forEach(function(f, i) {
-    html += '<button class="saved-filter-chip" onclick="applySavedFilter(' + i + ')" title="' + describeSavedFilter(f) + '">' +
-      escapeHtmlLocal(f.name) +
-      '<span class="chip-remove" onclick="event.stopPropagation();removeSavedFilter(' + i + ')">\u00d7</span></button>';
+    switch(e.key) {
+      case '/':
+        e.preventDefault();
+        searchInput.focus();
+        break;
+      case 't':
+        e.preventDefault();
+        cycleTime(1);
+        break;
+      case 'T':
+        e.preventDefault();
+        cycleTime(-1);
+        break;
+      case 'l':
+        e.preventDefault();
+        cycleLevel(1);
+        break;
+      case 'L':
+        e.preventDefault();
+        cycleLevel(-1);
+        break;
+      case 's':
+        e.preventDefault();
+        cycleService(1);
+        break;
+      case 'S':
+        e.preventDefault();
+        cycleService(-1);
+        break;
+      case 'e':
+        e.preventDefault();
+        cycleEnv(1);
+        break;
+      case 'E':
+        e.preventDefault();
+        cycleEnv(-1);
+        break;
+      case 'c':
+        e.preventDefault();
+        clearFilters();
+        break;
+      case 'p':
+        e.preventDefault();
+        window.toggleLive();
+        break;
+    }
   });
-  container.innerHTML = html;
-}
 
-function describeSavedFilter(f) {
-  var parts = [];
-  if (f.query) parts.push('query: ' + f.query);
-  if (f.service) parts.push('service: ' + f.service);
-  if (f.level) parts.push('level: ' + f.level);
-  if (f.env) parts.push('env: ' + f.env);
-  return parts.join(', ') || 'no filters';
-}
+  // ── Save/load filters (localStorage) ──────────────────────
+  var SAVED_KEY = 'opentrace-saved-filters';
 
-function applySavedFilter(idx) {
-  var filters = getSavedFilters();
-  var f = filters[idx];
-  if (!f) return;
-  var form = document.querySelector('.log-filters');
-  form.querySelector('[name="query"]').value = f.query || '';
-  document.getElementById('service-select').value = f.service || '';
-  document.getElementById('env-filter-select').value = f.env || '';
-  selectedLevels = {};
-  if (f.level) f.level.split(',').forEach(function(l){ if(l) selectedLevels[l]=true; });
-  updateLevelUI();
-  htmx.trigger(form, 'submit');
-}
+  function getSavedFilters() {
+    try { return JSON.parse(localStorage.getItem(SAVED_KEY)) || []; } catch(ex) { return []; }
+  }
 
-function removeSavedFilter(idx) {
-  var filters = getSavedFilters();
-  filters.splice(idx, 1);
-  localStorage.setItem(SAVED_KEY, JSON.stringify(filters));
-  renderSavedFilters();
-  if (typeof showToast === 'function') showToast('Filter removed', 'info');
-}
-
-function saveCurrentFilter() {
-  var form = document.querySelector('.log-filters');
-  var f = {
-    query: form.querySelector('[name="query"]').value,
-    service: document.getElementById('service-select').value,
-    level: Object.keys(selectedLevels).join(','),
-    env: document.getElementById('env-filter-select').value
-  };
-  var name = prompt('Name this filter:');
-  if (!name) return;
-  f.name = name;
-  var filters = getSavedFilters();
-  filters.push(f);
-  localStorage.setItem(SAVED_KEY, JSON.stringify(filters));
-  renderSavedFilters();
-  if (typeof showToast === 'function') showToast('Filter saved: ' + name, 'success');
-}
-
-function updateSaveFilterBtn() {
-  var form = document.querySelector('.log-filters');
-  var hasFilter = form.querySelector('[name="query"]').value ||
-    document.getElementById('service-select').value ||
-    Object.keys(selectedLevels).length > 0 ||
-    document.getElementById('env-filter-select').value;
-  document.getElementById('save-filter-btn').style.display = hasFilter ? '' : 'none';
-}
-
-function escapeHtmlLocal(str) {
-  var div = document.createElement('div');
-  div.textContent = str || '';
-  return div.innerHTML;
-}
-
-// Populate service and environment dropdowns from API
-document.addEventListener('DOMContentLoaded', function(){
-  var currentService = '{{.LogFilters.Service}}';
-  var currentEnv = '{{.LogFilters.Environment}}' || (typeof getGlobalEnv === 'function' ? getGlobalEnv() : '');
-
-  fetch('/api/services').then(function(r){
-    if (!r.ok) throw new Error(r.status);
-    return r.json();
-  }).then(function(services){
-    var sel = document.getElementById('service-select');
-    if (!sel || !Array.isArray(services)) return;
-    services.forEach(function(s){
-      var opt = document.createElement('option');
-      opt.value = s;
-      opt.textContent = s;
-      if (s === currentService) opt.selected = true;
-      sel.appendChild(opt);
+  function renderSavedFilters() {
+    var filters = getSavedFilters();
+    var container = document.getElementById('saved-filters');
+    if (!filters.length) { container.style.display = 'none'; return; }
+    container.style.display = 'flex';
+    var html = '';
+    filters.forEach(function(f, i) {
+      html += '<button class="saved-filter-chip" onclick="applySavedFilter(' + i + ')" title="' + describeSavedFilter(f) + '">' +
+        escapeHtmlLocal(f.name) +
+        '<span class="chip-remove" onclick="event.stopPropagation();removeSavedFilter(' + i + ')">\u00d7</span></button>';
     });
-  }).catch(function(e){ console.warn('failed to load services:', e); });
+    container.innerHTML = html;
+  }
 
-  fetch('/api/environments').then(function(r){
-    if (!r.ok) throw new Error(r.status);
-    return r.json();
-  }).then(function(envs){
-    var sel = document.getElementById('env-filter-select');
-    if (!sel || !Array.isArray(envs)) return;
-    envs.forEach(function(e){
-      var opt = document.createElement('option');
-      opt.value = e;
-      opt.textContent = e;
-      if (e === currentEnv) opt.selected = true;
-      sel.appendChild(opt);
-    });
-  }).catch(function(e){ console.warn('failed to load environments:', e); });
+  function describeSavedFilter(f) {
+    var parts = [];
+    if (f.query) parts.push('query: ' + f.query);
+    if (f.time_range) parts.push('t: ' + f.time_range);
+    if (f.level) parts.push('l: ' + f.level);
+    if (f.service) parts.push('s: ' + f.service);
+    if (f.env) parts.push('e: ' + f.env);
+    return parts.join(', ') || 'no filters';
+  }
 
-  updateLevelUI();
+  function applySavedFilter(idx) {
+    var filters = getSavedFilters();
+    var f = filters[idx];
+    if (!f) return;
+    searchInput.value = f.query || '';
+    // Set time
+    currentTimeIdx = Math.max(0, TIME_OPTIONS.indexOf(f.time_range || ''));
+    document.getElementById('f-time-range').value = TIME_OPTIONS[currentTimeIdx];
+    updateTagDisplay('tag-time-val', TIME_LABELS[currentTimeIdx], currentTimeIdx !== 0);
+    // Set level
+    currentLevelIdx = Math.max(0, LEVEL_OPTIONS.indexOf(f.level || ''));
+    document.getElementById('f-level').value = LEVEL_OPTIONS[currentLevelIdx];
+    updateTagDisplay('tag-level-val', LEVEL_LABELS[currentLevelIdx], currentLevelIdx !== 0);
+    // Set service
+    currentServiceIdx = Math.max(0, serviceList.indexOf(f.service || ''));
+    document.getElementById('f-service').value = serviceList[currentServiceIdx];
+    updateTagDisplay('tag-service-val', serviceList[currentServiceIdx] || 'all', currentServiceIdx !== 0);
+    // Set env
+    currentEnvIdx = Math.max(0, envList.indexOf(f.env || ''));
+    document.getElementById('f-env').value = envList[currentEnvIdx];
+    updateTagDisplay('tag-env-val', envList[currentEnvIdx] || 'all', currentEnvIdx !== 0);
+    applyFilters();
+  }
+  window.applySavedFilter = applySavedFilter;
+
+  function removeSavedFilter(idx) {
+    var filters = getSavedFilters();
+    filters.splice(idx, 1);
+    localStorage.setItem(SAVED_KEY, JSON.stringify(filters));
+    renderSavedFilters();
+    if (typeof showToast === 'function') showToast('Filter removed', 'info');
+  }
+  window.removeSavedFilter = removeSavedFilter;
+
+  function saveCurrentFilter() {
+    var f = {
+      query: searchInput.value,
+      time_range: TIME_OPTIONS[currentTimeIdx],
+      level: LEVEL_OPTIONS[currentLevelIdx],
+      service: serviceList[currentServiceIdx],
+      env: envList[currentEnvIdx]
+    };
+    var name = prompt('Name this filter:');
+    if (!name) return;
+    f.name = name;
+    var filters = getSavedFilters();
+    filters.push(f);
+    localStorage.setItem(SAVED_KEY, JSON.stringify(filters));
+    renderSavedFilters();
+    if (typeof showToast === 'function') showToast('Filter saved: ' + name, 'success');
+  }
+  window.saveCurrentFilter = saveCurrentFilter;
+
+  function updateSaveBtn() {
+    var hasFilter = searchInput.value || currentTimeIdx !== 0 || currentLevelIdx !== 0 ||
+      currentServiceIdx !== 0 || currentEnvIdx !== 0;
+    document.getElementById('save-filter-btn').style.display = hasFilter ? '' : 'none';
+  }
+
+  function escapeHtmlLocal(str) {
+    var div = document.createElement('div');
+    div.textContent = str || '';
+    return div.innerHTML;
+  }
+
+  // ── Populate service and env lists from API ───────────────
+  var initService = '{{.LogFilters.Service}}';
+  var initEnv = '{{.LogFilters.Environment}}' || (typeof getGlobalEnv === 'function' ? getGlobalEnv() : '');
+
+  fetch('/api/services').then(function(r){ return r.json(); }).then(function(services){
+    if (!Array.isArray(services)) return;
+    services.forEach(function(s){ serviceList.push(s); });
+    if (initService) {
+      currentServiceIdx = Math.max(0, serviceList.indexOf(initService));
+      if (currentServiceIdx > 0) updateTagDisplay('tag-service-val', initService, true);
+    }
+  }).catch(function(){});
+
+  fetch('/api/environments').then(function(r){ return r.json(); }).then(function(envs){
+    if (!Array.isArray(envs)) return;
+    envs.forEach(function(e){ envList.push(e); });
+    if (initEnv) {
+      currentEnvIdx = Math.max(0, envList.indexOf(initEnv));
+      if (currentEnvIdx > 0) updateTagDisplay('tag-env-val', initEnv, true);
+    }
+  }).catch(function(){});
+
+  // ── Initial display ───────────────────────────────────────
+  updateTagDisplay('tag-time-val', TIME_LABELS[currentTimeIdx], currentTimeIdx !== 0);
+  updateTagDisplay('tag-level-val', LEVEL_LABELS[currentLevelIdx], currentLevelIdx !== 0);
   renderSavedFilters();
-  // Update save button when filter fields change
-  document.querySelector('.log-filters').addEventListener('change', updateSaveFilterBtn);
-  document.querySelector('.log-filters [name="query"]').addEventListener('input', updateSaveFilterBtn);
-});
+  updateSaveBtn();
 
-(function(){
+  // ── Live polling ──────────────────────────────────────────
   var live = true;
   var timer = null;
   var POLL_INTERVAL = 2000;
 
   function getFilters() {
-    var form = document.querySelector('.log-filters');
-    if (!form) return '';
     var params = new URLSearchParams(new FormData(form));
     return params.toString();
   }
@@ -244,7 +382,6 @@ document.addEventListener('DOMContentLoaded', function(){
       var container = document.createElement('div');
       container.innerHTML = html;
 
-      // Extract max-id from response
       var newMaxEl = container.querySelector('[data-new-max-id]');
       if (newMaxEl) {
         setMaxID(newMaxEl.getAttribute('data-new-max-id'));
@@ -253,7 +390,6 @@ document.addEventListener('DOMContentLoaded', function(){
 
       var logList = document.querySelector('.log-list');
       if (!logList) {
-        // No log list yet — replace empty state
         var listEl = document.getElementById('logs-list');
         if (listEl) {
           listEl.innerHTML = '<div class="log-list">' + container.innerHTML + '</div>';
@@ -261,14 +397,12 @@ document.addEventListener('DOMContentLoaded', function(){
         return;
       }
 
-      // Prepend new entries
       var newEntries = container.querySelectorAll('.log-entry');
       for (var i = newEntries.length - 1; i >= 0; i--) {
         newEntries[i].classList.add('log-entry-new');
         logList.insertBefore(newEntries[i], logList.firstChild);
       }
 
-      // Update count
       var countEl = document.getElementById('logs-count');
       if (countEl) {
         var total = logList.querySelectorAll('.log-entry').length;
@@ -309,6 +443,10 @@ document.addEventListener('DOMContentLoaded', function(){
   };
 
   startPolling();
+
+  window.loadPageData = function() {
+    applyFilters();
+  };
 })();
 </script>
 {{end}}
@@ -336,7 +474,7 @@ document.addEventListener('DOMContentLoaded', function(){
 {{define "logs-sentinel"}}
 {{if .HasMore}}
 <div class="logs-sentinel"
-     hx-get="/logs?query={{.LogFilters.Query}}&service={{.LogFilters.Service}}&level={{.LogFilters.Level}}&environment={{.LogFilters.Environment}}&offset={{add .LogOffset .LogLimit}}&limit={{.LogLimit}}"
+     hx-get="/logs?query={{.LogFilters.Query}}&service={{.LogFilters.Service}}&level={{.LogFilters.Level}}&environment={{.LogFilters.Environment}}&time_range={{.LogFilters.TimeRange}}&offset={{add .LogOffset .LogLimit}}&limit={{.LogLimit}}"
      hx-trigger="revealed"
      hx-swap="outerHTML"
      hx-target="this">
@@ -356,8 +494,8 @@ document.addEventListener('DOMContentLoaded', function(){
 {{else}}
 <div class="empty-state">
   <div class="empty-icon">--</div>
-  <p>no logs found</p>
-  <p>logs will appear here once ingested via POST /api/logs</p>
+  <p class="empty-state-title">no logs found</p>
+  <p class="empty-state-desc">Logs will appear here once ingested via POST /api/logs</p>
 </div>
 {{end}}
 {{end}}
