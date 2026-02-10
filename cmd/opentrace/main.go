@@ -171,8 +171,14 @@ func run() error {
 	providerCache := llm.NewProviderCache(deps.cfg, defaultLLM)
 	modelRegistry := llm.NewModelRegistry(deps.cfg)
 
-	// Create watcher run store and executor
+	// Create watcher run store and clean up stale runs from previous crashes
 	runStore := store.NewWatcherRunStore(deps.db)
+	if n, err := runStore.FailStaleRuns(ctx, 10*time.Minute); err != nil {
+		log.Printf("warning: failed to clean stale runs: %v", err)
+	} else if n > 0 {
+		log.Printf("cleaned up %d stale watcher run(s)", n)
+	}
+
 	eventHub := watcher.NewEventHub()
 	executor := watcher.NewExecutor(
 		deps.watcherStore,

@@ -43,6 +43,7 @@ type WatcherRunStore interface {
 	Create(ctx context.Context, watcherID uuid.UUID) (*WatcherRun, error)
 	Complete(ctx context.Context, id uuid.UUID, summary string, details any, hasAlert bool) error
 	Fail(ctx context.Context, id uuid.UUID, errMsg string) error
+	FailStaleRuns(ctx context.Context, olderThan time.Duration) (int, error)
 	List(ctx context.Context, watcherID uuid.UUID, limit int) ([]WatcherRun, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*WatcherRun, error)
 }

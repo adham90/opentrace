@@ -89,6 +89,23 @@ func (s *watcherRunStore) Fail(ctx context.Context, id uuid.UUID, errMsg string)
 	return nil
 }
 
+func (s *watcherRunStore) FailStaleRuns(ctx context.Context, olderThan time.Duration) (int, error) {
+	cutoff := time.Now().Add(-olderThan).UTC().Format(time.RFC3339)
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE watcher_runs
+		 SET finished_at = ?, status = 'error', error_message = 'stale run cleaned up on startup'
+		 WHERE status = 'running' AND started_at < ?`,
+		now, cutoff,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failing stale runs: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	return int(n), nil
+}
+
 func (s *watcherRunStore) List(ctx context.Context, watcherID uuid.UUID, limit int) ([]WatcherRun, error) {
 	if limit <= 0 {
 		limit = 20

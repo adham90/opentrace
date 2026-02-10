@@ -285,6 +285,10 @@ func (m *mockWatcherRunStore) Fail(ctx context.Context, id uuid.UUID, errMsg str
 	return nil
 }
 
+func (m *mockWatcherRunStore) FailStaleRuns(ctx context.Context, olderThan time.Duration) (int, error) {
+	return 0, nil
+}
+
 func (m *mockWatcherRunStore) List(ctx context.Context, watcherID uuid.UUID, limit int) ([]store.WatcherRun, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
