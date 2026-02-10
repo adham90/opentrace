@@ -14,14 +14,15 @@ import (
 
 // Executor runs a single watcher evaluation.
 type Executor struct {
-	watcherStore  store.WatcherStore
-	runStore      store.WatcherRunStore
-	alertStore    store.AlertStore
-	registry      *connector.Registry
-	providerCache *llm.ProviderCache
-	agentCfg      agent.RunConfig
-	eventHub      *EventHub
-	ruleEvaluator *RuleEvaluator
+	watcherStore    store.WatcherStore
+	runStore        store.WatcherRunStore
+	alertStore      store.AlertStore
+	registry        *connector.Registry
+	providerCache   *llm.ProviderCache
+	agentCfg        agent.RunConfig
+	eventHub        *EventHub
+	ruleEvaluator   *RuleEvaluator
+	adaptiveEngine  *AdaptiveEngine
 }
 
 // NewExecutor creates a new watcher executor.
@@ -35,13 +36,14 @@ func NewExecutor(
 	eventHub *EventHub,
 ) *Executor {
 	return &Executor{
-		watcherStore:  watcherStore,
-		runStore:      runStore,
-		alertStore:    alertStore,
-		registry:      registry,
-		providerCache: providerCache,
-		agentCfg:      agentCfg,
-		eventHub:      eventHub,
+		watcherStore:   watcherStore,
+		runStore:       runStore,
+		alertStore:     alertStore,
+		registry:       registry,
+		providerCache:  providerCache,
+		agentCfg:       agentCfg,
+		eventHub:       eventHub,
+		adaptiveEngine: &AdaptiveEngine{},
 	}
 }
 
@@ -84,7 +86,7 @@ func (e *Executor) executeRule(ctx context.Context, w store.Watcher, run *store.
 		errMsg := "rule evaluator not configured"
 		log.Printf("watcher %s (%s): %s", w.ID, w.Title, errMsg)
 		e.runStore.Fail(ctx, run.ID, errMsg)
-		e.updateWatcherTiming(ctx, w)
+		e.finalizeRun(ctx, &w, RunOutcome{Errored: true})
 		return
 	}
 
@@ -93,7 +95,7 @@ func (e *Executor) executeRule(ctx context.Context, w store.Watcher, run *store.
 		errMsg := fmt.Sprintf("rule evaluation error: %v", err)
 		log.Printf("watcher %s (%s): %s", w.ID, w.Title, errMsg)
 		e.runStore.Fail(ctx, run.ID, errMsg)
-		e.updateWatcherTiming(ctx, w)
+		e.finalizeRun(ctx, &w, RunOutcome{Errored: true})
 		return
 	}
 
@@ -129,7 +131,7 @@ func (e *Executor) executeRule(ctx context.Context, w store.Watcher, run *store.
 		}
 	}
 
-	e.updateWatcherTiming(ctx, w)
+	e.finalizeRun(ctx, &w, RunOutcome{Alerted: result.HasAlert})
 }
 
 // executeAI runs the existing AI agent-based evaluation.
@@ -159,7 +161,7 @@ func (e *Executor) executeAI(ctx context.Context, w store.Watcher, run *store.Wa
 		errMsg := fmt.Sprintf("model resolution error: %v", err)
 		log.Printf("watcher %s (%s): %s", w.ID, w.Title, errMsg)
 		e.runStore.Fail(ctx, run.ID, errMsg)
-		e.updateWatcherTiming(ctx, w)
+		e.finalizeRun(ctx, &w, RunOutcome{Errored: true})
 		return
 	}
 
@@ -191,7 +193,7 @@ func (e *Executor) executeAI(ctx context.Context, w store.Watcher, run *store.Wa
 		errMsg := fmt.Sprintf("agent error: %v", err)
 		log.Printf("watcher %s (%s): %s", w.ID, w.Title, errMsg)
 		e.runStore.Fail(ctx, run.ID, errMsg)
-		e.updateWatcherTiming(ctx, w)
+		e.finalizeRun(ctx, &w, RunOutcome{Errored: true})
 		return
 	}
 
@@ -225,14 +227,53 @@ func (e *Executor) executeAI(ctx context.Context, w store.Watcher, run *store.Wa
 		}
 	}
 
-	// 10. Update watcher timing
-	e.updateWatcherTiming(ctx, w)
+	// 10. Finalize: apply adaptive scheduling and update timing
+	e.finalizeRun(ctx, &w, RunOutcome{Alerted: hasAlert})
 }
 
-func (e *Executor) updateWatcherTiming(ctx context.Context, w store.Watcher) {
+// finalizeRun applies adaptive scheduling transitions and updates watcher timing.
+func (e *Executor) finalizeRun(ctx context.Context, w *store.Watcher, outcome RunOutcome) {
 	now := time.Now()
 
-	// Prefer explicit schedule; fall back to time_range (backward compat).
+	// Apply adaptive scheduling if enabled
+	if w.AdaptiveConfig != nil && w.AdaptiveConfig.Enabled {
+		tr := e.adaptiveEngine.Transition(w, outcome, now)
+
+		if err := e.watcherStore.UpdateAdaptiveState(ctx, w.ID, store.UpdateAdaptiveParams{
+			AdaptiveState:        tr.NewState,
+			ConsecutiveCleanRuns: tr.CleanRuns,
+			ConsecutiveErrors:    tr.ErrorCount,
+			EscalatedAt:          tr.EscalatedAt,
+			TimeRange:            tr.NewTimeRange,
+			BaseTimeRange:        tr.BaseTimeRange,
+		}); err != nil {
+			log.Printf("watcher %s: failed to update adaptive state: %v", w.ID, err)
+		}
+
+		if tr.ShouldPause {
+			if _, err := e.watcherStore.UpdateStatus(ctx, w.ID, store.WatcherError); err != nil {
+				log.Printf("watcher %s: failed to pause monitor: %v", w.ID, err)
+			}
+		}
+
+		if tr.LogMessage != "" {
+			log.Printf("watcher %s (%s): adaptive: %s", w.ID, w.Title, tr.LogMessage)
+		}
+
+		// Use adaptive interval for next_run_at if provided
+		if tr.NewInterval != "" {
+			sched, err := ParseSchedule(tr.NewInterval)
+			if err == nil {
+				next := sched.Next(now)
+				if err := e.watcherStore.UpdateRunTime(ctx, w.ID, now, next); err != nil {
+					log.Printf("watcher %s: failed to update run time: %v", w.ID, err)
+				}
+				return
+			}
+		}
+	}
+
+	// Default timing: prefer explicit schedule, fall back to time_range
 	schedExpr := w.Schedule
 	if schedExpr == "" {
 		schedExpr = w.TimeRange
