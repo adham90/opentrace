@@ -59,6 +59,9 @@ function loadRuns() {
       html += '    <span class="run-time">' + time + '</span>';
       if (duration) html += '    <span class="run-duration">' + duration + '</span>';
       html += alertBadge;
+      if (run.status === 'running') {
+        html += '    <button class="btn btn-sm btn-danger" onclick="stopRun(\'' + run.id + '\', this)">stop</button>';
+      }
       html += '  </div>';
 
       if (run.status === 'running') {
@@ -237,6 +240,22 @@ function toggleTrace(btn, runId) {
     el.style.display = 'none';
     btn.textContent = 'show trace';
   }
+}
+
+function stopRun(runId, btn) {
+  btn.disabled = true;
+  btn.textContent = 'stopping...';
+  fetch('/api/watchers/' + watcherId + '/runs/' + runId + '/stop', { method: 'POST' })
+    .then(function(r) {
+      if (!r.ok) {
+        btn.disabled = false;
+        btn.textContent = 'stop';
+      }
+    })
+    .catch(function() {
+      btn.disabled = false;
+      btn.textContent = 'stop';
+    });
 }
 
 function getTimeAgo(dateStr) {
