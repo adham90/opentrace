@@ -5,7 +5,7 @@
   --bg-tertiary: #1e1e1e;
   --border: #2e2e2e;
   --text: #d0d0d0;
-  --text-dim: #777;
+  --text-dim: #8a8a8a;
   --text-bright: #e0e0e0;
   --green: #4ade80;
   --green-dim: #22633a;
@@ -18,7 +18,7 @@
   --cyan: #22d3ee;
   --purple: #c084fc;
   --overlay: rgba(0, 0, 0, 0.7);
-  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23777'/%3E%3C/svg%3E");
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238a8a8a'/%3E%3C/svg%3E");
   --font-mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', monospace;
   --topbar-height: 36px;
   --bg-row-alt: rgba(255,255,255,0.02);
@@ -88,6 +88,16 @@ body {
 
 a { color: var(--green); text-decoration: none; }
 a:hover { text-decoration: underline; }
+
+/* Focus-visible for keyboard accessibility */
+:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+button:focus-visible, .btn:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
 
 /* ===== Scrollbar ===== */
 ::-webkit-scrollbar { width: 6px; }

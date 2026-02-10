@@ -17,10 +17,10 @@
 </div>
 
 <!-- New Monitor Type Selection Modal -->
-<div id="new-monitor-modal" class="modal" style="display:none" onclick="if(event.target===this)hideNewMonitorModal()">
+<div id="new-monitor-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="new-monitor-title" style="display:none" onclick="if(event.target===this)hideNewMonitorModal()">
   <div class="modal-content">
     <div class="modal-header">
-      <h3><span class="prompt">$</span> new-monitor</h3>
+      <h3 id="new-monitor-title"><span class="prompt">$</span> new-monitor</h3>
       <button class="btn-close" onclick="hideNewMonitorModal()">&times;</button>
     </div>
     <div class="modal-body">
@@ -57,7 +57,7 @@
 </div>
 
 <!-- Rule Monitor Wizard (query/logs/health) -->
-<div id="rule-modal" class="modal" style="display:none" onclick="if(event.target===this)hideRuleModal()">
+<div id="rule-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="rule-modal-title" style="display:none" onclick="if(event.target===this)hideRuleModal()">
   <div class="modal-content">
     <div class="modal-header">
       <h3><span class="prompt">$</span> <span id="rule-modal-title">new-query-monitor</span></h3>
@@ -325,10 +325,10 @@
 </div>
 
 <!-- AI Create/Edit Modal (existing) -->
-<div id="watcher-modal" class="modal" style="display:none" onclick="if(event.target===this)hideModal()">
+<div id="watcher-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="ai-modal-title" style="display:none" onclick="if(event.target===this)hideModal()">
   <div class="modal-content">
     <div class="modal-header">
-      <h3><span class="prompt">$</span> <span id="modal-title">new-ai-monitor</span></h3>
+      <h3><span class="prompt">$</span> <span id="ai-modal-title">new-ai-monitor</span></h3>
       <button class="btn-close" onclick="hideModal()">&times;</button>
     </div>
     <form id="watcher-form" onsubmit="saveWatcher(event)">
@@ -1102,7 +1102,7 @@ function editRuleMonitor(id) {
 
 // AI watcher modal (existing)
 function showCreateModal() {
-  document.getElementById('modal-title').textContent = 'new-ai-monitor';
+  document.getElementById('ai-modal-title').textContent = 'new-ai-monitor';
   document.getElementById('modal-save-btn').textContent = 'Create Monitor';
   document.getElementById('watcher-id').value = '';
   document.getElementById('watcher-form').reset();
@@ -1189,7 +1189,7 @@ function saveWatcher(e) {
 
 function editWatcher(id) {
   fetch('/api/watchers/' + id).then(function(r) { return r.json(); }).then(function(w) {
-    document.getElementById('modal-title').textContent = 'edit-ai-monitor';
+    document.getElementById('ai-modal-title').textContent = 'edit-ai-monitor';
     document.getElementById('modal-save-btn').textContent = 'Save Changes';
     document.getElementById('watcher-id').value = w.id;
     document.getElementById('watcher-title').value = w.title;

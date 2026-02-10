@@ -17,10 +17,10 @@
 </div>
 
 <!-- Create Modal -->
-<div id="connector-modal" class="modal" style="display:none" onclick="if(event.target===this)hideModal()">
+<div id="connector-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="connector-modal-title" style="display:none" onclick="if(event.target===this)hideModal()">
   <div class="modal-content">
     <div class="modal-header">
-      <h3><span class="prompt">$</span> new-connector</h3>
+      <h3 id="connector-modal-title"><span class="prompt">$</span> new-connector</h3>
       <button class="btn-close" onclick="hideModal()">&times;</button>
     </div>
     <form id="connector-form" onsubmit="saveConnector(event)">

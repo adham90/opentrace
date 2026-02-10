@@ -292,9 +292,16 @@
         return;
       }
       if (e.key === 'Escape') {
+        // Close shortcut overlay first
         var overlay = document.getElementById('shortcut-overlay');
         if (overlay && overlay.style.display !== 'none') {
           overlay.style.display = 'none';
+          return;
+        }
+        // Close any open modal
+        var modals = document.querySelectorAll('.modal[style*="flex"]');
+        if (modals.length > 0) {
+          modals[modals.length - 1].style.display = 'none';
           return;
         }
       }
