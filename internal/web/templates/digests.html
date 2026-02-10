@@ -1,0 +1,108 @@
+{{define "content"}}
+<div class="page-header">
+  <h1><span class="prompt">$</span> digests</h1>
+</div>
+
+<div class="digest-latest" id="digest-latest">
+  <div class="empty-state"><div class="empty-icon">--</div><p>loading...</p></div>
+</div>
+
+<div class="overview-panel" style="margin-top:24px">
+  <div class="overview-panel-header">
+    <span>digest history</span>
+  </div>
+  <div class="overview-panel-body" id="digest-history">
+    <div class="empty-state"><div class="empty-icon">--</div><p>loading...</p></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  function statusClass(s) {
+    if (s === 'critical' || s === 'degraded') return 'status-error';
+    if (s === 'needs_attention') return 'status-warn';
+    if (s === 'healthy') return 'status-ok';
+    return '';
+  }
+
+  function statusIcon(s) {
+    if (s === 'critical') return '!!';
+    if (s === 'degraded') return '!~';
+    if (s === 'needs_attention') return '!';
+    if (s === 'info_only') return 'i';
+    return 'ok';
+  }
+
+  function fmtTime(ts) {
+    if (!ts) return '--';
+    var d = new Date(ts);
+    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  }
+
+  function fmtDuration(start, end) {
+    var s = new Date(start);
+    var e = new Date(end);
+    var hours = Math.round((e - s) / 3600000);
+    if (hours < 24) return hours + 'h';
+    return Math.round(hours / 24) + 'd';
+  }
+
+  function loadLatest() {
+    var envParam = (typeof getGlobalEnv === 'function' && getGlobalEnv()) ? '?env=' + encodeURIComponent(getGlobalEnv()) : '';
+    fetch('/api/digests/latest' + envParam).then(function(r){ return r.json(); }).then(function(d){
+      var el = document.getElementById('digest-latest');
+      if (!d || d.status === 'empty' || d.status === 'unavailable') {
+        el.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>' + (d.message || 'no digests yet') + '</p></div>';
+        return;
+      }
+      var html = '<div class="digest-card digest-card-latest">';
+      html += '<div class="digest-card-header">';
+      html += '<span class="severity-badge ' + statusClass(d.status) + '">' + statusIcon(d.status) + '</span>';
+      html += '<span class="digest-card-title">latest digest: <strong>' + d.status + '</strong></span>';
+      html += '<span class="digest-card-time">' + fmtTime(d.created_at) + '</span>';
+      html += '</div>';
+      html += '<div class="digest-card-body">';
+      html += '<div class="stat-grid" style="margin-bottom:0">';
+      html += '<div class="stat-card"><div class="stat-number ' + (d.alert_critical > 0 ? 'status-error' : d.alert_total > 0 ? 'status-warn' : 'status-ok') + '">' + d.alert_total + '</div><div class="stat-label">alerts</div><div class="stat-detail">' + d.alert_critical + ' critical, ' + d.alert_warning + ' warning</div></div>';
+      html += '<div class="stat-card"><div class="stat-number ' + (d.monitor_errored > 0 ? 'status-error' : 'status-ok') + '">' + d.monitor_total + '</div><div class="stat-label">monitors</div><div class="stat-detail">' + d.monitor_errored + ' in error</div></div>';
+      html += '<div class="stat-card"><div class="stat-number ' + (d.failed_runs > 0 ? 'status-warn' : 'status-ok') + '">' + d.failed_runs + '</div><div class="stat-label">failed runs</div><div class="stat-detail">period: ' + fmtDuration(d.period_start, d.period_end) + '</div></div>';
+      html += '</div>';
+      html += '</div></div>';
+      el.innerHTML = html;
+    }).catch(function(){
+      document.getElementById('digest-latest').innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>failed to load</p></div>';
+    });
+  }
+
+  function loadHistory() {
+    var envParam = (typeof getGlobalEnv === 'function' && getGlobalEnv()) ? '?env=' + encodeURIComponent(getGlobalEnv()) : '';
+    fetch('/api/digests' + envParam).then(function(r){ return r.json(); }).then(function(digests){
+      var el = document.getElementById('digest-history');
+      if (!digests || digests.length === 0) {
+        el.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no digest history</p></div>';
+        return;
+      }
+      var html = '<table class="data-table"><thead><tr><th>status</th><th>period</th><th>alerts</th><th>monitors</th><th>failed runs</th><th>generated</th></tr></thead><tbody>';
+      digests.forEach(function(d){
+        html += '<tr>';
+        html += '<td><span class="severity-badge ' + statusClass(d.status) + '">' + statusIcon(d.status) + '</span> ' + d.status + '</td>';
+        html += '<td>' + fmtDuration(d.period_start, d.period_end) + '</td>';
+        html += '<td>' + d.alert_total + ' <span class="dim">(' + d.alert_critical + ' crit)</span></td>';
+        html += '<td>' + d.monitor_total + ' <span class="dim">(' + d.monitor_errored + ' err)</span></td>';
+        html += '<td>' + d.failed_runs + '</td>';
+        html += '<td>' + fmtTime(d.created_at) + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      el.innerHTML = html;
+    }).catch(function(){
+      document.getElementById('digest-history').innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>failed to load</p></div>';
+    });
+  }
+
+  loadLatest();
+  loadHistory();
+  window.loadPageData = function() { loadLatest(); loadHistory(); };
+})();
+</script>
+{{end}}

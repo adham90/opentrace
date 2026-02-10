@@ -830,6 +830,80 @@ func (m *mockSessionStore) DeleteAllForUser(ctx context.Context, userID string) 
 	return nil
 }
 
+// mockDigestStore implements store.DigestStore for testing.
+type mockDigestStore struct {
+	mu      sync.Mutex
+	digests []store.StoredDigest
+}
+
+func newMockDigestStore() *mockDigestStore {
+	return &mockDigestStore{}
+}
+
+func (m *mockDigestStore) Save(ctx context.Context, d store.SaveDigestParams) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.digests = append(m.digests, store.StoredDigest{
+		ID:             d.ID,
+		Environment:    d.Environment,
+		Status:         d.Status,
+		PeriodStart:    d.PeriodStart,
+		PeriodEnd:      d.PeriodEnd,
+		AlertTotal:     d.AlertTotal,
+		AlertCritical:  d.AlertCritical,
+		AlertWarning:   d.AlertWarning,
+		MonitorTotal:   d.MonitorTotal,
+		MonitorErrored: d.MonitorErrored,
+		FailedRuns:     d.FailedRuns,
+		Data:           d.Data,
+		CreatedAt:      time.Now(),
+	})
+	return nil
+}
+
+func (m *mockDigestStore) GetLatest(ctx context.Context, environment string) (*store.StoredDigest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := len(m.digests) - 1; i >= 0; i-- {
+		if environment == "" || m.digests[i].Environment == environment {
+			return &m.digests[i], nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
+func (m *mockDigestStore) List(ctx context.Context, limit int, environment string) ([]store.StoredDigest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []store.StoredDigest
+	for _, d := range m.digests {
+		if environment != "" && d.Environment != environment {
+			continue
+		}
+		result = append(result, d)
+	}
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
+func (m *mockDigestStore) DeleteOlderThan(ctx context.Context, before time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var kept []store.StoredDigest
+	deleted := 0
+	for _, d := range m.digests {
+		if d.CreatedAt.Before(before) {
+			deleted++
+		} else {
+			kept = append(kept, d)
+		}
+	}
+	m.digests = kept
+	return deleted, nil
+}
+
 // mockSettingsStore implements store.SettingsStore for testing.
 type mockSettingsStore struct {
 	mu        sync.Mutex

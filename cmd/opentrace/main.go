@@ -210,6 +210,9 @@ func run() error {
 		eventHub,
 	)
 
+	// Create digest store (used by both server and scheduler)
+	digestStore := store.NewDigestStore(deps.db)
+
 	// Create server
 	srv := web.NewServerWithDeps(web.ServerDeps{
 		DB:            deps.db,
@@ -223,6 +226,7 @@ func run() error {
 		UserStore:     deps.userStore,
 		SessionStore:  deps.sessionStore,
 		SettingsStore: deps.settingsStore,
+		DigestStore:   digestStore,
 		Registry:      deps.registry,
 		Cfg:           deps.cfg,
 		Executor:      executor,
@@ -256,7 +260,6 @@ func run() error {
 	sched.Start(ctx)
 
 	// Start digest scheduler for daily health summaries
-	digestStore := store.NewDigestStore(deps.db)
 	digestBuilder := digest.NewBuilder(deps.alertStore, deps.watcherStore, runStore)
 	digestSched := digest.NewScheduler(digest.SchedulerOpts{
 		Builder:       digestBuilder,

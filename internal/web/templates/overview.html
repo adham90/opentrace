@@ -32,6 +32,15 @@
 </div>
 
 <div class="overview-panels">
+  <div class="overview-panel" id="digest-panel" style="grid-column:1/-1">
+    <div class="overview-panel-header">
+      <span>health digest</span>
+      <a href="/digests" class="panel-link">history &rarr;</a>
+    </div>
+    <div class="overview-panel-body" id="digest-summary">
+      <div class="empty-state"><div class="empty-icon">--</div><p>loading...</p></div>
+    </div>
+  </div>
   <div class="overview-panel">
     <div class="overview-panel-header">
       <span>recent alerts</span>
@@ -163,12 +172,38 @@
     return div.innerHTML;
   }
 
+  function loadDigestSummary() {
+    fetch('/api/digests/latest' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r){ return r.json(); }).then(function(d){
+      var container = document.getElementById('digest-summary');
+      if (!d || d.status === 'empty' || d.status === 'unavailable') {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no digest yet</p></div>';
+        return;
+      }
+      var sc = d.status === 'critical' || d.status === 'degraded' ? 'status-error' : d.status === 'needs_attention' ? 'status-warn' : d.status === 'healthy' ? 'status-ok' : '';
+      var icon = d.status === 'critical' ? '!!' : d.status === 'degraded' ? '!~' : d.status === 'needs_attention' ? '!' : d.status === 'healthy' ? 'ok' : 'i';
+      var html = '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">';
+      html += '<span class="severity-badge ' + sc + '">' + icon + '</span>';
+      html += '<strong>' + d.status + '</strong>';
+      html += '<span class="dim">|</span>';
+      html += '<span>' + d.alert_total + ' alerts (' + d.alert_critical + ' critical)</span>';
+      html += '<span class="dim">|</span>';
+      html += '<span>' + d.monitor_total + ' monitors (' + d.monitor_errored + ' errors)</span>';
+      html += '<span class="dim">|</span>';
+      html += '<span>' + d.failed_runs + ' failed runs</span>';
+      html += '</div>';
+      container.innerHTML = html;
+    }).catch(function(){
+      document.getElementById('digest-summary').innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>digest unavailable</p></div>';
+    });
+  }
+
   loadStats();
   loadRecentAlerts();
   loadRecentLogs();
-  setInterval(function(){ loadStats(); loadRecentAlerts(); }, 30000);
+  loadDigestSummary();
+  setInterval(function(){ loadStats(); loadRecentAlerts(); loadDigestSummary(); }, 30000);
 
-  window.loadPageData = function() { loadStats(); loadRecentAlerts(); };
+  window.loadPageData = function() { loadStats(); loadRecentAlerts(); loadDigestSummary(); };
 })();
 </script>
 {{end}}
