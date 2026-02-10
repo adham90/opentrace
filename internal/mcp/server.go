@@ -272,6 +272,14 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 			serverHealthHandler(deps.ServerStore, deps.MetricStore),
 		)
 	}
+
+	// Connection pool stats (read-only — queries pg_stat_activity).
+	s.AddTool(
+		mcp.NewTool("connection_pool_stats",
+			mcp.WithDescription("Show connection pool health: current utilization, idle/active connections, wait queue depth, and per-application breakdown. Use when diagnosing 'database is slow' or 'connection timeout' issues."),
+		),
+		connectionPoolStatsHandler(deps.Registry),
+	)
 }
 
 // addWriteTools registers write/admin tools (connector tools, create_monitor, preview_monitor).
@@ -338,6 +346,24 @@ Tip: Use db_query_stats, db_activity, or db_table_stats first to understand the 
 				mcp.WithString("data_source_id", mcp.Description("Data source ID for query/health rule monitors")),
 			),
 			previewMonitorHandler(deps.RuleEvaluator),
+		)
+	}
+
+	// Suggest monitors (admin — suggests creating monitors with ready-to-use configs).
+	if deps.WatcherStore != nil || deps.LogStore != nil {
+		s.AddTool(
+			mcp.NewTool("suggest_monitors",
+				mcp.WithDescription(`Analyze the current system state and suggest monitors the user should create.
+
+Returns prioritized suggestions with ready-to-use monitor configurations based on:
+- Current error patterns in logs
+- Gaps in monitoring coverage (connection pool, replication, disk, security)
+- Focus areas: "all" (default), "performance", "errors", "health", "security"
+
+Each suggestion includes a monitor_config that can be passed directly to create_monitor.`),
+				mcp.WithString("focus", mcp.Description("Focus area: all, performance, errors, health, security (default: all)")),
+			),
+			suggestMonitorsHandler(deps.WatcherStore, deps.LogStore),
 		)
 	}
 }

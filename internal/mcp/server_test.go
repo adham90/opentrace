@@ -1175,7 +1175,7 @@ func TestAddReadOnlyTools_RegistersExpectedTools(t *testing.T) {
 	addReadOnlyTools(s, deps)
 
 	tools := s.ListTools()
-	expectedTools := []string{"list_connectors", "list_monitors", "list_alerts", "get_digest", "db_locks", "log_stats", "trace_lookup", "db_index_analysis", "compare_periods"}
+	expectedTools := []string{"list_connectors", "list_monitors", "list_alerts", "get_digest", "db_locks", "log_stats", "trace_lookup", "db_index_analysis", "compare_periods", "connection_pool_stats"}
 	for _, name := range expectedTools {
 		if _, ok := tools[name]; !ok {
 			t.Errorf("expected read-only tool %q to be registered", name)
@@ -1232,6 +1232,11 @@ func TestAddWriteTools_RegistersConnectorTools(t *testing.T) {
 	// preview_monitor should be registered when RuleEvaluator is provided.
 	if _, ok := tools["preview_monitor"]; !ok {
 		t.Error("expected 'preview_monitor' to be registered by addWriteTools")
+	}
+
+	// suggest_monitors should be registered when WatcherStore is provided.
+	if _, ok := tools["suggest_monitors"]; !ok {
+		t.Error("expected 'suggest_monitors' to be registered by addWriteTools")
 	}
 }
 
