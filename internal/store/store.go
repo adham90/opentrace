@@ -119,6 +119,47 @@ type SessionStore interface {
 	DeleteAllForUser(ctx context.Context, userID string) error
 }
 
+// DigestStore manages stored health digests.
+type DigestStore interface {
+	Save(ctx context.Context, d SaveDigestParams) error
+	GetLatest(ctx context.Context, environment string) (*StoredDigest, error)
+	List(ctx context.Context, limit int, environment string) ([]StoredDigest, error)
+	DeleteOlderThan(ctx context.Context, before time.Time) (int, error)
+}
+
+// SaveDigestParams defines input for storing a digest.
+type SaveDigestParams struct {
+	ID              string
+	Environment     string
+	Status          string
+	PeriodStart     time.Time
+	PeriodEnd       time.Time
+	AlertTotal      int
+	AlertCritical   int
+	AlertWarning    int
+	MonitorTotal    int
+	MonitorErrored  int
+	FailedRuns      int
+	Data            string // full JSON blob
+}
+
+// StoredDigest represents a digest row from the database.
+type StoredDigest struct {
+	ID             string    `json:"id"`
+	Environment    string    `json:"environment"`
+	Status         string    `json:"status"`
+	PeriodStart    time.Time `json:"period_start"`
+	PeriodEnd      time.Time `json:"period_end"`
+	AlertTotal     int       `json:"alert_total"`
+	AlertCritical  int       `json:"alert_critical"`
+	AlertWarning   int       `json:"alert_warning"`
+	MonitorTotal   int       `json:"monitor_total"`
+	MonitorErrored int       `json:"monitor_errored"`
+	FailedRuns     int       `json:"failed_runs"`
+	Data           string    `json:"data"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
 // RetentionSettings holds data retention configuration.
 type RetentionSettings struct {
 	RetentionDays int `json:"retention_days"`
