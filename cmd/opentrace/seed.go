@@ -238,6 +238,178 @@ func runSeed() error {
 				MaxBackoffInterval: "1h",
 			},
 		},
+
+		// --- Rule monitors: query source ---
+		{
+			Title:       "Idle-in-Transaction Sessions",
+			Environment: "production",
+			Severity:    store.SeverityWarning,
+			MonitorType: store.MonitorTypeRule,
+			TimeRange:   "5m",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			RuleConfig: &store.RuleConfig{
+				Source:    store.RuleSourceQuery,
+				Query:     "SELECT count(*) FROM pg_stat_activity WHERE state = 'idle in transaction' AND xact_start < now() - interval '5 minutes'",
+				Metric:    "value",
+				Operator:  store.OpGreaterThan,
+				Threshold: 3,
+			},
+		},
+		{
+			Title:       "Dead Tuples on Orders Table",
+			Environment: "production",
+			Severity:    store.SeverityCritical,
+			MonitorType: store.MonitorTypeRule,
+			TimeRange:   "15m",
+			Schedule:    "*/15 * * * *",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			RuleConfig: &store.RuleConfig{
+				Source:    store.RuleSourceQuery,
+				Query:     "SELECT n_dead_tup FROM pg_stat_user_tables WHERE relname = 'orders'",
+				Metric:    "value",
+				Operator:  store.OpGreaterThan,
+				Threshold: 50000,
+			},
+			AdaptiveConfig: &store.AdaptiveConfig{
+				Enabled:            true,
+				EscalatedInterval:  "2m",
+				EscalationDuration: "30m",
+				CooldownRuns:       3,
+				MaxConsecErrors:    5,
+			},
+		},
+		{
+			Title:       "Long-Running Queries",
+			Environment: "production",
+			Severity:    store.SeverityWarning,
+			MonitorType: store.MonitorTypeRule,
+			TimeRange:   "5m",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			RuleConfig: &store.RuleConfig{
+				Source:    store.RuleSourceQuery,
+				Query:     "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND now() - query_start > interval '30 seconds'",
+				Metric:    "value",
+				Operator:  store.OpGreaterThan,
+				Threshold: 5,
+			},
+		},
+
+		// --- Rule monitors: logs source ---
+		{
+			Title:       "Error Log Volume",
+			Environment: "production",
+			Severity:    store.SeverityWarning,
+			MonitorType: store.MonitorTypeRule,
+			TimeRange:   "5m",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			RuleConfig: &store.RuleConfig{
+				Source:    store.RuleSourceLogs,
+				Metric:    "count",
+				Operator:  store.OpGreaterThan,
+				Threshold: 50,
+				TimeWindow: "5m",
+				Filter: &store.LogFilter{
+					Level: "ERROR",
+				},
+			},
+		},
+		{
+			Title:       "Payment Service Timeouts",
+			Environment: "production",
+			Severity:    store.SeverityCritical,
+			MonitorType: store.MonitorTypeRule,
+			TimeRange:   "5m",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			RuleConfig: &store.RuleConfig{
+				Source:    store.RuleSourceLogs,
+				Metric:    "count",
+				Operator:  store.OpGreaterThan,
+				Threshold: 10,
+				TimeWindow: "5m",
+				Filter: &store.LogFilter{
+					Service: "payment-api",
+					Level:   "ERROR",
+					Query:   "timeout",
+				},
+			},
+			AdaptiveConfig: &store.AdaptiveConfig{
+				Enabled:            true,
+				EscalatedInterval:  "1m",
+				EscalationDuration: "15m",
+				CooldownRuns:       3,
+				MaxConsecErrors:    5,
+			},
+		},
+		{
+			Title:       "Gateway 503 Errors",
+			Environment: "production",
+			Severity:    store.SeverityWarning,
+			MonitorType: store.MonitorTypeRule,
+			TimeRange:   "15m",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			RuleConfig: &store.RuleConfig{
+				Source:    store.RuleSourceLogs,
+				Metric:    "count",
+				Operator:  store.OpGreaterThan,
+				Threshold: 20,
+				TimeWindow: "15m",
+				Filter: &store.LogFilter{
+					Service: "gateway",
+					Query:   "503",
+				},
+			},
+		},
+
+		// --- Rule monitors: health source ---
+		{
+			Title:       "Primary DB Health",
+			Environment: "production",
+			Severity:    store.SeverityCritical,
+			MonitorType: store.MonitorTypeRule,
+			TimeRange:   "1m",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			RuleConfig: &store.RuleConfig{
+				Source: store.RuleSourceHealth,
+				Checks: []string{"connection", "latency"},
+				LatencyThreshold: 2000,
+			},
+		},
+		{
+			Title:       "Replica DB Health",
+			Environment: "production",
+			Severity:    store.SeverityWarning,
+			MonitorType: store.MonitorTypeRule,
+			TimeRange:   "5m",
+			Schedule:    "*/5 * * * *",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			RuleConfig: &store.RuleConfig{
+				Source: store.RuleSourceHealth,
+				Checks: []string{"connection"},
+			},
+		},
+		{
+			Title:       "Staging DB Connectivity",
+			Environment: "staging",
+			Severity:    store.SeverityInfo,
+			MonitorType: store.MonitorTypeRule,
+			TimeRange:   "15m",
+			Schedule:    "@hourly",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			RuleConfig: &store.RuleConfig{
+				Source: store.RuleSourceHealth,
+				Checks: []string{"connection", "latency"},
+				LatencyThreshold: 5000,
+			},
+		},
 	}
 
 	watcherStore := store.NewWatcherStore(deps.db)
@@ -372,7 +544,113 @@ func runSeed() error {
 		}
 	}
 
-	log.Println("  watcher runs: created (including adaptive-state scenarios)")
+	// Rule monitor runs
+	// [6] Idle-in-Transaction — mix of clean and alert
+	for j := 0; j < 5; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[6])
+		if err != nil {
+			continue
+		}
+		if j == 3 {
+			runStore.Complete(ctx, run.ID, "ALERT: 5 sessions idle-in-transaction for >5 minutes (threshold: 3). Longest: 12m.", nil, true)
+		} else {
+			runStore.Complete(ctx, run.ID, "OK: 1 idle-in-transaction session (threshold: 3).", nil, false)
+		}
+	}
+
+	// [7] Dead Tuples — always clean
+	for j := 0; j < 4; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[7])
+		if err != nil {
+			continue
+		}
+		runStore.Complete(ctx, run.ID, "OK: Dead tuples on orders table: 1,247 (threshold: 50,000).", nil, false)
+	}
+
+	// [8] Long-Running Queries — recent alert
+	for j := 0; j < 3; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[8])
+		if err != nil {
+			continue
+		}
+		if j == 2 {
+			runStore.Complete(ctx, run.ID, "ALERT: 7 queries running >30s (threshold: 5). Likely caused by missing index on orders.customer_id.", nil, true)
+		} else {
+			runStore.Complete(ctx, run.ID, "OK: 2 queries running >30s (threshold: 5).", nil, false)
+		}
+	}
+
+	// [9] Error Log Volume — alert triggered
+	for j := 0; j < 4; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[9])
+		if err != nil {
+			continue
+		}
+		if j >= 2 {
+			runStore.Complete(ctx, run.ID, "ALERT: 73 ERROR logs in last 5m (threshold: 50). Top service: payment-api (41 errors).", nil, true)
+		} else {
+			runStore.Complete(ctx, run.ID, "OK: 12 ERROR logs in last 5m (threshold: 50).", nil, false)
+		}
+	}
+
+	// [10] Payment Service Timeouts — some alerts
+	for j := 0; j < 6; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[10])
+		if err != nil {
+			continue
+		}
+		if j >= 4 {
+			runStore.Complete(ctx, run.ID, "ALERT: 14 timeout errors from payment-api in last 5m (threshold: 10).", nil, true)
+		} else {
+			runStore.Complete(ctx, run.ID, "OK: 2 timeout errors from payment-api in last 5m (threshold: 10).", nil, false)
+		}
+	}
+
+	// [11] Gateway 503 — clean
+	for j := 0; j < 3; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[11])
+		if err != nil {
+			continue
+		}
+		runStore.Complete(ctx, run.ID, "OK: 3 gateway 503 errors in last 15m (threshold: 20).", nil, false)
+	}
+
+	// [12] Primary DB Health — mostly healthy, one failure
+	for j := 0; j < 5; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[12])
+		if err != nil {
+			continue
+		}
+		if j == 2 {
+			runStore.Complete(ctx, run.ID, "ALERT: Primary DB ping latency 3,200ms exceeds threshold 2,000ms.", nil, true)
+		} else {
+			runStore.Complete(ctx, run.ID, "OK: Primary DB connection healthy. Latency: 45ms.", nil, false)
+		}
+	}
+
+	// [13] Replica DB Health — clean
+	for j := 0; j < 3; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[13])
+		if err != nil {
+			continue
+		}
+		runStore.Complete(ctx, run.ID, "OK: Replica DB connection healthy.", nil, false)
+	}
+
+	// [14] Staging DB Connectivity — one error
+	for j := 0; j < 3; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[14])
+		if err != nil {
+			continue
+		}
+		if j == 0 {
+			runStore.Fail(ctx, run.ID, "Connection refused: staging DB at 10.1.3.10:5432")
+		} else {
+			runStore.Complete(ctx, run.ID, "OK: Staging DB connection healthy. Latency: 120ms.", nil, false)
+		}
+	}
+
+	log.Println("  watcher runs: created (including adaptive-state and rule-monitor scenarios)")
 
 	// --- Alerts ---
 	alertStore := store.NewAlertStore(deps.db)
@@ -413,6 +691,47 @@ func runSeed() error {
 			Summary:     "notification-service is experiencing SMTP connection refused errors. 15 email delivery failures in the last hour.",
 			Environment: "production",
 			Severity:    store.SeverityWarning,
+		},
+		// Rule monitor alerts
+		{
+			WatcherID:   &watcherIDs[6],
+			Title:       "Idle-in-transaction sessions detected",
+			Summary:     "5 sessions idle-in-transaction for >5 minutes (threshold: 3). Longest running: 12 minutes on table pg_catalog.pg_class. Consider checking for uncommitted transactions.",
+			Environment: "production",
+			Severity:    store.SeverityWarning,
+			Details:     json.RawMessage(`{"current_value":5,"threshold":3,"source":"query"}`),
+		},
+		{
+			WatcherID:   &watcherIDs[8],
+			Title:       "Long-running queries detected",
+			Summary:     "7 queries running >30 seconds (threshold: 5). Most are SELECT queries hitting the orders table without using the customer_id index.",
+			Environment: "production",
+			Severity:    store.SeverityWarning,
+			Details:     json.RawMessage(`{"current_value":7,"threshold":5,"source":"query"}`),
+		},
+		{
+			WatcherID:   &watcherIDs[9],
+			Title:       "Error log volume spike",
+			Summary:     "73 ERROR logs in last 5 minutes (threshold: 50). Top contributor: payment-api with 41 errors, mostly connection timeouts to upstream payment gateway.",
+			Environment: "production",
+			Severity:    store.SeverityWarning,
+			Details:     json.RawMessage(`{"current_value":73,"threshold":50,"source":"logs","top_service":"payment-api"}`),
+		},
+		{
+			WatcherID:   &watcherIDs[10],
+			Title:       "Payment service timeout surge",
+			Summary:     "14 timeout errors from payment-api in last 5 minutes (threshold: 10). Upstream payment-gateway appears to be experiencing degraded performance.",
+			Environment: "production",
+			Severity:    store.SeverityCritical,
+			Details:     json.RawMessage(`{"current_value":14,"threshold":10,"source":"logs","service":"payment-api"}`),
+		},
+		{
+			WatcherID:   &watcherIDs[12],
+			Title:       "Primary DB high latency",
+			Summary:     "Primary database ping latency spiked to 3,200ms (threshold: 2,000ms). This may indicate disk I/O saturation or lock contention.",
+			Environment: "production",
+			Severity:    store.SeverityCritical,
+			Details:     json.RawMessage(`{"current_value":3200,"threshold":2000,"source":"health","check":"latency"}`),
 		},
 	}
 
