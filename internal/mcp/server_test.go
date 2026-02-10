@@ -485,6 +485,11 @@ func (m *mockWatcherRunStore) List(_ context.Context, watcherID uuid.UUID, limit
 	return result, nil
 }
 func (m *mockWatcherRunStore) GetByID(_ context.Context, id uuid.UUID) (*store.WatcherRun, error) {
+	for i := range m.runs {
+		if m.runs[i].ID == id {
+			return &m.runs[i], nil
+		}
+	}
 	return nil, store.ErrNotFound
 }
 func (m *mockWatcherRunStore) Prune(_ context.Context, _ time.Duration) (int64, error) {
