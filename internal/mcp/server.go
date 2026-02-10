@@ -183,7 +183,14 @@ func addWriteTools(s *server.MCPServer, deps Deps) {
 	if deps.WatcherStore != nil {
 		s.AddTool(
 			mcp.NewTool("create_monitor",
-				mcp.WithDescription("Create a new monitor. Use monitor_type=ai for AI-powered analysis or monitor_type=rule for threshold-based checks"),
+				mcp.WithDescription(`Create a new monitor. Use monitor_type=ai for AI-powered analysis or monitor_type=rule for threshold-based checks.
+
+Natural language examples for rule monitors:
+- "Alert when active connections exceed 80" → rule_config: {"source":"query","query":"SELECT count(*) FROM pg_stat_activity WHERE state='active'","metric":"value","operator":"gt","threshold":80}
+- "Alert when dead tuples on users table exceed 10000" → rule_config: {"source":"query","query":"SELECT n_dead_tup FROM pg_stat_user_tables WHERE relname='users'","metric":"value","operator":"gt","threshold":10000}
+- "Alert when slow queries exceed 5 seconds average" → rule_config: {"source":"query","query":"SELECT mean_exec_time FROM pg_stat_statements ORDER BY mean_exec_time DESC LIMIT 1","metric":"value","operator":"gt","threshold":5000}
+
+Use db_query_stats, db_activity, and db_table_stats to discover what to monitor, then use this tool to create the monitor.`),
 				mcp.WithString("title", mcp.Required(), mcp.Description("Title for the monitor")),
 				mcp.WithString("monitor_type", mcp.Description("Monitor type: ai (default) or rule")),
 				mcp.WithString("description", mcp.Description("Instructions for the AI agent (required for ai monitors)")),
@@ -207,7 +214,11 @@ func addWriteTools(s *server.MCPServer, deps Deps) {
 	if deps.RuleEvaluator != nil {
 		s.AddTool(
 			mcp.NewTool("preview_monitor",
-				mcp.WithDescription("Run a rule monitor evaluation ad-hoc without saving. Returns the current value and whether it would trigger an alert"),
+				mcp.WithDescription(`Run a rule monitor evaluation ad-hoc without saving. Returns the current value and whether it would trigger an alert.
+
+Use this to test a rule_config before creating a monitor. The query in rule_config must be a valid SELECT statement. For example: {"source":"query","query":"SELECT count(*) FROM pg_stat_activity WHERE state='active'","metric":"value","operator":"gt","threshold":80}
+
+Tip: Use db_query_stats, db_activity, or db_table_stats first to understand the database, then preview a monitor rule to verify it works before creating it.`),
 				mcp.WithString("rule_config", mcp.Required(), mcp.Description("JSON object: {source, query, metric, operator, threshold, filter, checks, latency_threshold_ms}")),
 				mcp.WithString("data_source_id", mcp.Description("Data source ID for query/health rule monitors")),
 			),
