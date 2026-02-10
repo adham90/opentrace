@@ -893,7 +893,7 @@ select:focus { outline: none; border-color: var(--green); }
 /* ===== Overview Page ===== */
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 12px;
   margin-bottom: 24px;
 }
@@ -1143,4 +1143,211 @@ select:focus { outline: none; border-color: var(--green); }
 .form-tips ul li {
   margin-bottom: 3px;
   font-size: 11px;
+}
+
+/* ===== Servers Page ===== */
+.server-list { display: flex; flex-direction: column; gap: 8px; }
+
+.server-card {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s;
+}
+.server-card:hover { border-color: var(--text-dim); text-decoration: none; }
+
+.server-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.server-hostname {
+  color: var(--text-bright);
+  font-weight: 600;
+  flex: 1;
+}
+
+.server-card-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.server-card-metrics {
+  font-size: 11px;
+  color: var(--cyan);
+}
+
+/* ===== Server Detail Page ===== */
+.server-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px 24px;
+  font-size: 12px;
+}
+
+.metric-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.metric-chart-panel {
+  padding: 12px;
+}
+
+.metric-chart-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.sparkline-canvas {
+  width: 100%;
+  height: 80px;
+  display: block;
+}
+
+.metric-chart-value {
+  font-size: 11px;
+  margin-top: 6px;
+}
+
+/* ===== Watcher Trace (Live + Stored) ===== */
+.trace-container {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  margin-top: 8px;
+  padding: 8px;
+}
+
+.trace-events {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trace-event {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  word-break: break-word;
+  padding: 2px 0;
+}
+
+.trace-event-new {
+  animation: trace-slide-in 0.2s ease-out;
+}
+
+@keyframes trace-slide-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.trace-label {
+  font-weight: 700;
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+.trace-label::before { content: '['; }
+.trace-label::after { content: ']'; }
+
+.trace-label-tool { color: var(--cyan); }
+.trace-label-result { color: var(--green); }
+.trace-label-final { color: var(--text-bright); }
+.trace-label-final::before { content: ''; }
+.trace-label-final::after { content: ''; }
+.trace-label-error { color: var(--red); }
+
+.trace-thinking { color: var(--text-dim); }
+
+.trace-tool-name {
+  color: var(--cyan);
+  font-weight: 600;
+}
+
+.trace-args {
+  color: var(--text-dim);
+  font-size: 10px;
+  max-width: 100%;
+  overflow-wrap: break-word;
+}
+
+.trace-result-content {
+  color: var(--green);
+  margin: 2px 0;
+  padding: 4px 8px;
+  border-left: 2px solid var(--green-dim);
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  line-height: 1.4;
+  width: 100%;
+}
+
+.trace-final-alert {
+  color: var(--red);
+  border-left: 2px solid var(--red);
+  padding-left: 8px;
+}
+
+.trace-final-ok {
+  color: var(--green);
+  border-left: 2px solid var(--green);
+  padding-left: 8px;
+}
+
+.trace-error-content {
+  color: var(--red);
+}
+
+.trace-cursor {
+  display: inline-block;
+  color: var(--green);
+  animation: trace-blink 1s step-end infinite;
+  margin-left: 4px;
+}
+
+@keyframes trace-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.trace-toggle {
+  margin-top: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.trace-expand-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.trace-expand-btn:hover { color: var(--green); }
+
+.trace-stored {
+  margin-top: 8px;
 }

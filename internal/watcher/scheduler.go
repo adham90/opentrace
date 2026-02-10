@@ -20,6 +20,7 @@ type SchedulerOpts struct {
 	Registry      *connector.Registry
 	ProviderCache *llm.ProviderCache
 	AgentCfg      agent.RunConfig
+	EventHub      *EventHub
 	PollInterval  time.Duration // how often to check for due watchers (default: 30s)
 	MaxConcurrent int           // max concurrent watcher runs (default: 3)
 }
@@ -52,6 +53,7 @@ func NewScheduler(opts SchedulerOpts) *Scheduler {
 		opts.Registry,
 		opts.ProviderCache,
 		opts.AgentCfg,
+		opts.EventHub,
 	)
 
 	return &Scheduler{

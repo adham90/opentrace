@@ -29,11 +29,15 @@ type Server struct {
 	watcherStore  store.WatcherStore
 	runStore      store.WatcherRunStore
 	alertStore    store.AlertStore
+	serverStore   store.ServerStore
+	metricStore   store.MetricStore
 	registry      *connector.Registry
 	cfg           *config.Config
 	executor      *watcher.Executor
+	eventHub      *watcher.EventHub
 	modelRegistry *llm.ModelRegistry
 	logsConnMu    sync.Mutex
+	metricsConnMu sync.Mutex
 }
 
 // ServerDeps holds all dependencies for the web server.
@@ -43,9 +47,12 @@ type ServerDeps struct {
 	WatcherStore  store.WatcherStore
 	RunStore      store.WatcherRunStore
 	AlertStore    store.AlertStore
+	ServerStore   store.ServerStore
+	MetricStore   store.MetricStore
 	Registry      *connector.Registry
 	Cfg           *config.Config
 	Executor      *watcher.Executor
+	EventHub      *watcher.EventHub
 	ModelRegistry *llm.ModelRegistry
 }
 
@@ -67,9 +74,12 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		watcherStore:  deps.WatcherStore,
 		runStore:      deps.RunStore,
 		alertStore:    deps.AlertStore,
+		serverStore:   deps.ServerStore,
+		metricStore:   deps.MetricStore,
 		registry:      deps.Registry,
 		cfg:           deps.Cfg,
 		executor:      deps.Executor,
+		eventHub:      deps.EventHub,
 		modelRegistry: deps.ModelRegistry,
 	}
 
@@ -100,6 +110,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Get("/logs", srv.handleLogsPage)
 	router.Get("/api/logs/poll", srv.handleLogsPoll)
 	router.Get("/connectors", srv.handleConnectorsPage)
+	router.Get("/servers", srv.handleServersPage)
+	router.Get("/servers/{id}", srv.handleServerDetailPage)
 	router.Get("/setup", srv.handleSetupPage)
 
 	// API
@@ -130,12 +142,23 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Post("/watchers/{id}/run", srv.handleRunWatcherNow)
 		r.Get("/watchers/{id}/runs", srv.handleListWatcherRuns)
 		r.Get("/watchers/{id}/runs/{runId}", srv.handleGetWatcherRun)
+		r.Get("/watchers/{id}/runs/{runId}/events", srv.handleRunEvents)
 
 		// Alert API
 		r.Get("/alerts", srv.handleListAlerts)
 		r.Get("/alerts/count", srv.handleAlertCount)
 		r.Post("/alerts/{id}/read", srv.handleMarkAlertRead)
 		r.Post("/alerts/{id}/dismiss", srv.handleDismissAlert)
+
+		// Server metrics API
+		if srv.serverStore != nil && srv.metricStore != nil {
+			r.With(APIKeyAuth(apiKey)).Post("/servers/register", srv.handleRegisterServer)
+			r.Get("/servers", srv.handleListServers)
+			r.Get("/servers/{id}", srv.handleGetServer)
+			r.Delete("/servers/{id}", srv.handleDeleteServer)
+			r.With(APIKeyAuth(apiKey)).Post("/servers/{id}/metrics", srv.handlePushMetrics)
+			r.Get("/servers/{id}/metrics", srv.handleQueryMetrics)
+		}
 
 		// Overview
 		r.Get("/overview", srv.handleOverviewAPI)

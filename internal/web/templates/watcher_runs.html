@@ -15,6 +15,9 @@
 
 <script>
 var watcherId = '{{.WatcherID}}';
+var activeStreams = {};
+var pollTimer = null;
+var hasRunning = false;
 
 function loadWatcherInfo() {
   fetch('/api/watchers/' + watcherId).then(function(r) { return r.json(); }).then(function(w) {
@@ -31,8 +34,13 @@ function loadRuns() {
     var container = document.getElementById('runs-list');
     if (!runs || runs.length === 0) {
       container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no runs yet</p><p>this watcher has not executed</p></div>';
+      hasRunning = false;
+      schedulePoll();
       return;
     }
+
+    var newHasRunning = false;
+    var currentRunIds = {};
 
     var html = '';
     runs.forEach(function(run) {
@@ -45,23 +53,190 @@ function loadRuns() {
       var alertBadge = run.has_alert ? ' <span class="severity-badge severity-warning">ALERT</span>' : '';
       var time = getTimeAgo(run.started_at);
 
-      html += '<div class="run-card ' + statusClass + '">';
+      html += '<div class="run-card ' + statusClass + '" id="run-' + run.id + '">';
       html += '  <div class="run-header">';
       html += '    <span class="run-status ' + statusClass + '">' + run.status + '</span>';
       html += '    <span class="run-time">' + time + '</span>';
       if (duration) html += '    <span class="run-duration">' + duration + '</span>';
       html += alertBadge;
       html += '  </div>';
-      if (run.summary) {
-        html += '  <div class="run-summary">' + escapeHtml(run.summary).substring(0, 300) + '</div>';
+
+      if (run.status === 'running') {
+        newHasRunning = true;
+        currentRunIds[run.id] = true;
+        html += '  <div class="trace-container" id="trace-' + run.id + '">';
+        html += '    <div class="trace-events" id="trace-events-' + run.id + '"></div>';
+        html += '    <span class="trace-cursor">_</span>';
+        html += '  </div>';
+      } else {
+        if (run.summary) {
+          html += '  <div class="run-summary">' + escapeHtml(run.summary).substring(0, 300) + '</div>';
+        }
+        if (run.error) {
+          html += '  <div class="run-error">' + escapeHtml(run.error) + '</div>';
+        }
+        if (run.details && run.details.length > 0) {
+          html += '  <button class="trace-toggle btn btn-sm" onclick="toggleTrace(this, \'' + run.id + '\')">show trace</button>';
+          html += '  <div class="trace-container trace-stored" id="trace-stored-' + run.id + '" style="display:none"></div>';
+        }
       }
-      if (run.error) {
-        html += '  <div class="run-error">' + escapeHtml(run.error) + '</div>';
-      }
+
       html += '</div>';
     });
     container.innerHTML = html;
+
+    // Clean up stale EventSource connections
+    Object.keys(activeStreams).forEach(function(rid) {
+      if (!currentRunIds[rid]) {
+        activeStreams[rid].close();
+        delete activeStreams[rid];
+      }
+    });
+
+    // Connect SSE for running runs
+    runs.forEach(function(run) {
+      if (run.status === 'running' && !activeStreams[run.id]) {
+        connectSSE(run.id);
+      }
+    });
+
+    hasRunning = newHasRunning;
+    schedulePoll();
   });
+}
+
+function schedulePoll() {
+  if (pollTimer) clearTimeout(pollTimer);
+  var interval = hasRunning ? 3000 : 10000;
+  pollTimer = setTimeout(loadRuns, interval);
+}
+
+function connectSSE(runId) {
+  var url = '/api/watchers/' + watcherId + '/runs/' + runId + '/events';
+  var es = new EventSource(url);
+  var retried = false;
+  activeStreams[runId] = es;
+
+  var traceEl = document.getElementById('trace-events-' + runId);
+  var container = document.getElementById('trace-' + runId);
+  var userScrolled = false;
+
+  if (container) {
+    container.addEventListener('scroll', function() {
+      var atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 30;
+      userScrolled = !atBottom;
+    });
+  }
+
+  es.onmessage = function(e) {
+    if (!traceEl) return;
+    try {
+      var ev = JSON.parse(e.data);
+      var el = renderTraceEvent(ev);
+      traceEl.appendChild(el);
+      if (!userScrolled && container) {
+        container.scrollTop = container.scrollHeight;
+      }
+    } catch(err) {}
+  };
+
+  es.addEventListener('done', function() {
+    es.close();
+    delete activeStreams[runId];
+    // Remove cursor
+    var cursor = container && container.querySelector('.trace-cursor');
+    if (cursor) cursor.remove();
+    // Reload runs after a short delay
+    setTimeout(loadRuns, 500);
+  });
+
+  es.onerror = function() {
+    es.close();
+    delete activeStreams[runId];
+    if (!retried) {
+      retried = true;
+      setTimeout(function() { connectSSE(runId); }, 2000);
+    }
+  };
+}
+
+function renderTraceEvent(ev) {
+  var div = document.createElement('div');
+  div.className = 'trace-event trace-event-new';
+
+  if (ev.type === 'thinking') {
+    div.innerHTML = '<span class="trace-label">thinking</span> ' +
+      '<span class="trace-thinking">' + escapeHtml(ev.content) + '</span>';
+  } else if (ev.type === 'tool_call') {
+    var argsStr = ev.args ? JSON.stringify(ev.args) : '';
+    if (argsStr.length > 200) argsStr = argsStr.substring(0, 200) + '...';
+    div.innerHTML = '<span class="trace-label trace-label-tool">tool</span> ' +
+      '<span class="trace-tool-name">' + escapeHtml(ev.tool_name) + '</span>' +
+      (argsStr ? ' <span class="trace-args">' + escapeHtml(argsStr) + '</span>' : '');
+  } else if (ev.type === 'observation') {
+    var content = ev.content || '';
+    var lines = content.split('\n');
+    var truncated = lines.length > 5;
+    var display = truncated ? lines.slice(0, 5).join('\n') : content;
+    div.innerHTML = '<span class="trace-label trace-label-result">result</span> ' +
+      (ev.tool_name ? '<span class="trace-tool-name">' + escapeHtml(ev.tool_name) + '</span> ' : '') +
+      '<pre class="trace-result-content">' + escapeHtml(display) + '</pre>' +
+      (truncated ? '<button class="trace-expand-btn" onclick="expandResult(this, this.previousElementSibling)">show ' + (lines.length - 5) + ' more lines</button>' : '');
+    div.dataset.fullContent = content;
+  } else if (ev.type === 'final') {
+    var isAlert = /^ALERT/i.test(ev.content);
+    var cls = isAlert ? 'trace-final-alert' : 'trace-final-ok';
+    div.innerHTML = '<span class="trace-label trace-label-final">&gt;&gt;</span> ' +
+      '<span class="' + cls + '">' + escapeHtml(ev.content) + '</span>';
+  } else if (ev.type === 'error') {
+    div.innerHTML = '<span class="trace-label trace-label-error">error</span> ' +
+      '<span class="trace-error-content">' + escapeHtml(ev.content) + '</span>';
+  }
+
+  return div;
+}
+
+function expandResult(btn, pre) {
+  var container = btn.closest('.trace-event');
+  if (container && container.dataset.fullContent) {
+    pre.textContent = container.dataset.fullContent;
+    btn.remove();
+  }
+}
+
+function toggleTrace(btn, runId) {
+  var el = document.getElementById('trace-stored-' + runId);
+  if (!el) return;
+
+  if (el.style.display === 'none') {
+    el.style.display = 'block';
+    btn.textContent = 'hide trace';
+    // Fetch and render stored events on first expand
+    if (!el.dataset.loaded) {
+      el.innerHTML = '<div class="trace-events" style="padding:8px"><span class="text-dim">loading...</span></div>';
+      fetch('/api/watchers/' + watcherId + '/runs/' + runId)
+        .then(function(r) { return r.json(); })
+        .then(function(run) {
+          el.dataset.loaded = '1';
+          var events = [];
+          try { events = JSON.parse(JSON.stringify(run.details || [])); } catch(e) {}
+          if (!events || events.length === 0) {
+            el.innerHTML = '<div class="trace-events" style="padding:8px"><span class="text-dim">no trace data</span></div>';
+            return;
+          }
+          var inner = document.createElement('div');
+          inner.className = 'trace-events';
+          events.forEach(function(ev) {
+            inner.appendChild(renderTraceEvent(ev));
+          });
+          el.innerHTML = '';
+          el.appendChild(inner);
+        });
+    }
+  } else {
+    el.style.display = 'none';
+    btn.textContent = 'show trace';
+  }
 }
 
 function getTimeAgo(dateStr) {

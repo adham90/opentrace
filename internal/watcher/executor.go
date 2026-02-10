@@ -20,6 +20,7 @@ type Executor struct {
 	registry      *connector.Registry
 	providerCache *llm.ProviderCache
 	agentCfg      agent.RunConfig
+	eventHub      *EventHub
 }
 
 // NewExecutor creates a new watcher executor.
@@ -30,6 +31,7 @@ func NewExecutor(
 	registry *connector.Registry,
 	providerCache *llm.ProviderCache,
 	agentCfg agent.RunConfig,
+	eventHub *EventHub,
 ) *Executor {
 	return &Executor{
 		watcherStore:  watcherStore,
@@ -38,6 +40,7 @@ func NewExecutor(
 		registry:      registry,
 		providerCache: providerCache,
 		agentCfg:      agentCfg,
+		eventHub:      eventHub,
 	}
 }
 
@@ -49,6 +52,12 @@ func (e *Executor) Execute(ctx context.Context, w store.Watcher) {
 	if err != nil {
 		log.Printf("watcher %s: failed to create run: %v", w.ID, err)
 		return
+	}
+
+	// Register with EventHub for live streaming
+	if e.eventHub != nil {
+		e.eventHub.Register(run.ID)
+		defer e.eventHub.MarkDone(run.ID)
 	}
 
 	// 2. Get tools from registry
@@ -67,7 +76,8 @@ func (e *Executor) Execute(ctx context.Context, w store.Watcher) {
 	}
 
 	// 4. Build the query from watcher config
-	query := BuildQuery(w, lastRunSummary)
+	hasServers := e.registry.Get(connector.ConnectorServerMetrics) != nil
+	query := BuildQuery(w, lastRunSummary, hasServers)
 
 	// 5. Resolve per-watcher LLM provider
 	provider, err := e.providerCache.Get(w.Model)
@@ -79,13 +89,30 @@ func (e *Executor) Execute(ctx context.Context, w store.Watcher) {
 		return
 	}
 
-	// 6. Run the agent loop with effort-adjusted config
+	// 6. Run the agent loop with effort-adjusted config and event callback
 	runCfg := e.agentCfg
 	effortCfg := EffortSettings(w.Effort)
 	runCfg.MaxSteps = effortCfg.MaxSteps
 	runCfg.MaxToolCalls = effortCfg.MaxToolCalls
+
+	var traceEvents []RunEvent
+	var callback agent.EventCallback
+	if e.eventHub != nil {
+		callback = func(ev agent.Event) {
+			re := RunEvent{
+				Type:     ev.Type,
+				Content:  ev.Content,
+				ToolName: ev.ToolName,
+				Args:     ev.Args,
+				Time:     time.Now(),
+			}
+			traceEvents = append(traceEvents, re)
+			e.eventHub.Publish(run.ID, re)
+		}
+	}
+
 	ag := agent.New(provider, runCfg)
-	answer, err := ag.Run(ctx, query, tools)
+	answer, err := ag.RunWithCallback(ctx, query, tools, callback, nil)
 	if err != nil {
 		errMsg := fmt.Sprintf("agent error: %v", err)
 		log.Printf("watcher %s (%s): %s", w.ID, w.Title, errMsg)
@@ -97,8 +124,12 @@ func (e *Executor) Execute(ctx context.Context, w store.Watcher) {
 	// 7. Evaluate findings
 	hasAlert := EvaluateFindings(answer)
 
-	// 8. Complete the run
-	if err := e.runStore.Complete(ctx, run.ID, answer, nil, hasAlert); err != nil {
+	// 8. Complete the run (store trace events as details)
+	var details any
+	if len(traceEvents) > 0 {
+		details = traceEvents
+	}
+	if err := e.runStore.Complete(ctx, run.ID, answer, details, hasAlert); err != nil {
 		log.Printf("watcher %s: failed to complete run: %v", w.ID, err)
 	}
 

@@ -17,6 +17,7 @@ import (
 	"github.com/adham90/opentrace/internal/llm"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/vmagent"
 	"github.com/adham90/opentrace/internal/watcher"
 	"github.com/adham90/opentrace/internal/web"
 )
@@ -28,14 +29,23 @@ type appDeps struct {
 	logStore     store.LogStore
 	watcherStore store.WatcherStore
 	alertStore   store.AlertStore
+	serverStore  store.ServerStore
+	metricStore  store.MetricStore
 	registry     *connector.Registry
 	cfg          *config.Config
 }
 
 func main() {
 	var err error
-	if len(os.Args) > 1 && os.Args[1] == "mcp" {
-		err = runMCP()
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "mcp":
+			err = runMCP()
+		case "agent":
+			err = runAgent()
+		default:
+			err = run()
+		}
 	} else {
 		err = run()
 	}
@@ -79,6 +89,8 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	logStore := store.NewLogStore(db)
 	watcherStore := store.NewWatcherStore(db)
 	alertStore := store.NewAlertStore(db)
+	serverStore := store.NewServerStore(db)
+	metricStore := store.NewMetricStore(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
@@ -90,6 +102,8 @@ func initApp(ctx context.Context) (*appDeps, error) {
 		logStore:     logStore,
 		watcherStore: watcherStore,
 		alertStore:   alertStore,
+		serverStore:  serverStore,
+		metricStore:  metricStore,
 		registry:     registry,
 		cfg:          cfg,
 	}, nil
@@ -112,7 +126,33 @@ func runMCP() error {
 		Registry:     deps.registry,
 		WatcherStore: deps.watcherStore,
 		AlertStore:   deps.alertStore,
+		ServerStore:  deps.serverStore,
+		MetricStore:  deps.metricStore,
 	})
+}
+
+// runAgent starts the VM metrics collection agent.
+func runAgent() error {
+	config.LoadEnvFile(".env")
+
+	cfg, err := vmagent.LoadConfig()
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Graceful shutdown
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-done
+		cancel()
+	}()
+
+	a := vmagent.New(cfg)
+	return a.Run(ctx)
 }
 
 func run() error {
@@ -133,6 +173,7 @@ func run() error {
 
 	// Create watcher run store and executor
 	runStore := store.NewWatcherRunStore(deps.db)
+	eventHub := watcher.NewEventHub()
 	executor := watcher.NewExecutor(
 		deps.watcherStore,
 		runStore,
@@ -144,6 +185,7 @@ func run() error {
 			MaxToolCalls:        deps.cfg.MaxToolCalls,
 			MaxObservationBytes: deps.cfg.MaxObservationBytes,
 		},
+		eventHub,
 	)
 
 	// Create server
@@ -153,9 +195,12 @@ func run() error {
 		WatcherStore:  deps.watcherStore,
 		RunStore:      runStore,
 		AlertStore:    deps.alertStore,
+		ServerStore:   deps.serverStore,
+		MetricStore:   deps.metricStore,
 		Registry:      deps.registry,
 		Cfg:           deps.cfg,
 		Executor:      executor,
+		EventHub:      eventHub,
 		ModelRegistry: modelRegistry,
 	})
 
@@ -167,6 +212,40 @@ func run() error {
 	// Graceful shutdown
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
+
+	// Background: mark stale servers offline every 60s
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			if n, err := deps.serverStore.MarkStaleOffline(context.Background(), 2*time.Minute); err != nil {
+				log.Printf("WARN: MarkStaleOffline: %v", err)
+			} else if n > 0 {
+				log.Printf("marked %d stale server(s) offline", n)
+			}
+		}
+	}()
+
+	// Background: prune old metrics every hour
+	go func() {
+		retentionDays := 7
+		if v := os.Getenv("OPENTRACE_METRIC_RETENTION_DAYS"); v != "" {
+			var d int
+			if _, err := fmt.Sscanf(v, "%d", &d); err == nil && d > 0 {
+				retentionDays = d
+			}
+		}
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			retention := time.Duration(retentionDays) * 24 * time.Hour
+			if n, err := deps.metricStore.Prune(context.Background(), retention); err != nil {
+				log.Printf("WARN: metric prune: %v", err)
+			} else if n > 0 {
+				log.Printf("pruned %d old metric(s)", n)
+			}
+		}
+	}()
 
 	go func() {
 		log.Printf("listening on %s", deps.cfg.ListenAddr)

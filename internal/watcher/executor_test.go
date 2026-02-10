@@ -37,7 +37,7 @@ func TestExecutor_AlertTriggered(t *testing.T) {
 		MaxSteps:            5,
 		MaxToolCalls:        3,
 		MaxObservationBytes: 4096,
-	})
+	}, nil)
 
 	w := store.Watcher{
 		ID:              uuid.New(),
@@ -98,7 +98,7 @@ func TestExecutor_NoAlert(t *testing.T) {
 		MaxSteps:            5,
 		MaxToolCalls:        3,
 		MaxObservationBytes: 4096,
-	})
+	}, nil)
 
 	w := store.Watcher{
 		ID:              uuid.New(),
@@ -141,7 +141,7 @@ func TestExecutor_AgentError(t *testing.T) {
 		MaxSteps:            5,
 		MaxToolCalls:        3,
 		MaxObservationBytes: 4096,
-	})
+	}, nil)
 
 	w := store.Watcher{
 		ID:              uuid.New(),

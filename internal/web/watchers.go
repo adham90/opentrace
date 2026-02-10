@@ -1,8 +1,10 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -185,9 +187,10 @@ func (s *Server) handleRunWatcherNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Trigger immediate execution in background
+	// Trigger immediate execution in background.
+	// Use context.Background() — r.Context() is cancelled when the HTTP response is sent.
 	if s.executor != nil {
-		go s.executor.Execute(r.Context(), *watcher)
+		go s.executor.Execute(context.Background(), *watcher)
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "triggered"})
@@ -235,4 +238,86 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		models = llm.AvailableProviders(s.cfg)
 	}
 	writeJSON(w, http.StatusOK, models)
+}
+
+// handleRunEvents streams run events via SSE for live trace viewing.
+func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
+	runID, err := uuid.Parse(chi.URLParam(r, "runId"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid run ID")
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	// Try to subscribe to live events
+	if s.eventHub != nil {
+		ch, buffered, unsub, found := s.eventHub.Subscribe(runID)
+		if found {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			w.Header().Set("X-Accel-Buffering", "no")
+
+			// Send buffered events for catch-up
+			for _, ev := range buffered {
+				data, _ := json.Marshal(ev)
+				fmt.Fprintf(w, "data: %s\n\n", data)
+			}
+			flusher.Flush()
+
+			defer unsub()
+
+			// Stream new events
+			for {
+				select {
+				case ev, open := <-ch:
+					if !open {
+						// Run complete
+						fmt.Fprintf(w, "event: done\ndata: {}\n\n")
+						flusher.Flush()
+						return
+					}
+					data, _ := json.Marshal(ev)
+					fmt.Fprintf(w, "data: %s\n\n", data)
+					flusher.Flush()
+				case <-r.Context().Done():
+					return
+				}
+			}
+		}
+	}
+
+	// Run not in hub — check if it has stored trace details
+	run, err := s.runStore.GetByID(r.Context(), runID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "run not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to get run")
+		}
+		return
+	}
+
+	// Return stored events as SSE (all at once) + done
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	if len(run.Details) > 0 {
+		// Details is a JSON array of RunEvent
+		var events []json.RawMessage
+		if json.Unmarshal(run.Details, &events) == nil {
+			for _, ev := range events {
+				fmt.Fprintf(w, "data: %s\n\n", ev)
+			}
+		}
+	}
+	fmt.Fprintf(w, "event: done\ndata: {}\n\n")
+	flusher.Flush()
 }
