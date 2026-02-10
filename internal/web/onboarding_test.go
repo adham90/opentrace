@@ -86,8 +86,13 @@ func TestOnboardingSubmit_CreatesAdminAndAPIKey(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.Router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 (step 2), got %d", rec.Code)
+	// POST redirects to step 2 (PRG pattern)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected 302 redirect, got %d", rec.Code)
+	}
+	loc := rec.Header().Get("Location")
+	if loc != "/onboarding?step=2" {
+		t.Fatalf("expected redirect to /onboarding?step=2, got %s", loc)
 	}
 
 	// User was created
@@ -107,20 +112,28 @@ func TestOnboardingSubmit_CreatesAdminAndAPIKey(t *testing.T) {
 
 	// Session cookie was set
 	cookies := rec.Result().Cookies()
-	found := false
+	var sessionCookie *http.Cookie
 	for _, c := range cookies {
 		if c.Name == sessionCookieName && c.Value != "" {
-			found = true
+			sessionCookie = c
 		}
 	}
-	if !found {
+	if sessionCookie == nil {
 		t.Fatal("expected session cookie to be set")
 	}
 
-	// Response body contains the API key
-	body := rec.Body.String()
+	// Follow the redirect to step 2 — should show API key
+	req2 := httptest.NewRequest(http.MethodGet, "/onboarding?step=2", nil)
+	req2.AddCookie(sessionCookie)
+	rec2 := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected 200 for step 2, got %d", rec2.Code)
+	}
+	body := rec2.Body.String()
 	if !strings.Contains(body, key) {
-		t.Fatal("expected API key to appear in the response body")
+		t.Fatal("expected API key to appear in step 2 response body")
 	}
 }
 

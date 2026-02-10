@@ -46,6 +46,8 @@ func main() {
 			err = runMCP()
 		case "agent":
 			err = runAgent()
+		case "seed":
+			err = runSeed()
 		default:
 			err = run()
 		}

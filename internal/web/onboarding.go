@@ -19,10 +19,14 @@ type onboardingData struct {
 }
 
 func (s *Server) handleOnboardingPage(w http.ResponseWriter, r *http.Request) {
-	// If users already exist, redirect to home
 	if s.userStore != nil {
 		count, err := s.userStore.Count(r.Context())
 		if err == nil && count > 0 {
+			// Step 2: user just created, show API key + setup instructions
+			if r.URL.Query().Get("step") == "2" && UserFromContext(r.Context()) != nil {
+				s.renderOnboardingStep2(w, r)
+				return
+			}
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
 		}
@@ -124,7 +128,11 @@ func (s *Server) handleOnboardingSubmit(w http.ResponseWriter, r *http.Request) 
 		setSessionCookie(w, token, int(sessionDuration.Seconds()))
 	}
 
-	// Build base URL from request
+	// PRG: redirect to step 2 so the URL reflects the state
+	http.Redirect(w, r, "/onboarding?step=2", http.StatusFound)
+}
+
+func (s *Server) renderOnboardingStep2(w http.ResponseWriter, r *http.Request) {
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
@@ -139,7 +147,7 @@ func (s *Server) handleOnboardingSubmit(w http.ResponseWriter, r *http.Request) 
 		Step:     2,
 		BaseURL:  baseURL,
 	}
-	data.pageData.APIKey = apiKey
+	data.pageData.APIKey = s.getEffectiveAPIKey(r.Context())
 
 	tmpl := s.getTemplate(onboardingTmpl,
 		"internal/web/templates/layout_minimal.html",

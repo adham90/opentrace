@@ -1,6 +1,6 @@
 {{define "content"}}
 <div class="auth-page">
-  <div class="auth-card" style="max-width:520px">
+  <div class="auth-card" style="max-width:{{if eq .Step 2}}700px{{else}}520px{{end}}">
     {{if eq .Step 1}}
     <h1><span class="prompt">$</span> setup</h1>
     <p class="help-text" style="margin-bottom:1.5rem">Welcome to OpenTrace. Create your admin account to get started.</p>
