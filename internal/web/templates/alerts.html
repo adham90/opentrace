@@ -214,23 +214,26 @@ function toggleAlert(el) {
 }
 
 function markRead(id) {
-  fetch('/api/alerts/' + id + '/read', { method: 'POST' }).then(function() {
+  fetch('/api/alerts/' + id + '/read', { method: 'POST' }).then(function(r) {
+    if (r.ok) showToast('Alert marked as read', 'info');
     loadAlerts();
-  });
+  }).catch(function() { showToast('Failed to mark alert', 'error'); });
 }
 
 function markAllRead() {
   var url = '/api/alerts/read-all';
   url += (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '');
-  fetch(url, { method: 'POST' }).then(function() {
+  fetch(url, { method: 'POST' }).then(function(r) {
+    if (r.ok) showToast('All alerts marked as read', 'success');
     loadAlerts();
-  });
+  }).catch(function() { showToast('Failed to mark alerts', 'error'); });
 }
 
 function dismissAlert(id) {
-  fetch('/api/alerts/' + id + '/dismiss', { method: 'POST' }).then(function() {
+  fetch('/api/alerts/' + id + '/dismiss', { method: 'POST' }).then(function(r) {
+    if (r.ok) showToast('Alert dismissed', 'info');
     loadAlerts();
-  });
+  }).catch(function() { showToast('Failed to dismiss alert', 'error'); });
 }
 
 function updateBadge() {

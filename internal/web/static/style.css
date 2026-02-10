@@ -1172,6 +1172,104 @@ select:focus { outline: none; border-color: var(--green); }
 .form-grid .form-group { margin-bottom: 0; }
 .form-grid .form-group.full-width { grid-column: 1 / -1; }
 
+/* ===== Toast Notifications ===== */
+.toast-container {
+  position: fixed;
+  top: calc(var(--topbar-height) + 12px);
+  right: 16px;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  max-width: 420px;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  pointer-events: auto;
+  animation: toast-in 0.25s ease-out;
+  word-break: break-word;
+}
+
+.toast-removing {
+  animation: toast-out 0.2s ease-in forwards;
+}
+
+.toast-icon {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.toast-body { flex: 1; }
+
+.toast-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+  font-family: var(--font-mono);
+}
+.toast-close:hover { color: var(--text-bright); }
+
+.toast-success { border-color: var(--green-dim); }
+.toast-success .toast-icon { color: var(--green); }
+.toast-error { border-color: var(--red-dim); }
+.toast-error .toast-icon { color: var(--red); }
+.toast-info { border-color: var(--blue-dim); }
+.toast-info .toast-icon { color: var(--blue); }
+.toast-warning { border-color: var(--yellow-dim); }
+.toast-warning .toast-icon { color: var(--yellow); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(20px); }
+}
+
+/* ===== Form Validation ===== */
+.form-error {
+  font-size: 11px;
+  color: var(--red);
+  margin-top: 3px;
+  line-height: 1.3;
+  display: none;
+}
+
+.input-invalid {
+  border-color: var(--red) !important;
+}
+
+.input-valid {
+  border-color: var(--green) !important;
+}
+
+/* ===== Button Loading State ===== */
+.btn-loading {
+  opacity: 0.7;
+  pointer-events: none;
+  position: relative;
+}
+
 /* ===== Utilities ===== */
 .mt-8 { margin-top: 8px; }
 .mt-16 { margin-top: 16px; }

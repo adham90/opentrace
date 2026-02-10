@@ -765,14 +765,34 @@ function runPreview() {
     btn.disabled = false; btn.textContent = 'Run Preview';
     result.innerHTML = '<span style="color:var(--red)">Preview failed</span>';
     result.style.display = '';
+    showToast('Preview failed — check your query and data source', 'error');
   });
 }
 
 function saveRuleMonitor(e) {
   e.preventDefault();
-  var id = document.getElementById('rule-watcher-id').value;
+  var titleInput = document.getElementById('rule-title');
   var source = document.getElementById('rule-source').value;
+
+  // Validate required fields
+  var valid = true;
+  if (!validateField(titleInput, [{required: true, message: 'Monitor name is required'}, {minLength: 3, message: 'Name must be at least 3 characters'}])) valid = false;
+
+  if (source === 'query') {
+    var dsInput = document.getElementById('rule-datasource');
+    var queryInput = document.getElementById('rule-query');
+    if (!dsInput.value) { showToast('Please select a data source', 'error'); valid = false; }
+    if (!validateField(queryInput, [{required: true, message: 'SQL query is required'}])) valid = false;
+  } else if (source === 'health') {
+    var hdsInput = document.getElementById('rule-health-datasource');
+    if (!hdsInput.value) { showToast('Please select a data source', 'error'); valid = false; }
+  }
+  if (!valid) return;
+
+  var id = document.getElementById('rule-watcher-id').value;
   var dsId = source === 'health' ? document.getElementById('rule-health-datasource').value : document.getElementById('rule-datasource').value;
+  var btn = document.getElementById('rule-save-btn');
+  setButtonLoading(btn, true, 'saving...');
 
   var schedule = (document.getElementById('rule-schedule') || {}).value || '';
   var body = {
@@ -796,9 +816,14 @@ function saveRuleMonitor(e) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body)
   }).then(function(resp) {
-    if (!resp.ok) return resp.json().then(function(d) { alert(d.error || 'Error saving monitor'); });
+    if (!resp.ok) return resp.json().then(function(d) { setButtonLoading(btn, false); showToast(d.error || 'Error saving monitor', 'error'); });
+    setButtonLoading(btn, false);
+    showToast(id ? 'Monitor updated' : 'Monitor created', 'success');
     hideRuleModal();
     loadWatchers();
+  }).catch(function() {
+    setButtonLoading(btn, false);
+    showToast('Network error — could not save monitor', 'error');
   });
 }
 
@@ -873,7 +898,19 @@ function toggleWebhook() {
 
 function saveWatcher(e) {
   e.preventDefault();
+  var titleInput = document.getElementById('watcher-title');
+  var descInput = document.getElementById('watcher-description');
+
+  // Validate required fields
+  var valid = true;
+  if (!validateField(titleInput, [{required: true, message: 'Monitor name is required'}, {minLength: 3, message: 'Name must be at least 3 characters'}])) valid = false;
+  if (!validateField(descInput, [{required: true, message: 'Analysis instructions are required'}, {minLength: 10, message: 'Please provide more detailed instructions'}])) valid = false;
+  if (!valid) return;
+
   var id = document.getElementById('watcher-id').value;
+  var btn = document.getElementById('modal-save-btn');
+  setButtonLoading(btn, true, 'saving...');
+
   var filters = {};
   var svc = document.getElementById('filter-service').value;
   var lvl = document.getElementById('filter-level').value;
@@ -915,9 +952,14 @@ function saveWatcher(e) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body)
   }).then(function(resp) {
-    if (!resp.ok) return resp.json().then(function(d) { alert(d.error || 'Error saving monitor'); });
+    if (!resp.ok) return resp.json().then(function(d) { setButtonLoading(btn, false); showToast(d.error || 'Error saving monitor', 'error'); });
+    setButtonLoading(btn, false);
+    showToast(id ? 'Monitor updated' : 'Monitor created', 'success');
     hideModal();
     loadWatchers();
+  }).catch(function() {
+    setButtonLoading(btn, false);
+    showToast('Network error — could not save monitor', 'error');
   });
 }
 
@@ -970,20 +1012,36 @@ function editWatcher(id) {
 }
 
 function pauseWatcher(id) {
-  fetch('/api/watchers/' + id + '/pause', { method: 'POST' }).then(function() { loadWatchers(); });
+  fetch('/api/watchers/' + id + '/pause', { method: 'POST' }).then(function(r) {
+    if (r.ok) showToast('Monitor paused', 'info');
+    else showToast('Failed to pause monitor', 'error');
+    loadWatchers();
+  }).catch(function() { showToast('Network error', 'error'); });
 }
 
 function resumeWatcher(id) {
-  fetch('/api/watchers/' + id + '/resume', { method: 'POST' }).then(function() { loadWatchers(); });
+  fetch('/api/watchers/' + id + '/resume', { method: 'POST' }).then(function(r) {
+    if (r.ok) showToast('Monitor resumed', 'success');
+    else showToast('Failed to resume monitor', 'error');
+    loadWatchers();
+  }).catch(function() { showToast('Network error', 'error'); });
 }
 
 function runNow(id) {
-  fetch('/api/watchers/' + id + '/run', { method: 'POST' }).then(function() { loadWatchers(); });
+  showToast('Monitor run triggered', 'info');
+  fetch('/api/watchers/' + id + '/run', { method: 'POST' }).then(function(r) {
+    if (!r.ok) showToast('Failed to trigger run', 'error');
+    loadWatchers();
+  }).catch(function() { showToast('Network error', 'error'); });
 }
 
 function deleteWatcher(id) {
   if (!confirm('Delete this monitor?')) return;
-  fetch('/api/watchers/' + id, { method: 'DELETE' }).then(function() { loadWatchers(); });
+  fetch('/api/watchers/' + id, { method: 'DELETE' }).then(function(r) {
+    if (r.ok) showToast('Monitor deleted', 'success');
+    else showToast('Failed to delete monitor', 'error');
+    loadWatchers();
+  }).catch(function() { showToast('Network error', 'error'); });
 }
 
 function getTimeAgo(dateStr) {

@@ -76,6 +76,7 @@
       </div>
     </div>
   </header>
+  <div class="toast-container" id="toast-container"></div>
   <main class="content">
     <div class="content-container">
       {{template "content" .}}
@@ -151,6 +152,94 @@
         menu.classList.remove('show');
       }
     });
+  })();
+
+  // Toast notification system
+  (function(){
+    var icons = {success: '\u2713', error: '\u2717', info: 'i', warning: '!'};
+    window.showToast = function(message, type, duration) {
+      type = type || 'info';
+      duration = duration !== undefined ? duration : (type === 'error' ? 0 : 5000);
+      var container = document.getElementById('toast-container');
+      var toast = document.createElement('div');
+      toast.className = 'toast toast-' + type;
+      toast.innerHTML = '<span class="toast-icon">' + (icons[type] || 'i') + '</span>' +
+        '<span class="toast-body">' + escapeHtmlGlobal(message) + '</span>' +
+        '<button class="toast-close" onclick="dismissToast(this.parentElement)">\u00d7</button>';
+      container.appendChild(toast);
+      if (duration > 0) {
+        setTimeout(function() { dismissToast(toast); }, duration);
+      }
+      return toast;
+    };
+    window.dismissToast = function(el) {
+      if (!el || el.classList.contains('toast-removing')) return;
+      el.classList.add('toast-removing');
+      setTimeout(function() { if (el.parentElement) el.parentElement.removeChild(el); }, 200);
+    };
+    window.escapeHtmlGlobal = function(str) {
+      var div = document.createElement('div');
+      div.textContent = str || '';
+      return div.innerHTML;
+    };
+  })();
+
+  // Form validation helpers
+  (function(){
+    window.validateField = function(input, rules) {
+      var value = input.value.trim();
+      var errorEl = input.parentElement.querySelector('.form-error');
+      if (!errorEl) {
+        errorEl = document.createElement('div');
+        errorEl.className = 'form-error';
+        input.parentElement.appendChild(errorEl);
+      }
+      for (var i = 0; i < rules.length; i++) {
+        var rule = rules[i];
+        if (rule.required && !value) {
+          input.classList.add('input-invalid');
+          input.classList.remove('input-valid');
+          errorEl.textContent = rule.message || 'This field is required';
+          errorEl.style.display = 'block';
+          return false;
+        }
+        if (rule.minLength && value.length < rule.minLength) {
+          input.classList.add('input-invalid');
+          input.classList.remove('input-valid');
+          errorEl.textContent = rule.message || 'Minimum ' + rule.minLength + ' characters';
+          errorEl.style.display = 'block';
+          return false;
+        }
+        if (rule.pattern && value && !rule.pattern.test(value)) {
+          input.classList.add('input-invalid');
+          input.classList.remove('input-valid');
+          errorEl.textContent = rule.message || 'Invalid format';
+          errorEl.style.display = 'block';
+          return false;
+        }
+      }
+      input.classList.remove('input-invalid');
+      if (value) input.classList.add('input-valid'); else input.classList.remove('input-valid');
+      errorEl.style.display = 'none';
+      return true;
+    };
+    window.clearValidation = function(input) {
+      input.classList.remove('input-invalid', 'input-valid');
+      var errorEl = input.parentElement.querySelector('.form-error');
+      if (errorEl) errorEl.style.display = 'none';
+    };
+    window.setButtonLoading = function(btn, loading, originalText) {
+      if (loading) {
+        btn.setAttribute('data-original-text', btn.textContent);
+        btn.textContent = originalText || 'saving...';
+        btn.classList.add('btn-loading');
+        btn.disabled = true;
+      } else {
+        btn.textContent = btn.getAttribute('data-original-text') || originalText || btn.textContent;
+        btn.classList.remove('btn-loading');
+        btn.disabled = false;
+      }
+    };
   })();
 
   // Keyboard navigation (tmux-style: press 0-4 to switch tabs)

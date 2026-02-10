@@ -137,10 +137,19 @@ function onTypeChange() {
 function saveConnector(e) {
   e.preventDefault();
   var type = document.getElementById('conn-type').value;
-  var name = document.getElementById('conn-name').value;
+  var nameInput = document.getElementById('conn-name');
   var environment = document.getElementById('conn-env').value;
-  var config = {};
 
+  // Validate
+  var valid = true;
+  if (!validateField(nameInput, [{required: true, message: 'Connector name is required'}])) valid = false;
+  if (type === 'database') {
+    var csInput = document.getElementById('cfg-connection-string');
+    if (!validateField(csInput, [{required: true, message: 'Connection string is required'}, {pattern: /^postgres(ql)?:\/\//, message: 'Must start with postgres:// or postgresql://'}])) valid = false;
+  }
+  if (!valid) return;
+
+  var config = {};
   if (type === 'database') {
     var cs = document.getElementById('cfg-connection-string').value;
     if (cs) config.connection_string = cs;
@@ -149,7 +158,10 @@ function saveConnector(e) {
     if (rp) config.repo_path = rp;
   }
 
-  var body = {type: type, name: name, config: config};
+  var submitBtn = e.target.querySelector('button[type="submit"]');
+  setButtonLoading(submitBtn, true, 'creating...');
+
+  var body = {type: type, name: nameInput.value, config: config};
   if (environment) body.environment = environment;
 
   fetch('/api/connectors', {
@@ -157,28 +169,40 @@ function saveConnector(e) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body)
   }).then(function(r) {
+    setButtonLoading(submitBtn, false);
     if (r.ok) {
+      showToast('Connector created', 'success');
       hideModal();
       loadConnectors();
+    } else {
+      r.json().then(function(d) { showToast(d.error || 'Failed to create connector', 'error'); }).catch(function() { showToast('Failed to create connector', 'error'); });
     }
+  }).catch(function() {
+    setButtonLoading(submitBtn, false);
+    showToast('Network error — could not create connector', 'error');
   });
 }
 
 function testConnector(id, btn) {
   btn.disabled = true;
   btn.textContent = 'testing...';
-  fetch('/api/connectors/' + id + '/test', { method: 'POST' }).then(function() {
+  fetch('/api/connectors/' + id + '/test', { method: 'POST' }).then(function(r) {
+    if (r.ok) showToast('Connection test passed', 'success');
+    else showToast('Connection test failed', 'error');
     loadConnectors();
   }).catch(function() {
+    showToast('Connection test failed — network error', 'error');
     loadConnectors();
   });
 }
 
 function deleteConnector(id, name) {
   if (!confirm('Delete connector \'' + name + '\'?')) return;
-  fetch('/api/connectors/' + id, { method: 'DELETE' }).then(function() {
+  fetch('/api/connectors/' + id, { method: 'DELETE' }).then(function(r) {
+    if (r.ok) showToast('Connector deleted', 'success');
+    else showToast('Failed to delete connector', 'error');
     loadConnectors();
-  });
+  }).catch(function() { showToast('Network error', 'error'); });
 }
 
 function getTimeAgo(dateStr) {
