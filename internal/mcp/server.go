@@ -206,6 +206,31 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 		)
 	}
 
+	// Index health analysis (read-only — queries system catalogs).
+	s.AddTool(
+		mcp.NewTool("db_index_analysis",
+			mcp.WithDescription("Analyze database index health: find unused indexes (wasting disk/write overhead), missing indexes (tables with high sequential scan ratios), duplicate indexes, and bloated indexes. Use after db_table_stats shows sequential scans or db_query_stats shows slow queries."),
+			mcp.WithString("table_name", mcp.Description("Analyze indexes for a specific table (omit for all tables)")),
+			mcp.WithBoolean("include_suggestions", mcp.Description("Include CREATE/DROP INDEX suggestions (default: true)")),
+		),
+		dbIndexAnalysisHandler(deps.Registry),
+	)
+
+	// Period comparison (read-only — uses log/alert stores).
+	if deps.LogStore != nil {
+		s.AddTool(
+			mcp.NewTool("compare_periods",
+				mcp.WithDescription("Compare metrics between two time periods to identify what changed. Compares error rates, log volumes, or alert counts between a current period and a baseline. Use when the user asks 'what changed?', 'why is it slow now?', or 'is this worse than yesterday?'."),
+				mcp.WithString("metric", mcp.Required(), mcp.Description("What to compare: 'errors' (log error rates), 'log_volume' (total log counts by level), 'alerts' (alert counts by severity)")),
+				mcp.WithString("current_period", mcp.Description("Current period: 'last_1h' (default), 'last_6h', 'last_24h', 'today'")),
+				mcp.WithString("baseline_period", mcp.Description("Baseline to compare against: 'previous' (default), 'yesterday_same_time', 'last_week_same_time'")),
+				mcp.WithString("service", mcp.Description("Filter to a specific service (for error/log_volume metrics)")),
+				mcp.WithString("environment", mcp.Description("Filter to a specific environment")),
+			),
+			comparePeriodsHandler(deps.LogStore, deps.AlertStore),
+		)
+	}
+
 	// Server metrics read tools.
 	if deps.ServerStore != nil && deps.MetricStore != nil {
 		s.AddTool(
