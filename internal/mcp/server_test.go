@@ -1162,17 +1162,20 @@ func TestAddReadOnlyTools_RegistersExpectedTools(t *testing.T) {
 	as := &mockAlertStore{}
 	rs := &mockWatcherRunStore{}
 
+	ls := &mockLogStore{}
+
 	s := server.NewMCPServer("opentrace-test", "0.1.0")
 	deps := Deps{
 		Registry:        registry,
 		WatcherStore:    ws,
 		AlertStore:      as,
 		WatcherRunStore: rs,
+		LogStore:        ls,
 	}
 	addReadOnlyTools(s, deps)
 
 	tools := s.ListTools()
-	expectedTools := []string{"list_connectors", "list_monitors", "list_alerts", "get_digest", "db_locks"}
+	expectedTools := []string{"list_connectors", "list_monitors", "list_alerts", "get_digest", "db_locks", "log_stats"}
 	for _, name := range expectedTools {
 		if _, ok := tools[name]; !ok {
 			t.Errorf("expected read-only tool %q to be registered", name)

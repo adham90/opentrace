@@ -139,6 +139,7 @@ func runMCP() error {
 		WatcherStore:    deps.watcherStore,
 		AlertStore:      deps.alertStore,
 		WatcherRunStore: store.NewWatcherRunStore(deps.db),
+		LogStore:        deps.logStore,
 		ServerStore:     deps.serverStore,
 		MetricStore:     deps.metricStore,
 		UserStore:       deps.userStore,

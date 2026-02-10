@@ -149,6 +149,80 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 	return result, rows.Err()
 }
 
+func (s *logStore) CountByLevel(ctx context.Context, params LogCountParams) (map[string]int, error) {
+	query := `SELECT level, COUNT(*) FROM logs WHERE timestamp >= ? AND timestamp < ?`
+	args := []any{params.Since.UTC().Format(time.RFC3339Nano), params.Until.UTC().Format(time.RFC3339Nano)}
+
+	if params.Service != "" {
+		query += ` AND service = ? COLLATE NOCASE`
+		args = append(args, params.Service)
+	}
+	if params.Level != "" {
+		query += ` AND level = ? COLLATE NOCASE`
+		args = append(args, params.Level)
+	}
+	if params.Environment != "" {
+		query += ` AND environment = ?`
+		args = append(args, params.Environment)
+	}
+	query += ` GROUP BY level`
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("counting logs by level: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]int)
+	for rows.Next() {
+		var level string
+		var count int
+		if err := rows.Scan(&level, &count); err != nil {
+			return nil, fmt.Errorf("scanning level count: %w", err)
+		}
+		result[level] = count
+	}
+	return result, rows.Err()
+}
+
+func (s *logStore) CountByService(ctx context.Context, params LogCountParams) ([]ServiceLogCount, error) {
+	query := `SELECT service,
+	                 COUNT(*) AS total,
+	                 SUM(CASE WHEN level IN ('error', 'fatal') THEN 1 ELSE 0 END) AS error_count
+	          FROM logs WHERE timestamp >= ? AND timestamp < ?`
+	args := []any{params.Since.UTC().Format(time.RFC3339Nano), params.Until.UTC().Format(time.RFC3339Nano)}
+
+	if params.Service != "" {
+		query += ` AND service = ? COLLATE NOCASE`
+		args = append(args, params.Service)
+	}
+	if params.Level != "" {
+		query += ` AND level = ? COLLATE NOCASE`
+		args = append(args, params.Level)
+	}
+	if params.Environment != "" {
+		query += ` AND environment = ?`
+		args = append(args, params.Environment)
+	}
+	query += ` GROUP BY service ORDER BY total DESC`
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("counting logs by service: %w", err)
+	}
+	defer rows.Close()
+
+	var result []ServiceLogCount
+	for rows.Next() {
+		var sc ServiceLogCount
+		if err := rows.Scan(&sc.Service, &sc.Total, &sc.ErrorCount); err != nil {
+			return nil, fmt.Errorf("scanning service count: %w", err)
+		}
+		result = append(result, sc)
+	}
+	return result, rows.Err()
+}
+
 func (s *logStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339Nano)
 	result, err := s.db.ExecContext(ctx,

@@ -83,6 +83,22 @@ type LogSearchParams struct {
 	SinceID     int64      `json:"since_id,omitempty"`
 }
 
+// LogCountParams defines filters for log aggregation queries.
+type LogCountParams struct {
+	Since       time.Time
+	Until       time.Time
+	Service     string // optional filter
+	Level       string // optional filter
+	Environment string // optional filter
+}
+
+// ServiceLogCount holds per-service log counts.
+type ServiceLogCount struct {
+	Service    string `json:"service"`
+	Total      int    `json:"total"`
+	ErrorCount int    `json:"error_count"`
+}
+
 // MonitorType represents the evaluation strategy.
 type MonitorType string
 

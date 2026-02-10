@@ -107,6 +107,14 @@ func (m *mockLogStore) Prune(_ context.Context, _ time.Duration) (int64, error) 
 	return 0, nil
 }
 
+func (m *mockLogStore) CountByLevel(_ context.Context, _ store.LogCountParams) (map[string]int, error) {
+	return nil, nil
+}
+
+func (m *mockLogStore) CountByService(_ context.Context, _ store.LogCountParams) ([]store.ServiceLogCount, error) {
+	return nil, nil
+}
+
 // mockDSStore implements store.DataSourceStore for testing.
 type mockDSStore struct{}
 

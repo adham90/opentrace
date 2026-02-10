@@ -25,6 +25,8 @@ type LogStore interface {
 	BatchInsert(ctx context.Context, entries []LogEntry) (int, error)
 	Search(ctx context.Context, params LogSearchParams) ([]LogEntry, error)
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
+	CountByLevel(ctx context.Context, params LogCountParams) (map[string]int, error)
+	CountByService(ctx context.Context, params LogCountParams) ([]ServiceLogCount, error)
 }
 
 // UpdateAdaptiveParams defines the input for updating adaptive scheduling state.

@@ -26,6 +26,7 @@ type Deps struct {
 	MetricStore   store.MetricStore
 	UserStore     store.UserStore
 	WatcherRunStore store.WatcherRunStore
+	LogStore        store.LogStore
 	RuleEvaluator   *watcher.RuleEvaluator
 	MCPToken        string // OPENTRACE_MCP_TOKEN from environment
 	ServerName      string // OPENTRACE_MCP_NAME — custom server name (default: "opentrace")
@@ -188,6 +189,22 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 		),
 		dbLocksHandler(deps.Registry),
 	)
+
+	// Log aggregation and pattern detection.
+	if deps.LogStore != nil {
+		s.AddTool(
+			mcp.NewTool("log_stats",
+				mcp.WithDescription("Aggregate log statistics: volume by level/service, error rate trends, and most common error patterns. Use when investigating 'what's going wrong?', 'are errors increasing?', or 'which service has the most issues?'. Unlike log_search which returns individual entries, this returns aggregated counts and patterns."),
+				mcp.WithString("time_range", mcp.Description("Lookback window: '15m', '1h' (default), '6h', '24h', '7d'")),
+				mcp.WithString("group_by", mcp.Description("Primary grouping: 'level' (default), 'service', 'pattern' (clusters similar error messages)")),
+				mcp.WithString("service", mcp.Description("Filter to a specific service name")),
+				mcp.WithString("level", mcp.Description("Filter to a specific log level (debug, info, warn, error, fatal)")),
+				mcp.WithString("environment", mcp.Description("Filter to a specific environment")),
+				mcp.WithString("bucket_interval", mcp.Description("Time bucket size for trend data: '1m', '5m' (default), '15m', '1h'")),
+			),
+			logStatsHandler(deps.LogStore),
+		)
+	}
 
 	// Server metrics read tools.
 	if deps.ServerStore != nil && deps.MetricStore != nil {
