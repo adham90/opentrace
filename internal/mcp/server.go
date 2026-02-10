@@ -307,6 +307,24 @@ func listConnectorsHandler(registry *connector.Registry) server.ToolHandlerFunc 
 	}
 }
 
+// monitorListEntry is a compact representation of a monitor for the list_monitors MCP tool.
+type monitorListEntry struct {
+	ID                   string `json:"id"`
+	Title                string `json:"title"`
+	Status               string `json:"status"`
+	MonitorType          string `json:"monitor_type"`
+	Environment          string `json:"environment,omitempty"`
+	Severity             string `json:"severity"`
+	TimeRange            string `json:"time_range"`
+	Schedule             string `json:"schedule,omitempty"`
+	NextRunAt            *time.Time `json:"next_run_at,omitempty"`
+	LastRunAt            *time.Time `json:"last_run_at,omitempty"`
+	AdaptiveState        string `json:"adaptive_state,omitempty"`
+	EffectiveInterval    string `json:"effective_interval,omitempty"`
+	ConsecutiveCleanRuns int    `json:"consecutive_clean_runs,omitempty"`
+	ConsecutiveErrors    int    `json:"consecutive_errors,omitempty"`
+}
+
 // listMonitorsHandler returns a handler that lists all monitors.
 func listMonitorsHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -327,12 +345,66 @@ func listMonitorsHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 			return mcp.NewToolResultText("No monitors configured."), nil
 		}
 
-		data, err := json.MarshalIndent(watchers, "", "  ")
+		entries := make([]monitorListEntry, 0, len(watchers))
+		for _, w := range watchers {
+			e := monitorListEntry{
+				ID:          w.ID.String(),
+				Title:       w.Title,
+				Status:      string(w.Status),
+				MonitorType: string(w.MonitorType),
+				Environment: w.Environment,
+				Severity:    string(w.Severity),
+				TimeRange:   w.TimeRange,
+				Schedule:    w.Schedule,
+				NextRunAt:   w.NextRunAt,
+				LastRunAt:   w.LastRunAt,
+			}
+
+			// Include adaptive info if not in default normal state
+			if w.AdaptiveConfig != nil && w.AdaptiveConfig.Enabled {
+				e.AdaptiveState = string(w.AdaptiveState)
+				e.ConsecutiveCleanRuns = w.ConsecutiveCleanRuns
+				e.ConsecutiveErrors = w.ConsecutiveErrors
+				e.EffectiveInterval = effectiveInterval(w)
+			}
+
+			entries = append(entries, e)
+		}
+
+		data, err := json.MarshalIndent(entries, "", "  ")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal monitors: %v", err)), nil
 		}
 
 		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// effectiveInterval returns the current polling interval based on adaptive state.
+func effectiveInterval(w store.Watcher) string {
+	if w.AdaptiveConfig == nil || !w.AdaptiveConfig.Enabled {
+		if w.Schedule != "" {
+			return w.Schedule
+		}
+		return w.TimeRange
+	}
+
+	switch w.AdaptiveState {
+	case store.AdaptiveEscalated:
+		if w.AdaptiveConfig.EscalatedInterval != "" {
+			return w.AdaptiveConfig.EscalatedInterval
+		}
+		return w.TimeRange // already adapted by engine
+	case store.AdaptiveRelaxed:
+		if w.AdaptiveConfig.RelaxedInterval != "" {
+			return w.AdaptiveConfig.RelaxedInterval
+		}
+		return w.TimeRange
+	default:
+		if w.Schedule != "" {
+			return w.Schedule
+		}
+		return w.TimeRange
 	}
 }
 
