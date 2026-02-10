@@ -1172,7 +1172,7 @@ func TestAddReadOnlyTools_RegistersExpectedTools(t *testing.T) {
 		WatcherRunStore: rs,
 		LogStore:        ls,
 	}
-	addReadOnlyTools(s, deps)
+	addReadOnlyTools(s, deps, &CatalogBuilder{})
 
 	tools := s.ListTools()
 	expectedTools := []string{"list_connectors", "list_monitors", "list_alerts", "get_digest", "db_locks", "log_stats", "trace_lookup", "db_index_analysis", "compare_periods", "connection_pool_stats"}
@@ -1215,7 +1215,7 @@ func TestAddWriteTools_RegistersConnectorTools(t *testing.T) {
 		WatcherStore:  ws,
 		RuleEvaluator: re,
 	}
-	addWriteTools(s, deps)
+	addWriteTools(s, deps, &CatalogBuilder{})
 
 	tools := s.ListTools()
 

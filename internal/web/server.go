@@ -19,6 +19,7 @@ import (
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/llm"
+	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/store"
 	"github.com/adham90/opentrace/internal/watcher"
 )
@@ -44,6 +45,7 @@ type Server struct {
 	eventHub      *watcher.EventHub
 	modelRegistry *llm.ModelRegistry
 	ruleEvaluator *watcher.RuleEvaluator
+	toolCatalog   *mcpserver.ToolCatalog
 	logsConnMu    sync.Mutex
 	metricsConnMu sync.Mutex
 }
@@ -63,6 +65,7 @@ type ServerDeps struct {
 	SettingsStore store.SettingsStore
 	DigestStore   store.DigestStore
 	Registry      *connector.Registry
+	ToolCatalog   *mcpserver.ToolCatalog
 	Cfg           *config.Config
 	Executor      *watcher.Executor
 	EventHub      *watcher.EventHub
@@ -96,6 +99,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		settingsStore: deps.SettingsStore,
 		digestStore:   deps.DigestStore,
 		registry:      deps.Registry,
+		toolCatalog:   deps.ToolCatalog,
 		cfg:           deps.Cfg,
 		executor:      deps.Executor,
 		eventHub:      deps.EventHub,

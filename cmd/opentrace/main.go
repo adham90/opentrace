@@ -214,6 +214,17 @@ func run() error {
 	// Create digest store (used by both server and scheduler)
 	digestStore := store.NewDigestStore(deps.db)
 
+	// Build MCP tool catalog for the /tools page (auto-detected from MCP registrations).
+	toolCatalog := mcpserver.BuildCatalog(mcpserver.Deps{
+		Registry:        deps.registry,
+		WatcherStore:    deps.watcherStore,
+		AlertStore:      deps.alertStore,
+		WatcherRunStore: runStore,
+		LogStore:        deps.logStore,
+		ServerStore:     deps.serverStore,
+		MetricStore:     deps.metricStore,
+	})
+
 	// Create server
 	srv := web.NewServerWithDeps(web.ServerDeps{
 		DB:            deps.db,
@@ -229,6 +240,7 @@ func run() error {
 		SettingsStore: deps.settingsStore,
 		DigestStore:   digestStore,
 		Registry:      deps.registry,
+		ToolCatalog:   toolCatalog,
 		Cfg:           deps.cfg,
 		Executor:      executor,
 		EventHub:      eventHub,

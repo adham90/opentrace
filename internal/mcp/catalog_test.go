@@ -1,0 +1,164 @@
+package mcp
+
+import (
+	"testing"
+
+	"github.com/adham90/opentrace/internal/connector"
+)
+
+func TestCatalogBuilder_NilSafe(t *testing.T) {
+	var b *CatalogBuilder
+	// Should not panic.
+	b.Add("tool", "desc", "cat", "read", "")
+	cat := b.Build()
+	if len(cat.Categories()) != 0 {
+		t.Errorf("nil builder Build() should return empty catalog, got %d categories", len(cat.Categories()))
+	}
+}
+
+func TestCatalogBuilder_AddAndBuild(t *testing.T) {
+	b := &CatalogBuilder{}
+	b.Add("db_query_stats", "Show top queries", "Database Introspection", "read", "database connector")
+	b.Add("db_table_stats", "Show table stats", "Database Introspection", "read", "database connector")
+	b.Add("list_monitors", "List monitors", "Monitors", "read", "")
+	b.Add("create_monitor", "Create monitor", "Monitors", "admin", "")
+	b.Add("list_alerts", "List alerts", "Alerts", "read", "")
+
+	cat := b.Build()
+	categories := cat.Categories()
+
+	if len(categories) != 3 {
+		t.Fatalf("expected 3 categories, got %d", len(categories))
+	}
+
+	// Verify insertion order is preserved.
+	if categories[0].Name != "Database Introspection" {
+		t.Errorf("category[0] = %q, want %q", categories[0].Name, "Database Introspection")
+	}
+	if categories[1].Name != "Monitors" {
+		t.Errorf("category[1] = %q, want %q", categories[1].Name, "Monitors")
+	}
+	if categories[2].Name != "Alerts" {
+		t.Errorf("category[2] = %q, want %q", categories[2].Name, "Alerts")
+	}
+
+	// Verify tool counts per category.
+	if len(categories[0].Tools) != 2 {
+		t.Errorf("Database Introspection tools = %d, want 2", len(categories[0].Tools))
+	}
+	if len(categories[1].Tools) != 2 {
+		t.Errorf("Monitors tools = %d, want 2", len(categories[1].Tools))
+	}
+	if len(categories[2].Tools) != 1 {
+		t.Errorf("Alerts tools = %d, want 1", len(categories[2].Tools))
+	}
+
+	// Verify tool fields.
+	dbTool := categories[0].Tools[0]
+	if dbTool.Name != "db_query_stats" {
+		t.Errorf("tool name = %q, want %q", dbTool.Name, "db_query_stats")
+	}
+	if dbTool.Access != "read" {
+		t.Errorf("tool access = %q, want %q", dbTool.Access, "read")
+	}
+	if dbTool.Requires != "database connector" {
+		t.Errorf("tool requires = %q, want %q", dbTool.Requires, "database connector")
+	}
+}
+
+func TestCatalogBuilder_CategoryDescriptions(t *testing.T) {
+	b := &CatalogBuilder{}
+	b.Add("list_monitors", "List monitors", "Monitors", "read", "")
+
+	cat := b.Build()
+	categories := cat.Categories()
+
+	if len(categories) != 1 {
+		t.Fatalf("expected 1 category, got %d", len(categories))
+	}
+	if categories[0].Description == "" {
+		t.Error("expected category description to be populated from categoryDescriptions map")
+	}
+}
+
+func TestToolCatalog_NilCategories(t *testing.T) {
+	var tc *ToolCatalog
+	if tc.Categories() != nil {
+		t.Error("nil ToolCatalog.Categories() should return nil")
+	}
+}
+
+func TestBuildCatalog_WithDeps(t *testing.T) {
+	registry := connector.NewRegistry()
+	ws := &mockWatcherStore{}
+	as := &mockAlertStore{}
+	rs := &mockWatcherRunStore{}
+	ls := &mockLogStore{}
+
+	cat := BuildCatalog(Deps{
+		Registry:        registry,
+		WatcherStore:    ws,
+		AlertStore:      as,
+		WatcherRunStore: rs,
+		LogStore:        ls,
+	})
+
+	categories := cat.Categories()
+	if len(categories) == 0 {
+		t.Fatal("expected non-empty catalog")
+	}
+
+	// Collect all tool names.
+	toolNames := make(map[string]bool)
+	for _, c := range categories {
+		for _, tool := range c.Tools {
+			toolNames[tool.Name] = true
+		}
+	}
+
+	// Verify key tools are present.
+	expected := []string{
+		"list_connectors", "list_monitors", "list_alerts", "get_digest",
+		"db_query_stats", "db_table_stats", "db_activity", "db_locks",
+		"log_stats", "trace_lookup", "compare_periods",
+		"db_index_analysis", "connection_pool_stats",
+		"explain_query", "create_monitor", "suggest_monitors",
+		"monitor_run_history", "alert_details",
+	}
+	for _, name := range expected {
+		if !toolNames[name] {
+			t.Errorf("expected tool %q in catalog", name)
+		}
+	}
+}
+
+func TestBuildCatalog_MinimalDeps(t *testing.T) {
+	// With only a registry, conditional tools should be omitted.
+	cat := BuildCatalog(Deps{
+		Registry: connector.NewRegistry(),
+	})
+
+	categories := cat.Categories()
+	toolNames := make(map[string]bool)
+	for _, c := range categories {
+		for _, tool := range c.Tools {
+			toolNames[tool.Name] = true
+		}
+	}
+
+	// Tools that require WatcherStore should be absent.
+	if toolNames["list_monitors"] {
+		t.Error("list_monitors should not be in catalog without WatcherStore")
+	}
+	if toolNames["create_monitor"] {
+		t.Error("create_monitor should not be in catalog without WatcherStore")
+	}
+
+	// Tools that don't require optional deps should be present.
+	if !toolNames["list_connectors"] {
+		t.Error("list_connectors should always be in catalog")
+	}
+	if !toolNames["db_query_stats"] {
+		t.Error("db_query_stats should always be in catalog")
+	}
+}

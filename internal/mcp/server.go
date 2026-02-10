@@ -74,29 +74,40 @@ func Serve(deps Deps) error {
 	}
 
 	// Read-only tools (available to all authenticated users).
-	addReadOnlyTools(s, deps)
+	b := &CatalogBuilder{}
+	addReadOnlyTools(s, deps, b)
 
 	// Write tools (admin only).
 	if isAdmin {
-		addWriteTools(s, deps)
+		addWriteTools(s, deps, b)
 	}
 
 	return server.ServeStdio(s)
 }
 
+// maybeAddTool registers a tool on the MCP server if s is non-nil.
+// When s is nil (catalog-only mode), this is a no-op.
+func maybeAddTool(s *server.MCPServer, tool mcp.Tool, handler server.ToolHandlerFunc) {
+	if s != nil {
+		s.AddTool(tool, handler)
+	}
+}
+
 // addReadOnlyTools registers read-only tools available to all users.
-func addReadOnlyTools(s *server.MCPServer, deps Deps) {
+// When s is nil (catalog-only mode), tools are only cataloged via b.
+func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 	// Meta-tool for listing available connectors.
-	s.AddTool(
+	maybeAddTool(s,
 		mcp.NewTool("list_connectors",
 			mcp.WithDescription("List all active OpenTrace connectors and their tools"),
 		),
 		listConnectorsHandler(deps.Registry),
 	)
+	b.Add("list_connectors", "List all active OpenTrace connectors and their tools", "Connectors", "read", "")
 
 	// Monitor list.
 	if deps.WatcherStore != nil {
-		s.AddTool(
+		maybeAddTool(s,
 			mcp.NewTool("list_monitors",
 				mcp.WithDescription("List all configured monitors with their status"),
 				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production, staging)")),
@@ -104,11 +115,12 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 			),
 			listMonitorsHandler(deps.WatcherStore),
 		)
+		b.Add("list_monitors", "List all configured monitors with their status", "Monitors", "read", "")
 	}
 
 	// Alert list.
 	if deps.AlertStore != nil {
-		s.AddTool(
+		maybeAddTool(s,
 			mcp.NewTool("list_alerts",
 				mcp.WithDescription("List recent alerts from watchers"),
 				mcp.WithNumber("limit", mcp.Description("Maximum number of alerts to return (default: 10)")),
@@ -117,11 +129,12 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 			),
 			listAlertsHandler(deps.AlertStore),
 		)
+		b.Add("list_alerts", "List recent alerts from watchers", "Alerts", "read", "")
 	}
 
 	// Health digest.
 	if deps.AlertStore != nil && deps.WatcherStore != nil && deps.WatcherRunStore != nil {
-		s.AddTool(
+		maybeAddTool(s,
 			mcp.NewTool("get_digest",
 				mcp.WithDescription("Get a health digest summarizing database alerts, monitor status, and trends. Use this when the user asks 'what happened overnight?', 'any issues?', 'daily report', or similar. At the start of a session, consider running this proactively to inform the user of any issues."),
 				mcp.WithString("period", mcp.Description("Time period: 'last_24h' (default), 'last_12h', 'last_7d', 'today', 'yesterday'")),
@@ -129,10 +142,11 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 			),
 			getDigestHandler(deps.AlertStore, deps.WatcherStore, deps.WatcherRunStore),
 		)
+		b.Add("get_digest", "Get a health digest summarizing alerts, monitor status, and trends", "Alerts", "read", "")
 	}
 
 	// Database introspection tools (Postgres runtime stats).
-	s.AddTool(
+	maybeAddTool(s,
 		mcp.NewTool("db_query_stats",
 			mcp.WithDescription("Show top SQL queries from pg_stat_statements — useful for identifying slow or frequent queries to monitor"),
 			mcp.WithString("order_by", mcp.Description("Sort by: calls, total_exec_time (default), mean_exec_time, rows, shared_blks_hit, shared_blks_read")),
@@ -140,25 +154,28 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 		),
 		queryStatsHandler(deps.Registry, deps.WatcherStore),
 	)
+	b.Add("db_query_stats", "Show top SQL queries from pg_stat_statements", "Database Introspection", "read", "database connector")
 
-	s.AddTool(
+	maybeAddTool(s,
 		mcp.NewTool("db_table_stats",
 			mcp.WithDescription("Show table-level statistics: row counts, dead tuples, sequential vs index scans, cache hit ratios, and vacuum status"),
 			mcp.WithString("table_name", mcp.Description("Filter to a specific table name")),
 		),
 		dbTableStatsHandler(deps.Registry, deps.WatcherStore),
 	)
+	b.Add("db_table_stats", "Show table-level statistics: row counts, dead tuples, scans, cache hits", "Database Introspection", "read", "database connector")
 
-	s.AddTool(
+	maybeAddTool(s,
 		mcp.NewTool("db_activity",
 			mcp.WithDescription("Show current database activity: connection summary, long-running queries (>10s), idle-in-transaction sessions (>1min), and connection utilization"),
 		),
 		dbActivityHandler(deps.Registry, deps.WatcherStore),
 	)
+	b.Add("db_activity", "Show current database activity: connections, long-running queries, idle sessions", "Database Introspection", "read", "database connector")
 
 	// Monitor run history.
 	if deps.WatcherStore != nil && deps.WatcherRunStore != nil {
-		s.AddTool(
+		maybeAddTool(s,
 			mcp.NewTool("monitor_run_history",
 				mcp.WithDescription("Show recent execution history for a monitor: run status, duration, summary, errors, and alert rate. Use when investigating why a monitor is firing too often, missing issues, or showing errors."),
 				mcp.WithString("monitor_id", mcp.Required(), mcp.Description("Monitor UUID (from list_monitors)")),
@@ -167,11 +184,12 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 			),
 			monitorRunHistoryHandler(deps.WatcherStore, deps.WatcherRunStore),
 		)
+		b.Add("monitor_run_history", "Show execution history for a specific monitor with outcome trends", "Monitors", "read", "")
 	}
 
 	// Alert details.
 	if deps.AlertStore != nil {
-		s.AddTool(
+		maybeAddTool(s,
 			mcp.NewTool("alert_details",
 				mcp.WithDescription("Get full details for a specific alert: the triggering monitor configuration, the run that produced it, and correlated alerts from the same time window."),
 				mcp.WithString("alert_id", mcp.Required(), mcp.Description("Alert UUID (from list_alerts)")),
@@ -179,20 +197,22 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 			),
 			alertDetailsHandler(deps.AlertStore, deps.WatcherStore, deps.WatcherRunStore),
 		)
+		b.Add("alert_details", "Get full alert details including triggering run, related alerts, and context", "Alerts", "read", "")
 	}
 
 	// Lock contention (read-only — queries system catalogs).
-	s.AddTool(
+	maybeAddTool(s,
 		mcp.NewTool("db_locks",
 			mcp.WithDescription("Show current lock contention: blocking chains, lock types, and waiting queries. Use when db_activity shows long-running or idle-in-transaction sessions, or when users report the database is stuck."),
 			mcp.WithBoolean("blocking_only", mcp.Description("Only show lock chains where one query is blocking another (default: true). Set to false to see all held locks.")),
 		),
 		dbLocksHandler(deps.Registry),
 	)
+	b.Add("db_locks", "Show current database locks, blocking chains, and deadlock risks", "Database Introspection", "read", "database connector")
 
 	// Log aggregation and pattern detection.
 	if deps.LogStore != nil {
-		s.AddTool(
+		maybeAddTool(s,
 			mcp.NewTool("log_stats",
 				mcp.WithDescription("Aggregate log statistics: volume by level/service, error rate trends, and most common error patterns. Use when investigating 'what's going wrong?', 'are errors increasing?', or 'which service has the most issues?'. Unlike log_search which returns individual entries, this returns aggregated counts and patterns."),
 				mcp.WithString("time_range", mcp.Description("Lookback window: '15m', '1h' (default), '6h', '24h', '7d'")),
@@ -204,11 +224,12 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 			),
 			logStatsHandler(deps.LogStore),
 		)
+		b.Add("log_stats", "Aggregate log statistics by level, service, or pattern with trend detection", "Log Intelligence", "read", "")
 	}
 
 	// Distributed trace lookup.
 	if deps.LogStore != nil {
-		s.AddTool(
+		maybeAddTool(s,
 			mcp.NewTool("trace_lookup",
 				mcp.WithDescription("Follow a distributed trace across services. Given a trace ID, assembles all log entries from that trace ordered by timestamp, showing the request journey through services, timing between hops, and where errors occurred. Use when investigating a specific request failure or latency issue."),
 				mcp.WithString("trace_id", mcp.Required(), mcp.Description("The trace/correlation ID to look up (from log entries or error reports)")),
@@ -216,10 +237,11 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 			),
 			traceLookupHandler(deps.LogStore),
 		)
+		b.Add("trace_lookup", "Assemble a distributed trace timeline from log entries by trace ID", "Log Intelligence", "read", "")
 	}
 
 	// Index health analysis (read-only — queries system catalogs).
-	s.AddTool(
+	maybeAddTool(s,
 		mcp.NewTool("db_index_analysis",
 			mcp.WithDescription("Analyze database index health: find unused indexes (wasting disk/write overhead), missing indexes (tables with high sequential scan ratios), duplicate indexes, and bloated indexes. Use after db_table_stats shows sequential scans or db_query_stats shows slow queries."),
 			mcp.WithString("table_name", mcp.Description("Analyze indexes for a specific table (omit for all tables)")),
@@ -227,10 +249,11 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 		),
 		dbIndexAnalysisHandler(deps.Registry),
 	)
+	b.Add("db_index_analysis", "Analyze indexes: find unused, missing, duplicate, and bloated indexes with fix suggestions", "Database Introspection", "read", "database connector")
 
 	// Period comparison (read-only — uses log/alert stores).
 	if deps.LogStore != nil {
-		s.AddTool(
+		maybeAddTool(s,
 			mcp.NewTool("compare_periods",
 				mcp.WithDescription("Compare metrics between two time periods to identify what changed. Compares error rates, log volumes, or alert counts between a current period and a baseline. Use when the user asks 'what changed?', 'why is it slow now?', or 'is this worse than yesterday?'."),
 				mcp.WithString("metric", mcp.Required(), mcp.Description("What to compare: 'errors' (log error rates), 'log_volume' (total log counts by level), 'alerts' (alert counts by severity)")),
@@ -241,18 +264,20 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 			),
 			comparePeriodsHandler(deps.LogStore, deps.AlertStore),
 		)
+		b.Add("compare_periods", "Compare error rates, log volume, or alert counts between two time periods", "Log Intelligence", "read", "")
 	}
 
 	// Server metrics read tools.
 	if deps.ServerStore != nil && deps.MetricStore != nil {
-		s.AddTool(
+		maybeAddTool(s,
 			mcp.NewTool("list_servers",
 				mcp.WithDescription("List all monitored servers with their status (online/offline/unknown)"),
 			),
 			listServersHandler(deps.ServerStore),
 		)
+		b.Add("list_servers", "List all monitored servers with their status", "Server Metrics", "read", "")
 
-		s.AddTool(
+		maybeAddTool(s,
 			mcp.NewTool("query_metrics",
 				mcp.WithDescription("Query time-series metrics for a server (CPU, memory, disk, network, load)"),
 				mcp.WithString("server_id", mcp.Required(), mcp.Description("Server UUID (from list_servers)")),
@@ -263,34 +288,40 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 			),
 			queryMetricsHandler(deps.ServerStore, deps.MetricStore),
 		)
+		b.Add("query_metrics", "Query time-series metrics for a server (CPU, memory, disk, network, load)", "Server Metrics", "read", "")
 
-		s.AddTool(
+		maybeAddTool(s,
 			mcp.NewTool("server_health",
 				mcp.WithDescription("Get current health snapshot for a server — latest value for every metric"),
 				mcp.WithString("server_id", mcp.Required(), mcp.Description("Server UUID (from list_servers)")),
 			),
 			serverHealthHandler(deps.ServerStore, deps.MetricStore),
 		)
+		b.Add("server_health", "Get current health snapshot for a server", "Server Metrics", "read", "")
 	}
 
 	// Connection pool stats (read-only — queries pg_stat_activity).
-	s.AddTool(
+	maybeAddTool(s,
 		mcp.NewTool("connection_pool_stats",
 			mcp.WithDescription("Show connection pool health: current utilization, idle/active connections, wait queue depth, and per-application breakdown. Use when diagnosing 'database is slow' or 'connection timeout' issues."),
 		),
 		connectionPoolStatsHandler(deps.Registry),
 	)
+	b.Add("connection_pool_stats", "Show connection pool health: utilization, per-application breakdown, and warnings", "Database Introspection", "read", "database connector")
 }
 
 // addWriteTools registers write/admin tools (connector tools, create_monitor, preview_monitor).
-func addWriteTools(s *server.MCPServer, deps Deps) {
+// When s is nil (catalog-only mode), tools are only cataloged via b.
+func addWriteTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 	// All connector tools (run queries, etc.).
+	// Note: dynamic connector tools are not cataloged here — the web handler
+	// merges them at request time from s.registry.AllTools().
 	for _, t := range deps.Registry.AllTools() {
-		s.AddTool(convertTool(t), bridgeHandler(t))
+		maybeAddTool(s, convertTool(t), bridgeHandler(t))
 	}
 
 	// Explain query (admin — executes queries).
-	s.AddTool(
+	maybeAddTool(s,
 		mcp.NewTool("explain_query",
 			mcp.WithDescription("Run EXPLAIN ANALYZE on a SQL query to show the execution plan, actual vs estimated rows, and timing. Use when investigating slow queries identified by db_query_stats. The query is validated as SELECT-only."),
 			mcp.WithString("query", mcp.Required(), mcp.Description("The SQL SELECT query to analyze")),
@@ -300,10 +331,11 @@ func addWriteTools(s *server.MCPServer, deps Deps) {
 		),
 		explainQueryHandler(deps.Registry),
 	)
+	b.Add("explain_query", "Run EXPLAIN ANALYZE on a query and return the execution plan with optimization tips", "Database Introspection", "admin", "database connector")
 
 	// Create monitor.
 	if deps.WatcherStore != nil {
-		s.AddTool(
+		maybeAddTool(s,
 			mcp.NewTool("create_monitor",
 				mcp.WithDescription(`Create a new monitor. Use monitor_type=ai for AI-powered analysis or monitor_type=rule for threshold-based checks.
 
@@ -331,11 +363,12 @@ Use db_query_stats, db_activity, and db_table_stats to discover what to monitor,
 			),
 			createMonitorHandler(deps.WatcherStore),
 		)
+		b.Add("create_monitor", "Create a new AI or rule-based monitor with SQL query and schedule", "Monitors", "admin", "")
 	}
 
 	// Preview monitor (rule evaluation without saving).
 	if deps.RuleEvaluator != nil {
-		s.AddTool(
+		maybeAddTool(s,
 			mcp.NewTool("preview_monitor",
 				mcp.WithDescription(`Run a rule monitor evaluation ad-hoc without saving. Returns the current value and whether it would trigger an alert.
 
@@ -347,11 +380,12 @@ Tip: Use db_query_stats, db_activity, or db_table_stats first to understand the 
 			),
 			previewMonitorHandler(deps.RuleEvaluator),
 		)
+		b.Add("preview_monitor", "Run a rule monitor evaluation ad-hoc without saving", "Monitors", "admin", "")
 	}
 
 	// Suggest monitors (admin — suggests creating monitors with ready-to-use configs).
 	if deps.WatcherStore != nil || deps.LogStore != nil {
-		s.AddTool(
+		maybeAddTool(s,
 			mcp.NewTool("suggest_monitors",
 				mcp.WithDescription(`Analyze the current system state and suggest monitors the user should create.
 
@@ -365,6 +399,7 @@ Each suggestion includes a monitor_config that can be passed directly to create_
 			),
 			suggestMonitorsHandler(deps.WatcherStore, deps.LogStore),
 		)
+		b.Add("suggest_monitors", "Analyze system state and suggest monitors to create, with ready-to-use configs", "Monitors", "admin", "")
 	}
 }
 
