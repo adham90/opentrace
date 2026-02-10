@@ -7,6 +7,30 @@
     </div>
   </div>
 
+  <div class="filter-bar" id="watcher-filter-bar">
+    <div class="filter-bar-tags">
+      <div class="filter-tag" id="tag-status" onclick="toggleWatcherDropdown('status',event)" title="status — key: s">
+        <span class="filter-tag-key">s:</span>
+        <span class="filter-tag-val" id="tag-status-val">all</span>
+        <div class="filter-dropdown" id="drop-status"></div>
+      </div>
+      <div class="filter-tag" id="tag-type" onclick="toggleWatcherDropdown('type',event)" title="type — key: t">
+        <span class="filter-tag-key">t:</span>
+        <span class="filter-tag-val" id="tag-type-val">all</span>
+        <div class="filter-dropdown" id="drop-type"></div>
+      </div>
+      <div class="filter-tag" id="tag-severity" onclick="toggleWatcherDropdown('severity',event)" title="severity — key: v">
+        <span class="filter-tag-key">v:</span>
+        <span class="filter-tag-val" id="tag-severity-val">all</span>
+        <div class="filter-dropdown" id="drop-severity"></div>
+      </div>
+    </div>
+    <div class="filter-bar-actions">
+      <span class="dim" id="watcher-filter-count"></span>
+      <button type="button" class="filter-bar-btn btn-clear" onclick="clearWatcherFilters()">clear</button>
+    </div>
+  </div>
+
   <div id="watchers-list" class="watchers-list">
     <div class="loading-state">loading monitors</div>
   </div>
@@ -532,6 +556,193 @@
 <script>
 var isAdmin = {{.IsAdmin}};
 
+// --- Filter state ---
+var STATUS_OPTIONS = ['', 'active', 'paused'];
+var STATUS_LABELS  = ['all', 'active', 'paused'];
+var TYPE_OPTIONS = ['', 'query', 'logs', 'health', 'ai'];
+var TYPE_LABELS  = ['all', 'query', 'logs', 'health', 'ai'];
+var SEV_OPTIONS = ['', 'critical', 'warning', 'info'];
+var SEV_LABELS  = ['all', 'crit', 'warn', 'info'];
+var currentStatusIdx = 0;
+var currentTypeIdx = 0;
+var currentSevIdx = 0;
+var allWatchers = [];
+var openDrop = null;
+
+function getWatcherType(w) {
+  if (w.monitor_type === 'rule' && w.rule_config) return w.rule_config.source || 'query';
+  return 'ai';
+}
+
+function filterWatchers() {
+  var status = STATUS_OPTIONS[currentStatusIdx];
+  var type = TYPE_OPTIONS[currentTypeIdx];
+  var sev = SEV_OPTIONS[currentSevIdx];
+  return allWatchers.filter(function(w) {
+    if (status && w.status !== status) return false;
+    if (type && getWatcherType(w) !== type) return false;
+    if (sev && w.severity !== sev) return false;
+    return true;
+  });
+}
+
+function updateFilterCount(filtered, total) {
+  var el = document.getElementById('watcher-filter-count');
+  if (currentStatusIdx === 0 && currentTypeIdx === 0 && currentSevIdx === 0) {
+    el.textContent = '';
+  } else {
+    el.textContent = filtered + ' of ' + total + ' monitors';
+  }
+}
+
+// --- Dropdown logic ---
+function closeAllWatcherDropdowns() {
+  document.querySelectorAll('#watcher-filter-bar .filter-dropdown.show').forEach(function(d){ d.classList.remove('show'); });
+  openDrop = null;
+}
+
+function renderDropdown(dropId, options, labels, currentIdx, selectFn) {
+  var drop = document.getElementById(dropId);
+  var html = '';
+  for (var i = 0; i < options.length; i++) {
+    var cls = i === currentIdx ? 'filter-drop-item drop-active' : 'filter-drop-item';
+    html += '<button type="button" class="' + cls + '" data-idx="' + i + '">' + escapeHtml(labels[i]) + '</button>';
+  }
+  drop.innerHTML = html;
+  drop.querySelectorAll('.filter-drop-item').forEach(function(btn){
+    btn.addEventListener('click', function(e){
+      e.stopPropagation();
+      selectFn(parseInt(btn.getAttribute('data-idx')));
+      closeAllWatcherDropdowns();
+    });
+  });
+}
+
+function toggleWatcherDropdown(name, e) {
+  e.stopPropagation();
+  var dropId = 'drop-' + name;
+  var drop = document.getElementById(dropId);
+  var wasOpen = drop.classList.contains('show');
+  closeAllWatcherDropdowns();
+  if (wasOpen) return;
+  if (name === 'status') renderDropdown(dropId, STATUS_OPTIONS, STATUS_LABELS, currentStatusIdx, selectStatus);
+  else if (name === 'type') renderDropdown(dropId, TYPE_OPTIONS, TYPE_LABELS, currentTypeIdx, selectType);
+  else if (name === 'severity') renderDropdown(dropId, SEV_OPTIONS, SEV_LABELS, currentSevIdx, selectSeverity);
+  drop.classList.add('show');
+  openDrop = dropId;
+}
+window.toggleWatcherDropdown = toggleWatcherDropdown;
+
+document.addEventListener('click', function(){ closeAllWatcherDropdowns(); });
+
+// --- Tag display & flash ---
+function updateTagDisplay(elId, text, isActive) {
+  var el = document.getElementById(elId);
+  el.textContent = text;
+  el.className = 'filter-tag-val' + (isActive ? ' val-active' : ' val-all');
+}
+
+function flashTag(tagId) {
+  var el = document.getElementById(tagId);
+  el.classList.remove('filter-flash');
+  void el.offsetWidth;
+  el.classList.add('filter-flash');
+}
+
+// --- Select & cycle ---
+function selectStatus(idx) {
+  currentStatusIdx = idx;
+  updateTagDisplay('tag-status-val', STATUS_LABELS[idx], idx !== 0);
+  flashTag('tag-status');
+  syncToUrl();
+  applyFilters();
+}
+function selectType(idx) {
+  currentTypeIdx = idx;
+  updateTagDisplay('tag-type-val', TYPE_LABELS[idx], idx !== 0);
+  flashTag('tag-type');
+  syncToUrl();
+  applyFilters();
+}
+function selectSeverity(idx) {
+  currentSevIdx = idx;
+  updateTagDisplay('tag-severity-val', SEV_LABELS[idx], idx !== 0);
+  flashTag('tag-severity');
+  syncToUrl();
+  applyFilters();
+}
+function cycleStatus(dir) { selectStatus((currentStatusIdx + dir + STATUS_OPTIONS.length) % STATUS_OPTIONS.length); }
+function cycleType(dir) { selectType((currentTypeIdx + dir + TYPE_OPTIONS.length) % TYPE_OPTIONS.length); }
+function cycleSeverity(dir) { selectSeverity((currentSevIdx + dir + SEV_OPTIONS.length) % SEV_OPTIONS.length); }
+
+function clearWatcherFilters() {
+  currentStatusIdx = 0;
+  currentTypeIdx = 0;
+  currentSevIdx = 0;
+  updateTagDisplay('tag-status-val', STATUS_LABELS[0], false);
+  updateTagDisplay('tag-type-val', TYPE_LABELS[0], false);
+  updateTagDisplay('tag-severity-val', SEV_LABELS[0], false);
+  syncToUrl();
+  applyFilters();
+}
+window.clearWatcherFilters = clearWatcherFilters;
+
+function applyFilters() {
+  var filtered = filterWatchers();
+  updateFilterCount(filtered.length, allWatchers.length);
+  renderWatchers(filtered);
+}
+
+// --- URL sync ---
+function syncToUrl() {
+  var params = new URLSearchParams();
+  if (STATUS_OPTIONS[currentStatusIdx]) params.set('status', STATUS_OPTIONS[currentStatusIdx]);
+  if (TYPE_OPTIONS[currentTypeIdx]) params.set('type', TYPE_OPTIONS[currentTypeIdx]);
+  if (SEV_OPTIONS[currentSevIdx]) params.set('severity', SEV_OPTIONS[currentSevIdx]);
+  var qs = params.toString();
+  var url = window.location.pathname + (qs ? '?' + qs : '');
+  history.replaceState(null, '', url);
+}
+
+function initFromUrl() {
+  var params = new URLSearchParams(window.location.search);
+  var s = params.get('status') || '';
+  var si = STATUS_OPTIONS.indexOf(s);
+  if (si >= 0) currentStatusIdx = si;
+  var t = params.get('type') || '';
+  var ti = TYPE_OPTIONS.indexOf(t);
+  if (ti >= 0) currentTypeIdx = ti;
+  var v = params.get('severity') || '';
+  var vi = SEV_OPTIONS.indexOf(v);
+  if (vi >= 0) currentSevIdx = vi;
+  updateTagDisplay('tag-status-val', STATUS_LABELS[currentStatusIdx], currentStatusIdx !== 0);
+  updateTagDisplay('tag-type-val', TYPE_LABELS[currentTypeIdx], currentTypeIdx !== 0);
+  updateTagDisplay('tag-severity-val', SEV_LABELS[currentSevIdx], currentSevIdx !== 0);
+}
+
+// --- Keyboard shortcuts ---
+document.addEventListener('keydown', function(e){
+  var tag = document.activeElement.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  var overlay = document.getElementById('shortcut-overlay');
+  if (overlay && overlay.style.display !== 'none') return;
+  // Skip if any modal is visible
+  var modals = document.querySelectorAll('.modal[style*="flex"]');
+  if (modals.length > 0) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  closeAllWatcherDropdowns();
+  switch(e.key) {
+    case 's': e.preventDefault(); cycleStatus(1); break;
+    case 'S': e.preventDefault(); cycleStatus(-1); break;
+    case 't': e.preventDefault(); cycleType(1); break;
+    case 'T': e.preventDefault(); cycleType(-1); break;
+    case 'v': e.preventDefault(); cycleSeverity(1); break;
+    case 'V': e.preventDefault(); cycleSeverity(-1); break;
+    case 'c': e.preventDefault(); clearWatcherFilters(); break;
+  }
+});
+
 function loadModels() {
   fetch('/api/models').then(function(r) { return r.json(); }).then(function(models) {
     var sel = document.getElementById('watcher-model');
@@ -613,61 +824,72 @@ function getAdaptiveBadge(w) {
   return '';
 }
 
+function renderWatchers(watchers) {
+  var container = document.getElementById('watchers-list');
+  if (!allWatchers || allWatchers.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No monitors yet</p><p class="empty-state-desc">Monitors watch your databases and logs for problems, then alert you when something needs attention.</p>' + (isAdmin ? '<button class="btn btn-primary" onclick="showNewMonitorModal()">+ Create your first monitor</button>' : '') + '</div>';
+    return;
+  }
+  if (!watchers || watchers.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No matching monitors</p><p class="empty-state-desc">Try adjusting your filters or <button class="btn btn-sm" onclick="clearWatcherFilters()">clear all</button></p></div>';
+    return;
+  }
+
+  var html = '';
+  watchers.forEach(function(w) {
+    var statusClass = w.status === 'active' ? 'status-active' : w.status === 'paused' ? 'status-paused' : 'status-error';
+    var statusIcon = w.status === 'active' ? '&#9679;' : w.status === 'paused' ? '&#9208;' : '&#9888;';
+    var lastRun = w.last_run_at ? getTimeAgo(w.last_run_at) : 'never';
+
+    html += '<div class="watcher-card">';
+    html += '  <div class="watcher-header">';
+    html += '    ' + getMonitorTypeBadge(w);
+    html += '    <span class="watcher-title">' + escapeHtml(w.title) + '</span>';
+    var schedLabel = w.schedule ? describeSchedule(w.schedule) : ('every ' + (w.time_range || '15m'));
+    html += '    <span class="watcher-meta">' + escapeHtml(schedLabel) + '</span>';
+    if (w.monitor_type !== 'rule' && w.model) {
+      html += '    <span class="watcher-meta">' + escapeHtml(w.model) + '</span>';
+    }
+    html += '    <span class="watcher-status ' + statusClass + '">' + statusIcon + ' ' + w.status + '</span>';
+    html += getAdaptiveBadge(w);
+    html += '  </div>';
+    html += '  <div class="watcher-info">';
+    html += '    <span>Last run: ' + lastRun + '</span>';
+    html += '    <span class="severity-badge severity-' + w.severity + '">' + w.severity + '</span>';
+    html += (w.environment ? '    <span class="badge badge-env">' + escapeHtml(w.environment) + '</span>' : '');
+    html += '  </div>';
+    html += '  <div class="watcher-actions">';
+    if (isAdmin) {
+      if (w.monitor_type === 'rule') {
+        html += '    <button class="btn btn-sm" onclick="editRuleMonitor(\'' + w.id + '\')">Edit</button>';
+      } else {
+        html += '    <button class="btn btn-sm" onclick="editWatcher(\'' + w.id + '\')">Edit</button>';
+      }
+      if (w.status === 'active') {
+        html += '    <button class="btn btn-sm" onclick="pauseWatcher(\'' + w.id + '\')">Pause</button>';
+      } else if (w.adaptive_state === 'error') {
+        html += '    <button class="btn btn-sm btn-resume" onclick="resumeWatcher(\'' + w.id + '\')">Resume Monitor</button>';
+      } else {
+        html += '    <button class="btn btn-sm" onclick="resumeWatcher(\'' + w.id + '\')">Resume</button>';
+      }
+      html += '    <button class="btn btn-sm" onclick="runNow(\'' + w.id + '\')">Run Now</button>';
+    }
+    html += '    <a href="/watchers/' + w.id + '/runs" class="btn btn-sm">History</a>';
+    if (isAdmin) {
+      html += '    <button class="btn btn-sm btn-danger" onclick="deleteWatcher(\'' + w.id + '\')">Delete</button>';
+    }
+    html += '  </div>';
+    html += '</div>';
+  });
+  container.innerHTML = html;
+}
+
 function loadWatchers() {
   fetch('/api/watchers' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r) { return r.json(); }).then(function(watchers) {
-    var container = document.getElementById('watchers-list');
-    if (!watchers || watchers.length === 0) {
-      container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No monitors yet</p><p class="empty-state-desc">Monitors watch your databases and logs for problems, then alert you when something needs attention.</p>' + (isAdmin ? '<button class="btn btn-primary" onclick="showNewMonitorModal()">+ Create your first monitor</button>' : '') + '</div>';
-      return;
-    }
-
-    var html = '';
-    watchers.forEach(function(w) {
-      var statusClass = w.status === 'active' ? 'status-active' : w.status === 'paused' ? 'status-paused' : 'status-error';
-      var statusIcon = w.status === 'active' ? '&#9679;' : w.status === 'paused' ? '&#9208;' : '&#9888;';
-      var lastRun = w.last_run_at ? getTimeAgo(w.last_run_at) : 'never';
-
-      html += '<div class="watcher-card">';
-      html += '  <div class="watcher-header">';
-      html += '    ' + getMonitorTypeBadge(w);
-      html += '    <span class="watcher-title">' + escapeHtml(w.title) + '</span>';
-      var schedLabel = w.schedule ? describeSchedule(w.schedule) : ('every ' + (w.time_range || '15m'));
-      html += '    <span class="watcher-meta">' + escapeHtml(schedLabel) + '</span>';
-      if (w.monitor_type !== 'rule' && w.model) {
-        html += '    <span class="watcher-meta">' + escapeHtml(w.model) + '</span>';
-      }
-      html += '    <span class="watcher-status ' + statusClass + '">' + statusIcon + ' ' + w.status + '</span>';
-      html += getAdaptiveBadge(w);
-      html += '  </div>';
-      html += '  <div class="watcher-info">';
-      html += '    <span>Last run: ' + lastRun + '</span>';
-      html += '    <span class="severity-badge severity-' + w.severity + '">' + w.severity + '</span>';
-      html += (w.environment ? '    <span class="badge badge-env">' + escapeHtml(w.environment) + '</span>' : '');
-      html += '  </div>';
-      html += '  <div class="watcher-actions">';
-      if (isAdmin) {
-        if (w.monitor_type === 'rule') {
-          html += '    <button class="btn btn-sm" onclick="editRuleMonitor(\'' + w.id + '\')">Edit</button>';
-        } else {
-          html += '    <button class="btn btn-sm" onclick="editWatcher(\'' + w.id + '\')">Edit</button>';
-        }
-        if (w.status === 'active') {
-          html += '    <button class="btn btn-sm" onclick="pauseWatcher(\'' + w.id + '\')">Pause</button>';
-        } else if (w.adaptive_state === 'error') {
-          html += '    <button class="btn btn-sm btn-resume" onclick="resumeWatcher(\'' + w.id + '\')">Resume Monitor</button>';
-        } else {
-          html += '    <button class="btn btn-sm" onclick="resumeWatcher(\'' + w.id + '\')">Resume</button>';
-        }
-        html += '    <button class="btn btn-sm" onclick="runNow(\'' + w.id + '\')">Run Now</button>';
-      }
-      html += '    <a href="/watchers/' + w.id + '/runs" class="btn btn-sm">History</a>';
-      if (isAdmin) {
-        html += '    <button class="btn btn-sm btn-danger" onclick="deleteWatcher(\'' + w.id + '\')">Delete</button>';
-      }
-      html += '  </div>';
-      html += '</div>';
-    });
-    container.innerHTML = html;
+    allWatchers = watchers || [];
+    var filtered = filterWatchers();
+    updateFilterCount(filtered.length, allWatchers.length);
+    renderWatchers(filtered);
   });
 }
 
@@ -1404,6 +1626,7 @@ function populateAdaptiveConfig(prefix, cfg) {
   }
 }
 
+initFromUrl();
 loadWatchers();
 loadModels();
 window.loadPageData = loadWatchers;
