@@ -49,27 +49,29 @@
         <select id="env-select" class="topbar-select" onchange="setGlobalEnv(this.value)" title="Filter by environment">
           <option value="">all envs</option>
         </select>
-        <button class="topbar-icon-btn" onclick="cycleTheme()" title="Toggle theme (system/dark/light)">
-          <span id="theme-icon">&#9684;</span>
-        </button>
-        <button class="topbar-icon-btn" onclick="toggleShortcuts()" title="Keyboard shortcuts (?)">?</button>
-        <span class="topbar-sep">│</span>
         {{if .User}}
         <div class="user-dropdown">
           <button class="user-dropdown-toggle" onclick="toggleUserMenu()">
-            {{.User.DisplayName}}{{if .IsAdmin}} <span class="badge badge-type">admin</span>{{end}}
+            {{.User.DisplayName}}
           </button>
           <div class="user-dropdown-menu" id="user-dropdown-menu">
-            {{if .IsAdmin}}<a href="/admin/users" class="dropdown-item">users</a>{{end}}
-            {{if .IsAdmin}}<a href="/admin/settings" class="dropdown-item">settings</a>{{end}}
             <a href="/profile" class="dropdown-item">profile</a>
             <a href="/setup" class="dropdown-item">setup</a>
+            <div class="dropdown-divider"></div>
+            <button type="button" class="dropdown-item" onclick="cycleTheme();event.stopPropagation()">
+              theme <span class="dropdown-item-hint" id="theme-label">system</span>
+            </button>
+            <button type="button" class="dropdown-item" onclick="toggleShortcuts();toggleUserMenu()">
+              shortcuts <span class="dropdown-item-hint">?</span>
+            </button>
+            {{if .IsAdmin}}<div class="dropdown-divider"></div>{{end}}
+            {{if .IsAdmin}}<a href="/admin/users" class="dropdown-item">users</a>{{end}}
+            {{if .IsAdmin}}<a href="/admin/settings" class="dropdown-item">settings</a>{{end}}
             <div class="dropdown-divider"></div>
             <form method="POST" action="/logout"><button type="submit" class="dropdown-item dropdown-item-danger">logout</button></form>
           </div>
         </div>
         {{else}}
-        <span class="topbar-sep">│</span>
         <a href="/login" class="nav-item">login</a>
         {{end}}
       </div>
