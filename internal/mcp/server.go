@@ -116,6 +116,16 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 		)
 	}
 
+	// Database introspection tools (Postgres runtime stats).
+	s.AddTool(
+		mcp.NewTool("db_query_stats",
+			mcp.WithDescription("Show top SQL queries from pg_stat_statements — useful for identifying slow or frequent queries to monitor"),
+			mcp.WithString("order_by", mcp.Description("Sort by: calls, total_exec_time (default), mean_exec_time, rows, shared_blks_hit, shared_blks_read")),
+			mcp.WithNumber("limit", mcp.Description("Number of queries to return (default: 20, max: 100)")),
+		),
+		queryStatsHandler(deps.Registry),
+	)
+
 	// Server metrics read tools.
 	if deps.ServerStore != nil && deps.MetricStore != nil {
 		s.AddTool(
