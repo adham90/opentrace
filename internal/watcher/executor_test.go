@@ -357,6 +357,10 @@ func (m *mockRunStore) List(ctx context.Context, watcherID uuid.UUID, limit int)
 	return result, nil
 }
 
+func (m *mockRunStore) ListWithFilter(ctx context.Context, watcherID uuid.UUID, limit int, status string) ([]store.WatcherRun, error) {
+	return m.List(ctx, watcherID, limit)
+}
+
 func (m *mockRunStore) GetByID(ctx context.Context, id uuid.UUID) (*store.WatcherRun, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -433,13 +437,25 @@ func (m *mockAlertStore) CountTotal(ctx context.Context, environment string) (in
 
 func (m *mockAlertStore) MarkRead(ctx context.Context, id uuid.UUID) error      { return nil }
 func (m *mockAlertStore) MarkAllRead(ctx context.Context, environment string) error { return nil }
-func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error       { return nil }
+func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error          { return nil }
+func (m *mockAlertStore) DismissAll(ctx context.Context, environment string) error { return nil }
 func (m *mockAlertStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	return 0, nil
 }
 
 func (m *mockAlertStore) CountBySeverity(ctx context.Context, since, until time.Time, environment string) (map[string]int, error) {
 	return make(map[string]int), nil
+}
+
+func (m *mockAlertStore) GetByID(ctx context.Context, id uuid.UUID) (*store.Alert, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.alerts {
+		if m.alerts[i].ID == id {
+			return &m.alerts[i], nil
+		}
+	}
+	return nil, store.ErrNotFound
 }
 
 func (m *mockAlertStore) getAlerts() []store.Alert {

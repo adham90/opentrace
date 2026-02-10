@@ -155,6 +155,31 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 		dbActivityHandler(deps.Registry, deps.WatcherStore),
 	)
 
+	// Monitor run history.
+	if deps.WatcherStore != nil && deps.WatcherRunStore != nil {
+		s.AddTool(
+			mcp.NewTool("monitor_run_history",
+				mcp.WithDescription("Show recent execution history for a monitor: run status, duration, summary, errors, and alert rate. Use when investigating why a monitor is firing too often, missing issues, or showing errors."),
+				mcp.WithString("monitor_id", mcp.Required(), mcp.Description("Monitor UUID (from list_monitors)")),
+				mcp.WithNumber("limit", mcp.Description("Maximum runs to return (default: 20, max: 100)")),
+				mcp.WithString("status_filter", mcp.Description("Filter by run status: 'all' (default), 'completed', 'failed', 'error', 'alerted'")),
+			),
+			monitorRunHistoryHandler(deps.WatcherStore, deps.WatcherRunStore),
+		)
+	}
+
+	// Alert details.
+	if deps.AlertStore != nil {
+		s.AddTool(
+			mcp.NewTool("alert_details",
+				mcp.WithDescription("Get full details for a specific alert: the triggering monitor configuration, the run that produced it, and correlated alerts from the same time window."),
+				mcp.WithString("alert_id", mcp.Required(), mcp.Description("Alert UUID (from list_alerts)")),
+				mcp.WithBoolean("include_correlated", mcp.Description("Include other alerts within +/- 5 minutes (default: true)")),
+			),
+			alertDetailsHandler(deps.AlertStore, deps.WatcherStore, deps.WatcherRunStore),
+		)
+	}
+
 	// Lock contention (read-only — queries system catalogs).
 	s.AddTool(
 		mcp.NewTool("db_locks",

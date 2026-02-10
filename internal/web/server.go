@@ -216,6 +216,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Post("/watchers/{id}/runs/{runId}/stop", srv.handleStopRun)
 			r.Post("/monitors/preview", srv.handleMonitorPreview)
 			r.Post("/alerts/read-all", srv.handleMarkAllAlertsRead)
+			r.Post("/alerts/dismiss-all", srv.handleDismissAllAlerts)
 			r.Post("/alerts/{id}/read", srv.handleMarkAlertRead)
 			r.Post("/alerts/{id}/dismiss", srv.handleDismissAlert)
 

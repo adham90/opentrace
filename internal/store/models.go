@@ -304,11 +304,12 @@ type CreateAlertParams struct {
 
 // ListAlertParams defines filters for listing alerts.
 type ListAlertParams struct {
-	UnreadOnly  bool            `json:"unread_only,omitempty"`
-	Severity    WatcherSeverity `json:"severity,omitempty"`
-	WatcherID   *uuid.UUID      `json:"watcher_id,omitempty"`
-	Environment string          `json:"environment,omitempty"`
-	Limit       int             `json:"limit,omitempty"`
+	UnreadOnly    bool            `json:"unread_only,omitempty"`
+	DismissedOnly bool            `json:"dismissed_only,omitempty"`
+	Severity      WatcherSeverity `json:"severity,omitempty"`
+	WatcherID     *uuid.UUID      `json:"watcher_id,omitempty"`
+	Environment   string          `json:"environment,omitempty"`
+	Limit         int             `json:"limit,omitempty"`
 }
 
 // ServerStatus represents the health status of a monitored server.

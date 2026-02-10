@@ -56,10 +56,10 @@ func (s *alertStore) Create(ctx context.Context, params CreateAlertParams) (*Ale
 		return nil, fmt.Errorf("creating alert: %w", err)
 	}
 
-	return s.getByID(ctx, id)
+	return s.GetByID(ctx, id)
 }
 
-func (s *alertStore) getByID(ctx context.Context, id uuid.UUID) (*Alert, error) {
+func (s *alertStore) GetByID(ctx context.Context, id uuid.UUID) (*Alert, error) {
 	a := &Alert{}
 	var createdAt string
 	var detailsStr sql.NullString
@@ -99,8 +99,12 @@ func (s *alertStore) List(ctx context.Context, params ListAlertParams) ([]Alert,
 		 FROM alerts a LEFT JOIN watchers w ON a.watcher_id = w.id WHERE 1=1`
 	var args []any
 
-	if params.UnreadOnly {
+	if params.DismissedOnly {
+		query += ` AND a.dismissed = 1`
+	} else if params.UnreadOnly {
 		query += ` AND a.read = 0 AND a.dismissed = 0`
+	} else {
+		query += ` AND a.dismissed = 0`
 	}
 
 	if params.Severity != "" {
@@ -248,6 +252,20 @@ func (s *alertStore) Dismiss(ctx context.Context, id uuid.UUID) error {
 	n, _ := result.RowsAffected()
 	if n == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *alertStore) DismissAll(ctx context.Context, environment string) error {
+	query := `UPDATE alerts SET dismissed = 1 WHERE dismissed = 0`
+	var args []any
+	if environment != "" {
+		query += ` AND environment = ?`
+		args = append(args, environment)
+	}
+	_, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("dismissing all alerts: %w", err)
 	}
 	return nil
 }

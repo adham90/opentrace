@@ -94,9 +94,18 @@ func (m *mockAlertStore) CountBySeverity(_ context.Context, since, until time.Ti
 	return result, nil
 }
 
+func (m *mockAlertStore) GetByID(_ context.Context, id uuid.UUID) (*store.Alert, error) {
+	for i := range m.alerts {
+		if m.alerts[i].ID == id {
+			return &m.alerts[i], nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
 func (m *mockAlertStore) MarkRead(_ context.Context, _ uuid.UUID) error                { return nil }
 func (m *mockAlertStore) MarkAllRead(_ context.Context, _ string) error                 { return nil }
 func (m *mockAlertStore) Dismiss(_ context.Context, _ uuid.UUID) error                  { return nil }
+func (m *mockAlertStore) DismissAll(_ context.Context, _ string) error                  { return nil }
 func (m *mockAlertStore) Prune(_ context.Context, _ time.Duration) (int64, error)       { return 0, nil }
 
 type mockWatcherStore struct {
@@ -196,6 +205,10 @@ func (m *mockRunStore) GetByID(_ context.Context, id uuid.UUID) (*store.WatcherR
 		}
 	}
 	return nil, store.ErrNotFound
+}
+
+func (m *mockRunStore) ListWithFilter(_ context.Context, watcherID uuid.UUID, limit int, status string) ([]store.WatcherRun, error) {
+	return m.List(context.Background(), watcherID, limit)
 }
 
 func (m *mockRunStore) CountRuns(_ context.Context, params store.CountRunParams) (int, error) {

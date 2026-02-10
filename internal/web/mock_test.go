@@ -367,6 +367,10 @@ func (m *mockWatcherRunStore) List(ctx context.Context, watcherID uuid.UUID, lim
 	return result, nil
 }
 
+func (m *mockWatcherRunStore) ListWithFilter(ctx context.Context, watcherID uuid.UUID, limit int, status string) ([]store.WatcherRun, error) {
+	return m.List(ctx, watcherID, limit)
+}
+
 func (m *mockWatcherRunStore) GetByID(ctx context.Context, id uuid.UUID) (*store.WatcherRun, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -453,6 +457,17 @@ func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+func (m *mockAlertStore) DismissAll(ctx context.Context, environment string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, a := range m.alerts {
+		if environment == "" || a.Environment == environment {
+			a.Dismissed = true
+		}
+	}
+	return nil
+}
+
 func (m *mockAlertStore) CountTotal(ctx context.Context, environment string) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -503,6 +518,16 @@ func (m *mockAlertStore) CountBySeverity(ctx context.Context, since, until time.
 		result[string(a.Severity)]++
 	}
 	return result, nil
+}
+
+func (m *mockAlertStore) GetByID(ctx context.Context, id uuid.UUID) (*store.Alert, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.alerts[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return a, nil
 }
 
 // mockServerStore implements store.ServerStore for testing.

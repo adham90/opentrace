@@ -2,20 +2,38 @@
 <div class="page-header">
   <h1><span class="prompt">$</span> alerts <span class="dim" id="alerts-count"></span></h1>
   <div class="actions">
+    <button id="dismiss-all-btn" class="btn btn-sm btn-danger" onclick="dismissAllAlerts()" style="display:none">dismiss all</button>
     <button id="mark-all-read-btn" class="btn btn-sm" onclick="markAllRead()" style="display:none">mark all read</button>
   </div>
 </div>
 
 <div class="alert-filters">
-  <div class="filter-tabs" id="statusFilter" data-value="unread">
-    <button class="filter-tab" data-value="all" onclick="setFilter('statusFilter','all')">all</button>
-    <button class="filter-tab active" data-value="unread" onclick="setFilter('statusFilter','unread')">unread</button>
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <div class="filter-tabs" id="statusFilter" data-value="unread">
+      <button class="filter-tab" data-value="all" onclick="setFilter('statusFilter','all')">all</button>
+      <button class="filter-tab active" data-value="unread" onclick="setFilter('statusFilter','unread')">unread</button>
+      <button class="filter-tab" data-value="dismissed" onclick="setFilter('statusFilter','dismissed')">dismissed</button>
+    </div>
+    <div class="filter-tabs" id="severityFilter" data-value="">
+      <button class="filter-tab active" data-value="" onclick="setFilter('severityFilter','')">all</button>
+      <button class="filter-tab sev-critical" data-value="critical" onclick="setFilter('severityFilter','critical')">crit</button>
+      <button class="filter-tab sev-warning" data-value="warning" onclick="setFilter('severityFilter','warning')">warn</button>
+      <button class="filter-tab sev-info" data-value="info" onclick="setFilter('severityFilter','info')">info</button>
+    </div>
+    <select id="watcherFilter" class="alert-filter-select" onchange="loadAlerts()">
+      <option value="">all monitors</option>
+    </select>
+    <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);cursor:pointer;">
+      <input type="checkbox" id="groupToggle" onchange="renderAlerts()" style="accent-color:var(--green)"> group by monitor
+    </label>
   </div>
-  <div class="filter-tabs" id="severityFilter" data-value="">
-    <button class="filter-tab active" data-value="" onclick="setFilter('severityFilter','')">all</button>
-    <button class="filter-tab sev-critical" data-value="critical" onclick="setFilter('severityFilter','critical')">crit</button>
-    <button class="filter-tab sev-warning" data-value="warning" onclick="setFilter('severityFilter','warning')">warn</button>
-    <button class="filter-tab sev-info" data-value="info" onclick="setFilter('severityFilter','info')">info</button>
+</div>
+
+<div id="bulk-bar" class="bulk-bar" style="display:none">
+  <span><span class="bulk-count" id="bulk-count">0</span> selected</span>
+  <div class="bulk-actions">
+    <button class="btn btn-sm" onclick="bulkMarkRead()">mark read</button>
+    <button class="btn btn-sm btn-danger" onclick="bulkDismiss()">dismiss</button>
   </div>
 </div>
 
@@ -32,19 +50,23 @@
 var allAlerts = [];
 var alertCounts = { count: 0, total: 0 };
 var isAdmin = {{.IsAdmin}};
+var selectedAlerts = {};
+var watcherList = [];
 
 function getUrlParams() {
   var params = new URLSearchParams(window.location.search);
   return {
     status: params.get('status') || 'unread',
-    severity: params.get('severity') || ''
+    severity: params.get('severity') || '',
+    watcher_id: params.get('watcher_id') || ''
   };
 }
 
-function setUrlParams(status, severity) {
+function setUrlParams(status, severity, watcherId) {
   var params = new URLSearchParams();
   if (status && status !== 'unread') params.set('status', status);
   if (severity) params.set('severity', severity);
+  if (watcherId) params.set('watcher_id', watcherId);
   var qs = params.toString();
   var url = window.location.pathname + (qs ? '?' + qs : '');
   history.replaceState(null, '', url);
@@ -54,6 +76,9 @@ function initFilters() {
   var p = getUrlParams();
   setFilter('statusFilter', p.status, true);
   setFilter('severityFilter', p.severity, true);
+  if (p.watcher_id) {
+    document.getElementById('watcherFilter').value = p.watcher_id;
+  }
 }
 
 function setFilter(groupId, value, silent) {
@@ -64,20 +89,42 @@ function setFilter(groupId, value, silent) {
     t.classList.toggle('active', t.getAttribute('data-value') === value);
   });
   if (!silent) {
+    selectedAlerts = {};
+    updateBulkBar();
     var status = document.getElementById('statusFilter').getAttribute('data-value');
     var severity = document.getElementById('severityFilter').getAttribute('data-value');
-    setUrlParams(status, severity);
+    var watcherId = document.getElementById('watcherFilter').value;
+    setUrlParams(status, severity, watcherId);
     loadAlerts();
   }
+}
+
+function loadWatchers() {
+  fetch('/api/watchers' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r) { return r.json(); }).then(function(watchers) {
+    watcherList = watchers || [];
+    var sel = document.getElementById('watcherFilter');
+    var current = sel.value;
+    sel.innerHTML = '<option value="">all monitors</option>';
+    watcherList.forEach(function(w) {
+      sel.innerHTML += '<option value="' + w.id + '">' + escapeHtml(w.title) + '</option>';
+    });
+    sel.value = current;
+  }).catch(function() {});
 }
 
 function loadAlerts() {
   var status = document.getElementById('statusFilter').getAttribute('data-value');
   var severity = document.getElementById('severityFilter').getAttribute('data-value');
-  var url = '/api/alerts?limit=50';
+  var watcherId = document.getElementById('watcherFilter').value;
+  var url = '/api/alerts?limit=100';
   if (status === 'unread') url += '&unread=true';
+  if (status === 'dismissed') url += '&dismissed=true';
   if (severity) url += '&severity=' + encodeURIComponent(severity);
+  if (watcherId) url += '&watcher_id=' + encodeURIComponent(watcherId);
   url += (getGlobalEnv() ? '&env=' + encodeURIComponent(getGlobalEnv()) : '');
+
+  var wId = watcherId;
+  setUrlParams(status, severity, wId);
 
   fetch(url).then(function(r) { return r.json(); }).then(function(alerts) {
     allAlerts = alerts || [];
@@ -94,8 +141,7 @@ function loadCounts() {
     alertCounts = data;
     updateHeaderCount();
     updateBadge();
-    updateMarkAllBtn();
-    // Re-render to update empty state with correct counts
+    updateActionBtns();
     if (allAlerts.length === 0) renderAlerts();
   });
 }
@@ -113,18 +159,19 @@ function updateHeaderCount() {
   el.textContent = parts.join(', ');
 }
 
-function updateMarkAllBtn() {
-  var btn = document.getElementById('mark-all-read-btn');
-  if (!btn) return;
-  btn.style.display = (isAdmin && alertCounts.count > 0) ? '' : 'none';
+function updateActionBtns() {
+  var markBtn = document.getElementById('mark-all-read-btn');
+  var dismissBtn = document.getElementById('dismiss-all-btn');
+  if (markBtn) markBtn.style.display = (isAdmin && alertCounts.count > 0) ? '' : 'none';
+  if (dismissBtn) dismissBtn.style.display = (isAdmin && alertCounts.total > 0) ? '' : 'none';
 }
 
 function renderAlerts() {
   var container = document.getElementById('alerts-list');
   var empty = document.getElementById('alerts-empty');
   var status = document.getElementById('statusFilter').getAttribute('data-value');
+  var grouped = document.getElementById('groupToggle').checked;
 
-  // Preserve expanded rows across re-renders
   var expandedIDs = {};
   container.querySelectorAll('.alert-row.expanded').forEach(function(el) {
     expandedIDs[el.getAttribute('data-id')] = true;
@@ -140,9 +187,13 @@ function renderAlerts() {
     var action = document.getElementById('empty-action');
 
     var severity = document.getElementById('severityFilter').getAttribute('data-value');
-    if (alertCounts.total > 0 && status === 'unread' && !severity) {
+    if (status === 'dismissed') {
+      title.textContent = 'no dismissed alerts';
+      desc.textContent = 'dismissed alerts appear here for reference';
+      action.style.display = 'none';
+    } else if (alertCounts.total > 0 && status === 'unread' && !severity) {
       title.textContent = 'all caught up';
-      desc.textContent = 'no unread alerts — switch to "all alerts" to see history';
+      desc.textContent = 'no unread alerts \u2014 switch to "all" to see history';
       action.style.display = 'none';
     } else if (alertCounts.total > 0) {
       title.textContent = 'no matching alerts';
@@ -156,23 +207,63 @@ function renderAlerts() {
     return;
   }
 
-  var html = '<div class="alert-list">';
+  var html = '';
+  if (grouped) {
+    html = renderGrouped(expandedIDs, status);
+  } else {
+    html = renderFlat(allAlerts, expandedIDs, status);
+  }
+  container.innerHTML = html;
+  updateBulkBar();
+}
+
+function renderGrouped(expandedIDs, status) {
+  var groups = {};
+  var order = [];
   allAlerts.forEach(function(a) {
+    var key = a.watcher_id || '__none__';
+    if (!groups[key]) {
+      groups[key] = { title: a.watcher_title || 'Unknown monitor', alerts: [] };
+      order.push(key);
+    }
+    groups[key].alerts.push(a);
+  });
+
+  var html = '';
+  order.forEach(function(key) {
+    var g = groups[key];
+    html += '<div class="alert-group-header">' + escapeHtml(g.title) + '<span class="group-count">(' + g.alerts.length + ')</span></div>';
+    html += renderFlat(g.alerts, expandedIDs, status);
+  });
+  return html;
+}
+
+function renderFlat(alerts, expandedIDs, status) {
+  var isDismissedTab = status === 'dismissed';
+  var html = '<div class="alert-list">';
+  alerts.forEach(function(a) {
     var sevClass = 'severity-' + a.severity;
     var sevLabel = a.severity === 'critical' ? 'CRIT' : a.severity === 'warning' ? 'WARN' : 'INFO';
     var timeAgo = getTimeAgo(a.created_at);
     var readClass = a.read ? ' alert-read' : '';
     var expandClass = expandedIDs[a.id] ? ' expanded' : '';
+    var checked = selectedAlerts[a.id] ? ' checked' : '';
 
     html += '<div class="alert-row ' + sevClass + readClass + expandClass + '" data-id="' + a.id + '">';
-    html += '  <div class="alert-row-main" onclick="toggleAlert(this)">';
-    html += '    <span class="alert-ts">' + formatTimestamp(a.created_at) + '</span>';
-    html += '    <span class="badge badge-' + a.severity + '">' + sevLabel + '</span>';
-    if (a.environment) {
-      html += '    <span class="alert-env">' + escapeHtml(a.environment) + '</span>';
+    html += '  <div class="alert-row-main">';
+    if (isAdmin && !isDismissedTab) {
+      html += '    <input type="checkbox" class="alert-checkbox" data-alert-id="' + a.id + '"' + checked + ' onclick="event.stopPropagation();toggleSelect(\'' + a.id + '\', this.checked)" />';
     }
-    html += '    <span class="alert-title-text">' + escapeHtml(a.title) + '</span>';
-    html += '    <span class="alert-time-ago">' + timeAgo + '</span>';
+    html += '    <span class="alert-ts" onclick="toggleAlert(this)">' + formatTimestamp(a.created_at) + '</span>';
+    html += '    <span class="badge badge-' + a.severity + '" onclick="toggleAlert(this)">' + sevLabel + '</span>';
+    if (a.environment) {
+      html += '    <span class="alert-env" onclick="toggleAlert(this)">' + escapeHtml(a.environment) + '</span>';
+    }
+    html += '    <span class="alert-title-text" onclick="toggleAlert(this)">' + escapeHtml(a.title) + '</span>';
+    if (a.watcher_title) {
+      html += '    <span class="alert-env" onclick="toggleAlert(this)">' + escapeHtml(a.watcher_title) + '</span>';
+    }
+    html += '    <span class="alert-time-ago" onclick="toggleAlert(this)">' + timeAgo + '</span>';
     html += '  </div>';
     html += '  <div class="alert-detail">';
     html += '    <div class="alert-detail-summary">' + escapeHtml(a.summary) + '</div>';
@@ -188,8 +279,11 @@ function renderAlerts() {
     if (a.read) {
       html += '      <div class="alert-detail-row"><span class="alert-detail-key">status</span><span class="alert-detail-val dim">read</span></div>';
     }
+    if (a.dismissed) {
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key">status</span><span class="alert-detail-val dim">dismissed</span></div>';
+    }
     html += '    </div>';
-    if (isAdmin) {
+    if (isAdmin && !isDismissedTab) {
       html += '    <div class="alert-detail-actions">';
       if (!a.read) {
         html += '      <button class="btn btn-sm" onclick="event.stopPropagation();markRead(\'' + a.id + '\')">mark read</button>';
@@ -201,7 +295,7 @@ function renderAlerts() {
     html += '</div>';
   });
   html += '</div>';
-  container.innerHTML = html;
+  return html;
 }
 
 function toggleAlert(el) {
@@ -211,6 +305,56 @@ function toggleAlert(el) {
   } else {
     row.classList.add('expanded');
   }
+}
+
+/* Selection & bulk actions */
+function toggleSelect(id, checked) {
+  if (checked) { selectedAlerts[id] = true; } else { delete selectedAlerts[id]; }
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  var keys = Object.keys(selectedAlerts);
+  var bar = document.getElementById('bulk-bar');
+  if (!bar) return;
+  if (keys.length > 0) {
+    bar.style.display = 'flex';
+    document.getElementById('bulk-count').textContent = keys.length;
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+function bulkMarkRead() {
+  var ids = Object.keys(selectedAlerts);
+  if (ids.length === 0) return;
+  var pending = ids.length;
+  ids.forEach(function(id) {
+    fetch('/api/alerts/' + id + '/read', { method: 'POST' }).then(function() {
+      pending--;
+      if (pending === 0) {
+        showToast(ids.length + ' alert(s) marked as read', 'success');
+        selectedAlerts = {};
+        loadAlerts();
+      }
+    }).catch(function() { pending--; });
+  });
+}
+
+function bulkDismiss() {
+  var ids = Object.keys(selectedAlerts);
+  if (ids.length === 0) return;
+  var pending = ids.length;
+  ids.forEach(function(id) {
+    fetch('/api/alerts/' + id + '/dismiss', { method: 'POST' }).then(function() {
+      pending--;
+      if (pending === 0) {
+        showToast(ids.length + ' alert(s) dismissed', 'success');
+        selectedAlerts = {};
+        loadAlerts();
+      }
+    }).catch(function() { pending--; });
+  });
 }
 
 function markRead(id) {
@@ -234,6 +378,15 @@ function dismissAlert(id) {
     if (r.ok) showToast('Alert dismissed', 'info');
     loadAlerts();
   }).catch(function() { showToast('Failed to dismiss alert', 'error'); });
+}
+
+function dismissAllAlerts() {
+  var url = '/api/alerts/dismiss-all';
+  url += (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '');
+  fetch(url, { method: 'POST' }).then(function(r) {
+    if (r.ok) showToast('All alerts dismissed', 'success');
+    loadAlerts();
+  }).catch(function() { showToast('Failed to dismiss alerts', 'error'); });
 }
 
 function updateBadge() {
@@ -269,6 +422,7 @@ function escapeHtml(str) {
 window.loadPageData = loadAlerts;
 document.addEventListener('DOMContentLoaded', function() {
   initFilters();
+  loadWatchers();
   loadAlerts();
   setInterval(function() { loadAlerts(); }, 30000);
 });

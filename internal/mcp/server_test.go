@@ -377,7 +377,12 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 }
 
 func (m *mockWatcherStore) GetByID(ctx context.Context, id uuid.UUID) (*store.Watcher, error) {
-	return nil, nil
+	for i := range m.watchers {
+		if m.watchers[i].ID == id {
+			return &m.watchers[i], nil
+		}
+	}
+	return nil, store.ErrNotFound
 }
 func (m *mockWatcherStore) Update(ctx context.Context, id uuid.UUID, params store.UpdateWatcherParams) (*store.Watcher, error) {
 	return nil, nil
@@ -425,9 +430,19 @@ func (m *mockAlertStore) CountTotal(ctx context.Context, environment string) (in
 func (m *mockAlertStore) MarkRead(ctx context.Context, id uuid.UUID) error    { return nil }
 func (m *mockAlertStore) MarkAllRead(ctx context.Context, environment string) error { return nil }
 func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error     { return nil }
+func (m *mockAlertStore) DismissAll(ctx context.Context, environment string) error { return nil }
 func (m *mockAlertStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	return 0, nil
 }
+func (m *mockAlertStore) GetByID(ctx context.Context, id uuid.UUID) (*store.Alert, error) {
+	for i := range m.alerts {
+		if m.alerts[i].ID == id {
+			return &m.alerts[i], nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
 func (m *mockAlertStore) CountBySeverity(ctx context.Context, since, until time.Time, environment string) (map[string]int, error) {
 	result := make(map[string]int)
 	for _, a := range m.alerts {
@@ -475,6 +490,34 @@ func (m *mockWatcherRunStore) GetByID(_ context.Context, id uuid.UUID) (*store.W
 func (m *mockWatcherRunStore) Prune(_ context.Context, _ time.Duration) (int64, error) {
 	return 0, nil
 }
+func (m *mockWatcherRunStore) ListWithFilter(_ context.Context, watcherID uuid.UUID, limit int, status string) ([]store.WatcherRun, error) {
+	var result []store.WatcherRun
+	for _, r := range m.runs {
+		if r.WatcherID != watcherID {
+			continue
+		}
+		switch status {
+		case "completed":
+			if r.Status != "completed" {
+				continue
+			}
+		case "failed", "error":
+			if r.Status != "failed" && r.Status != "error" {
+				continue
+			}
+		case "alerted":
+			if r.Status != "completed" || !r.HasAlert {
+				continue
+			}
+		}
+		result = append(result, r)
+	}
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
 func (m *mockWatcherRunStore) CountRuns(_ context.Context, params store.CountRunParams) (int, error) {
 	count := 0
 	for _, r := range m.runs {

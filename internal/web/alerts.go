@@ -19,7 +19,9 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 		params.Environment = env
 	}
 
-	if r.URL.Query().Get("unread") == "true" {
+	if r.URL.Query().Get("dismissed") == "true" {
+		params.DismissedOnly = true
+	} else if r.URL.Query().Get("unread") == "true" {
 		params.UnreadOnly = true
 	}
 
@@ -81,6 +83,15 @@ func (s *Server) handleMarkAllAlertsRead(w http.ResponseWriter, r *http.Request)
 	env := r.URL.Query().Get("env")
 	if err := s.alertStore.MarkAllRead(r.Context(), env); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to mark all alerts read")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleDismissAllAlerts(w http.ResponseWriter, r *http.Request) {
+	env := r.URL.Query().Get("env")
+	if err := s.alertStore.DismissAll(r.Context(), env); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to dismiss all alerts")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

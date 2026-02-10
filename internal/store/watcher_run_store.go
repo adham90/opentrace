@@ -136,6 +136,46 @@ func (s *watcherRunStore) List(ctx context.Context, watcherID uuid.UUID, limit i
 	return result, rows.Err()
 }
 
+func (s *watcherRunStore) ListWithFilter(ctx context.Context, watcherID uuid.UUID, limit int, status string) ([]WatcherRun, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	query := `SELECT id, watcher_id, started_at, finished_at, status, summary, details, has_alert, error_message, created_at
+		 FROM watcher_runs
+		 WHERE watcher_id = ?`
+	args := []any{watcherID.String()}
+
+	switch status {
+	case "completed":
+		query += ` AND status = 'completed'`
+	case "failed", "error":
+		query += ` AND status IN ('failed', 'error')`
+	case "alerted":
+		query += ` AND status = 'completed' AND has_alert = 1`
+	}
+
+	query += ` ORDER BY created_at DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing watcher runs with filter: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]WatcherRun, 0)
+	for rows.Next() {
+		r, err := scanWatcherRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *r)
+	}
+
+	return result, rows.Err()
+}
+
 func (s *watcherRunStore) GetByID(ctx context.Context, id uuid.UUID) (*WatcherRun, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, watcher_id, started_at, finished_at, status, summary, details, has_alert, error_message, created_at
