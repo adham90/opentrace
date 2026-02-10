@@ -49,8 +49,8 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.OllamaURL != "http://localhost:11434" {
 		t.Errorf("OllamaURL = %q, want %q", cfg.OllamaURL, "http://localhost:11434")
 	}
-	if cfg.ListenAddr != ":8080" {
-		t.Errorf("ListenAddr = %q, want %q", cfg.ListenAddr, ":8080")
+	if cfg.ListenAddr != "127.0.0.1:8080" {
+		t.Errorf("ListenAddr = %q, want %q", cfg.ListenAddr, "127.0.0.1:8080")
 	}
 	if cfg.MaxQueryRows != 500 {
 		t.Errorf("MaxQueryRows = %d, want %d", cfg.MaxQueryRows, 500)

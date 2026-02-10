@@ -126,7 +126,7 @@ func (s *Server) handleTestConnectorAPI(w http.ResponseWriter, r *http.Request) 
 			s.renderConnectorList(w, r)
 			return
 		}
-		writeError(w, http.StatusUnprocessableEntity, "connector test failed: "+err.Error())
+		writeError(w, http.StatusUnprocessableEntity, "connector test failed: unable to initialize connector")
 		return
 	}
 
@@ -141,7 +141,7 @@ func (s *Server) handleTestConnectorAPI(w http.ResponseWriter, r *http.Request) 
 			s.renderConnectorList(w, r)
 			return
 		}
-		writeError(w, http.StatusUnprocessableEntity, "connector test failed: "+err.Error())
+		writeError(w, http.StatusUnprocessableEntity, "connector test failed: unable to connect")
 		return
 	}
 

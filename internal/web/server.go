@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -109,10 +110,15 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 
 	cfg := deps.Cfg
 
+	loginLimiter := NewRateLimiter(10, 1*time.Minute)
+	apiLimiter := NewRateLimiter(120, 1*time.Minute)
+
 	router := chi.NewRouter()
 	router.Use(middleware.Logger)
 	router.Use(middleware.Recoverer)
 	router.Use(middleware.RequestID)
+	router.Use(SecurityHeaders)
+	router.Use(MaxBodySize(10 << 20)) // 10 MB global body limit
 	router.Use(srv.SessionAuth)
 
 	router.Get("/healthz", srv.handleHealthCheck)
@@ -127,11 +133,11 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		router.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 	}
 
-	// Always-open auth routes
+	// Always-open auth routes (login/register rate-limited)
 	router.Get("/login", srv.handleLoginPage)
-	router.Post("/login", srv.handleLoginSubmit)
+	router.With(loginLimiter.Middleware).Post("/login", srv.handleLoginSubmit)
 	router.Get("/register", srv.handleRegisterPage)
-	router.Post("/register", srv.handleRegisterSubmit)
+	router.With(loginLimiter.Middleware).Post("/register", srv.handleRegisterSubmit)
 	router.Post("/logout", srv.handleLogout)
 
 	// Onboarding routes (open — guarded inside handler)
@@ -168,13 +174,13 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		// Agent install script (no auth — the script is self-contained)
 		r.Get("/agent/install.sh", srv.handleAgentInstallScript)
 
-		// Log ingestion with dynamic API key auth
-		r.With(srv.DynamicAPIKeyAuth).Post("/logs", srv.handleIngestLogs)
+		// Log ingestion with dynamic API key auth + rate limiting
+		r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/logs", srv.handleIngestLogs)
 
-		// Server registration and metric push with dynamic API key auth
+		// Server registration and metric push with dynamic API key auth + rate limiting
 		if srv.serverStore != nil && srv.metricStore != nil {
-			r.With(srv.DynamicAPIKeyAuth).Post("/servers/register", srv.handleRegisterServer)
-			r.With(srv.DynamicAPIKeyAuth).Post("/servers/{id}/metrics", srv.handlePushMetrics)
+			r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/servers/register", srv.handleRegisterServer)
+			r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/servers/{id}/metrics", srv.handlePushMetrics)
 		}
 
 		// Read API — require auth, 503 if onboarding needed

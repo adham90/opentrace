@@ -65,8 +65,8 @@ func (s *Server) handleOnboardingSubmit(w http.ResponseWriter, r *http.Request) 
 		s.renderOnboardingError(w, r, "Email and password are required")
 		return
 	}
-	if len(password) < 8 {
-		s.renderOnboardingError(w, r, "Password must be at least 8 characters")
+	if len(password) < 12 {
+		s.renderOnboardingError(w, r, "Password must be at least 12 characters")
 		return
 	}
 

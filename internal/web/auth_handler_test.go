@@ -243,7 +243,7 @@ func TestRegisterSubmit_ShortPassword(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "Password must be at least 8 characters") {
+	if !strings.Contains(body, "Password must be at least 12 characters") {
 		t.Fatalf("expected body to contain password length error, got: %s", body)
 	}
 }

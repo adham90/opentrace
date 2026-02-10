@@ -73,7 +73,7 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	}
 
 	// Ensure data directory exists
-	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating data directory: %w", err)
 	}
 

@@ -78,7 +78,7 @@ func TestOnboardingSubmit_CreatesAdminAndAPIKey(t *testing.T) {
 
 	form := url.Values{
 		"email":    {"admin@test.com"},
-		"password": {"password123"},
+		"password": {"password12345"},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/onboarding",
 		strings.NewReader(form.Encode()))
@@ -157,7 +157,7 @@ func TestOnboardingSubmit_RejectsWhenUsersExist(t *testing.T) {
 
 	form := url.Values{
 		"email":    {"new@test.com"},
-		"password": {"password123"},
+		"password": {"password12345"},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/onboarding",
 		strings.NewReader(form.Encode()))
@@ -187,7 +187,7 @@ func TestOnboardingSubmit_ValidationErrors(t *testing.T) {
 	}{
 		{"empty email", "", "password123", "Email and password are required"},
 		{"empty password", "test@test.com", "", "Email and password are required"},
-		{"short password", "test@test.com", "short", "Password must be at least 8 characters"},
+		{"short password", "test@test.com", "short", "Password must be at least 12 characters"},
 	}
 
 	for _, tt := range tests {

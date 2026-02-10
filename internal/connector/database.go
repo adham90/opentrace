@@ -115,10 +115,9 @@ func (c *DatabaseConnector) ExecuteReadQuery(ctx context.Context, query string) 
 		return nil, fmt.Errorf("query rejected: %w", err)
 	}
 
-	// Add LIMIT if not present
+	// Add LIMIT if the AST doesn't already contain one
 	limitedQuery := query
-	upperQuery := strings.ToUpper(strings.TrimSpace(query))
-	if !strings.Contains(upperQuery, "LIMIT") {
+	if !guardrail.HasLimit(query) {
 		limitedQuery = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(query, "; "), c.maxRows)
 	}
 
@@ -176,10 +175,9 @@ func (c *DatabaseConnector) handleDbSearch(ctx context.Context, args map[string]
 		return "", fmt.Errorf("query rejected: %w", err)
 	}
 
-	// Add LIMIT if not present
+	// Add LIMIT if the AST doesn't already contain one
 	limitedQuery := query
-	upperQuery := strings.ToUpper(strings.TrimSpace(query))
-	if !strings.Contains(upperQuery, "LIMIT") {
+	if !guardrail.HasLimit(query) {
 		limitedQuery = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(query, "; "), c.maxRows)
 	}
 

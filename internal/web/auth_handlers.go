@@ -160,8 +160,8 @@ func (s *Server) handleRegisterSubmit(w http.ResponseWriter, r *http.Request) {
 		s.renderRegisterError(w, r, "Email and password are required")
 		return
 	}
-	if len(password) < 8 {
-		s.renderRegisterError(w, r, "Password must be at least 8 characters")
+	if len(password) < 12 {
+		s.renderRegisterError(w, r, "Password must be at least 12 characters")
 		return
 	}
 
@@ -275,8 +275,8 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "current and new passwords are required")
 		return
 	}
-	if len(newPassword) < 8 {
-		writeError(w, http.StatusBadRequest, "new password must be at least 8 characters")
+	if len(newPassword) < 12 {
+		writeError(w, http.StatusBadRequest, "new password must be at least 12 characters")
 		return
 	}
 

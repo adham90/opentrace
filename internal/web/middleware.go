@@ -3,9 +3,83 @@ package web
 import (
 	"context"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/adham90/opentrace/internal/store"
 )
+
+// SecurityHeaders adds standard security headers to all responses.
+func SecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// MaxBodySize limits the request body to the given number of bytes.
+func MaxBodySize(maxBytes int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// rateLimitEntry tracks request counts for a single IP.
+type rateLimitEntry struct {
+	count    int
+	resetAt  time.Time
+}
+
+// RateLimiter provides per-IP rate limiting.
+type RateLimiter struct {
+	mu       sync.Mutex
+	entries  map[string]*rateLimitEntry
+	limit    int
+	window   time.Duration
+}
+
+// NewRateLimiter creates a rate limiter allowing limit requests per window per IP.
+func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
+	return &RateLimiter{
+		entries: make(map[string]*rateLimitEntry),
+		limit:   limit,
+		window:  window,
+	}
+}
+
+// Middleware returns an HTTP middleware that enforces the rate limit.
+func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := r.RemoteAddr
+		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			ip = fwd
+		}
+
+		rl.mu.Lock()
+		now := time.Now()
+		entry, ok := rl.entries[ip]
+		if !ok || now.After(entry.resetAt) {
+			rl.entries[ip] = &rateLimitEntry{count: 1, resetAt: now.Add(rl.window)}
+			rl.mu.Unlock()
+			next.ServeHTTP(w, r)
+			return
+		}
+		entry.count++
+		if entry.count > rl.limit {
+			rl.mu.Unlock()
+			writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
+			return
+		}
+		rl.mu.Unlock()
+		next.ServeHTTP(w, r)
+	})
+}
 
 // APIKeyAuth returns middleware that validates a Bearer token against the given
 // API key. If apiKey is empty, all requests are allowed (auth disabled).

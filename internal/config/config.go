@@ -112,7 +112,7 @@ func Load() (*Config, error) {
 		LLMProvider:         envOrDefault("OPENTRACE_LLM_PROVIDER", "ollama"),
 		OllamaURL:           envOrDefault("OPENTRACE_OLLAMA_URL", "http://localhost:11434"),
 		OllamaModel:         envOrDefault("OPENTRACE_OLLAMA_MODEL", "llama3.2"),
-		ListenAddr:          envOrDefault("OPENTRACE_LISTEN_ADDR", ":8080"),
+		ListenAddr:          envOrDefault("OPENTRACE_LISTEN_ADDR", "127.0.0.1:8080"),
 		APIKey:              os.Getenv("OPENTRACE_API_KEY"),
 		AnthropicAPIKey:     os.Getenv("OPENTRACE_ANTHROPIC_API_KEY"),
 		AnthropicModel:      envOrDefault("OPENTRACE_ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929"),

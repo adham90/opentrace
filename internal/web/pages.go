@@ -199,6 +199,9 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
+	if limit > 500 {
+		limit = 500
+	}
 
 	offset := 0
 	if o := r.URL.Query().Get("offset"); o != "" {

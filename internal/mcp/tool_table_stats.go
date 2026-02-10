@@ -51,7 +51,7 @@ LEFT JOIN pg_statio_user_tables io
   ON s.relid = io.relid`
 
 		if tableName != "" {
-			query += fmt.Sprintf("\nWHERE s.relname = '%s'", tableName)
+			query += fmt.Sprintf("\nWHERE s.relname = '%s'", sanitizeIdentifier(tableName))
 		}
 
 		query += "\nORDER BY s.n_live_tup DESC\nLIMIT 50"

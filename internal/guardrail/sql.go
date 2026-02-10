@@ -30,3 +30,18 @@ func ValidateReadOnly(query string) error {
 
 	return nil
 }
+
+// HasLimit returns true if the query's top-level SELECT already contains a LIMIT clause.
+func HasLimit(query string) bool {
+	result, err := pg_query.Parse(query)
+	if err != nil {
+		return false
+	}
+	for _, stmt := range result.GetStmts() {
+		sel := stmt.GetStmt().GetSelectStmt()
+		if sel != nil && sel.LimitCount != nil {
+			return true
+		}
+	}
+	return false
+}
