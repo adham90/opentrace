@@ -213,6 +213,58 @@
             </div>
           </div>
         </div>
+        <!-- Adaptive Scheduling (collapsible) -->
+        <div class="modal-section">
+          <div class="modal-section-label" style="cursor:pointer" onclick="toggleAdaptiveSection('rule')">
+            <span id="rule-adaptive-toggle-icon">&#9654;</span> Adaptive Scheduling
+          </div>
+          <div id="rule-adaptive-section" style="display:none">
+            <div class="form-group">
+              <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="rule-adaptive-enabled"> Enable adaptive scheduling</label>
+              <div class="form-hint">Automatically adjust polling frequency based on alert state</div>
+            </div>
+            <div id="rule-adaptive-fields" style="display:none">
+              <div class="form-grid">
+                <div class="form-group">
+                  <label>Escalated Interval</label>
+                  <input type="text" id="rule-adaptive-escalated" placeholder="e.g. 1m (default: 1/4 of normal)">
+                  <div class="form-hint">How often to check when alerting</div>
+                </div>
+                <div class="form-group">
+                  <label>Escalation Duration</label>
+                  <input type="text" id="rule-adaptive-duration" placeholder="e.g. 30m (default)">
+                  <div class="form-hint">Max time in escalated state</div>
+                </div>
+                <div class="form-group">
+                  <label>Cooldown Runs</label>
+                  <input type="number" id="rule-adaptive-cooldown" placeholder="3" min="1">
+                  <div class="form-hint">Clean runs before returning to normal</div>
+                </div>
+                <div class="form-group">
+                  <label>Max Consecutive Errors</label>
+                  <input type="number" id="rule-adaptive-max-errors" placeholder="5" min="1">
+                  <div class="form-hint">Errors before pausing monitor</div>
+                </div>
+              </div>
+              <div class="form-group" style="margin-top:8px">
+                <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="rule-adaptive-relax"> Enable relaxation (reduce frequency when quiet)</label>
+              </div>
+              <div id="rule-relax-fields" style="display:none">
+                <div class="form-grid">
+                  <div class="form-group">
+                    <label>Relaxed Interval</label>
+                    <input type="text" id="rule-adaptive-relaxed" placeholder="e.g. 2h">
+                  </div>
+                  <div class="form-group">
+                    <label>Relax After Runs</label>
+                    <input type="number" id="rule-adaptive-relax-after" placeholder="20" min="1">
+                    <div class="form-hint">Clean runs before relaxing</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn" onclick="hideRuleModal()">Cancel</button>
@@ -343,9 +395,62 @@
           </div>
         </div>
 
-        <!-- 04 Notifications -->
+        <!-- 04 Adaptive Scheduling (collapsible) -->
         <div class="modal-section">
-          <div class="modal-section-label"><span class="section-number">04</span> Notifications</div>
+          <div class="modal-section-label" style="cursor:pointer" onclick="toggleAdaptiveSection('ai')">
+            <span id="ai-adaptive-toggle-icon">&#9654;</span> Adaptive Scheduling
+          </div>
+          <div id="ai-adaptive-section" style="display:none">
+            <div class="form-group">
+              <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="ai-adaptive-enabled"> Enable adaptive scheduling</label>
+              <div class="form-hint">Automatically adjust polling frequency based on alert state</div>
+            </div>
+            <div id="ai-adaptive-fields" style="display:none">
+              <div class="form-grid">
+                <div class="form-group">
+                  <label>Escalated Interval</label>
+                  <input type="text" id="ai-adaptive-escalated" placeholder="e.g. 1m (default: 1/4 of normal)">
+                  <div class="form-hint">How often to check when alerting</div>
+                </div>
+                <div class="form-group">
+                  <label>Escalation Duration</label>
+                  <input type="text" id="ai-adaptive-duration" placeholder="e.g. 30m (default)">
+                  <div class="form-hint">Max time in escalated state</div>
+                </div>
+                <div class="form-group">
+                  <label>Cooldown Runs</label>
+                  <input type="number" id="ai-adaptive-cooldown" placeholder="3" min="1">
+                  <div class="form-hint">Clean runs before returning to normal</div>
+                </div>
+                <div class="form-group">
+                  <label>Max Consecutive Errors</label>
+                  <input type="number" id="ai-adaptive-max-errors" placeholder="5" min="1">
+                  <div class="form-hint">Errors before pausing monitor</div>
+                </div>
+              </div>
+              <div class="form-group" style="margin-top:8px">
+                <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="ai-adaptive-relax"> Enable relaxation (reduce frequency when quiet)</label>
+              </div>
+              <div id="ai-relax-fields" style="display:none">
+                <div class="form-grid">
+                  <div class="form-group">
+                    <label>Relaxed Interval</label>
+                    <input type="text" id="ai-adaptive-relaxed" placeholder="e.g. 2h">
+                  </div>
+                  <div class="form-group">
+                    <label>Relax After Runs</label>
+                    <input type="number" id="ai-adaptive-relax-after" placeholder="20" min="1">
+                    <div class="form-hint">Clean runs before relaxing</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 05 Notifications -->
+        <div class="modal-section">
+          <div class="modal-section-label"><span class="section-number">05</span> Notifications</div>
           <div class="notify-channels">
             <div class="notify-channel">
               <span class="notify-channel-icon">&#9632;</span>
@@ -449,6 +554,18 @@ function getMonitorTypeBadge(w) {
   return '<span class="badge badge-type badge-ai">AI</span>';
 }
 
+function getAdaptiveBadge(w) {
+  if (!w.adaptive_config || !w.adaptive_config.enabled) return '';
+  var s = w.adaptive_state || 'normal';
+  if (s === 'normal') return '';
+  if (s === 'escalated') return '<span class="badge badge-adaptive badge-escalated" title="Checking more frequently due to alerts">&#8593; escalated</span>';
+  if (s === 'sustained') return '<span class="badge badge-adaptive badge-sustained" title="Alert persists at normal interval">&#8252; sustained</span>';
+  if (s === 'relaxed') return '<span class="badge badge-adaptive badge-relaxed" title="Checking less frequently — no issues detected">&#8595; relaxed</span>';
+  if (s === 'backing_off') return '<span class="badge badge-adaptive badge-backoff" title="Backing off after errors (consecutive: ' + (w.consecutive_errors || 0) + ')">&#8634; backoff</span>';
+  if (s === 'error') return '<span class="badge badge-adaptive badge-adaptive-error" title="Paused after ' + (w.consecutive_errors || 0) + ' consecutive errors">&#9888; paused</span>';
+  return '';
+}
+
 function loadWatchers() {
   fetch('/api/watchers' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r) { return r.json(); }).then(function(watchers) {
     var container = document.getElementById('watchers-list');
@@ -473,6 +590,7 @@ function loadWatchers() {
         html += '    <span class="watcher-meta">' + escapeHtml(w.model) + '</span>';
       }
       html += '    <span class="watcher-status ' + statusClass + '">' + statusIcon + ' ' + w.status + '</span>';
+      html += getAdaptiveBadge(w);
       html += '  </div>';
       html += '  <div class="watcher-info">';
       html += '    <span>Last run: ' + lastRun + '</span>';
@@ -488,6 +606,8 @@ function loadWatchers() {
         }
         if (w.status === 'active') {
           html += '    <button class="btn btn-sm" onclick="pauseWatcher(\'' + w.id + '\')">Pause</button>';
+        } else if (w.adaptive_state === 'error') {
+          html += '    <button class="btn btn-sm btn-resume" onclick="resumeWatcher(\'' + w.id + '\')">Resume Monitor</button>';
         } else {
           html += '    <button class="btn btn-sm" onclick="resumeWatcher(\'' + w.id + '\')">Resume</button>';
         }
@@ -665,6 +785,8 @@ function saveRuleMonitor(e) {
   };
   if (schedule) body.schedule = schedule;
   if (dsId) body.data_source_id = dsId;
+  var adaptiveCfg = buildAdaptiveConfig('rule');
+  if (adaptiveCfg) body.adaptive_config = adaptiveCfg;
 
   var method = id ? 'PUT' : 'POST';
   var url = id ? '/api/watchers/' + id : '/api/watchers';
@@ -725,6 +847,7 @@ function editRuleMonitor(id) {
       if (w.data_source_id) document.getElementById('rule-health-datasource').value = w.data_source_id;
       toggleLatency();
     }
+    populateAdaptiveConfig('rule', w.adaptive_config);
   });
 }
 
@@ -781,6 +904,8 @@ function saveWatcher(e) {
     notify: notify
   };
   if (aiSchedule) body.schedule = aiSchedule;
+  var adaptiveCfg = buildAdaptiveConfig('ai');
+  if (adaptiveCfg) body.adaptive_config = adaptiveCfg;
 
   var method = id ? 'PUT' : 'POST';
   var url = id ? '/api/watchers/' + id : '/api/watchers';
@@ -839,6 +964,7 @@ function editWatcher(id) {
     var wg = document.getElementById('webhook-url-group');
     if (hasWebhook) { wg.classList.add('show'); } else { wg.classList.remove('show'); }
 
+    populateAdaptiveConfig('ai', w.adaptive_config);
     document.getElementById('watcher-modal').style.display = 'flex';
   });
 }
@@ -935,6 +1061,70 @@ document.getElementById('watcher-schedule').addEventListener('input', function()
   var desc = describeSchedule(this.value);
   document.getElementById('ai-schedule-preview').textContent = desc ? '→ ' + desc : '';
 });
+
+// --- Adaptive Scheduling UI ---
+function toggleAdaptiveSection(prefix) {
+  var el = document.getElementById(prefix + '-adaptive-section');
+  var icon = document.getElementById(prefix + '-adaptive-toggle-icon');
+  if (el.style.display === 'none') { el.style.display = ''; icon.innerHTML = '&#9660;'; }
+  else { el.style.display = 'none'; icon.innerHTML = '&#9654;'; }
+}
+
+['rule', 'ai'].forEach(function(prefix) {
+  var cb = document.getElementById(prefix + '-adaptive-enabled');
+  if (cb) cb.addEventListener('change', function() {
+    document.getElementById(prefix + '-adaptive-fields').style.display = this.checked ? '' : 'none';
+  });
+  var relaxCb = document.getElementById(prefix + '-adaptive-relax');
+  if (relaxCb) relaxCb.addEventListener('change', function() {
+    document.getElementById(prefix + '-relax-fields').style.display = this.checked ? '' : 'none';
+  });
+});
+
+function buildAdaptiveConfig(prefix) {
+  var enabled = document.getElementById(prefix + '-adaptive-enabled');
+  if (!enabled || !enabled.checked) return null;
+  var cfg = {enabled: true};
+  var v;
+  v = document.getElementById(prefix + '-adaptive-escalated').value; if (v) cfg.escalated_interval = v;
+  v = document.getElementById(prefix + '-adaptive-duration').value; if (v) cfg.escalation_duration = v;
+  v = document.getElementById(prefix + '-adaptive-cooldown').value; if (v) cfg.cooldown_runs = parseInt(v);
+  v = document.getElementById(prefix + '-adaptive-max-errors').value; if (v) cfg.max_consecutive_errors = parseInt(v);
+  var relaxCb = document.getElementById(prefix + '-adaptive-relax');
+  if (relaxCb && relaxCb.checked) {
+    cfg.relax_enabled = true;
+    v = document.getElementById(prefix + '-adaptive-relaxed').value; if (v) cfg.relaxed_interval = v;
+    v = document.getElementById(prefix + '-adaptive-relax-after').value; if (v) cfg.relax_after_runs = parseInt(v);
+  }
+  return cfg;
+}
+
+function populateAdaptiveConfig(prefix, cfg) {
+  var enabled = document.getElementById(prefix + '-adaptive-enabled');
+  if (!cfg || !cfg.enabled) {
+    if (enabled) enabled.checked = false;
+    document.getElementById(prefix + '-adaptive-fields').style.display = 'none';
+    return;
+  }
+  enabled.checked = true;
+  document.getElementById(prefix + '-adaptive-fields').style.display = '';
+  document.getElementById(prefix + '-adaptive-section').style.display = '';
+  document.getElementById(prefix + '-adaptive-toggle-icon').innerHTML = '&#9660;';
+  document.getElementById(prefix + '-adaptive-escalated').value = cfg.escalated_interval || '';
+  document.getElementById(prefix + '-adaptive-duration').value = cfg.escalation_duration || '';
+  document.getElementById(prefix + '-adaptive-cooldown').value = cfg.cooldown_runs || '';
+  document.getElementById(prefix + '-adaptive-max-errors').value = cfg.max_consecutive_errors || '';
+  var relaxCb = document.getElementById(prefix + '-adaptive-relax');
+  if (cfg.relax_enabled) {
+    relaxCb.checked = true;
+    document.getElementById(prefix + '-relax-fields').style.display = '';
+    document.getElementById(prefix + '-adaptive-relaxed').value = cfg.relaxed_interval || '';
+    document.getElementById(prefix + '-adaptive-relax-after').value = cfg.relax_after_runs || '';
+  } else {
+    relaxCb.checked = false;
+    document.getElementById(prefix + '-relax-fields').style.display = 'none';
+  }
+}
 
 loadWatchers();
 loadModels();

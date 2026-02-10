@@ -57,15 +57,25 @@ func (s *watcherStore) Create(ctx context.Context, params CreateWatcherParams) (
 		ruleConfigStr = &s
 	}
 
+	var adaptiveConfigStr *string
+	if params.AdaptiveConfig != nil {
+		b, err := json.Marshal(params.AdaptiveConfig)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling adaptive_config: %w", err)
+		}
+		s := string(b)
+		adaptiveConfigStr = &s
+	}
+
 	id := uuid.New()
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO watchers (id, title, description, environment, severity, filters, time_range, schedule, model, effort, notify, monitor_type, rule_config, data_source_id, next_run_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO watchers (id, title, description, environment, severity, filters, time_range, schedule, model, effort, notify, monitor_type, rule_config, data_source_id, adaptive_config, next_run_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id.String(), params.Title, params.Description, params.Environment, string(severity),
 		string(filters), timeRange, params.Schedule, params.Model, string(effort), string(notify),
-		string(monitorType), ruleConfigStr, params.DataSourceID,
+		string(monitorType), ruleConfigStr, params.DataSourceID, adaptiveConfigStr,
 		now, now, now,
 	)
 	if err != nil {
@@ -246,25 +256,36 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 		dataSourceIDStr = params.DataSourceID
 	}
 
+	var adaptiveConfigStr *string
+	if params.AdaptiveConfig != nil {
+		b, err := json.Marshal(params.AdaptiveConfig)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling adaptive_config: %w", err)
+		}
+		s := string(b)
+		adaptiveConfigStr = &s
+	}
+
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE watchers
-		 SET title          = COALESCE(?, title),
-		     description    = COALESCE(?, description),
-		     environment    = COALESCE(?, environment),
-		     severity       = COALESCE(?, severity),
-		     filters        = COALESCE(?, filters),
-		     time_range     = COALESCE(?, time_range),
-		     schedule       = COALESCE(?, schedule),
-		     model          = COALESCE(?, model),
-		     effort         = COALESCE(?, effort),
-		     notify         = COALESCE(?, notify),
-		     monitor_type   = COALESCE(?, monitor_type),
-		     rule_config    = COALESCE(?, rule_config),
-		     data_source_id = COALESCE(?, data_source_id),
-		     updated_at     = ?
+		 SET title            = COALESCE(?, title),
+		     description      = COALESCE(?, description),
+		     environment      = COALESCE(?, environment),
+		     severity         = COALESCE(?, severity),
+		     filters          = COALESCE(?, filters),
+		     time_range       = COALESCE(?, time_range),
+		     schedule         = COALESCE(?, schedule),
+		     model            = COALESCE(?, model),
+		     effort           = COALESCE(?, effort),
+		     notify           = COALESCE(?, notify),
+		     monitor_type     = COALESCE(?, monitor_type),
+		     rule_config      = COALESCE(?, rule_config),
+		     data_source_id   = COALESCE(?, data_source_id),
+		     adaptive_config  = COALESCE(?, adaptive_config),
+		     updated_at       = ?
 		 WHERE id = ?`,
 		titleStr, descStr, envStr, sevStr, filtersStr, timeRangeStr, scheduleStr, modelStr, effortStr, notifyStr,
-		monitorTypeStr, ruleConfigStr, dataSourceIDStr,
+		monitorTypeStr, ruleConfigStr, dataSourceIDStr, adaptiveConfigStr,
 		now, id.String(),
 	)
 	if err != nil {

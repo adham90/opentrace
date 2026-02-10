@@ -15,35 +15,37 @@ import (
 )
 
 type createWatcherRequest struct {
-	Title        string               `json:"title"`
-	Description  string               `json:"description"`
-	Environment  string               `json:"environment"`
-	Severity     store.WatcherSeverity `json:"severity"`
-	Filters      json.RawMessage      `json:"filters"`
-	TimeRange    string               `json:"time_range"`
-	Schedule     string               `json:"schedule,omitempty"`
-	Model        string               `json:"model"`
-	Effort       store.WatcherEffort   `json:"effort"`
-	Notify       json.RawMessage      `json:"notify"`
-	MonitorType  store.MonitorType     `json:"monitor_type"`
-	RuleConfig   *store.RuleConfig     `json:"rule_config,omitempty"`
-	DataSourceID *string               `json:"data_source_id,omitempty"`
+	Title          string                `json:"title"`
+	Description    string                `json:"description"`
+	Environment    string                `json:"environment"`
+	Severity       store.WatcherSeverity `json:"severity"`
+	Filters        json.RawMessage       `json:"filters"`
+	TimeRange      string                `json:"time_range"`
+	Schedule       string                `json:"schedule,omitempty"`
+	Model          string                `json:"model"`
+	Effort         store.WatcherEffort   `json:"effort"`
+	Notify         json.RawMessage       `json:"notify"`
+	MonitorType    store.MonitorType     `json:"monitor_type"`
+	RuleConfig     *store.RuleConfig     `json:"rule_config,omitempty"`
+	DataSourceID   *string               `json:"data_source_id,omitempty"`
+	AdaptiveConfig *store.AdaptiveConfig `json:"adaptive_config,omitempty"`
 }
 
 type updateWatcherRequest struct {
-	Title        *string                `json:"title,omitempty"`
-	Description  *string                `json:"description,omitempty"`
-	Environment  *string                `json:"environment,omitempty"`
-	Severity     *store.WatcherSeverity `json:"severity,omitempty"`
-	Filters      json.RawMessage        `json:"filters,omitempty"`
-	TimeRange    *string                `json:"time_range,omitempty"`
-	Schedule     *string                `json:"schedule,omitempty"`
-	Model        *string                `json:"model,omitempty"`
-	Effort       *store.WatcherEffort   `json:"effort,omitempty"`
-	Notify       json.RawMessage        `json:"notify,omitempty"`
-	MonitorType  *store.MonitorType     `json:"monitor_type,omitempty"`
-	RuleConfig   *store.RuleConfig      `json:"rule_config,omitempty"`
-	DataSourceID *string                `json:"data_source_id,omitempty"`
+	Title          *string                `json:"title,omitempty"`
+	Description    *string                `json:"description,omitempty"`
+	Environment    *string                `json:"environment,omitempty"`
+	Severity       *store.WatcherSeverity `json:"severity,omitempty"`
+	Filters        json.RawMessage        `json:"filters,omitempty"`
+	TimeRange      *string                `json:"time_range,omitempty"`
+	Schedule       *string                `json:"schedule,omitempty"`
+	Model          *string                `json:"model,omitempty"`
+	Effort         *store.WatcherEffort   `json:"effort,omitempty"`
+	Notify         json.RawMessage        `json:"notify,omitempty"`
+	MonitorType    *store.MonitorType     `json:"monitor_type,omitempty"`
+	RuleConfig     *store.RuleConfig      `json:"rule_config,omitempty"`
+	DataSourceID   *string                `json:"data_source_id,omitempty"`
+	AdaptiveConfig *store.AdaptiveConfig  `json:"adaptive_config,omitempty"`
 }
 
 func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
@@ -71,19 +73,20 @@ func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := s.watcherStore.Create(r.Context(), store.CreateWatcherParams{
-		Title:        req.Title,
-		Description:  req.Description,
-		Environment:  req.Environment,
-		Severity:     req.Severity,
-		Filters:      req.Filters,
-		TimeRange:    req.TimeRange,
-		Schedule:     req.Schedule,
-		Model:        req.Model,
-		Effort:       req.Effort,
-		Notify:       req.Notify,
-		MonitorType:  req.MonitorType,
-		RuleConfig:   req.RuleConfig,
-		DataSourceID: req.DataSourceID,
+		Title:          req.Title,
+		Description:    req.Description,
+		Environment:    req.Environment,
+		Severity:       req.Severity,
+		Filters:        req.Filters,
+		TimeRange:      req.TimeRange,
+		Schedule:       req.Schedule,
+		Model:          req.Model,
+		Effort:         req.Effort,
+		Notify:         req.Notify,
+		MonitorType:    req.MonitorType,
+		RuleConfig:     req.RuleConfig,
+		DataSourceID:   req.DataSourceID,
+		AdaptiveConfig: req.AdaptiveConfig,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create watcher")
@@ -143,19 +146,20 @@ func (s *Server) handleUpdateWatcher(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updated, err := s.watcherStore.Update(r.Context(), id, store.UpdateWatcherParams{
-		Title:        req.Title,
-		Description:  req.Description,
-		Environment:  req.Environment,
-		Severity:     req.Severity,
-		Filters:      req.Filters,
-		TimeRange:    req.TimeRange,
-		Schedule:     req.Schedule,
-		Model:        req.Model,
-		Effort:       req.Effort,
-		Notify:       req.Notify,
-		MonitorType:  req.MonitorType,
-		RuleConfig:   req.RuleConfig,
-		DataSourceID: req.DataSourceID,
+		Title:          req.Title,
+		Description:    req.Description,
+		Environment:    req.Environment,
+		Severity:       req.Severity,
+		Filters:        req.Filters,
+		TimeRange:      req.TimeRange,
+		Schedule:       req.Schedule,
+		Model:          req.Model,
+		Effort:         req.Effort,
+		Notify:         req.Notify,
+		MonitorType:    req.MonitorType,
+		RuleConfig:     req.RuleConfig,
+		DataSourceID:   req.DataSourceID,
+		AdaptiveConfig: req.AdaptiveConfig,
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {

@@ -232,8 +232,9 @@ type CreateWatcherParams struct {
 	Effort       WatcherEffort   `json:"effort"`
 	Notify       json.RawMessage `json:"notify"`
 	MonitorType  MonitorType     `json:"monitor_type"`
-	RuleConfig   *RuleConfig     `json:"rule_config,omitempty"`
-	DataSourceID *string         `json:"data_source_id,omitempty"`
+	RuleConfig      *RuleConfig     `json:"rule_config,omitempty"`
+	DataSourceID    *string         `json:"data_source_id,omitempty"`
+	AdaptiveConfig  *AdaptiveConfig `json:"adaptive_config,omitempty"`
 }
 
 // UpdateWatcherParams defines the input for updating a watcher.
@@ -249,8 +250,9 @@ type UpdateWatcherParams struct {
 	Effort       *WatcherEffort   `json:"effort,omitempty"`
 	Notify       json.RawMessage  `json:"notify,omitempty"`
 	MonitorType  *MonitorType     `json:"monitor_type,omitempty"`
-	RuleConfig   *RuleConfig      `json:"rule_config,omitempty"`
-	DataSourceID *string          `json:"data_source_id,omitempty"`
+	RuleConfig      *RuleConfig      `json:"rule_config,omitempty"`
+	DataSourceID    *string          `json:"data_source_id,omitempty"`
+	AdaptiveConfig  *AdaptiveConfig  `json:"adaptive_config,omitempty"`
 }
 
 // ListWatcherParams defines filters for listing watchers.

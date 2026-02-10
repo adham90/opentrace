@@ -489,6 +489,9 @@ select:focus { outline: none; border-color: var(--green); }
 .btn-danger { color: var(--red); border-color: var(--red-dim); }
 .btn-danger:hover { background: var(--red-dim); }
 
+.btn-resume { color: var(--green); border-color: var(--green); font-weight: 600; }
+.btn-resume:hover { background: rgba(74, 222, 128, 0.15); }
+
 .btn-sm { padding: 3px 8px; font-size: 11px; }
 
 .btn-close {
@@ -905,6 +908,19 @@ select:focus { outline: none; border-color: var(--green); }
 .badge-logs { color: var(--purple); }
 .badge-health { color: var(--green); }
 .badge-ai { color: var(--cyan); }
+
+/* Adaptive scheduling state badges */
+.badge-adaptive {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin-left: 6px;
+}
+.badge-escalated { background: rgba(239, 68, 68, 0.15); color: var(--red); }
+.badge-sustained { background: rgba(251, 146, 60, 0.15); color: var(--yellow); }
+.badge-relaxed { background: rgba(96, 165, 250, 0.15); color: var(--blue); }
+.badge-backoff { background: rgba(251, 191, 36, 0.15); color: var(--yellow); }
+.badge-adaptive-error { background: rgba(239, 68, 68, 0.2); color: var(--red); font-weight: 600; }
 
 /* ===== Monitor Type Selection Grid ===== */
 .monitor-type-grid {
