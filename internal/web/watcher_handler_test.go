@@ -261,6 +261,73 @@ func TestHandleListModels(t *testing.T) {
 	}
 }
 
+func TestHandleCreateRuleMonitor(t *testing.T) {
+	srv := newTestServerWithWatchers()
+
+	body := `{
+		"title": "Connection count monitor",
+		"monitor_type": "rule",
+		"rule_config": {
+			"source": "query",
+			"query": "SELECT count(*) FROM pg_stat_activity",
+			"metric": "value",
+			"operator": "gt",
+			"threshold": 80
+		},
+		"data_source_id": "ds-123",
+		"severity": "warning",
+		"time_range": "5m"
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/watchers", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var watcher store.Watcher
+	json.NewDecoder(w.Body).Decode(&watcher)
+	if watcher.MonitorType != store.MonitorTypeRule {
+		t.Errorf("monitor_type = %q, want %q", watcher.MonitorType, store.MonitorTypeRule)
+	}
+	if watcher.RuleConfig == nil {
+		t.Fatal("expected non-nil rule_config")
+	}
+	if watcher.RuleConfig.Source != store.RuleSourceQuery {
+		t.Errorf("rule source = %q, want %q", watcher.RuleConfig.Source, store.RuleSourceQuery)
+	}
+	if watcher.DataSourceID == nil || *watcher.DataSourceID != "ds-123" {
+		t.Errorf("data_source_id = %v, want ds-123", watcher.DataSourceID)
+	}
+}
+
+func TestHandleMonitorTemplates(t *testing.T) {
+	srv := newTestServerWithWatchers()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/monitors/templates", nil)
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var templates []map[string]any
+	json.NewDecoder(w.Body).Decode(&templates)
+	if len(templates) == 0 {
+		t.Fatal("expected non-empty templates list")
+	}
+
+	// Verify first template has required fields
+	first := templates[0]
+	if first["id"] == nil || first["name"] == nil || first["category"] == nil {
+		t.Errorf("template missing required fields: %v", first)
+	}
+}
+
 func TestHandleCreateWatcher_WithModel(t *testing.T) {
 	srv := newTestServerWithWatchers()
 

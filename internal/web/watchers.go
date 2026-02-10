@@ -14,27 +14,33 @@ import (
 )
 
 type createWatcherRequest struct {
-	Title       string               `json:"title"`
-	Description string               `json:"description"`
-	Environment string               `json:"environment"`
-	Severity    store.WatcherSeverity `json:"severity"`
-	Filters     json.RawMessage      `json:"filters"`
-	TimeRange   string               `json:"time_range"`
-	Model       string               `json:"model"`
-	Effort      store.WatcherEffort   `json:"effort"`
-	Notify      json.RawMessage      `json:"notify"`
+	Title        string               `json:"title"`
+	Description  string               `json:"description"`
+	Environment  string               `json:"environment"`
+	Severity     store.WatcherSeverity `json:"severity"`
+	Filters      json.RawMessage      `json:"filters"`
+	TimeRange    string               `json:"time_range"`
+	Model        string               `json:"model"`
+	Effort       store.WatcherEffort   `json:"effort"`
+	Notify       json.RawMessage      `json:"notify"`
+	MonitorType  store.MonitorType     `json:"monitor_type"`
+	RuleConfig   *store.RuleConfig     `json:"rule_config,omitempty"`
+	DataSourceID *string               `json:"data_source_id,omitempty"`
 }
 
 type updateWatcherRequest struct {
-	Title       *string                `json:"title,omitempty"`
-	Description *string                `json:"description,omitempty"`
-	Environment *string                `json:"environment,omitempty"`
-	Severity    *store.WatcherSeverity `json:"severity,omitempty"`
-	Filters     json.RawMessage        `json:"filters,omitempty"`
-	TimeRange   *string                `json:"time_range,omitempty"`
-	Model       *string                `json:"model,omitempty"`
-	Effort      *store.WatcherEffort   `json:"effort,omitempty"`
-	Notify      json.RawMessage        `json:"notify,omitempty"`
+	Title        *string                `json:"title,omitempty"`
+	Description  *string                `json:"description,omitempty"`
+	Environment  *string                `json:"environment,omitempty"`
+	Severity     *store.WatcherSeverity `json:"severity,omitempty"`
+	Filters      json.RawMessage        `json:"filters,omitempty"`
+	TimeRange    *string                `json:"time_range,omitempty"`
+	Model        *string                `json:"model,omitempty"`
+	Effort       *store.WatcherEffort   `json:"effort,omitempty"`
+	Notify       json.RawMessage        `json:"notify,omitempty"`
+	MonitorType  *store.MonitorType     `json:"monitor_type,omitempty"`
+	RuleConfig   *store.RuleConfig      `json:"rule_config,omitempty"`
+	DataSourceID *string                `json:"data_source_id,omitempty"`
 }
 
 func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
@@ -43,21 +49,29 @@ func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Title == "" || req.Description == "" {
-		writeError(w, http.StatusBadRequest, "title and description are required")
+	if req.Title == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+	// AI monitors require a description; rule monitors don't
+	if req.MonitorType != store.MonitorTypeRule && req.Description == "" {
+		writeError(w, http.StatusBadRequest, "description is required for AI monitors")
 		return
 	}
 
 	watcher, err := s.watcherStore.Create(r.Context(), store.CreateWatcherParams{
-		Title:       req.Title,
-		Description: req.Description,
-		Environment: req.Environment,
-		Severity:    req.Severity,
-		Filters:     req.Filters,
-		TimeRange:   req.TimeRange,
-		Model:       req.Model,
-		Effort:      req.Effort,
-		Notify:      req.Notify,
+		Title:        req.Title,
+		Description:  req.Description,
+		Environment:  req.Environment,
+		Severity:     req.Severity,
+		Filters:      req.Filters,
+		TimeRange:    req.TimeRange,
+		Model:        req.Model,
+		Effort:       req.Effort,
+		Notify:       req.Notify,
+		MonitorType:  req.MonitorType,
+		RuleConfig:   req.RuleConfig,
+		DataSourceID: req.DataSourceID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create watcher")
@@ -109,15 +123,18 @@ func (s *Server) handleUpdateWatcher(w http.ResponseWriter, r *http.Request) {
 	}
 
 	watcher, err := s.watcherStore.Update(r.Context(), id, store.UpdateWatcherParams{
-		Title:       req.Title,
-		Description: req.Description,
-		Environment: req.Environment,
-		Severity:    req.Severity,
-		Filters:     req.Filters,
-		TimeRange:   req.TimeRange,
-		Model:       req.Model,
-		Effort:      req.Effort,
-		Notify:      req.Notify,
+		Title:        req.Title,
+		Description:  req.Description,
+		Environment:  req.Environment,
+		Severity:     req.Severity,
+		Filters:      req.Filters,
+		TimeRange:    req.TimeRange,
+		Model:        req.Model,
+		Effort:       req.Effort,
+		Notify:       req.Notify,
+		MonitorType:  req.MonitorType,
+		RuleConfig:   req.RuleConfig,
+		DataSourceID: req.DataSourceID,
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {

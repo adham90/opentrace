@@ -42,6 +42,7 @@ type Server struct {
 	executor      *watcher.Executor
 	eventHub      *watcher.EventHub
 	modelRegistry *llm.ModelRegistry
+	ruleEvaluator *watcher.RuleEvaluator
 	logsConnMu    sync.Mutex
 	metricsConnMu sync.Mutex
 }
@@ -64,6 +65,7 @@ type ServerDeps struct {
 	Executor      *watcher.Executor
 	EventHub      *watcher.EventHub
 	ModelRegistry *llm.ModelRegistry
+	RuleEvaluator *watcher.RuleEvaluator
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
@@ -95,6 +97,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		executor:      deps.Executor,
 		eventHub:      deps.EventHub,
 		modelRegistry: deps.ModelRegistry,
+		ruleEvaluator: deps.RuleEvaluator,
 	}
 
 	cfg := deps.Cfg
@@ -177,6 +180,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Get("/watchers/{id}/runs", srv.handleListWatcherRuns)
 			r.Get("/watchers/{id}/runs/{runId}", srv.handleGetWatcherRun)
 			r.Get("/watchers/{id}/runs/{runId}/events", srv.handleRunEvents)
+			r.Get("/monitors/templates", srv.handleMonitorTemplates)
 			r.Get("/alerts", srv.handleListAlerts)
 			r.Get("/alerts/count", srv.handleAlertCount)
 			r.Get("/overview", srv.handleOverviewAPI)
@@ -202,6 +206,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Post("/watchers/{id}/resume", srv.handleResumeWatcher)
 			r.Post("/watchers/{id}/run", srv.handleRunWatcherNow)
 			r.Post("/watchers/{id}/runs/{runId}/stop", srv.handleStopRun)
+			r.Post("/monitors/preview", srv.handleMonitorPreview)
+			r.Post("/alerts/read-all", srv.handleMarkAllAlertsRead)
 			r.Post("/alerts/{id}/read", srv.handleMarkAlertRead)
 			r.Post("/alerts/{id}/dismiss", srv.handleDismissAlert)
 

@@ -372,8 +372,15 @@ func (m *mockAlertStore) CountUnread(ctx context.Context, environment string) (i
 	return count, nil
 }
 
-func (m *mockAlertStore) MarkRead(ctx context.Context, id uuid.UUID) error { return nil }
-func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error  { return nil }
+func (m *mockAlertStore) CountTotal(ctx context.Context, environment string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.alerts), nil
+}
+
+func (m *mockAlertStore) MarkRead(ctx context.Context, id uuid.UUID) error      { return nil }
+func (m *mockAlertStore) MarkAllRead(ctx context.Context, environment string) error { return nil }
+func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error       { return nil }
 func (m *mockAlertStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	return 0, nil
 }

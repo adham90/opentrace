@@ -164,12 +164,17 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 	if effort == "" {
 		effort = store.EffortMedium
 	}
+	monitorType := params.MonitorType
+	if monitorType == "" {
+		monitorType = store.MonitorTypeAI
+	}
 	now := time.Now()
 	w := &store.Watcher{
 		ID: uuid.New(), Title: params.Title, Description: params.Description,
 		Environment: params.Environment,
 		Severity: sev, Filters: filters, TimeRange: timeRange,
 		Model: params.Model, Effort: effort, Status: store.WatcherActive, Notify: notify,
+		MonitorType: monitorType, RuleConfig: params.RuleConfig, DataSourceID: params.DataSourceID,
 		NextRunAt: &now, CreatedAt: now, UpdatedAt: now,
 	}
 	m.watchers[w.ID] = w
@@ -403,6 +408,35 @@ func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error {
 		return store.ErrNotFound
 	}
 	a.Dismissed = true
+	return nil
+}
+
+func (m *mockAlertStore) CountTotal(ctx context.Context, environment string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, a := range m.alerts {
+		if !a.Dismissed {
+			if environment != "" && a.Environment != environment {
+				continue
+			}
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (m *mockAlertStore) MarkAllRead(ctx context.Context, environment string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, a := range m.alerts {
+		if !a.Dismissed && !a.Read {
+			if environment != "" && a.Environment != environment {
+				continue
+			}
+			a.Read = true
+		}
+	}
 	return nil
 }
 
