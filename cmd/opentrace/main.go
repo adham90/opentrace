@@ -213,6 +213,22 @@ func run() error {
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
 
+	// Start watcher scheduler for automatic scheduled runs
+	sched := watcher.NewScheduler(watcher.SchedulerOpts{
+		WatcherStore:  deps.watcherStore,
+		RunStore:      runStore,
+		AlertStore:    deps.alertStore,
+		Registry:      deps.registry,
+		ProviderCache: providerCache,
+		AgentCfg: agent.RunConfig{
+			MaxSteps:            deps.cfg.MaxAgentSteps,
+			MaxToolCalls:        deps.cfg.MaxToolCalls,
+			MaxObservationBytes: deps.cfg.MaxObservationBytes,
+		},
+		EventHub: eventHub,
+	})
+	sched.Start(ctx)
+
 	// Background: mark stale servers offline every 60s
 	go func() {
 		ticker := time.NewTicker(60 * time.Second)
@@ -257,6 +273,7 @@ func run() error {
 	<-done
 	log.Println("shutting down...")
 
+	sched.Stop()
 	deps.registry.CloseAll()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
