@@ -14,6 +14,23 @@
   </script>
   <link rel="stylesheet" href="/static/style.css">
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script>
+  // Global environment helpers — must be in <head> so content scripts can use them
+  function getGlobalEnv() {
+    return localStorage.getItem('opentrace-env') || '';
+  }
+  function setGlobalEnv(val) {
+    if (val) {
+      localStorage.setItem('opentrace-env', val);
+    } else {
+      localStorage.removeItem('opentrace-env');
+    }
+    if (typeof window.loadPageData === 'function') {
+      window.loadPageData();
+    }
+    if (typeof updateBadge === 'function') updateBadge();
+  }
+  </script>
 </head>
 <body>
   <header class="topbar">
@@ -25,7 +42,8 @@
         <a href="/watchers" class="nav-item {{if eq .Nav "watchers"}}active{{end}}">3:watchers</a>
         <a href="/connectors" class="nav-item {{if eq .Nav "connectors"}}active{{end}}">4:connectors</a>
         <a href="/servers" class="nav-item {{if eq .Nav "servers"}}active{{end}}">5:servers</a>
-        <a href="/tools" class="nav-item {{if eq .Nav "tools"}}active{{end}}">6:tools</a>
+        <a href="/digests" class="nav-item {{if eq .Nav "digests"}}active{{end}}">6:digests</a>
+        <a href="/tools" class="nav-item {{if eq .Nav "tools"}}active{{end}}">7:tools</a>
       </nav>
       <div class="topbar-right">
         <select id="env-select" class="topbar-select" onchange="setGlobalEnv(this.value)" title="Filter by environment">
@@ -64,22 +82,6 @@
     </div>
   </main>
   <script>
-  // Global environment management
-  function getGlobalEnv() {
-    return localStorage.getItem('opentrace-env') || '';
-  }
-  function setGlobalEnv(val) {
-    if (val) {
-      localStorage.setItem('opentrace-env', val);
-    } else {
-      localStorage.removeItem('opentrace-env');
-    }
-    if (typeof window.loadPageData === 'function') {
-      window.loadPageData();
-    }
-    // Reload alert badge with new env
-    updateBadge();
-  }
   function loadEnvironments() {
     fetch('/api/environments').then(function(r){return r.json()}).then(function(envs){
       var sel = document.getElementById('env-select');
@@ -153,7 +155,7 @@
 
   // Keyboard navigation (tmux-style: press 0-4 to switch tabs)
   (function(){
-    var tabs = {1:'/logs', 2:'/alerts', 3:'/watchers', 4:'/connectors', 5:'/servers', 6:'/tools'};
+    var tabs = {1:'/logs', 2:'/alerts', 3:'/watchers', 4:'/connectors', 5:'/servers', 6:'/digests', 7:'/tools'};
     document.addEventListener('keydown', function(e) {
       var tag = e.target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
