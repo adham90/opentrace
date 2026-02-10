@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/adham90/opentrace/internal/agent"
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/store"
@@ -599,5 +600,253 @@ func TestListAlertsHandler_Error(t *testing.T) {
 	}
 	if !result.IsError {
 		t.Fatal("expected error result")
+	}
+}
+
+// --- Mock UserStore for auth tests ---
+
+type mockUserStore struct {
+	users map[string]*store.User // keyed by MCP token
+	err   error
+}
+
+func (m *mockUserStore) Create(ctx context.Context, params store.CreateUserParams) (*store.User, error) {
+	return nil, m.err
+}
+
+func (m *mockUserStore) GetByID(ctx context.Context, id string) (*store.User, error) {
+	return nil, m.err
+}
+
+func (m *mockUserStore) GetByEmail(ctx context.Context, email string) (*store.User, error) {
+	return nil, m.err
+}
+
+func (m *mockUserStore) GetByMCPToken(ctx context.Context, token string) (*store.User, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if u, ok := m.users[token]; ok {
+		if u.MCPEnabled && u.IsActive {
+			return u, nil
+		}
+		return nil, store.ErrNotFound
+	}
+	return nil, store.ErrNotFound
+}
+
+func (m *mockUserStore) List(ctx context.Context) ([]store.User, error) {
+	return nil, m.err
+}
+
+func (m *mockUserStore) Update(ctx context.Context, id string, params store.UpdateUserParams) (*store.User, error) {
+	return nil, m.err
+}
+
+func (m *mockUserStore) UpdatePassword(ctx context.Context, id string, passwordHash string) error {
+	return m.err
+}
+
+func (m *mockUserStore) UpdateMCPToken(ctx context.Context, id string, token string) error {
+	return m.err
+}
+
+func (m *mockUserStore) Delete(ctx context.Context, id string) error {
+	return m.err
+}
+
+func (m *mockUserStore) Count(ctx context.Context) (int, error) {
+	return len(m.users), m.err
+}
+
+// testAccessControl mirrors the access-control logic from Serve() so we can
+// test it without starting a blocking stdio server.
+func testAccessControl(deps Deps) (hasAccess, isAdmin bool) {
+	hasAccess = true
+	isAdmin = true
+	if deps.UserStore != nil && deps.MCPToken != "" {
+		ctx := context.Background()
+		user, err := deps.UserStore.GetByMCPToken(ctx, deps.MCPToken)
+		if err != nil || user == nil {
+			hasAccess = false
+			return
+		}
+		isAdmin = user.Role == store.RoleAdmin
+	}
+	return
+}
+
+// --- Access-control logic tests ---
+
+func TestAccessControl_NoUserStore(t *testing.T) {
+	// No UserStore, no token → backward compat → full access.
+	deps := Deps{
+		Registry: connector.NewRegistry(),
+	}
+	hasAccess, isAdmin := testAccessControl(deps)
+	if !hasAccess {
+		t.Error("expected hasAccess=true when no UserStore is set")
+	}
+	if !isAdmin {
+		t.Error("expected isAdmin=true when no UserStore is set")
+	}
+}
+
+func TestAccessControl_ValidAdminToken(t *testing.T) {
+	token := "admin-token-abc123"
+	us := &mockUserStore{
+		users: map[string]*store.User{
+			token: {
+				ID:         "u1",
+				Email:      "admin@example.com",
+				Role:       store.RoleAdmin,
+				MCPEnabled: true,
+				IsActive:   true,
+			},
+		},
+	}
+
+	deps := Deps{
+		Registry:  connector.NewRegistry(),
+		UserStore: us,
+		MCPToken:  token,
+	}
+	hasAccess, isAdmin := testAccessControl(deps)
+	if !hasAccess {
+		t.Error("expected hasAccess=true for valid admin token")
+	}
+	if !isAdmin {
+		t.Error("expected isAdmin=true for admin user")
+	}
+}
+
+func TestAccessControl_ValidMemberToken(t *testing.T) {
+	token := "member-token-xyz789"
+	us := &mockUserStore{
+		users: map[string]*store.User{
+			token: {
+				ID:         "u2",
+				Email:      "member@example.com",
+				Role:       store.RoleMember,
+				MCPEnabled: true,
+				IsActive:   true,
+			},
+		},
+	}
+
+	deps := Deps{
+		Registry:  connector.NewRegistry(),
+		UserStore: us,
+		MCPToken:  token,
+	}
+	hasAccess, isAdmin := testAccessControl(deps)
+	if !hasAccess {
+		t.Error("expected hasAccess=true for valid member token")
+	}
+	if isAdmin {
+		t.Error("expected isAdmin=false for member user")
+	}
+}
+
+func TestAccessControl_InvalidToken(t *testing.T) {
+	us := &mockUserStore{
+		users: map[string]*store.User{}, // no users
+	}
+
+	deps := Deps{
+		Registry:  connector.NewRegistry(),
+		UserStore: us,
+		MCPToken:  "bad-token",
+	}
+	hasAccess, _ := testAccessControl(deps)
+	if hasAccess {
+		t.Error("expected hasAccess=false for invalid token")
+	}
+}
+
+func TestAccessControl_EmptyToken(t *testing.T) {
+	// UserStore is set but token is empty → condition (UserStore != nil && MCPToken != "")
+	// is false → backward compat → full access.
+	us := &mockUserStore{
+		users: map[string]*store.User{},
+	}
+
+	deps := Deps{
+		Registry:  connector.NewRegistry(),
+		UserStore: us,
+		MCPToken:  "",
+	}
+	hasAccess, isAdmin := testAccessControl(deps)
+	if !hasAccess {
+		t.Error("expected hasAccess=true when MCPToken is empty (backward compat)")
+	}
+	if !isAdmin {
+		t.Error("expected isAdmin=true when MCPToken is empty (backward compat)")
+	}
+}
+
+// --- Tool registration tests ---
+
+func TestAddReadOnlyTools_RegistersExpectedTools(t *testing.T) {
+	registry := connector.NewRegistry()
+	ws := &mockWatcherStore{}
+	as := &mockAlertStore{}
+
+	s := server.NewMCPServer("opentrace-test", "0.1.0")
+	deps := Deps{
+		Registry:     registry,
+		WatcherStore: ws,
+		AlertStore:   as,
+	}
+	addReadOnlyTools(s, deps)
+
+	tools := s.ListTools()
+	expectedTools := []string{"list_connectors", "list_watchers", "list_alerts"}
+	for _, name := range expectedTools {
+		if _, ok := tools[name]; !ok {
+			t.Errorf("expected read-only tool %q to be registered", name)
+		}
+	}
+
+	// Verify write tools are NOT registered by addReadOnlyTools.
+	if _, ok := tools["create_watcher"]; ok {
+		t.Error("create_watcher should not be registered by addReadOnlyTools")
+	}
+}
+
+func TestAddWriteTools_RegistersConnectorTools(t *testing.T) {
+	registry := connector.NewRegistry()
+	registry.Register(&mockDataSource{
+		connType: connector.ConnectorDatabase,
+		tools: []agent.Tool{
+			{
+				Name:        "run_query",
+				Description: "Run a SQL query",
+				Handler: func(ctx context.Context, args map[string]any) (string, error) {
+					return "ok", nil
+				},
+			},
+		},
+	})
+
+	ws := &mockWatcherStore{}
+
+	s := server.NewMCPServer("opentrace-test", "0.1.0")
+	deps := Deps{
+		Registry:     registry,
+		WatcherStore: ws,
+	}
+	addWriteTools(s, deps)
+
+	tools := s.ListTools()
+
+	// Connector tool should be registered.
+	if _, ok := tools["run_query"]; !ok {
+		t.Error("expected connector tool 'run_query' to be registered by addWriteTools")
+	}
+
+	// create_watcher should be registered when WatcherStore is provided.
+	if _, ok := tools["create_watcher"]; !ok {
+		t.Error("expected 'create_watcher' to be registered by addWriteTools")
 	}
 }

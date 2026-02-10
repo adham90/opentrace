@@ -31,6 +31,8 @@ type appDeps struct {
 	alertStore   store.AlertStore
 	serverStore  store.ServerStore
 	metricStore  store.MetricStore
+	userStore    store.UserStore
+	sessionStore store.SessionStore
 	registry     *connector.Registry
 	cfg          *config.Config
 }
@@ -91,6 +93,8 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	alertStore := store.NewAlertStore(db)
 	serverStore := store.NewServerStore(db)
 	metricStore := store.NewMetricStore(db)
+	userStore := store.NewUserStore(db)
+	sessionStore := store.NewSessionStore(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
@@ -104,6 +108,8 @@ func initApp(ctx context.Context) (*appDeps, error) {
 		alertStore:   alertStore,
 		serverStore:  serverStore,
 		metricStore:  metricStore,
+		userStore:    userStore,
+		sessionStore: sessionStore,
 		registry:     registry,
 		cfg:          cfg,
 	}, nil
@@ -128,6 +134,8 @@ func runMCP() error {
 		AlertStore:   deps.alertStore,
 		ServerStore:  deps.serverStore,
 		MetricStore:  deps.metricStore,
+		UserStore:    deps.userStore,
+		MCPToken:     os.Getenv("OPENTRACE_MCP_TOKEN"),
 	})
 }
 
@@ -203,6 +211,8 @@ func run() error {
 		AlertStore:    deps.alertStore,
 		ServerStore:   deps.serverStore,
 		MetricStore:   deps.metricStore,
+		UserStore:     deps.userStore,
+		SessionStore:  deps.sessionStore,
 		Registry:      deps.registry,
 		Cfg:           deps.cfg,
 		Executor:      executor,
@@ -234,6 +244,19 @@ func run() error {
 		EventHub: eventHub,
 	})
 	sched.Start(ctx)
+
+	// Background: clean expired sessions every 15 minutes
+	go func() {
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if n, err := deps.sessionStore.DeleteExpired(context.Background()); err != nil {
+				log.Printf("WARN: session cleanup: %v", err)
+			} else if n > 0 {
+				log.Printf("cleaned %d expired session(s)", n)
+			}
+		}
+	}()
 
 	// Background: mark stale servers offline every 60s
 	go func() {

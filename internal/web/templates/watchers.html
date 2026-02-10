@@ -3,7 +3,7 @@
   <div class="page-header">
     <h1><span class="prompt">$</span> watchers</h1>
     <div class="actions">
-      <button class="btn btn-primary" onclick="showCreateModal()">+ New Watcher</button>
+      {{if .IsAdmin}}<button class="btn btn-primary" onclick="showCreateModal()">+ New Watcher</button>{{end}}
     </div>
   </div>
 
@@ -159,6 +159,7 @@
 </div>
 
 <script>
+var isAdmin = {{.IsAdmin}};
 function loadModels() {
   fetch('/api/models').then(function(r) { return r.json(); }).then(function(models) {
     var sel = document.getElementById('watcher-model');
@@ -206,15 +207,19 @@ function loadWatchers() {
       html += '    <span class="severity-badge severity-' + w.severity + '">' + w.severity + '</span>';
       html += '  </div>';
       html += '  <div class="watcher-actions">';
-      html += '    <button class="btn btn-sm" onclick="editWatcher(\'' + w.id + '\')">Edit</button>';
-      if (w.status === 'active') {
-        html += '    <button class="btn btn-sm" onclick="pauseWatcher(\'' + w.id + '\')">Pause</button>';
-      } else {
-        html += '    <button class="btn btn-sm" onclick="resumeWatcher(\'' + w.id + '\')">Resume</button>';
+      if (isAdmin) {
+        html += '    <button class="btn btn-sm" onclick="editWatcher(\'' + w.id + '\')">Edit</button>';
+        if (w.status === 'active') {
+          html += '    <button class="btn btn-sm" onclick="pauseWatcher(\'' + w.id + '\')">Pause</button>';
+        } else {
+          html += '    <button class="btn btn-sm" onclick="resumeWatcher(\'' + w.id + '\')">Resume</button>';
+        }
+        html += '    <button class="btn btn-sm" onclick="runNow(\'' + w.id + '\')">Run Now</button>';
       }
-      html += '    <button class="btn btn-sm" onclick="runNow(\'' + w.id + '\')">Run Now</button>';
       html += '    <a href="/watchers/' + w.id + '/runs" class="btn btn-sm">History</a>';
-      html += '    <button class="btn btn-sm btn-danger" onclick="deleteWatcher(\'' + w.id + '\')">Delete</button>';
+      if (isAdmin) {
+        html += '    <button class="btn btn-sm btn-danger" onclick="deleteWatcher(\'' + w.id + '\')">Delete</button>';
+      }
       html += '  </div>';
       html += '</div>';
     });

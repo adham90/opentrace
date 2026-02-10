@@ -31,6 +31,8 @@ type Server struct {
 	alertStore    store.AlertStore
 	serverStore   store.ServerStore
 	metricStore   store.MetricStore
+	userStore     store.UserStore
+	sessionStore  store.SessionStore
 	registry      *connector.Registry
 	cfg           *config.Config
 	executor      *watcher.Executor
@@ -49,6 +51,8 @@ type ServerDeps struct {
 	AlertStore    store.AlertStore
 	ServerStore   store.ServerStore
 	MetricStore   store.MetricStore
+	UserStore     store.UserStore
+	SessionStore  store.SessionStore
 	Registry      *connector.Registry
 	Cfg           *config.Config
 	Executor      *watcher.Executor
@@ -76,6 +80,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		alertStore:    deps.AlertStore,
 		serverStore:   deps.ServerStore,
 		metricStore:   deps.MetricStore,
+		userStore:     deps.UserStore,
+		sessionStore:  deps.SessionStore,
 		registry:      deps.Registry,
 		cfg:           deps.Cfg,
 		executor:      deps.Executor,
@@ -89,6 +95,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Use(middleware.Logger)
 	router.Use(middleware.Recoverer)
 	router.Use(middleware.RequestID)
+	router.Use(srv.SessionAuth)
 
 	router.Get("/healthz", srv.handleHealthCheck)
 
@@ -102,70 +109,111 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		router.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 	}
 
-	// Pages
-	router.Get("/", srv.handleOverviewPage)
-	router.Get("/alerts", srv.handleAlertsPage)
-	router.Get("/watchers", srv.handleWatchersPage)
-	router.Get("/watchers/{id}/runs", srv.handleWatcherRunsPage)
-	router.Get("/logs", srv.handleLogsPage)
-	router.Get("/api/logs/poll", srv.handleLogsPoll)
-	router.Get("/connectors", srv.handleConnectorsPage)
-	router.Get("/servers", srv.handleServersPage)
-	router.Get("/servers/{id}", srv.handleServerDetailPage)
-	router.Get("/setup", srv.handleSetupPage)
+	// Always-open auth routes
+	router.Get("/login", srv.handleLoginPage)
+	router.Post("/login", srv.handleLoginSubmit)
+	router.Get("/register", srv.handleRegisterPage)
+	router.Post("/register", srv.handleRegisterSubmit)
+	router.Post("/logout", srv.handleLogout)
+
+	// Pages — require auth when users exist
+	router.Group(func(r chi.Router) {
+		r.Use(srv.RequireAuthIfEnabled)
+		r.Get("/", srv.handleOverviewPage)
+		r.Get("/alerts", srv.handleAlertsPage)
+		r.Get("/watchers", srv.handleWatchersPage)
+		r.Get("/watchers/{id}/runs", srv.handleWatcherRunsPage)
+		r.Get("/logs", srv.handleLogsPage)
+		r.Get("/connectors", srv.handleConnectorsPage)
+		r.Get("/servers", srv.handleServersPage)
+		r.Get("/servers/{id}", srv.handleServerDetailPage)
+		r.Get("/setup", srv.handleSetupPage)
+		r.Get("/profile", srv.handleProfilePage)
+	})
+
+	// Admin pages
+	router.Group(func(r chi.Router) {
+		r.Use(srv.RequireAuthIfEnabled)
+		r.Use(RequireAdmin)
+		r.Get("/admin/users", srv.handleUsersPage)
+	})
 
 	// API
 	router.Route("/api", func(r chi.Router) {
-		r.Post("/connectors", srv.handleCreateConnectorAPI)
-		r.Get("/connectors", srv.handleListConnectors)
-		r.Post("/connectors/{id}/test", srv.handleTestConnectorAPI)
-		r.Delete("/connectors/{id}", srv.handleDeleteConnectorAPI)
+		// Agent install script (no auth — the script is self-contained)
+		r.Get("/agent/install.sh", srv.handleAgentInstallScript)
 
-		// Log ingestion with optional API key auth
+		// Log ingestion with API key auth (unchanged)
 		apiKey := ""
 		if cfg != nil {
 			apiKey = cfg.APIKey
 		}
 		r.With(APIKeyAuth(apiKey)).Post("/logs", srv.handleIngestLogs)
 
-		// Models API
-		r.Get("/models", srv.handleListModels)
-
-		// Watcher API
-		r.Post("/watchers", srv.handleCreateWatcher)
-		r.Get("/watchers", srv.handleListWatchers)
-		r.Get("/watchers/{id}", srv.handleGetWatcher)
-		r.Put("/watchers/{id}", srv.handleUpdateWatcher)
-		r.Delete("/watchers/{id}", srv.handleDeleteWatcher)
-		r.Post("/watchers/{id}/pause", srv.handlePauseWatcher)
-		r.Post("/watchers/{id}/resume", srv.handleResumeWatcher)
-		r.Post("/watchers/{id}/run", srv.handleRunWatcherNow)
-		r.Get("/watchers/{id}/runs", srv.handleListWatcherRuns)
-		r.Get("/watchers/{id}/runs/{runId}", srv.handleGetWatcherRun)
-		r.Get("/watchers/{id}/runs/{runId}/events", srv.handleRunEvents)
-		r.Post("/watchers/{id}/runs/{runId}/stop", srv.handleStopRun)
-
-		// Alert API
-		r.Get("/alerts", srv.handleListAlerts)
-		r.Get("/alerts/count", srv.handleAlertCount)
-		r.Post("/alerts/{id}/read", srv.handleMarkAlertRead)
-		r.Post("/alerts/{id}/dismiss", srv.handleDismissAlert)
-
-		// Agent install script (no auth — the script is self-contained)
-		r.Get("/agent/install.sh", srv.handleAgentInstallScript)
-
-		// Server metrics API
+		// Server registration and metric push with API key auth (unchanged)
 		if srv.serverStore != nil && srv.metricStore != nil {
 			r.With(APIKeyAuth(apiKey)).Post("/servers/register", srv.handleRegisterServer)
-			r.Get("/servers", srv.handleListServers)
-			r.Get("/servers/{id}", srv.handleGetServer)
-			r.Delete("/servers/{id}", srv.handleDeleteServer)
 			r.With(APIKeyAuth(apiKey)).Post("/servers/{id}/metrics", srv.handlePushMetrics)
-			r.Get("/servers/{id}/metrics", srv.handleQueryMetrics)
 		}
 
-		// Overview
-		r.Get("/overview", srv.handleOverviewAPI)
+		// Read API — require auth when users exist
+		r.Group(func(r chi.Router) {
+			r.Use(srv.requireAuthIfEnabledAPI)
+			r.Get("/connectors", srv.handleListConnectors)
+			r.Get("/models", srv.handleListModels)
+			r.Get("/watchers", srv.handleListWatchers)
+			r.Get("/watchers/{id}", srv.handleGetWatcher)
+			r.Get("/watchers/{id}/runs", srv.handleListWatcherRuns)
+			r.Get("/watchers/{id}/runs/{runId}", srv.handleGetWatcherRun)
+			r.Get("/watchers/{id}/runs/{runId}/events", srv.handleRunEvents)
+			r.Get("/alerts", srv.handleListAlerts)
+			r.Get("/alerts/count", srv.handleAlertCount)
+			r.Get("/overview", srv.handleOverviewAPI)
+			r.Get("/logs/poll", srv.handleLogsPoll)
+
+			if srv.serverStore != nil && srv.metricStore != nil {
+				r.Get("/servers", srv.handleListServers)
+				r.Get("/servers/{id}", srv.handleGetServer)
+				r.Get("/servers/{id}/metrics", srv.handleQueryMetrics)
+			}
+		})
+
+		// Write API — require admin when users exist
+		r.Group(func(r chi.Router) {
+			r.Use(srv.requireAdminIfEnabled)
+			r.Post("/connectors", srv.handleCreateConnectorAPI)
+			r.Post("/connectors/{id}/test", srv.handleTestConnectorAPI)
+			r.Delete("/connectors/{id}", srv.handleDeleteConnectorAPI)
+			r.Post("/watchers", srv.handleCreateWatcher)
+			r.Put("/watchers/{id}", srv.handleUpdateWatcher)
+			r.Delete("/watchers/{id}", srv.handleDeleteWatcher)
+			r.Post("/watchers/{id}/pause", srv.handlePauseWatcher)
+			r.Post("/watchers/{id}/resume", srv.handleResumeWatcher)
+			r.Post("/watchers/{id}/run", srv.handleRunWatcherNow)
+			r.Post("/watchers/{id}/runs/{runId}/stop", srv.handleStopRun)
+			r.Post("/alerts/{id}/read", srv.handleMarkAlertRead)
+			r.Post("/alerts/{id}/dismiss", srv.handleDismissAlert)
+
+			if srv.serverStore != nil && srv.metricStore != nil {
+				r.Delete("/servers/{id}", srv.handleDeleteServer)
+			}
+		})
+
+		// User management API (admin only)
+		r.Group(func(r chi.Router) {
+			r.Use(srv.requireAdminIfEnabled)
+			r.Post("/users/{id}/role", srv.handleUpdateUserRole)
+			r.Post("/users/{id}/mcp", srv.handleToggleMCPAccess)
+			r.Post("/users/{id}/active", srv.handleToggleUserActive)
+			r.Post("/users/{id}/mcp-token", srv.handleRegenerateMCPToken)
+			r.Delete("/users/{id}", srv.handleDeleteUser)
+		})
+
+		// Profile API (auth required)
+		r.Group(func(r chi.Router) {
+			r.Use(srv.requireAuthIfEnabledAPI)
+			r.Post("/profile/password", srv.handleChangePassword)
+		})
 
 		// Dev-mode live-reload endpoint
 		if cfg != nil && cfg.DevMode {

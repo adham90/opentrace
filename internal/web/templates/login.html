@@ -1,0 +1,77 @@
+{{define "content"}}
+<div class="auth-page">
+  <div class="auth-card">
+    <h1><span class="prompt">$</span> login</h1>
+    {{if .Error}}
+    <div class="alert alert-error">{{.Error}}</div>
+    {{end}}
+    <form method="POST" action="/login" class="auth-form">
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" required autofocus placeholder="you@example.com">
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required placeholder="your password">
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">Log in</button>
+    </form>
+  </div>
+</div>
+
+<style>
+.auth-page {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 60vh;
+}
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+  padding: 2rem;
+}
+.auth-card h1 {
+  margin-bottom: 1.5rem;
+}
+.auth-form .form-group {
+  margin-bottom: 1rem;
+}
+.auth-form label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+.auth-form input {
+  width: 100%;
+  padding: 0.5rem;
+  background: var(--bg-secondary, #1a1a2e);
+  border: 1px solid var(--border, #333);
+  color: var(--fg, #e0e0e0);
+  border-radius: 4px;
+}
+.btn-block {
+  width: 100%;
+  margin-top: 1rem;
+}
+.alert-error {
+  background: rgba(255, 80, 80, 0.1);
+  border: 1px solid rgba(255, 80, 80, 0.3);
+  color: #ff5050;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+.alert-success {
+  background: rgba(80, 255, 80, 0.1);
+  border: 1px solid rgba(80, 255, 80, 0.3);
+  color: #50ff50;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+</style>
+{{end}}

@@ -1,0 +1,310 @@
+package web
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
+
+	"github.com/adham90/opentrace/internal/store"
+)
+
+// newTestServer creates a Server with all mock stores wired up, suitable for
+// testing auth handler flows via the full chi router.
+func newTestServer(t *testing.T) (*Server, *mockUserStore, *mockSessionStore) {
+	t.Helper()
+	us := newMockUserStore()
+	ss := newMockSessionStore()
+	srv := NewServerWithDeps(ServerDeps{
+		DSStore:      newMockStore(),
+		LogStore:     newMockLogStore(),
+		UserStore:    us,
+		SessionStore: ss,
+	})
+	return srv, us, ss
+}
+
+// createTestUser creates a user in the mock store with a bcrypt-hashed password.
+func createTestUser(t *testing.T, us *mockUserStore, email, password string, role store.UserRole, active bool) *store.User {
+	t.Helper()
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("hashing password: %v", err)
+	}
+	user, err := us.Create(context.Background(), store.CreateUserParams{
+		Email:        email,
+		PasswordHash: string(hash),
+		DisplayName:  strings.Split(email, "@")[0],
+		Role:         role,
+	})
+	if err != nil {
+		t.Fatalf("creating user: %v", err)
+	}
+	if !active {
+		us.mu.Lock()
+		user.IsActive = false
+		us.mu.Unlock()
+	}
+	return user
+}
+
+// createTestSession creates a session for the given user and returns the token.
+func createTestSession(t *testing.T, ss *mockSessionStore, userID string) string {
+	t.Helper()
+	token := "test-session-token-" + userID
+	_, err := ss.Create(context.Background(), userID, token, time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("creating session: %v", err)
+	}
+	return token
+}
+
+// postForm builds an application/x-www-form-urlencoded POST request.
+func postForm(target string, values url.Values) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(values.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return req
+}
+
+// --- Login tests ---
+
+func TestLoginPage_RedirectsToRegisterWhenNoUsers(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	rec := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected 302, got %d", rec.Code)
+	}
+	loc := rec.Header().Get("Location")
+	if loc != "/register" {
+		t.Fatalf("expected redirect to /register, got %s", loc)
+	}
+}
+
+func TestLoginSubmit_Success(t *testing.T) {
+	srv, us, _ := newTestServer(t)
+
+	// Create a user with a known password.
+	createTestUser(t, us, "alice@example.com", "correctpassword", store.RoleAdmin, true)
+
+	form := url.Values{}
+	form.Set("email", "alice@example.com")
+	form.Set("password", "correctpassword")
+	req := postForm("/login", form)
+	rec := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected 302 redirect, got %d", rec.Code)
+	}
+	loc := rec.Header().Get("Location")
+	if loc != "/" {
+		t.Fatalf("expected redirect to /, got %s", loc)
+	}
+
+	// Check that a session cookie was set.
+	cookies := rec.Result().Cookies()
+	found := false
+	for _, c := range cookies {
+		if c.Name == sessionCookieName && c.Value != "" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected session cookie to be set after successful login")
+	}
+}
+
+func TestLoginSubmit_InvalidPassword(t *testing.T) {
+	srv, us, _ := newTestServer(t)
+
+	createTestUser(t, us, "bob@example.com", "realpassword", store.RoleMember, true)
+
+	form := url.Values{}
+	form.Set("email", "bob@example.com")
+	form.Set("password", "wrongpassword")
+	req := postForm("/login", form)
+	rec := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d", rec.Code)
+	}
+}
+
+func TestLoginSubmit_InactiveUser(t *testing.T) {
+	srv, us, _ := newTestServer(t)
+
+	createTestUser(t, us, "disabled@example.com", "password123", store.RoleMember, false)
+
+	form := url.Values{}
+	form.Set("email", "disabled@example.com")
+	form.Set("password", "password123")
+	req := postForm("/login", form)
+	rec := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Account is disabled") {
+		t.Fatalf("expected body to contain 'Account is disabled', got: %s", body)
+	}
+}
+
+// --- Register tests ---
+
+func TestRegisterSubmit_FirstUserBecomesAdmin(t *testing.T) {
+	srv, us, _ := newTestServer(t)
+
+	form := url.Values{}
+	form.Set("email", "first@example.com")
+	form.Set("password", "securepassword")
+	form.Set("display_name", "First User")
+	req := postForm("/register", form)
+	rec := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected 302 redirect, got %d", rec.Code)
+	}
+	loc := rec.Header().Get("Location")
+	if loc != "/" {
+		t.Fatalf("expected redirect to /, got %s", loc)
+	}
+
+	// Verify the user was created with admin role.
+	users, err := us.List(context.Background())
+	if err != nil {
+		t.Fatalf("listing users: %v", err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("expected 1 user, got %d", len(users))
+	}
+	if users[0].Role != store.RoleAdmin {
+		t.Fatalf("expected first user to have role %q, got %q", store.RoleAdmin, users[0].Role)
+	}
+	if users[0].Email != "first@example.com" {
+		t.Fatalf("expected email first@example.com, got %s", users[0].Email)
+	}
+}
+
+func TestRegisterSubmit_DuplicateEmail(t *testing.T) {
+	srv, us, ss := newTestServer(t)
+
+	// Create an existing admin user.
+	admin := createTestUser(t, us, "existing@example.com", "password123", store.RoleAdmin, true)
+
+	// Since a user already exists, we must be logged in as admin to register.
+	adminToken := createTestSession(t, ss, admin.ID)
+
+	form := url.Values{}
+	form.Set("email", "existing@example.com")
+	form.Set("password", "anotherpassword123")
+	req := postForm("/register", form)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminToken})
+	rec := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 for duplicate email, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Email is already registered") {
+		t.Fatalf("expected body to contain 'Email is already registered', got: %s", body)
+	}
+}
+
+func TestRegisterSubmit_ShortPassword(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	// No users exist, so registration is open.
+	form := url.Values{}
+	form.Set("email", "short@example.com")
+	form.Set("password", "abc")
+	req := postForm("/register", form)
+	rec := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 for short password, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Password must be at least 8 characters") {
+		t.Fatalf("expected body to contain password length error, got: %s", body)
+	}
+}
+
+// --- Logout tests ---
+
+func TestLogout_ClearsCookie(t *testing.T) {
+	srv, us, ss := newTestServer(t)
+
+	user := createTestUser(t, us, "logout@example.com", "password123", store.RoleMember, true)
+	token := createTestSession(t, ss, user.ID)
+
+	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected 302 redirect, got %d", rec.Code)
+	}
+	loc := rec.Header().Get("Location")
+	if loc != "/login" {
+		t.Fatalf("expected redirect to /login, got %s", loc)
+	}
+
+	// Verify the cookie is cleared (MaxAge < 0).
+	cookies := rec.Result().Cookies()
+	found := false
+	for _, c := range cookies {
+		if c.Name == sessionCookieName {
+			found = true
+			if c.MaxAge >= 0 {
+				t.Fatalf("expected cookie MaxAge < 0 (cleared), got %d", c.MaxAge)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected session cookie to be present with negative MaxAge")
+	}
+}
+
+// --- Delete user tests ---
+
+func TestDeleteUser_PreventSelfDeletion(t *testing.T) {
+	srv, us, ss := newTestServer(t)
+
+	admin := createTestUser(t, us, "admin@example.com", "adminpass123", store.RoleAdmin, true)
+	token := createTestSession(t, ss, admin.ID)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/users/"+admin.ID, nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 conflict for self-deletion, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "cannot delete your own account") {
+		t.Fatalf("expected body to contain self-deletion error, got: %s", body)
+	}
+}

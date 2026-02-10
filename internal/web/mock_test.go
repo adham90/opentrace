@@ -547,3 +547,202 @@ func (m *mockMetricStore) LatestByServer(ctx context.Context, serverID uuid.UUID
 func (m *mockMetricStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	return 0, nil
 }
+
+// mockUserStore implements store.UserStore for testing.
+type mockUserStore struct {
+	mu    sync.Mutex
+	users map[string]*store.User
+	count int
+}
+
+func newMockUserStore() *mockUserStore {
+	return &mockUserStore{users: make(map[string]*store.User)}
+}
+
+func (m *mockUserStore) Create(ctx context.Context, params store.CreateUserParams) (*store.User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, u := range m.users {
+		if u.Email == params.Email {
+			return nil, store.ErrEmailTaken
+		}
+	}
+	id := uuid.New().String()
+	u := &store.User{
+		ID: id, Email: params.Email, PasswordHash: params.PasswordHash,
+		DisplayName: params.DisplayName, Role: params.Role,
+		IsActive: true, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if params.MCPToken != nil {
+		u.MCPToken = params.MCPToken
+	}
+	m.users[id] = u
+	m.count++
+	return u, nil
+}
+
+func (m *mockUserStore) GetByID(ctx context.Context, id string) (*store.User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.users[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return u, nil
+}
+
+func (m *mockUserStore) GetByEmail(ctx context.Context, email string) (*store.User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, u := range m.users {
+		if u.Email == email {
+			return u, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
+func (m *mockUserStore) GetByMCPToken(ctx context.Context, token string) (*store.User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, u := range m.users {
+		if u.MCPToken != nil && *u.MCPToken == token && u.MCPEnabled && u.IsActive {
+			return u, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
+func (m *mockUserStore) List(ctx context.Context) ([]store.User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []store.User
+	for _, u := range m.users {
+		result = append(result, *u)
+	}
+	return result, nil
+}
+
+func (m *mockUserStore) Update(ctx context.Context, id string, params store.UpdateUserParams) (*store.User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.users[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	if params.DisplayName != nil {
+		u.DisplayName = *params.DisplayName
+	}
+	if params.Role != nil {
+		u.Role = *params.Role
+	}
+	if params.MCPEnabled != nil {
+		u.MCPEnabled = *params.MCPEnabled
+	}
+	if params.IsActive != nil {
+		u.IsActive = *params.IsActive
+	}
+	return u, nil
+}
+
+func (m *mockUserStore) UpdatePassword(ctx context.Context, id string, hash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.users[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	u.PasswordHash = hash
+	return nil
+}
+
+func (m *mockUserStore) UpdateMCPToken(ctx context.Context, id string, token string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.users[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	u.MCPToken = &token
+	return nil
+}
+
+func (m *mockUserStore) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.users[id]; !ok {
+		return store.ErrNotFound
+	}
+	delete(m.users, id)
+	m.count--
+	return nil
+}
+
+func (m *mockUserStore) Count(ctx context.Context) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.users), nil
+}
+
+// mockSessionStore implements store.SessionStore for testing.
+type mockSessionStore struct {
+	mu       sync.Mutex
+	sessions map[string]*store.Session
+}
+
+func newMockSessionStore() *mockSessionStore {
+	return &mockSessionStore{sessions: make(map[string]*store.Session)}
+}
+
+func (m *mockSessionStore) Create(ctx context.Context, userID string, token string, expiresAt time.Time) (*store.Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s := &store.Session{
+		ID: uuid.New().String(), UserID: userID, Token: token,
+		ExpiresAt: expiresAt, CreatedAt: time.Now(),
+	}
+	m.sessions[s.ID] = s
+	return s, nil
+}
+
+func (m *mockSessionStore) GetByToken(ctx context.Context, token string) (*store.Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, s := range m.sessions {
+		if s.Token == token && s.ExpiresAt.After(time.Now()) {
+			return s, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
+func (m *mockSessionStore) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.sessions, id)
+	return nil
+}
+
+func (m *mockSessionStore) DeleteExpired(ctx context.Context) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for id, s := range m.sessions {
+		if s.ExpiresAt.Before(time.Now()) {
+			delete(m.sessions, id)
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (m *mockSessionStore) DeleteAllForUser(ctx context.Context, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, s := range m.sessions {
+		if s.UserID == userID {
+			delete(m.sessions, id)
+		}
+	}
+	return nil
+}

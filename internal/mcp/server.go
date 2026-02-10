@@ -22,11 +22,19 @@ type Deps struct {
 	AlertStore   store.AlertStore
 	ServerStore  store.ServerStore
 	MetricStore  store.MetricStore
+	UserStore    store.UserStore
+	MCPToken     string // OPENTRACE_MCP_TOKEN from environment
 }
 
 // Serve starts a stdio-based MCP server that exposes all tools from the
 // given connector registry plus watcher/alert management tools.
 // It blocks until the connection is closed.
+//
+// When UserStore and MCPToken are provided, the token is validated against the
+// user database. Invalid/disabled tokens result in zero tools being registered
+// (the server stays alive but is useless). Members get read-only tools; admins
+// get all tools. When no UserStore is provided (backward compat), all tools
+// are registered.
 func Serve(deps Deps) error {
 	s := server.NewMCPServer(
 		"opentrace",
@@ -34,12 +42,40 @@ func Serve(deps Deps) error {
 		server.WithToolCapabilities(false),
 	)
 
-	// Convert and register all connector tools.
-	for _, t := range deps.Registry.AllTools() {
-		s.AddTool(convertTool(t), bridgeHandler(t))
+	// Determine access level.
+	isAdmin := true    // default: full access (backward compat)
+	hasAccess := true
+
+	if deps.UserStore != nil && deps.MCPToken != "" {
+		ctx := context.Background()
+		user, err := deps.UserStore.GetByMCPToken(ctx, deps.MCPToken)
+		if err != nil || user == nil {
+			// Invalid token — serve with zero tools.
+			hasAccess = false
+		} else {
+			isAdmin = user.Role == store.RoleAdmin
+		}
 	}
 
-	// Add meta-tool for listing available connectors.
+	if !hasAccess {
+		// Start server with zero tools — stays alive but useless.
+		return server.ServeStdio(s)
+	}
+
+	// Read-only tools (available to all authenticated users).
+	addReadOnlyTools(s, deps)
+
+	// Write tools (admin only).
+	if isAdmin {
+		addWriteTools(s, deps)
+	}
+
+	return server.ServeStdio(s)
+}
+
+// addReadOnlyTools registers read-only tools available to all users.
+func addReadOnlyTools(s *server.MCPServer, deps Deps) {
+	// Meta-tool for listing available connectors.
 	s.AddTool(
 		mcp.NewTool("list_connectors",
 			mcp.WithDescription("List all active OpenTrace connectors and their tools"),
@@ -47,7 +83,7 @@ func Serve(deps Deps) error {
 		listConnectorsHandler(deps.Registry),
 	)
 
-	// Add watcher management tools.
+	// Watcher list.
 	if deps.WatcherStore != nil {
 		s.AddTool(
 			mcp.NewTool("list_watchers",
@@ -55,26 +91,9 @@ func Serve(deps Deps) error {
 			),
 			listWatchersHandler(deps.WatcherStore),
 		)
-
-		s.AddTool(
-			mcp.NewTool("create_watcher",
-				mcp.WithDescription("Create a new automated watcher that monitors logs on a schedule"),
-				mcp.WithString("title", mcp.Required(), mcp.Description("Title for the watcher")),
-				mcp.WithString("description", mcp.Required(), mcp.Description("Instructions for the monitoring agent \u2014 what to look for")),
-				mcp.WithString("service", mcp.Description("Filter by service name")),
-				mcp.WithString("level", mcp.Description("Filter by log level (e.g. error, warning)")),
-				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production)")),
-				mcp.WithString("time_range", mcp.Description("Lookback window and run interval (e.g. 5m, 15m, 1h, 6h, 24h). Default: 15m")),
-				mcp.WithString("query", mcp.Description("Full-text search query for logs")),
-				mcp.WithString("severity", mcp.Description("Alert severity: info, warning, or critical (default: warning)")),
-				mcp.WithString("model", mcp.Description("LLM model variant name (e.g. anthropic-sonnet, openai-gpt4o). Empty for global default")),
-				mcp.WithString("effort", mcp.Description("Analysis effort level: low (quick check), medium (default), or high (deep analysis)")),
-			),
-			createWatcherHandler(deps.WatcherStore),
-		)
 	}
 
-	// Add alert tools.
+	// Alert list.
 	if deps.AlertStore != nil {
 		s.AddTool(
 			mcp.NewTool("list_alerts",
@@ -86,7 +105,7 @@ func Serve(deps Deps) error {
 		)
 	}
 
-	// Add server metrics tools.
+	// Server metrics read tools.
 	if deps.ServerStore != nil && deps.MetricStore != nil {
 		s.AddTool(
 			mcp.NewTool("list_servers",
@@ -115,8 +134,34 @@ func Serve(deps Deps) error {
 			serverHealthHandler(deps.ServerStore, deps.MetricStore),
 		)
 	}
+}
 
-	return server.ServeStdio(s)
+// addWriteTools registers write/admin tools (connector tools, create_watcher).
+func addWriteTools(s *server.MCPServer, deps Deps) {
+	// All connector tools (run queries, etc.).
+	for _, t := range deps.Registry.AllTools() {
+		s.AddTool(convertTool(t), bridgeHandler(t))
+	}
+
+	// Create watcher.
+	if deps.WatcherStore != nil {
+		s.AddTool(
+			mcp.NewTool("create_watcher",
+				mcp.WithDescription("Create a new automated watcher that monitors logs on a schedule"),
+				mcp.WithString("title", mcp.Required(), mcp.Description("Title for the watcher")),
+				mcp.WithString("description", mcp.Required(), mcp.Description("Instructions for the monitoring agent \u2014 what to look for")),
+				mcp.WithString("service", mcp.Description("Filter by service name")),
+				mcp.WithString("level", mcp.Description("Filter by log level (e.g. error, warning)")),
+				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production)")),
+				mcp.WithString("time_range", mcp.Description("Lookback window and run interval (e.g. 5m, 15m, 1h, 6h, 24h). Default: 15m")),
+				mcp.WithString("query", mcp.Description("Full-text search query for logs")),
+				mcp.WithString("severity", mcp.Description("Alert severity: info, warning, or critical (default: warning)")),
+				mcp.WithString("model", mcp.Description("LLM model variant name (e.g. anthropic-sonnet, openai-gpt4o). Empty for global default")),
+				mcp.WithString("effort", mcp.Description("Analysis effort level: low (quick check), medium (default), or high (deep analysis)")),
+			),
+			createWatcherHandler(deps.WatcherStore),
+		)
+	}
 }
 
 // convertTool maps an agent.Tool to an mcp.Tool with the appropriate

@@ -1,0 +1,122 @@
+{{define "content"}}
+<div class="profile-page">
+  <div class="page-header">
+    <h1><span class="prompt">$</span> profile</h1>
+  </div>
+
+  {{if .Success}}
+  <div class="alert alert-success">{{.Success}}</div>
+  {{end}}
+
+  {{if .User}}
+  <div class="card" style="padding: 1.5rem; margin-bottom: 1.5rem;">
+    <h3 style="margin: 0 0 1rem 0;">Account Info</h3>
+    <div class="profile-info">
+      <div class="profile-row">
+        <span class="profile-label">Email</span>
+        <span>{{.User.Email}}</span>
+      </div>
+      <div class="profile-row">
+        <span class="profile-label">Display Name</span>
+        <span>{{.User.DisplayName}}</span>
+      </div>
+      <div class="profile-row">
+        <span class="profile-label">Role</span>
+        <span class="badge badge-type">{{.User.Role}}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="padding: 1.5rem; margin-bottom: 1.5rem;">
+    <h3 style="margin: 0 0 1rem 0;">MCP Access Token</h3>
+    <div id="mcp-section">
+      {{if .User.MCPEnabled}}
+      <p class="text-dim" style="margin: 0 0 1rem 0;">Use this token as <code>OPENTRACE_MCP_TOKEN</code> in your MCP configuration.</p>
+      <div class="code-block" style="position: relative;">
+        <button class="copy-btn" id="mcp-copy-btn" onclick="toggleAndCopyToken(this)">reveal</button>
+        <pre><code id="mcp-token-display">mcp_****...****</code></pre>
+      </div>
+      {{else}}
+      <p class="text-dim">MCP access is disabled for your account. Contact an admin to enable it.</p>
+      {{end}}
+    </div>
+  </div>
+
+  <div class="card" style="padding: 1.5rem;">
+    <h3 style="margin: 0 0 1rem 0;">Change Password</h3>
+    <form method="POST" action="/api/profile/password" class="auth-form" id="password-form">
+      <div class="form-group">
+        <label for="current_password">Current Password</label>
+        <input type="password" id="current_password" name="current_password" required>
+      </div>
+      <div class="form-group">
+        <label for="new_password">New Password</label>
+        <input type="password" id="new_password" name="new_password" required minlength="8" placeholder="min 8 characters">
+      </div>
+      <button type="submit" class="btn btn-primary">Update Password</button>
+    </form>
+  </div>
+  {{end}}
+</div>
+
+<script>
+var tokenRevealed = false;
+function toggleAndCopyToken(btn) {
+  var display = document.getElementById('mcp-token-display');
+  if (!tokenRevealed) {
+    // For security, the actual token is not embedded in the HTML.
+    // The user should copy it from the admin panel or when first created.
+    btn.textContent = 'token is hidden for security';
+    setTimeout(function() { btn.textContent = 'reveal'; }, 2000);
+    return;
+  }
+}
+</script>
+
+<style>
+.profile-page {
+  max-width: 600px;
+}
+.profile-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.profile-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.profile-label {
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+.auth-form .form-group {
+  margin-bottom: 1rem;
+}
+.auth-form label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+.auth-form input {
+  width: 100%;
+  max-width: 400px;
+  padding: 0.5rem;
+  background: var(--bg-secondary, #1a1a2e);
+  border: 1px solid var(--border, #333);
+  color: var(--fg, #e0e0e0);
+  border-radius: 4px;
+}
+.alert-success {
+  background: rgba(80, 255, 80, 0.1);
+  border: 1px solid rgba(80, 255, 80, 0.3);
+  color: #50ff50;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+</style>
+{{end}}

@@ -32,6 +32,10 @@ var (
 	setupTmpl          *template.Template
 	serversTmpl        *template.Template
 	serverDetailTmpl   *template.Template
+	loginTmpl          *template.Template
+	registerTmpl       *template.Template
+	profileTmpl        *template.Template
+	usersTmpl          *template.Template
 )
 
 func init() {
@@ -54,6 +58,14 @@ func init() {
 		"templates/layout.html", "templates/servers.html"))
 	serverDetailTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/server_detail.html"))
+	loginTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/login.html"))
+	registerTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/register.html"))
+	profileTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/profile.html"))
+	usersTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/users.html"))
 }
 
 // templates is used for rendering HTMX fragment responses (e.g. connector-list)
@@ -88,10 +100,25 @@ type pageData struct {
 	LogLimit   int
 	HasMore    bool
 	MaxLogID   int64
+	User       *store.User
+	IsAdmin    bool
 }
 
 func (s *Server) isDevMode() bool {
 	return s.cfg != nil && s.cfg.DevMode
+}
+
+// newPageData creates a pageData with common fields populated from the request context.
+func (s *Server) newPageData(r *http.Request, title, nav string) pageData {
+	user := UserFromContext(r.Context())
+	isAdmin := user != nil && user.Role == store.RoleAdmin
+	return pageData{
+		Title:   title,
+		Nav:     nav,
+		DevMode: s.isDevMode(),
+		User:    user,
+		IsAdmin: isAdmin,
+	}
 }
 
 // getTemplate returns a freshly-parsed template from disk in dev mode,
@@ -154,18 +181,14 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	data := pageData{
-		Title:      "Logs",
-		Nav:        "logs",
-		Content:    "logs",
-		Logs:       logs,
-		LogFilters: filters,
-		LogOffset:  offset,
-		LogLimit:   limit,
-		HasMore:    hasMore,
-		MaxLogID:   maxID,
-		DevMode:    s.isDevMode(),
-	}
+	data := s.newPageData(r, "Logs", "logs")
+	data.Content = "logs"
+	data.Logs = logs
+	data.LogFilters = filters
+	data.LogOffset = offset
+	data.LogLimit = limit
+	data.HasMore = hasMore
+	data.MaxLogID = maxID
 
 	if isHTMX(r) {
 		w.Header().Set("Content-Type", "text/html")
@@ -237,11 +260,7 @@ func (s *Server) handleLogsPoll(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAlertsPage(w http.ResponseWriter, r *http.Request) {
-	data := pageData{
-		Title:   "Alerts",
-		Nav:     "alerts",
-		DevMode: s.isDevMode(),
-	}
+	data := s.newPageData(r, "Alerts", "alerts")
 	tmpl := s.getTemplate(alertsTmpl,
 		"internal/web/templates/layout.html",
 		"internal/web/templates/alerts.html")
@@ -249,11 +268,7 @@ func (s *Server) handleAlertsPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleWatchersPage(w http.ResponseWriter, r *http.Request) {
-	data := pageData{
-		Title:   "Watchers",
-		Nav:     "watchers",
-		DevMode: s.isDevMode(),
-	}
+	data := s.newPageData(r, "Watchers", "watchers")
 	tmpl := s.getTemplate(watchersTmpl,
 		"internal/web/templates/layout.html",
 		"internal/web/templates/watchers.html")
@@ -262,12 +277,8 @@ func (s *Server) handleWatchersPage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleWatcherRunsPage(w http.ResponseWriter, r *http.Request) {
 	watcherID := chi.URLParam(r, "id")
-	data := pageData{
-		Title:     "Watcher Runs",
-		Nav:       "watchers",
-		WatcherID: watcherID,
-		DevMode:   s.isDevMode(),
-	}
+	data := s.newPageData(r, "Watcher Runs", "watchers")
+	data.WatcherID = watcherID
 	tmpl := s.getTemplate(watcherRunsTmpl,
 		"internal/web/templates/layout.html",
 		"internal/web/templates/watcher_runs.html")
@@ -275,11 +286,7 @@ func (s *Server) handleWatcherRunsPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleServersPage(w http.ResponseWriter, r *http.Request) {
-	data := pageData{
-		Title:   "Servers",
-		Nav:     "servers",
-		DevMode: s.isDevMode(),
-	}
+	data := s.newPageData(r, "Servers", "servers")
 	tmpl := s.getTemplate(serversTmpl,
 		"internal/web/templates/layout.html",
 		"internal/web/templates/servers.html")
@@ -288,12 +295,8 @@ func (s *Server) handleServersPage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleServerDetailPage(w http.ResponseWriter, r *http.Request) {
 	serverID := chi.URLParam(r, "id")
-	data := pageData{
-		Title:    "Server",
-		Nav:      "servers",
-		ServerID: serverID,
-		DevMode:  s.isDevMode(),
-	}
+	data := s.newPageData(r, "Server", "servers")
+	data.ServerID = serverID
 	tmpl := s.getTemplate(serverDetailTmpl,
 		"internal/web/templates/layout.html",
 		"internal/web/templates/server_detail.html")
@@ -301,11 +304,7 @@ func (s *Server) handleServerDetailPage(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleSetupPage(w http.ResponseWriter, r *http.Request) {
-	data := pageData{
-		Title:   "Setup",
-		Nav:     "setup",
-		DevMode: s.isDevMode(),
-	}
+	data := s.newPageData(r, "Setup", "setup")
 	tmpl := s.getTemplate(setupTmpl,
 		"internal/web/templates/layout.html",
 		"internal/web/templates/setup.html")
@@ -319,13 +318,9 @@ func (s *Server) handleConnectorsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := pageData{
-		Title:      "Connectors",
-		Nav:        "connectors",
-		Content:    "connectors",
-		Connectors: connectors,
-		DevMode:    s.isDevMode(),
-	}
+	data := s.newPageData(r, "Connectors", "connectors")
+	data.Content = "connectors"
+	data.Connectors = connectors
 	tmpl := s.getTemplate(connectorsTmpl,
 		"internal/web/templates/layout.html",
 		"internal/web/templates/connectors.html")
@@ -333,11 +328,7 @@ func (s *Server) handleConnectorsPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleOverviewPage(w http.ResponseWriter, r *http.Request) {
-	data := pageData{
-		Title:   "Overview",
-		Nav:     "overview",
-		DevMode: s.isDevMode(),
-	}
+	data := s.newPageData(r, "Overview", "overview")
 	tmpl := s.getTemplate(overviewTmpl,
 		"internal/web/templates/layout.html",
 		"internal/web/templates/overview.html")

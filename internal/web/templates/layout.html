@@ -33,9 +33,20 @@
         <span class="nav-sep">|</span>
         <a href="/setup" class="nav-item {{if eq .Nav "setup"}}active{{end}}">setup</a>
       </nav>
-      <button class="theme-toggle" onclick="cycleTheme()" id="theme-btn" title="Toggle theme">
-        <span id="theme-icon">&#9684;</span> <span id="theme-label">system</span>
-      </button>
+      <div class="topbar-right">
+        {{if .User}}
+        <span class="user-info">
+          {{.User.DisplayName}}
+          {{if .IsAdmin}}<span class="badge badge-type">admin</span>{{end}}
+        </span>
+        {{if .IsAdmin}}<a href="/admin/users" class="nav-item">users</a>{{end}}
+        <a href="/profile" class="nav-item">profile</a>
+        <form method="POST" action="/logout" style="display:inline"><button type="submit" class="nav-item btn-link">logout</button></form>
+        {{end}}
+        <button class="theme-toggle" onclick="cycleTheme()" id="theme-btn" title="Toggle theme">
+          <span id="theme-icon">&#9684;</span> <span id="theme-label">system</span>
+        </button>
+      </div>
     </div>
   </header>
   <main class="content">

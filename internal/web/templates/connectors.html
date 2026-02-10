@@ -3,7 +3,7 @@
   <div class="page-header">
     <h1><span class="prompt">$</span> connectors</h1>
     <div class="actions">
-      <button class="btn btn-primary" onclick="showCreateModal()">+ New Connector</button>
+      {{if .IsAdmin}}<button class="btn btn-primary" onclick="showCreateModal()">+ New Connector</button>{{end}}
     </div>
   </div>
 
@@ -72,6 +72,7 @@
 </div>
 
 <script>
+var isAdmin = {{.IsAdmin}};
 function loadConnectors() {
   fetch('/api/connectors').then(function(r) { return r.json(); }).then(function(connectors) {
     var container = document.getElementById('connectors-list');
@@ -100,8 +101,10 @@ function loadConnectors() {
       html += '  </div>';
 
       html += '  <div class="connector-actions">';
-      html += '    <button class="btn btn-sm" onclick="testConnector(\'' + c.id + '\', this)">Test</button>';
-      html += '    <button class="btn btn-sm btn-danger" onclick="deleteConnector(\'' + c.id + '\', \'' + escapeHtml(c.name).replace(/'/g, "\\'") + '\')">Delete</button>';
+      if (isAdmin) {
+        html += '    <button class="btn btn-sm" onclick="testConnector(\'' + c.id + '\', this)">Test</button>';
+        html += '    <button class="btn btn-sm btn-danger" onclick="deleteConnector(\'' + c.id + '\', \'' + escapeHtml(c.name).replace(/'/g, "\\'") + '\')">Delete</button>';
+      }
       html += '  </div>';
       html += '</div>';
     });

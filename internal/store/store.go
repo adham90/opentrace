@@ -74,3 +74,32 @@ type MetricStore interface {
 	LatestByServer(ctx context.Context, serverID uuid.UUID) ([]MetricPoint, error)
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
 }
+
+// ErrEmailTaken is returned when a user attempts to register with an email already in use.
+var ErrEmailTaken = errors.New("email already taken")
+
+// ErrLastAdmin is returned when attempting to demote or delete the last admin user.
+var ErrLastAdmin = errors.New("cannot remove the last admin")
+
+// UserStore manages user accounts.
+type UserStore interface {
+	Create(ctx context.Context, params CreateUserParams) (*User, error)
+	GetByID(ctx context.Context, id string) (*User, error)
+	GetByEmail(ctx context.Context, email string) (*User, error)
+	GetByMCPToken(ctx context.Context, token string) (*User, error)
+	List(ctx context.Context) ([]User, error)
+	Update(ctx context.Context, id string, params UpdateUserParams) (*User, error)
+	UpdatePassword(ctx context.Context, id string, passwordHash string) error
+	UpdateMCPToken(ctx context.Context, id string, token string) error
+	Delete(ctx context.Context, id string) error
+	Count(ctx context.Context) (int, error)
+}
+
+// SessionStore manages browser sessions.
+type SessionStore interface {
+	Create(ctx context.Context, userID string, token string, expiresAt time.Time) (*Session, error)
+	GetByToken(ctx context.Context, token string) (*Session, error)
+	Delete(ctx context.Context, id string) error
+	DeleteExpired(ctx context.Context) (int, error)
+	DeleteAllForUser(ctx context.Context, userID string) error
+}

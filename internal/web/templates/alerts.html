@@ -23,6 +23,7 @@
 
 <script>
 var allAlerts = [];
+var isAdmin = {{.IsAdmin}};
 
 function loadAlerts() {
   var filter = document.getElementById('alertFilter').value;
@@ -65,10 +66,12 @@ function renderAlerts() {
     html += '  </div>';
     html += '  <div class="alert-summary">' + escapeHtml(a.summary).substring(0, 200) + '</div>';
     html += '  <div class="alert-actions">';
-    if (!a.read) {
-      html += '    <button class="btn btn-sm" onclick="markRead(\'' + a.id + '\')">Mark read</button>';
+    if (isAdmin) {
+      if (!a.read) {
+        html += '    <button class="btn btn-sm" onclick="markRead(\'' + a.id + '\')">Mark read</button>';
+      }
+      html += '    <button class="btn btn-sm btn-danger" onclick="dismissAlert(\'' + a.id + '\')">Dismiss</button>';
     }
-    html += '    <button class="btn btn-sm btn-danger" onclick="dismissAlert(\'' + a.id + '\')">Dismiss</button>';
     html += '  </div>';
     html += '</div>';
   });
