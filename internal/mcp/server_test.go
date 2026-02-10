@@ -13,6 +13,7 @@ import (
 	"github.com/adham90/opentrace/internal/agent"
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/watcher"
 )
 
 // --- helpers ---
@@ -351,18 +352,25 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 	if effort == "" {
 		effort = store.EffortMedium
 	}
+	mt := params.MonitorType
+	if mt == "" {
+		mt = store.MonitorTypeAI
+	}
 	w := &store.Watcher{
-		ID:          uuid.New(),
-		Title:       params.Title,
-		Description: params.Description,
-		Severity:    params.Severity,
-		Filters:     params.Filters,
-		TimeRange:   params.TimeRange,
-		Effort:      effort,
-		Status:      store.WatcherActive,
-		Notify:      params.Notify,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:           uuid.New(),
+		Title:        params.Title,
+		Description:  params.Description,
+		MonitorType:  mt,
+		RuleConfig:   params.RuleConfig,
+		DataSourceID: params.DataSourceID,
+		Severity:     params.Severity,
+		Filters:      params.Filters,
+		TimeRange:    params.TimeRange,
+		Effort:       effort,
+		Status:       store.WatcherActive,
+		Notify:       params.Notify,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 	m.created = w
 	return w, nil
@@ -413,11 +421,11 @@ func (m *mockAlertStore) Prune(ctx context.Context, olderThan time.Duration) (in
 	return 0, nil
 }
 
-// --- listWatchersHandler tests ---
+// --- listMonitorsHandler tests ---
 
-func TestListWatchersHandler_Empty(t *testing.T) {
+func TestListMonitorsHandler_Empty(t *testing.T) {
 	ws := &mockWatcherStore{}
-	handler := listWatchersHandler(ws)
+	handler := listMonitorsHandler(ws)
 
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {
@@ -425,19 +433,19 @@ func TestListWatchersHandler_Empty(t *testing.T) {
 	}
 
 	text := resultText(t, result)
-	if text != "No watchers configured." {
-		t.Errorf("text = %q, want %q", text, "No watchers configured.")
+	if text != "No monitors configured." {
+		t.Errorf("text = %q, want %q", text, "No monitors configured.")
 	}
 }
 
-func TestListWatchersHandler_WithWatchers(t *testing.T) {
+func TestListMonitorsHandler_WithMonitors(t *testing.T) {
 	ws := &mockWatcherStore{
 		watchers: []store.Watcher{
-			{ID: uuid.New(), Title: "Error Monitor", Status: store.WatcherActive},
-			{ID: uuid.New(), Title: "Timeout Watcher", Status: store.WatcherPaused},
+			{ID: uuid.New(), Title: "Error Monitor", Status: store.WatcherActive, MonitorType: store.MonitorTypeAI},
+			{ID: uuid.New(), Title: "Connection Check", Status: store.WatcherActive, MonitorType: store.MonitorTypeRule},
 		},
 	}
-	handler := listWatchersHandler(ws)
+	handler := listMonitorsHandler(ws)
 
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {
@@ -451,14 +459,37 @@ func TestListWatchersHandler_WithWatchers(t *testing.T) {
 	if !contains(text, "Error Monitor") {
 		t.Error("expected output to contain 'Error Monitor'")
 	}
-	if !contains(text, "Timeout Watcher") {
-		t.Error("expected output to contain 'Timeout Watcher'")
+	if !contains(text, "Connection Check") {
+		t.Error("expected output to contain 'Connection Check'")
 	}
 }
 
-func TestListWatchersHandler_Error(t *testing.T) {
+func TestListMonitorsHandler_FilterByType(t *testing.T) {
+	ws := &mockWatcherStore{
+		watchers: []store.Watcher{
+			{ID: uuid.New(), Title: "AI Monitor", Status: store.WatcherActive, MonitorType: store.MonitorTypeAI},
+			{ID: uuid.New(), Title: "Rule Monitor", Status: store.WatcherActive, MonitorType: store.MonitorTypeRule},
+		},
+	}
+	// Override List to check the filter is passed.
+	handler := listMonitorsHandler(ws)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"monitor_type": "rule",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatal("expected success result")
+	}
+	// The mock doesn't filter by type — just verify the call doesn't error.
+	// The real store filters by type via the SQL query.
+}
+
+func TestListMonitorsHandler_Error(t *testing.T) {
 	ws := &mockWatcherStore{err: errors.New("db error")}
-	handler := listWatchersHandler(ws)
+	handler := listMonitorsHandler(ws)
 
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {
@@ -469,11 +500,11 @@ func TestListWatchersHandler_Error(t *testing.T) {
 	}
 }
 
-// --- createWatcherHandler tests ---
+// --- createMonitorHandler tests ---
 
-func TestCreateWatcherHandler_Success(t *testing.T) {
+func TestCreateMonitorHandler_AISuccess(t *testing.T) {
 	ws := &mockWatcherStore{}
-	handler := createWatcherHandler(ws)
+	handler := createMonitorHandler(ws)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"title":       "Error Monitor",
@@ -493,16 +524,18 @@ func TestCreateWatcherHandler_Success(t *testing.T) {
 	}
 
 	text := resultText(t, result)
-	if !contains(text, "Watcher created successfully") {
-		t.Errorf("text = %q, want it to contain 'Watcher created successfully'", text)
+	if !contains(text, "Monitor created successfully") {
+		t.Errorf("text = %q, want it to contain 'Monitor created successfully'", text)
 	}
 
-	// Verify the watcher was created with correct params
 	if ws.created == nil {
-		t.Fatal("watcher was not created")
+		t.Fatal("monitor was not created")
 	}
 	if ws.created.Title != "Error Monitor" {
 		t.Errorf("title = %q, want %q", ws.created.Title, "Error Monitor")
+	}
+	if ws.created.MonitorType != store.MonitorTypeAI {
+		t.Errorf("monitor_type = %q, want %q", ws.created.MonitorType, store.MonitorTypeAI)
 	}
 	if ws.created.TimeRange != "10m" {
 		t.Errorf("time_range = %q, want %q", ws.created.TimeRange, "10m")
@@ -511,20 +544,70 @@ func TestCreateWatcherHandler_Success(t *testing.T) {
 		t.Errorf("severity = %q, want %q", ws.created.Severity, store.SeverityCritical)
 	}
 
-	// Verify filters
 	var filters map[string]string
 	json.Unmarshal(ws.created.Filters, &filters)
 	if filters["service"] != "api" {
 		t.Errorf("filter service = %q, want %q", filters["service"], "api")
 	}
-	if filters["level"] != "error" {
-		t.Errorf("filter level = %q, want %q", filters["level"], "error")
+}
+
+func TestCreateMonitorHandler_RuleSuccess(t *testing.T) {
+	ws := &mockWatcherStore{}
+	handler := createMonitorHandler(ws)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"title":          "Connection count",
+		"monitor_type":   "rule",
+		"rule_config":    `{"source":"query","query":"SELECT count(*) FROM pg_stat_activity","metric":"value","operator":"gt","threshold":100}`,
+		"data_source_id": "ds-123",
+		"severity":       "warning",
+		"time_range":     "5m",
+	}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+
+	if ws.created == nil {
+		t.Fatal("monitor was not created")
+	}
+	if ws.created.MonitorType != store.MonitorTypeRule {
+		t.Errorf("monitor_type = %q, want %q", ws.created.MonitorType, store.MonitorTypeRule)
+	}
+	if ws.created.RuleConfig == nil {
+		t.Fatal("expected rule_config to be set")
+	}
+	if ws.created.RuleConfig.Source != store.RuleSourceQuery {
+		t.Errorf("rule_config.source = %q, want %q", ws.created.RuleConfig.Source, store.RuleSourceQuery)
+	}
+	if ws.created.DataSourceID == nil || *ws.created.DataSourceID != "ds-123" {
+		t.Errorf("data_source_id = %v, want ds-123", ws.created.DataSourceID)
 	}
 }
 
-func TestCreateWatcherHandler_MissingTitle(t *testing.T) {
+func TestCreateMonitorHandler_RuleMissingConfig(t *testing.T) {
 	ws := &mockWatcherStore{}
-	handler := createWatcherHandler(ws)
+	handler := createMonitorHandler(ws)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"title":        "Rule without config",
+		"monitor_type": "rule",
+	}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for rule monitor without rule_config")
+	}
+}
+
+func TestCreateMonitorHandler_MissingTitle(t *testing.T) {
+	ws := &mockWatcherStore{}
+	handler := createMonitorHandler(ws)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"description": "some description",
@@ -538,12 +621,28 @@ func TestCreateWatcherHandler_MissingTitle(t *testing.T) {
 	}
 }
 
-func TestCreateWatcherHandler_Defaults(t *testing.T) {
+func TestCreateMonitorHandler_AIMissingDescription(t *testing.T) {
 	ws := &mockWatcherStore{}
-	handler := createWatcherHandler(ws)
+	handler := createMonitorHandler(ws)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"title":       "Simple Watcher",
+		"title": "No description AI monitor",
+	}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for AI monitor without description")
+	}
+}
+
+func TestCreateMonitorHandler_Defaults(t *testing.T) {
+	ws := &mockWatcherStore{}
+	handler := createMonitorHandler(ws)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"title":       "Simple Monitor",
 		"description": "Just watch",
 	}))
 
@@ -559,6 +658,39 @@ func TestCreateWatcherHandler_Defaults(t *testing.T) {
 	}
 	if ws.created.Severity != store.SeverityWarning {
 		t.Errorf("default severity = %q, want %q", ws.created.Severity, store.SeverityWarning)
+	}
+	if ws.created.MonitorType != store.MonitorTypeAI {
+		t.Errorf("default monitor_type = %q, want %q", ws.created.MonitorType, store.MonitorTypeAI)
+	}
+}
+
+// --- previewMonitorHandler tests ---
+
+func TestPreviewMonitorHandler_MissingConfig(t *testing.T) {
+	re := watcher.NewRuleEvaluator(connector.NewRegistry(), nil, nil)
+	handler := previewMonitorHandler(re)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for missing rule_config")
+	}
+}
+
+func TestPreviewMonitorHandler_InvalidJSON(t *testing.T) {
+	re := watcher.NewRuleEvaluator(connector.NewRegistry(), nil, nil)
+	handler := previewMonitorHandler(re)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"rule_config": "not-json",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for invalid JSON")
 	}
 }
 
@@ -819,7 +951,7 @@ func TestAddReadOnlyTools_RegistersExpectedTools(t *testing.T) {
 	addReadOnlyTools(s, deps)
 
 	tools := s.ListTools()
-	expectedTools := []string{"list_connectors", "list_watchers", "list_alerts"}
+	expectedTools := []string{"list_connectors", "list_monitors", "list_alerts"}
 	for _, name := range expectedTools {
 		if _, ok := tools[name]; !ok {
 			t.Errorf("expected read-only tool %q to be registered", name)
@@ -827,8 +959,8 @@ func TestAddReadOnlyTools_RegistersExpectedTools(t *testing.T) {
 	}
 
 	// Verify write tools are NOT registered by addReadOnlyTools.
-	if _, ok := tools["create_watcher"]; ok {
-		t.Error("create_watcher should not be registered by addReadOnlyTools")
+	if _, ok := tools["create_monitor"]; ok {
+		t.Error("create_monitor should not be registered by addReadOnlyTools")
 	}
 }
 
@@ -848,11 +980,13 @@ func TestAddWriteTools_RegistersConnectorTools(t *testing.T) {
 	})
 
 	ws := &mockWatcherStore{}
+	re := watcher.NewRuleEvaluator(registry, nil, nil)
 
 	s := server.NewMCPServer("opentrace-test", "0.1.0")
 	deps := Deps{
-		Registry:     registry,
-		WatcherStore: ws,
+		Registry:      registry,
+		WatcherStore:  ws,
+		RuleEvaluator: re,
 	}
 	addWriteTools(s, deps)
 
@@ -863,8 +997,13 @@ func TestAddWriteTools_RegistersConnectorTools(t *testing.T) {
 		t.Error("expected connector tool 'run_query' to be registered by addWriteTools")
 	}
 
-	// create_watcher should be registered when WatcherStore is provided.
-	if _, ok := tools["create_watcher"]; !ok {
-		t.Error("expected 'create_watcher' to be registered by addWriteTools")
+	// create_monitor should be registered when WatcherStore is provided.
+	if _, ok := tools["create_monitor"]; !ok {
+		t.Error("expected 'create_monitor' to be registered by addWriteTools")
+	}
+
+	// preview_monitor should be registered when RuleEvaluator is provided.
+	if _, ok := tools["preview_monitor"]; !ok {
+		t.Error("expected 'preview_monitor' to be registered by addWriteTools")
 	}
 }

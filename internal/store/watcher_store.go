@@ -142,11 +142,15 @@ func (s *watcherStore) GetByID(ctx context.Context, id uuid.UUID) (*Watcher, err
 }
 
 func (s *watcherStore) List(ctx context.Context, params ListWatcherParams) ([]Watcher, error) {
-	query := `SELECT ` + watcherColumns + ` FROM watchers`
+	query := `SELECT ` + watcherColumns + ` FROM watchers WHERE 1=1`
 	var args []any
 	if params.Environment != "" {
-		query += ` WHERE environment = ?`
+		query += ` AND environment = ?`
 		args = append(args, params.Environment)
+	}
+	if params.MonitorType != "" {
+		query += ` AND monitor_type = ?`
+		args = append(args, string(params.MonitorType))
 	}
 	query += ` ORDER BY created_at DESC`
 

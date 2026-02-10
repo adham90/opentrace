@@ -13,18 +13,20 @@ import (
 	"github.com/adham90/opentrace/internal/agent"
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/watcher"
 )
 
 // Deps holds the dependencies for the MCP server.
 type Deps struct {
-	Registry     *connector.Registry
-	WatcherStore store.WatcherStore
-	AlertStore   store.AlertStore
-	ServerStore  store.ServerStore
-	MetricStore  store.MetricStore
-	UserStore    store.UserStore
-	MCPToken     string // OPENTRACE_MCP_TOKEN from environment
-	ServerName   string // OPENTRACE_MCP_NAME — custom server name (default: "opentrace")
+	Registry      *connector.Registry
+	WatcherStore  store.WatcherStore
+	AlertStore    store.AlertStore
+	ServerStore   store.ServerStore
+	MetricStore   store.MetricStore
+	UserStore     store.UserStore
+	RuleEvaluator *watcher.RuleEvaluator
+	MCPToken      string // OPENTRACE_MCP_TOKEN from environment
+	ServerName    string // OPENTRACE_MCP_NAME — custom server name (default: "opentrace")
 }
 
 // Serve starts a stdio-based MCP server that exposes all tools from the
@@ -89,14 +91,15 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 		listConnectorsHandler(deps.Registry),
 	)
 
-	// Watcher list.
+	// Monitor list.
 	if deps.WatcherStore != nil {
 		s.AddTool(
-			mcp.NewTool("list_watchers",
-				mcp.WithDescription("List all configured watchers with their status"),
+			mcp.NewTool("list_monitors",
+				mcp.WithDescription("List all configured monitors with their status"),
 				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production, staging)")),
+				mcp.WithString("monitor_type", mcp.Description("Filter by monitor type: ai or rule")),
 			),
-			listWatchersHandler(deps.WatcherStore),
+			listMonitorsHandler(deps.WatcherStore),
 		)
 	}
 
@@ -144,31 +147,46 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 	}
 }
 
-// addWriteTools registers write/admin tools (connector tools, create_watcher).
+// addWriteTools registers write/admin tools (connector tools, create_monitor, preview_monitor).
 func addWriteTools(s *server.MCPServer, deps Deps) {
 	// All connector tools (run queries, etc.).
 	for _, t := range deps.Registry.AllTools() {
 		s.AddTool(convertTool(t), bridgeHandler(t))
 	}
 
-	// Create watcher.
+	// Create monitor.
 	if deps.WatcherStore != nil {
 		s.AddTool(
-			mcp.NewTool("create_watcher",
-				mcp.WithDescription("Create a new automated watcher that monitors logs on a schedule"),
-				mcp.WithString("title", mcp.Required(), mcp.Description("Title for the watcher")),
-				mcp.WithString("description", mcp.Required(), mcp.Description("Instructions for the monitoring agent \u2014 what to look for")),
-				mcp.WithString("service", mcp.Description("Filter by service name")),
-				mcp.WithString("level", mcp.Description("Filter by log level (e.g. error, warning)")),
+			mcp.NewTool("create_monitor",
+				mcp.WithDescription("Create a new monitor. Use monitor_type=ai for AI-powered analysis or monitor_type=rule for threshold-based checks"),
+				mcp.WithString("title", mcp.Required(), mcp.Description("Title for the monitor")),
+				mcp.WithString("monitor_type", mcp.Description("Monitor type: ai (default) or rule")),
+				mcp.WithString("description", mcp.Description("Instructions for the AI agent (required for ai monitors)")),
+				mcp.WithString("rule_config", mcp.Description("JSON object for rule monitors: {source, query, metric, operator, threshold, filter, checks, latency_threshold_ms}")),
+				mcp.WithString("data_source_id", mcp.Description("Data source ID for query/health rule monitors")),
+				mcp.WithString("service", mcp.Description("Filter by service name (ai monitors)")),
+				mcp.WithString("level", mcp.Description("Filter by log level (ai monitors)")),
 				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production)")),
-				mcp.WithString("time_range", mcp.Description("Lookback window and run interval (e.g. 5m, 15m, 1h, 6h, 24h). Default: 15m")),
-				mcp.WithString("query", mcp.Description("Full-text search query for logs")),
+				mcp.WithString("time_range", mcp.Description("Check interval (e.g. 5m, 15m, 1h). Default: 15m")),
+				mcp.WithString("query", mcp.Description("Full-text search query for logs (ai monitors)")),
 				mcp.WithString("severity", mcp.Description("Alert severity: info, warning, or critical (default: warning)")),
-				mcp.WithString("model", mcp.Description("LLM model variant name (e.g. anthropic-sonnet, openai-gpt4o). Empty for global default")),
-				mcp.WithString("effort", mcp.Description("Analysis effort level: low (quick check), medium (default), or high (deep analysis)")),
-				mcp.WithString("watcher_environment", mcp.Description("Environment to assign to the watcher itself (e.g. production, staging)")),
+				mcp.WithString("model", mcp.Description("LLM model name (ai monitors only)")),
+				mcp.WithString("effort", mcp.Description("Analysis effort: low, medium (default), or high (ai monitors only)")),
+				mcp.WithString("watcher_environment", mcp.Description("Environment to assign to the monitor (e.g. production, staging)")),
 			),
-			createWatcherHandler(deps.WatcherStore),
+			createMonitorHandler(deps.WatcherStore),
+		)
+	}
+
+	// Preview monitor (rule evaluation without saving).
+	if deps.RuleEvaluator != nil {
+		s.AddTool(
+			mcp.NewTool("preview_monitor",
+				mcp.WithDescription("Run a rule monitor evaluation ad-hoc without saving. Returns the current value and whether it would trigger an alert"),
+				mcp.WithString("rule_config", mcp.Required(), mcp.Description("JSON object: {source, query, metric, operator, threshold, filter, checks, latency_threshold_ms}")),
+				mcp.WithString("data_source_id", mcp.Description("Data source ID for query/health rule monitors")),
+			),
+			previewMonitorHandler(deps.RuleEvaluator),
 		)
 	}
 }
@@ -238,44 +256,56 @@ func listConnectorsHandler(registry *connector.Registry) server.ToolHandlerFunc 
 	}
 }
 
-// listWatchersHandler returns a handler that lists all watchers.
-func listWatchersHandler(ws store.WatcherStore) server.ToolHandlerFunc {
+// listMonitorsHandler returns a handler that lists all monitors.
+func listMonitorsHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 		var params store.ListWatcherParams
 		if v, ok := args["environment"].(string); ok && v != "" {
 			params.Environment = v
 		}
+		if v, ok := args["monitor_type"].(string); ok && v != "" {
+			params.MonitorType = store.MonitorType(v)
+		}
 		watchers, err := ws.List(ctx, params)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to list watchers: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to list monitors: %v", err)), nil
 		}
 
 		if len(watchers) == 0 {
-			return mcp.NewToolResultText("No watchers configured."), nil
+			return mcp.NewToolResultText("No monitors configured."), nil
 		}
 
 		data, err := json.MarshalIndent(watchers, "", "  ")
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal watchers: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal monitors: %v", err)), nil
 		}
 
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }
 
-// createWatcherHandler returns a handler that creates a new watcher.
-func createWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
+// createMonitorHandler returns a handler that creates a new monitor (AI or rule).
+func createMonitorHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 
 		title, _ := args["title"].(string)
-		description, _ := args["description"].(string)
-		if title == "" || description == "" {
-			return mcp.NewToolResultError("title and description are required"), nil
+		if title == "" {
+			return mcp.NewToolResultError("title is required"), nil
 		}
 
-		// Build filters from individual params.
+		monitorType := store.MonitorTypeAI
+		if v, ok := args["monitor_type"].(string); ok && v != "" {
+			monitorType = store.MonitorType(v)
+		}
+
+		description, _ := args["description"].(string)
+		if monitorType == store.MonitorTypeAI && description == "" {
+			return mcp.NewToolResultError("description is required for ai monitors"), nil
+		}
+
+		// Build filters from individual params (for AI monitors).
 		filters := make(map[string]string)
 		if v, ok := args["service"].(string); ok && v != "" {
 			filters["service"] = v
@@ -289,7 +319,6 @@ func createWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 		if v, ok := args["query"].(string); ok && v != "" {
 			filters["query"] = v
 		}
-
 		filtersJSON, _ := json.Marshal(filters)
 
 		timeRange := "15m"
@@ -315,6 +344,7 @@ func createWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 			Title:       title,
 			Description: description,
 			Environment: watcherEnv,
+			MonitorType: monitorType,
 			Severity:    severity,
 			Filters:     filtersJSON,
 			TimeRange:   timeRange,
@@ -323,17 +353,82 @@ func createWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 			Notify:      json.RawMessage(`["dashboard"]`),
 		}
 
-		watcher, err := ws.Create(ctx, params)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to create watcher: %v", err)), nil
+		// Parse rule_config JSON string for rule monitors.
+		if monitorType == store.MonitorTypeRule {
+			rcStr, _ := args["rule_config"].(string)
+			if rcStr == "" {
+				return mcp.NewToolResultError("rule_config is required for rule monitors"), nil
+			}
+			var rc store.RuleConfig
+			if err := json.Unmarshal([]byte(rcStr), &rc); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("invalid rule_config JSON: %v", err)), nil
+			}
+			params.RuleConfig = &rc
 		}
 
-		data, err := json.MarshalIndent(watcher, "", "  ")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal watcher: %v", err)), nil
+		if v, ok := args["data_source_id"].(string); ok && v != "" {
+			params.DataSourceID = &v
 		}
 
-		return mcp.NewToolResultText(fmt.Sprintf("Watcher created successfully:\n%s", string(data))), nil
+		monitor, err := ws.Create(ctx, params)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to create monitor: %v", err)), nil
+		}
+
+		data, err := json.MarshalIndent(monitor, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal monitor: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(fmt.Sprintf("Monitor created successfully:\n%s", string(data))), nil
+	}
+}
+
+// previewMonitorHandler returns a handler that runs a rule evaluation ad-hoc.
+func previewMonitorHandler(re *watcher.RuleEvaluator) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := request.GetArguments()
+
+		rcStr, _ := args["rule_config"].(string)
+		if rcStr == "" {
+			return mcp.NewToolResultError("rule_config is required"), nil
+		}
+
+		var rc store.RuleConfig
+		if err := json.Unmarshal([]byte(rcStr), &rc); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid rule_config JSON: %v", err)), nil
+		}
+
+		tempWatcher := store.Watcher{
+			MonitorType: store.MonitorTypeRule,
+			RuleConfig:  &rc,
+		}
+		if v, ok := args["data_source_id"].(string); ok && v != "" {
+			tempWatcher.DataSourceID = &v
+		}
+
+		start := time.Now()
+		result, err := re.Evaluate(ctx, tempWatcher)
+		elapsed := time.Since(start).Milliseconds()
+
+		if err != nil {
+			return mcp.NewToolResultText(fmt.Sprintf("Preview error: %v (took %dms)", err, elapsed)), nil
+		}
+
+		resp := map[string]any{
+			"would_alert":   result.HasAlert,
+			"summary":       result.Summary,
+			"query_time_ms": elapsed,
+		}
+		if result.Value != nil {
+			resp["current_value"] = *result.Value
+		}
+
+		data, err := json.MarshalIndent(resp, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(data)), nil
 	}
 }
 

@@ -217,7 +217,8 @@ type UpdateWatcherParams struct {
 
 // ListWatcherParams defines filters for listing watchers.
 type ListWatcherParams struct {
-	Environment string `json:"environment,omitempty"`
+	Environment string      `json:"environment,omitempty"`
+	MonitorType MonitorType `json:"monitor_type,omitempty"`
 }
 
 // WatcherRun represents a single execution of a watcher.
