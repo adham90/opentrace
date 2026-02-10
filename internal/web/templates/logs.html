@@ -8,6 +8,8 @@
   </div>
 </div>
 
+<div id="saved-filters" class="saved-filters" style="display:none"></div>
+
 <form class="log-filters" hx-get="/logs" hx-target="#logs-list" hx-swap="innerHTML" hx-trigger="submit" hx-push-url="false"
       onsubmit="pauseLiveOnFilter()">
   <div class="filter-group filter-search">
@@ -19,13 +21,14 @@
     </select>
   </div>
   <div class="filter-group">
-    <select name="level">
-      <option value="">all levels</option>
-      <option value="DEBUG" {{if eq .LogFilters.Level "DEBUG"}}selected{{end}}>DEBUG</option>
-      <option value="INFO" {{if eq .LogFilters.Level "INFO"}}selected{{end}}>INFO</option>
-      <option value="WARN" {{if eq .LogFilters.Level "WARN"}}selected{{end}}>WARN</option>
-      <option value="ERROR" {{if eq .LogFilters.Level "ERROR"}}selected{{end}}>ERROR</option>
-    </select>
+    <div class="level-toggles" id="level-toggles">
+      <input type="hidden" name="level" id="level-hidden" value="{{.LogFilters.Level}}">
+      <button type="button" class="filter-tab" data-level="" onclick="toggleLevel(this)">all</button>
+      <button type="button" class="filter-tab" data-level="ERROR" onclick="toggleLevel(this)">ERROR</button>
+      <button type="button" class="filter-tab" data-level="WARN" onclick="toggleLevel(this)">WARN</button>
+      <button type="button" class="filter-tab" data-level="INFO" onclick="toggleLevel(this)">INFO</button>
+      <button type="button" class="filter-tab" data-level="DEBUG" onclick="toggleLevel(this)">DEBUG</button>
+    </div>
   </div>
   <div class="filter-group">
     <select name="environment" id="env-filter-select">
@@ -33,6 +36,7 @@
     </select>
   </div>
   <button type="submit" class="btn btn-primary btn-sm">filter</button>
+  <button type="button" class="btn btn-sm" id="save-filter-btn" onclick="saveCurrentFilter()" style="display:none" title="Save current filter">save</button>
 </form>
 
 <div id="logs-list" data-max-id="{{.MaxLogID}}">
@@ -40,7 +44,129 @@
 </div>
 
 <script>
-// Populate service and environment dropdowns from API (deferred until layout script loads)
+// Level multi-select toggles
+var selectedLevels = {};
+(function(){
+  var initial = '{{.LogFilters.Level}}'.split(',').filter(function(v){return v;});
+  initial.forEach(function(l){ selectedLevels[l] = true; });
+})();
+
+function toggleLevel(btn) {
+  var level = btn.getAttribute('data-level');
+  if (level === '') {
+    // "all" — clear selection
+    selectedLevels = {};
+  } else {
+    if (selectedLevels[level]) {
+      delete selectedLevels[level];
+    } else {
+      selectedLevels[level] = true;
+    }
+  }
+  updateLevelUI();
+}
+
+function updateLevelUI() {
+  var keys = Object.keys(selectedLevels);
+  document.getElementById('level-hidden').value = keys.join(',');
+  var btns = document.querySelectorAll('#level-toggles .filter-tab');
+  btns.forEach(function(b) {
+    var lev = b.getAttribute('data-level');
+    if (lev === '') {
+      b.classList.toggle('active', keys.length === 0);
+    } else {
+      b.classList.toggle('active', !!selectedLevels[lev]);
+    }
+  });
+  updateSaveFilterBtn();
+}
+
+// Saved filters (localStorage)
+var SAVED_KEY = 'opentrace-saved-filters';
+
+function getSavedFilters() {
+  try { return JSON.parse(localStorage.getItem(SAVED_KEY)) || []; } catch(e) { return []; }
+}
+
+function renderSavedFilters() {
+  var filters = getSavedFilters();
+  var container = document.getElementById('saved-filters');
+  if (!filters.length) { container.style.display = 'none'; return; }
+  container.style.display = 'flex';
+  var html = '';
+  filters.forEach(function(f, i) {
+    html += '<button class="saved-filter-chip" onclick="applySavedFilter(' + i + ')" title="' + describeSavedFilter(f) + '">' +
+      escapeHtmlLocal(f.name) +
+      '<span class="chip-remove" onclick="event.stopPropagation();removeSavedFilter(' + i + ')">\u00d7</span></button>';
+  });
+  container.innerHTML = html;
+}
+
+function describeSavedFilter(f) {
+  var parts = [];
+  if (f.query) parts.push('query: ' + f.query);
+  if (f.service) parts.push('service: ' + f.service);
+  if (f.level) parts.push('level: ' + f.level);
+  if (f.env) parts.push('env: ' + f.env);
+  return parts.join(', ') || 'no filters';
+}
+
+function applySavedFilter(idx) {
+  var filters = getSavedFilters();
+  var f = filters[idx];
+  if (!f) return;
+  var form = document.querySelector('.log-filters');
+  form.querySelector('[name="query"]').value = f.query || '';
+  document.getElementById('service-select').value = f.service || '';
+  document.getElementById('env-filter-select').value = f.env || '';
+  selectedLevels = {};
+  if (f.level) f.level.split(',').forEach(function(l){ if(l) selectedLevels[l]=true; });
+  updateLevelUI();
+  htmx.trigger(form, 'submit');
+}
+
+function removeSavedFilter(idx) {
+  var filters = getSavedFilters();
+  filters.splice(idx, 1);
+  localStorage.setItem(SAVED_KEY, JSON.stringify(filters));
+  renderSavedFilters();
+  if (typeof showToast === 'function') showToast('Filter removed', 'info');
+}
+
+function saveCurrentFilter() {
+  var form = document.querySelector('.log-filters');
+  var f = {
+    query: form.querySelector('[name="query"]').value,
+    service: document.getElementById('service-select').value,
+    level: Object.keys(selectedLevels).join(','),
+    env: document.getElementById('env-filter-select').value
+  };
+  var name = prompt('Name this filter:');
+  if (!name) return;
+  f.name = name;
+  var filters = getSavedFilters();
+  filters.push(f);
+  localStorage.setItem(SAVED_KEY, JSON.stringify(filters));
+  renderSavedFilters();
+  if (typeof showToast === 'function') showToast('Filter saved: ' + name, 'success');
+}
+
+function updateSaveFilterBtn() {
+  var form = document.querySelector('.log-filters');
+  var hasFilter = form.querySelector('[name="query"]').value ||
+    document.getElementById('service-select').value ||
+    Object.keys(selectedLevels).length > 0 ||
+    document.getElementById('env-filter-select').value;
+  document.getElementById('save-filter-btn').style.display = hasFilter ? '' : 'none';
+}
+
+function escapeHtmlLocal(str) {
+  var div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+
+// Populate service and environment dropdowns from API
 document.addEventListener('DOMContentLoaded', function(){
   var currentService = '{{.LogFilters.Service}}';
   var currentEnv = '{{.LogFilters.Environment}}' || (typeof getGlobalEnv === 'function' ? getGlobalEnv() : '');
@@ -74,6 +200,12 @@ document.addEventListener('DOMContentLoaded', function(){
       sel.appendChild(opt);
     });
   }).catch(function(e){ console.warn('failed to load environments:', e); });
+
+  updateLevelUI();
+  renderSavedFilters();
+  // Update save button when filter fields change
+  document.querySelector('.log-filters').addEventListener('change', updateSaveFilterBtn);
+  document.querySelector('.log-filters [name="query"]').addEventListener('input', updateSaveFilterBtn);
 });
 
 (function(){
@@ -184,7 +316,7 @@ document.addEventListener('DOMContentLoaded', function(){
 {{define "log-entry"}}
 <div class="log-entry collapsed level-{{.Level}}" onclick="this.classList.toggle('collapsed');this.classList.toggle('expanded')">
   <div class="log-entry-meta">
-    <span class="log-entry-ts">{{.Timestamp.Format "2006-01-02 15:04:05"}}</span>
+    <span class="log-entry-ts" title="{{.Timestamp.Format "2006-01-02T15:04:05.000Z07:00"}}">{{.Timestamp.Format "2006-01-02 15:04:05"}}</span>
     <span class="badge badge-{{.Level}}">{{.Level}}</span>
     {{if .Service}}<span class="log-entry-svc">{{.Service}}</span>{{end}}
     {{if .Environment}}<span class="log-entry-env">{{.Environment}}</span>{{end}}

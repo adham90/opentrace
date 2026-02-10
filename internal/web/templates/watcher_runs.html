@@ -8,6 +8,16 @@
   </div>
 
   <div id="watcher-info" class="watcher-info-card"></div>
+
+  <div class="alert-filters" style="margin-bottom:12px">
+    <div class="filter-tabs" id="runStatusFilter" data-value="all">
+      <button class="filter-tab active" data-value="all" onclick="setRunFilter('all')">all</button>
+      <button class="filter-tab" data-value="completed" onclick="setRunFilter('completed')">completed</button>
+      <button class="filter-tab" data-value="failed" onclick="setRunFilter('failed')">failed</button>
+      <button class="filter-tab" data-value="running" onclick="setRunFilter('running')">running</button>
+    </div>
+  </div>
+
   <div id="runs-list" class="runs-list">
     <div class="empty-state">Loading...</div>
   </div>
@@ -18,6 +28,17 @@ var watcherId = '{{.WatcherID}}';
 var activeStreams = {};
 var pollTimer = null;
 var hasRunning = false;
+var runStatusFilter = 'all';
+
+function setRunFilter(value) {
+  runStatusFilter = value;
+  var tabs = document.querySelectorAll('#runStatusFilter .filter-tab');
+  tabs.forEach(function(t) {
+    t.classList.toggle('active', t.getAttribute('data-value') === value);
+  });
+  document.getElementById('runStatusFilter').setAttribute('data-value', value);
+  loadRuns();
+}
 
 function loadWatcherInfo() {
   fetch('/api/watchers/' + watcherId).then(function(r) { return r.json(); }).then(function(w) {
@@ -37,6 +58,20 @@ function loadRuns() {
       hasRunning = false;
       schedulePoll();
       return;
+    }
+
+    // Client-side status filter
+    if (runStatusFilter !== 'all') {
+      runs = runs.filter(function(run) {
+        if (runStatusFilter === 'failed') return run.status === 'failed' || run.status === 'error';
+        return run.status === runStatusFilter;
+      });
+      if (runs.length === 0) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no ' + runStatusFilter + ' runs</p><p>try a different filter</p></div>';
+        hasRunning = false;
+        schedulePoll();
+        return;
+      }
     }
 
     var newHasRunning = false;

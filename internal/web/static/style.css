@@ -725,12 +725,74 @@ select:focus { outline: none; border-color: var(--green); }
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ===== Saved Filters ===== */
+.saved-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.saved-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.saved-filter-chip:hover {
+  border-color: var(--green);
+  background: var(--bg-tertiary);
+}
+.chip-remove {
+  font-size: 13px;
+  color: var(--text-dim);
+  cursor: pointer;
+  line-height: 1;
+}
+.chip-remove:hover { color: var(--red); }
+
+/* Level toggle group */
+.level-toggles {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px;
+  height: 100%;
+  align-items: center;
+}
+.level-toggles .filter-tab {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 8px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.level-toggles .filter-tab:hover { color: var(--text-bright); }
+.level-toggles .filter-tab.active {
+  background: var(--bg-tertiary);
+  color: var(--text-bright);
+}
+
 /* ===== Log Filters ===== */
 .log-filters {
   display: flex;
   gap: 8px;
   margin-bottom: 16px;
   align-items: stretch;
+  flex-wrap: wrap;
 }
 
 .log-filters .filter-group {
