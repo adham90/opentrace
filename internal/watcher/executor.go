@@ -21,6 +21,7 @@ type Executor struct {
 	providerCache *llm.ProviderCache
 	agentCfg      agent.RunConfig
 	eventHub      *EventHub
+	ruleEvaluator *RuleEvaluator
 }
 
 // NewExecutor creates a new watcher executor.
@@ -44,8 +45,13 @@ func NewExecutor(
 	}
 }
 
-// Execute runs a single watcher: creates a run record, executes the agent,
-// evaluates findings, creates alerts if needed, and sends notifications.
+// SetRuleEvaluator sets the rule evaluator for handling rule-based monitors.
+func (e *Executor) SetRuleEvaluator(re *RuleEvaluator) {
+	e.ruleEvaluator = re
+}
+
+// Execute runs a single watcher: creates a run record, evaluates (AI or rule),
+// creates alerts if needed, and sends notifications.
 func (e *Executor) Execute(ctx context.Context, w store.Watcher) {
 	// 1. Create a run record
 	run, err := e.runStore.Create(ctx, w.ID)
@@ -63,6 +69,71 @@ func (e *Executor) Execute(ctx context.Context, w store.Watcher) {
 		defer e.eventHub.MarkDone(run.ID)
 	}
 
+	// Dispatch by monitor type
+	switch w.MonitorType {
+	case store.MonitorTypeRule:
+		e.executeRule(ctx, w, run)
+	default: // "ai" or empty (backward compat)
+		e.executeAI(ctx, w, run)
+	}
+}
+
+// executeRule runs a rule-based evaluation (query, logs, or health).
+func (e *Executor) executeRule(ctx context.Context, w store.Watcher, run *store.WatcherRun) {
+	if e.ruleEvaluator == nil {
+		errMsg := "rule evaluator not configured"
+		log.Printf("watcher %s (%s): %s", w.ID, w.Title, errMsg)
+		e.runStore.Fail(ctx, run.ID, errMsg)
+		e.updateWatcherTiming(ctx, w)
+		return
+	}
+
+	result, err := e.ruleEvaluator.Evaluate(ctx, w)
+	if err != nil {
+		errMsg := fmt.Sprintf("rule evaluation error: %v", err)
+		log.Printf("watcher %s (%s): %s", w.ID, w.Title, errMsg)
+		e.runStore.Fail(ctx, run.ID, errMsg)
+		e.updateWatcherTiming(ctx, w)
+		return
+	}
+
+	// Publish evaluation result to EventHub
+	if e.eventHub != nil {
+		e.eventHub.Publish(run.ID, RunEvent{
+			Type:    "rule_result",
+			Content: result.Summary,
+			Time:    time.Now(),
+		})
+	}
+
+	// Complete the run
+	if err := e.runStore.Complete(ctx, run.ID, result.Summary, result.Details, result.HasAlert); err != nil {
+		log.Printf("watcher %s: failed to complete run: %v", w.ID, err)
+	}
+
+	// Create alert and notify if needed
+	if result.HasAlert {
+		alert, err := e.alertStore.Create(ctx, store.CreateAlertParams{
+			WatcherID:   &w.ID,
+			RunID:       &run.ID,
+			Title:       w.Title,
+			Summary:     result.Summary,
+			Environment: w.Environment,
+			Severity:    w.Severity,
+		})
+		if err != nil {
+			log.Printf("watcher %s: failed to create alert: %v", w.ID, err)
+		} else {
+			notifiers := ParseNotifiers(w.Notify)
+			SendAll(ctx, notifiers, *alert)
+		}
+	}
+
+	e.updateWatcherTiming(ctx, w)
+}
+
+// executeAI runs the existing AI agent-based evaluation.
+func (e *Executor) executeAI(ctx context.Context, w store.Watcher, run *store.WatcherRun) {
 	// 2. Get tools from registry
 	tools := e.registry.AllTools()
 

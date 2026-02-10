@@ -108,6 +108,63 @@ func (c *DatabaseConnector) Close() error {
 	return nil
 }
 
+// ExecuteReadQuery runs a read-only SQL query and returns structured results.
+func (c *DatabaseConnector) ExecuteReadQuery(ctx context.Context, query string) (*QueryResult, error) {
+	// Validate SQL is read-only
+	if err := guardrail.ValidateReadOnly(query); err != nil {
+		return nil, fmt.Errorf("query rejected: %w", err)
+	}
+
+	// Add LIMIT if not present
+	limitedQuery := query
+	upperQuery := strings.ToUpper(strings.TrimSpace(query))
+	if !strings.Contains(upperQuery, "LIMIT") {
+		limitedQuery = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(query, "; "), c.maxRows)
+	}
+
+	rows, err := c.pool.Query(ctx, limitedQuery)
+	if err != nil {
+		return nil, fmt.Errorf("executing query: %w", err)
+	}
+	defer rows.Close()
+
+	descs := rows.FieldDescriptions()
+	colNames := make([]string, len(descs))
+	for i, d := range descs {
+		colNames[i] = string(d.Name)
+	}
+
+	var resultRows [][]any
+	for rows.Next() {
+		values, err := rows.Values()
+		if err != nil {
+			return nil, fmt.Errorf("reading row: %w", err)
+		}
+		resultRows = append(resultRows, values)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating rows: %w", err)
+	}
+
+	return &QueryResult{
+		Columns:  colNames,
+		Rows:     resultRows,
+		RowCount: len(resultRows),
+	}, nil
+}
+
+// Ping checks connectivity and measures latency.
+func (c *DatabaseConnector) Ping(ctx context.Context) PingResult {
+	start := time.Now()
+	err := c.pool.Ping(ctx)
+	latency := time.Since(start).Milliseconds()
+
+	if err != nil {
+		return PingResult{Reachable: false, LatencyMS: latency, Error: err.Error()}
+	}
+	return PingResult{Reachable: true, LatencyMS: latency}
+}
+
 func (c *DatabaseConnector) handleDbSearch(ctx context.Context, args map[string]any) (string, error) {
 	query, ok := args["query"].(string)
 	if !ok || query == "" {
