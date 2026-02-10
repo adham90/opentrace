@@ -231,7 +231,23 @@ func (e *Executor) executeAI(ctx context.Context, w store.Watcher, run *store.Wa
 
 func (e *Executor) updateWatcherTiming(ctx context.Context, w store.Watcher) {
 	now := time.Now()
-	next := now.Add(ParseTimeRange(w.TimeRange))
+
+	// Prefer explicit schedule; fall back to time_range (backward compat).
+	schedExpr := w.Schedule
+	if schedExpr == "" {
+		schedExpr = w.TimeRange
+	}
+
+	sched, err := ParseSchedule(schedExpr)
+	if err != nil {
+		log.Printf("watcher %s: invalid schedule %q, using 15m fallback: %v", w.ID, schedExpr, err)
+		if err := e.watcherStore.UpdateRunTime(ctx, w.ID, now, now.Add(15*time.Minute)); err != nil {
+			log.Printf("watcher %s: failed to update run time: %v", w.ID, err)
+		}
+		return
+	}
+
+	next := sched.Next(now)
 	if err := e.watcherStore.UpdateRunTime(ctx, w.ID, now, next); err != nil {
 		log.Printf("watcher %s: failed to update run time: %v", w.ID, err)
 	}

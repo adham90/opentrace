@@ -82,6 +82,49 @@ func TestExecutor_AlertTriggered(t *testing.T) {
 	}
 }
 
+func TestExecutor_CronSchedule(t *testing.T) {
+	ws := newMockWatcherStore()
+	rs := newMockRunStore()
+	as := newMockAlertStore()
+	registry := connector.NewRegistry()
+
+	mockLLM := &mockLLMProvider{
+		response: llm.ChatResponse{
+			Content: "OK: Everything looks normal.",
+		},
+	}
+
+	exec := NewExecutor(ws, rs, as, registry, newTestProviderCache(mockLLM), agent.RunConfig{
+		MaxSteps:            5,
+		MaxToolCalls:        3,
+		MaxObservationBytes: 4096,
+	}, nil)
+
+	w := store.Watcher{
+		ID:          uuid.New(),
+		Title:       "Daily check",
+		Description: "Check health daily",
+		Severity:    store.SeverityInfo,
+		Filters:     json.RawMessage(`{}`),
+		TimeRange:   "1h",
+		Schedule:    "0 9 * * *",
+		Notify:      json.RawMessage(`["dashboard"]`),
+	}
+
+	exec.Execute(context.Background(), w)
+
+	// Verify watcher timing uses cron schedule, not interval
+	_, nextRun := ws.getRunTime(w.ID)
+	if nextRun.IsZero() {
+		t.Fatal("expected next_run_at to be set")
+	}
+
+	// Next run should be at 9:00 AM, not now+1h
+	if nextRun.Hour() != 9 || nextRun.Minute() != 0 {
+		t.Errorf("expected next_run at 09:00, got %02d:%02d", nextRun.Hour(), nextRun.Minute())
+	}
+}
+
 func TestExecutor_NoAlert(t *testing.T) {
 	ws := newMockWatcherStore()
 	rs := newMockRunStore()
