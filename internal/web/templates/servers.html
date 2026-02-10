@@ -1,0 +1,88 @@
+{{define "content"}}
+<div class="page-header">
+  <h1><span class="prompt">$</span> servers</h1>
+</div>
+
+<div id="servers-container">
+  <div class="empty-state"><div class="empty-icon">--</div><p>loading...</p></div>
+</div>
+
+<script>
+(function(){
+  function loadServers() {
+    fetch('/api/servers').then(function(r){ return r.json(); }).then(function(servers){
+      var container = document.getElementById('servers-container');
+      if (!servers || servers.length === 0) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p>no servers monitored</p><p class="text-dim text-xs">run <code>opentrace agent</code> on a server to start collecting metrics</p></div>';
+        return;
+      }
+
+      var html = '<div class="server-list">';
+      servers.forEach(function(s){
+        var statusClass = s.status === 'online' ? 'badge-connected' : s.status === 'offline' ? 'badge-error' : 'badge-disconnected';
+        var lastSeen = s.last_seen_at ? getTimeAgo(s.last_seen_at) : 'never';
+
+        html += '<a href="/servers/' + s.id + '" class="server-card card">';
+        html += '  <div class="server-card-header">';
+        html += '    <span class="server-hostname">' + escapeHtml(s.hostname) + '</span>';
+        html += '    <span class="badge ' + statusClass + '">' + s.status + '</span>';
+        html += '  </div>';
+        html += '  <div class="server-card-meta">';
+        if (s.ip_address) html += '<span>IP: ' + escapeHtml(s.ip_address) + '</span>';
+        if (s.os) html += '<span>OS: ' + escapeHtml(s.os) + '/' + escapeHtml(s.arch || '') + '</span>';
+        html += '    <span>last seen: ' + lastSeen + '</span>';
+        html += '  </div>';
+        html += '  <div class="server-card-metrics" id="srv-metrics-' + s.id + '"></div>';
+        html += '</a>';
+      });
+      html += '</div>';
+      container.innerHTML = html;
+
+      // Load quick health metrics for each server
+      servers.forEach(function(s) {
+        fetch('/api/servers/' + s.id + '/metrics?name=cpu.usage_percent&limit=1')
+        .then(function(r){ return r.json(); })
+        .then(function(cpuData){
+          return fetch('/api/servers/' + s.id + '/metrics?name=memory.usage_percent&limit=1')
+          .then(function(r){ return r.json(); })
+          .then(function(memData){
+            return fetch('/api/servers/' + s.id + '/metrics?name=disk.usage_percent&limit=1')
+            .then(function(r){ return r.json(); })
+            .then(function(diskData){
+              var el = document.getElementById('srv-metrics-' + s.id);
+              if (!el) return;
+              var parts = [];
+              if (cpuData && cpuData.length > 0) parts.push('CPU: ' + cpuData[0].metric_value.toFixed(1) + '%');
+              if (memData && memData.length > 0) parts.push('Mem: ' + memData[0].metric_value.toFixed(1) + '%');
+              if (diskData && diskData.length > 0) parts.push('Disk: ' + diskData[0].metric_value.toFixed(1) + '%');
+              el.innerHTML = parts.length > 0 ? parts.join(' &middot; ') : '';
+            });
+          });
+        }).catch(function(){});
+      });
+    }).catch(function(){
+      document.getElementById('servers-container').innerHTML = '<div class="empty-state"><div class="empty-icon">!!</div><p>failed to load servers</p></div>';
+    });
+  }
+
+  function getTimeAgo(dateStr) {
+    var now = new Date();
+    var date = new Date(dateStr);
+    var diff = Math.floor((now - date) / 1000);
+    if (diff < 60) return diff + 's ago';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+  }
+
+  function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.textContent = str || '';
+    return div.innerHTML;
+  }
+
+  loadServers();
+  setInterval(loadServers, 30000);
+})();
+</script>
+{{end}}

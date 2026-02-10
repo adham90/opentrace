@@ -24,6 +24,11 @@
     <div class="stat-label">connectors</div>
     <div class="stat-detail" id="stat-connectors-detail">loading...</div>
   </a>
+  <a href="/servers" class="stat-card" id="stat-servers">
+    <div class="stat-number" id="stat-servers-num">—</div>
+    <div class="stat-label">servers</div>
+    <div class="stat-detail" id="stat-servers-detail">loading...</div>
+  </a>
 </div>
 
 <div class="overview-panels">
@@ -86,6 +91,16 @@
       cn.textContent = d.connectors.connected + ' / ' + d.connectors.total;
       cn.className = 'stat-number' + (d.connectors.error > 0 ? ' status-error' : d.connectors.connected === d.connectors.total && d.connectors.total > 0 ? ' status-ok' : '');
       cd.textContent = d.connectors.error > 0 ? d.connectors.error + ' error' : d.connectors.total > 0 ? 'all connected' : 'none configured';
+
+      // Servers
+      if (d.servers) {
+        var sn = document.getElementById('stat-servers-num');
+        var sd = document.getElementById('stat-servers-detail');
+        sn.textContent = d.servers.total;
+        sn.className = 'stat-number' + (d.servers.offline > 0 ? ' status-warn' : d.servers.online > 0 ? ' status-ok' : '');
+        sd.textContent = d.servers.online > 0 ? d.servers.online + ' online' : 'none monitored';
+        if (d.servers.offline > 0) sd.textContent += ', ' + d.servers.offline + ' offline';
+      }
     }).catch(function(){});
   }
 

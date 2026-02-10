@@ -240,6 +240,27 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, models)
 }
 
+// handleStopRun cancels a running watcher execution.
+func (s *Server) handleStopRun(w http.ResponseWriter, r *http.Request) {
+	runID, err := uuid.Parse(chi.URLParam(r, "runId"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid run ID")
+		return
+	}
+
+	if s.eventHub == nil {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
+
+	if !s.eventHub.Cancel(runID) {
+		writeError(w, http.StatusNotFound, "run not running or not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
+}
+
 // handleRunEvents streams run events via SSE for live trace viewing.
 func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 	runID, err := uuid.Parse(chi.URLParam(r, "runId"))

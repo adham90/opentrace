@@ -1,0 +1,220 @@
+package web
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/adham90/opentrace/internal/connector"
+)
+
+func newTestServerWithMetrics() *Server {
+	return NewServerWithDeps(ServerDeps{
+		DSStore:     newMockStore(),
+		LogStore:    newMockLogStore(),
+		ServerStore: newMockServerStore(),
+		MetricStore: newMockMetricStore(),
+		Registry:    connector.NewRegistry(),
+	})
+}
+
+func TestHandleRegisterServer(t *testing.T) {
+	srv := newTestServerWithMetrics()
+
+	body := `{"hostname":"web-01","ip_address":"10.0.1.5","os":"linux","arch":"amd64"}`
+	req := httptest.NewRequest("POST", "/api/servers/register", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["server_id"] == nil {
+		t.Error("response missing server_id")
+	}
+}
+
+func TestHandleRegisterServer_MissingHostname(t *testing.T) {
+	srv := newTestServerWithMetrics()
+
+	body := `{"os":"linux"}`
+	req := httptest.NewRequest("POST", "/api/servers/register", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleListServers(t *testing.T) {
+	srv := newTestServerWithMetrics()
+
+	// Register a server first
+	body := `{"hostname":"web-01"}`
+	req := httptest.NewRequest("POST", "/api/servers/register", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	// List servers
+	req = httptest.NewRequest("GET", "/api/servers", nil)
+	w = httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var servers []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &servers)
+	if len(servers) != 1 {
+		t.Errorf("servers count = %d, want 1", len(servers))
+	}
+}
+
+func TestHandlePushMetrics(t *testing.T) {
+	srv := newTestServerWithMetrics()
+
+	// Register server
+	body := `{"hostname":"web-01"}`
+	req := httptest.NewRequest("POST", "/api/servers/register", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	var regResp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &regResp)
+	serverID := regResp["server_id"].(string)
+
+	// Push metrics
+	metricsBody := `{
+		"timestamp": "2024-01-15T10:00:00Z",
+		"samples": [
+			{"name": "cpu.usage_percent", "value": 42.5, "unit": "percent"},
+			{"name": "memory.used_bytes", "value": 1073741824, "unit": "bytes"}
+		]
+	}`
+	req = httptest.NewRequest("POST", "/api/servers/"+serverID+"/metrics", bytes.NewBufferString(metricsBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["count"].(float64) != 2 {
+		t.Errorf("count = %v, want 2", resp["count"])
+	}
+}
+
+func TestHandleGetServer(t *testing.T) {
+	srv := newTestServerWithMetrics()
+
+	// Register
+	body := `{"hostname":"detail-test","os":"linux","arch":"amd64"}`
+	req := httptest.NewRequest("POST", "/api/servers/register", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	var regResp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &regResp)
+	serverID := regResp["server_id"].(string)
+
+	// Get
+	req = httptest.NewRequest("GET", "/api/servers/"+serverID, nil)
+	w = httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var s map[string]any
+	json.Unmarshal(w.Body.Bytes(), &s)
+	if s["hostname"] != "detail-test" {
+		t.Errorf("hostname = %v, want %q", s["hostname"], "detail-test")
+	}
+}
+
+func TestHandleDeleteServer(t *testing.T) {
+	srv := newTestServerWithMetrics()
+
+	// Register
+	body := `{"hostname":"del-test"}`
+	req := httptest.NewRequest("POST", "/api/servers/register", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	var regResp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &regResp)
+	serverID := regResp["server_id"].(string)
+
+	// Delete
+	req = httptest.NewRequest("DELETE", "/api/servers/"+serverID, nil)
+	w = httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNoContent)
+	}
+
+	// Verify gone
+	req = httptest.NewRequest("GET", "/api/servers/"+serverID, nil)
+	w = httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status after delete = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandleQueryMetrics(t *testing.T) {
+	srv := newTestServerWithMetrics()
+
+	// Register + push
+	body := `{"hostname":"query-test"}`
+	req := httptest.NewRequest("POST", "/api/servers/register", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	var regResp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &regResp)
+	serverID := regResp["server_id"].(string)
+
+	metricsBody := `{"timestamp":"2024-01-15T10:00:00Z","samples":[{"name":"cpu.usage_percent","value":55.0}]}`
+	req = httptest.NewRequest("POST", "/api/servers/"+serverID+"/metrics", bytes.NewBufferString(metricsBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	// Query
+	req = httptest.NewRequest("GET", "/api/servers/"+serverID+"/metrics?name=cpu.usage_percent", nil)
+	w = httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var points []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &points)
+	if len(points) != 1 {
+		t.Errorf("metrics count = %d, want 1", len(points))
+	}
+}

@@ -143,6 +143,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Get("/watchers/{id}/runs", srv.handleListWatcherRuns)
 		r.Get("/watchers/{id}/runs/{runId}", srv.handleGetWatcherRun)
 		r.Get("/watchers/{id}/runs/{runId}/events", srv.handleRunEvents)
+		r.Post("/watchers/{id}/runs/{runId}/stop", srv.handleStopRun)
 
 		// Alert API
 		r.Get("/alerts", srv.handleListAlerts)

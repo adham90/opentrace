@@ -69,7 +69,8 @@ func EffortSettings(effort store.WatcherEffort) EffortConfig {
 
 // BuildQuery translates a watcher definition into an agent query string.
 // It includes the watcher's instructions, filters, and optionally the previous run's summary.
-func BuildQuery(w store.Watcher, lastRunSummary string) string {
+// If hasServers is true, the prompt mentions that server metric tools are available.
+func BuildQuery(w store.Watcher, lastRunSummary string, hasServers ...bool) string {
 	var b strings.Builder
 
 	b.WriteString("You are a monitoring agent. Your job is to evaluate a specific condition and determine if it warrants an alert.\n\n")
@@ -106,6 +107,16 @@ func BuildQuery(w store.Watcher, lastRunSummary string) string {
 		b.WriteString("## Previous Run\n")
 		b.WriteString(lastRunSummary)
 		b.WriteString("\n\n")
+	}
+
+	// Mention server metrics if servers are being monitored
+	if len(hasServers) > 0 && hasServers[0] {
+		b.WriteString("## Available Server Metrics\n")
+		b.WriteString("Monitored servers are available. You can use these tools to correlate log issues with infrastructure health:\n")
+		b.WriteString("- `list_servers` — see all monitored servers and their status\n")
+		b.WriteString("- `query_server_metrics` — query CPU, memory, disk, network, load metrics by server\n")
+		b.WriteString("- `server_health_summary` — get a quick health snapshot of a server\n")
+		b.WriteString("Consider checking server health when you find log anomalies — high CPU, memory pressure, or disk saturation can explain application errors.\n\n")
 	}
 
 	// Adjust instructions based on effort level

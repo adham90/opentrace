@@ -10,9 +10,10 @@ import (
 type ConnectorType string
 
 const (
-	ConnectorLogs       ConnectorType = "logs"
-	ConnectorDatabase   ConnectorType = "database"
-	ConnectorMonitoring ConnectorType = "monitoring"
+	ConnectorLogs          ConnectorType = "logs"
+	ConnectorDatabase      ConnectorType = "database"
+	ConnectorMonitoring    ConnectorType = "monitoring"
+	ConnectorServerMetrics ConnectorType = "server_metrics"
 )
 
 // DataSource is the interface that all connectors must implement.

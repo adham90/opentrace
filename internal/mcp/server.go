@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/adham90/opentrace/internal/agent"
@@ -18,6 +20,8 @@ type Deps struct {
 	Registry     *connector.Registry
 	WatcherStore store.WatcherStore
 	AlertStore   store.AlertStore
+	ServerStore  store.ServerStore
+	MetricStore  store.MetricStore
 }
 
 // Serve starts a stdio-based MCP server that exposes all tools from the
@@ -79,6 +83,36 @@ func Serve(deps Deps) error {
 				mcp.WithBoolean("unread_only", mcp.Description("Only show unread alerts (default: false)")),
 			),
 			listAlertsHandler(deps.AlertStore),
+		)
+	}
+
+	// Add server metrics tools.
+	if deps.ServerStore != nil && deps.MetricStore != nil {
+		s.AddTool(
+			mcp.NewTool("list_servers",
+				mcp.WithDescription("List all monitored servers with their status (online/offline/unknown)"),
+			),
+			listServersHandler(deps.ServerStore),
+		)
+
+		s.AddTool(
+			mcp.NewTool("query_metrics",
+				mcp.WithDescription("Query time-series metrics for a server (CPU, memory, disk, network, load)"),
+				mcp.WithString("server_id", mcp.Required(), mcp.Description("Server UUID (from list_servers)")),
+				mcp.WithString("metric_name", mcp.Description("Metric name filter (e.g. cpu.usage_percent, memory.usage_percent)")),
+				mcp.WithString("start", mcp.Description("Start time in ISO 8601 format")),
+				mcp.WithString("end", mcp.Description("End time in ISO 8601 format")),
+				mcp.WithNumber("limit", mcp.Description("Max results (default: 100)")),
+			),
+			queryMetricsHandler(deps.ServerStore, deps.MetricStore),
+		)
+
+		s.AddTool(
+			mcp.NewTool("server_health",
+				mcp.WithDescription("Get current health snapshot for a server — latest value for every metric"),
+				mcp.WithString("server_id", mcp.Required(), mcp.Description("Server UUID (from list_servers)")),
+			),
+			serverHealthHandler(deps.ServerStore, deps.MetricStore),
 		)
 	}
 
@@ -238,6 +272,110 @@ func createWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 		}
 
 		return mcp.NewToolResultText(fmt.Sprintf("Watcher created successfully:\n%s", string(data))), nil
+	}
+}
+
+// listServersHandler returns a handler that lists all monitored servers.
+func listServersHandler(ss store.ServerStore) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		servers, err := ss.List(ctx)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to list servers: %v", err)), nil
+		}
+		if len(servers) == 0 {
+			return mcp.NewToolResultText("No monitored servers."), nil
+		}
+		data, err := json.MarshalIndent(servers, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal servers: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// queryMetricsHandler returns a handler that queries time-series metrics.
+func queryMetricsHandler(ss store.ServerStore, ms store.MetricStore) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := request.GetArguments()
+
+		serverIDStr, _ := args["server_id"].(string)
+		if serverIDStr == "" {
+			return mcp.NewToolResultError("server_id is required"), nil
+		}
+
+		serverID, err := uuid.Parse(serverIDStr)
+		if err != nil {
+			return mcp.NewToolResultError("invalid server_id format"), nil
+		}
+
+		q := store.MetricQuery{ServerID: serverID}
+		if v, ok := args["metric_name"].(string); ok {
+			q.MetricName = v
+		}
+		if v, ok := args["start"].(string); ok && v != "" {
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				q.Start = &t
+			}
+		}
+		if v, ok := args["end"].(string); ok && v != "" {
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				q.End = &t
+			}
+		}
+		if v, ok := args["limit"].(float64); ok && v > 0 {
+			q.Limit = int(v)
+		}
+
+		points, err := ms.Query(ctx, q)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to query metrics: %v", err)), nil
+		}
+		if len(points) == 0 {
+			return mcp.NewToolResultText("No metrics found matching the given criteria."), nil
+		}
+
+		data, err := json.MarshalIndent(points, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal metrics: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// serverHealthHandler returns a handler that shows the latest metrics for a server.
+func serverHealthHandler(ss store.ServerStore, ms store.MetricStore) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := request.GetArguments()
+
+		serverIDStr, _ := args["server_id"].(string)
+		if serverIDStr == "" {
+			return mcp.NewToolResultError("server_id is required"), nil
+		}
+
+		serverID, err := uuid.Parse(serverIDStr)
+		if err != nil {
+			return mcp.NewToolResultError("invalid server_id format"), nil
+		}
+
+		srv, err := ss.GetByID(ctx, serverID)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("server not found: %v", err)), nil
+		}
+
+		latest, err := ms.LatestByServer(ctx, serverID)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to query metrics: %v", err)), nil
+		}
+
+		result := map[string]any{
+			"server":  srv,
+			"metrics": latest,
+		}
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(data)), nil
 	}
 }
 

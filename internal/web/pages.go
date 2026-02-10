@@ -23,13 +23,15 @@ var tmplFuncs = template.FuncMap{
 }
 
 var (
-	overviewTmpl    *template.Template
-	connectorsTmpl  *template.Template
-	logsTmpl        *template.Template
-	alertsTmpl      *template.Template
-	watchersTmpl    *template.Template
-	watcherRunsTmpl *template.Template
-	setupTmpl       *template.Template
+	overviewTmpl       *template.Template
+	connectorsTmpl     *template.Template
+	logsTmpl           *template.Template
+	alertsTmpl         *template.Template
+	watchersTmpl       *template.Template
+	watcherRunsTmpl    *template.Template
+	setupTmpl          *template.Template
+	serversTmpl        *template.Template
+	serverDetailTmpl   *template.Template
 )
 
 func init() {
@@ -48,6 +50,10 @@ func init() {
 		"templates/layout.html", "templates/watcher_runs.html"))
 	setupTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/setup.html"))
+	serversTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/servers.html"))
+	serverDetailTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/server_detail.html"))
 }
 
 // templates is used for rendering HTMX fragment responses (e.g. connector-list)
@@ -73,6 +79,7 @@ type pageData struct {
 	Nav        string
 	Content    string
 	WatcherID  string
+	ServerID   string
 	DevMode    bool
 	Connectors interface{}
 	Logs       []store.LogEntry
@@ -267,6 +274,32 @@ func (s *Server) handleWatcherRunsPage(w http.ResponseWriter, r *http.Request) {
 	tmpl.ExecuteTemplate(w, "layout", data)
 }
 
+func (s *Server) handleServersPage(w http.ResponseWriter, r *http.Request) {
+	data := pageData{
+		Title:   "Servers",
+		Nav:     "servers",
+		DevMode: s.isDevMode(),
+	}
+	tmpl := s.getTemplate(serversTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/servers.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleServerDetailPage(w http.ResponseWriter, r *http.Request) {
+	serverID := chi.URLParam(r, "id")
+	data := pageData{
+		Title:    "Server",
+		Nav:      "servers",
+		ServerID: serverID,
+		DevMode:  s.isDevMode(),
+	}
+	tmpl := s.getTemplate(serverDetailTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/server_detail.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
 func (s *Server) handleSetupPage(w http.ResponseWriter, r *http.Request) {
 	data := pageData{
 		Title:   "Setup",
@@ -319,6 +352,7 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 		Watchers   map[string]int `json:"watchers"`
 		Logs       map[string]int `json:"logs"`
 		Connectors map[string]int `json:"connectors"`
+		Servers    map[string]int `json:"servers"`
 	}
 
 	stats := overviewStats{
@@ -326,6 +360,7 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 		Watchers:   map[string]int{"total": 0, "active": 0, "paused": 0, "error": 0},
 		Logs:       map[string]int{"last_hour": 0, "errors_last_hour": 0},
 		Connectors: map[string]int{"total": 0, "connected": 0, "error": 0},
+		Servers:    map[string]int{"total": 0, "online": 0, "offline": 0},
 	}
 
 	// Alerts stats
@@ -394,6 +429,22 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 					stats.Connectors["connected"]++
 				case store.StatusError:
 					stats.Connectors["error"]++
+				}
+			}
+		}
+	}
+
+	// Servers stats
+	if s.serverStore != nil {
+		servers, err := s.serverStore.List(ctx)
+		if err == nil {
+			stats.Servers["total"] = len(servers)
+			for _, srv := range servers {
+				switch srv.Status {
+				case store.ServerOnline:
+					stats.Servers["online"]++
+				case store.ServerOffline:
+					stats.Servers["offline"]++
 				}
 			}
 		}

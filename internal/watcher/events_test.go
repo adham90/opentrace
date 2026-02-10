@@ -10,7 +10,7 @@ import (
 func TestEventHub_PublishSubscribe(t *testing.T) {
 	hub := NewEventHub()
 	runID := uuid.New()
-	hub.Register(runID)
+	hub.Register(runID, nil)
 
 	ch, buffered, unsub, ok := hub.Subscribe(runID)
 	if !ok {
@@ -48,7 +48,7 @@ func TestEventHub_PublishSubscribe(t *testing.T) {
 func TestEventHub_CatchUp(t *testing.T) {
 	hub := NewEventHub()
 	runID := uuid.New()
-	hub.Register(runID)
+	hub.Register(runID, nil)
 
 	// Publish events before subscribing
 	hub.Publish(runID, RunEvent{Type: "thinking", Content: "first", Time: time.Now()})
@@ -85,7 +85,7 @@ func TestEventHub_CatchUp(t *testing.T) {
 func TestEventHub_MarkDone(t *testing.T) {
 	hub := NewEventHub()
 	runID := uuid.New()
-	hub.Register(runID)
+	hub.Register(runID, nil)
 
 	ch, _, unsub, ok := hub.Subscribe(runID)
 	if !ok {
@@ -109,7 +109,7 @@ func TestEventHub_MarkDone(t *testing.T) {
 func TestEventHub_MarkDone_LateSubscriber(t *testing.T) {
 	hub := NewEventHub()
 	runID := uuid.New()
-	hub.Register(runID)
+	hub.Register(runID, nil)
 
 	hub.Publish(runID, RunEvent{Type: "thinking", Content: "test", Time: time.Now()})
 	hub.MarkDone(runID)
@@ -138,7 +138,7 @@ func TestEventHub_MarkDone_LateSubscriber(t *testing.T) {
 func TestEventHub_NonBlocking(t *testing.T) {
 	hub := NewEventHub()
 	runID := uuid.New()
-	hub.Register(runID)
+	hub.Register(runID, nil)
 
 	// Publishing with no subscribers should not block
 	for i := 0; i < 100; i++ {
@@ -152,6 +152,35 @@ func TestEventHub_NonBlocking(t *testing.T) {
 	}
 	if len(buffered) != 100 {
 		t.Fatalf("expected 100 buffered events, got %d", len(buffered))
+	}
+}
+
+func TestEventHub_Cancel(t *testing.T) {
+	hub := NewEventHub()
+	runID := uuid.New()
+
+	cancelled := false
+	hub.Register(runID, func() { cancelled = true })
+
+	ok := hub.Cancel(runID)
+	if !ok {
+		t.Error("expected Cancel to return true")
+	}
+	if !cancelled {
+		t.Error("expected cancel function to be called")
+	}
+
+	// Cancel on already-done run should return false
+	hub.MarkDone(runID)
+	ok = hub.Cancel(runID)
+	if ok {
+		t.Error("expected Cancel to return false for done run")
+	}
+
+	// Cancel on unknown run should return false
+	ok = hub.Cancel(uuid.New())
+	if ok {
+		t.Error("expected Cancel to return false for unknown run")
 	}
 }
 

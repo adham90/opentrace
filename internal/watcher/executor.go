@@ -54,9 +54,12 @@ func (e *Executor) Execute(ctx context.Context, w store.Watcher) {
 		return
 	}
 
-	// Register with EventHub for live streaming
+	// Register with EventHub for live streaming and cancellation
 	if e.eventHub != nil {
-		e.eventHub.Register(run.ID)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		e.eventHub.Register(run.ID, cancel)
 		defer e.eventHub.MarkDone(run.ID)
 	}
 

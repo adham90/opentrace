@@ -1,6 +1,7 @@
 package watcher
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -29,6 +30,7 @@ type runStream struct {
 	subs   map[int]chan RunEvent
 	nextID int
 	done   bool
+	cancel context.CancelFunc
 }
 
 // NewEventHub creates a new EventHub.
@@ -38,13 +40,33 @@ func NewEventHub() *EventHub {
 	}
 }
 
-// Register creates a new stream for a run.
-func (h *EventHub) Register(runID uuid.UUID) {
+// Register creates a new stream for a run with an optional cancel function.
+func (h *EventHub) Register(runID uuid.UUID, cancel context.CancelFunc) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.runs[runID] = &runStream{
-		subs: make(map[int]chan RunEvent),
+		subs:   make(map[int]chan RunEvent),
+		cancel: cancel,
 	}
+}
+
+// Cancel cancels a running run by calling its cancel function.
+// Returns true if the run was found and cancelled.
+func (h *EventHub) Cancel(runID uuid.UUID) bool {
+	h.mu.RLock()
+	rs, ok := h.runs[runID]
+	h.mu.RUnlock()
+	if !ok {
+		return false
+	}
+
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if rs.done || rs.cancel == nil {
+		return false
+	}
+	rs.cancel()
+	return true
 }
 
 // Publish appends an event to the run's buffer and fans out to all subscribers.

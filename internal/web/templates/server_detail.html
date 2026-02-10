@@ -1,0 +1,160 @@
+{{define "content"}}
+<div class="page-header">
+  <h1><span class="prompt">$</span> server <span class="dim" id="srv-hostname">...</span></h1>
+  <div class="actions">
+    <a href="/servers" class="btn btn-sm">&larr; back</a>
+    <button class="btn btn-sm btn-danger" onclick="deleteServer()">delete</button>
+  </div>
+</div>
+
+<div id="server-info" class="server-detail-info card" style="margin-bottom:16px">
+  <div class="text-dim">loading...</div>
+</div>
+
+<div id="metric-charts">
+  <div class="text-dim" style="padding:20px;text-align:center">loading metrics...</div>
+</div>
+
+<script>
+(function(){
+  var serverID = '{{.ServerID}}';
+  if (!serverID) {
+    var parts = window.location.pathname.split('/');
+    serverID = parts[parts.length - 1];
+  }
+
+  function loadServer() {
+    fetch('/api/servers/' + serverID).then(function(r){ return r.json(); }).then(function(s){
+      document.getElementById('srv-hostname').textContent = s.hostname;
+
+      var statusClass = s.status === 'online' ? 'badge-connected' : s.status === 'offline' ? 'badge-error' : 'badge-disconnected';
+      var lastSeen = s.last_seen_at ? new Date(s.last_seen_at).toLocaleString() : 'never';
+
+      var html = '<div class="server-detail-grid">';
+      html += '<div><span class="text-dim">hostname:</span> ' + escapeHtml(s.hostname) + '</div>';
+      html += '<div><span class="text-dim">status:</span> <span class="badge ' + statusClass + '">' + s.status + '</span></div>';
+      if (s.ip_address) html += '<div><span class="text-dim">ip:</span> ' + escapeHtml(s.ip_address) + '</div>';
+      html += '<div><span class="text-dim">os:</span> ' + escapeHtml(s.os || '—') + '/' + escapeHtml(s.arch || '—') + '</div>';
+      if (s.agent_version) html += '<div><span class="text-dim">agent:</span> v' + escapeHtml(s.agent_version) + '</div>';
+      html += '<div><span class="text-dim">last seen:</span> ' + lastSeen + '</div>';
+      html += '</div>';
+
+      document.getElementById('server-info').innerHTML = html;
+    }).catch(function(){
+      document.getElementById('server-info').innerHTML = '<div class="text-dim">failed to load server info</div>';
+    });
+  }
+
+  function loadMetrics() {
+    var oneHourAgo = new Date(Date.now() - 3600000).toISOString();
+    var metricGroups = [
+      {title: 'CPU', names: ['cpu.usage_percent']},
+      {title: 'Memory', names: ['memory.usage_percent']},
+      {title: 'Disk', names: ['disk.usage_percent']},
+      {title: 'Load', names: ['load.1m', 'load.5m', 'load.15m']}
+    ];
+
+    var chartsContainer = document.getElementById('metric-charts');
+    chartsContainer.innerHTML = '<div class="metric-charts-grid"></div>';
+    var grid = chartsContainer.firstChild;
+
+    metricGroups.forEach(function(group) {
+      var panel = document.createElement('div');
+      panel.className = 'metric-chart-panel card';
+      panel.innerHTML = '<div class="metric-chart-title">' + group.title + '</div>' +
+        '<canvas class="sparkline-canvas" width="280" height="80"></canvas>' +
+        '<div class="metric-chart-value text-dim">—</div>';
+      grid.appendChild(panel);
+
+      // Fetch all metrics for this group
+      var fetches = group.names.map(function(name) {
+        return fetch('/api/servers/' + serverID + '/metrics?name=' + encodeURIComponent(name) + '&start=' + encodeURIComponent(oneHourAgo) + '&limit=200')
+          .then(function(r){ return r.json(); })
+          .then(function(data){ return {name: name, data: data || []}; });
+      });
+
+      Promise.all(fetches).then(function(results) {
+        // Use first metric for sparkline
+        var primary = results[0];
+        if (primary.data.length > 0) {
+          var canvas = panel.querySelector('canvas');
+          var values = primary.data.map(function(p){ return p.metric_value; }).reverse();
+          drawSparkline(canvas, values);
+
+          var latest = primary.data[0].metric_value;
+          var unit = primary.data[0].unit || '';
+          var valStr = latest.toFixed(1);
+          if (unit === 'percent') valStr += '%';
+          panel.querySelector('.metric-chart-value').textContent = 'latest: ' + valStr;
+          panel.querySelector('.metric-chart-value').className = 'metric-chart-value' +
+            (latest > 90 ? ' text-red' : latest > 70 ? ' status-warn' : '');
+        } else {
+          panel.querySelector('.metric-chart-value').textContent = 'no data';
+        }
+      }).catch(function(){});
+    });
+  }
+
+  function drawSparkline(canvas, values) {
+    if (values.length < 2) return;
+    var ctx = canvas.getContext('2d');
+    var w = canvas.width;
+    var h = canvas.height;
+    var pad = 4;
+
+    ctx.clearRect(0, 0, w, h);
+
+    var min = Math.min.apply(null, values);
+    var max = Math.max.apply(null, values);
+    if (max === min) { max = min + 1; }
+
+    var step = (w - pad * 2) / (values.length - 1);
+
+    // Fill
+    ctx.beginPath();
+    ctx.moveTo(pad, h - pad);
+    for (var i = 0; i < values.length; i++) {
+      var x = pad + i * step;
+      var y = h - pad - ((values[i] - min) / (max - min)) * (h - pad * 2);
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(pad + (values.length - 1) * step, h - pad);
+    ctx.closePath();
+
+    var style = getComputedStyle(document.documentElement);
+    var green = style.getPropertyValue('--green').trim() || '#4ade80';
+    ctx.fillStyle = green.replace(')', ', 0.1)').replace('rgb', 'rgba');
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    for (var j = 0; j < values.length; j++) {
+      var lx = pad + j * step;
+      var ly = h - pad - ((values[j] - min) / (max - min)) * (h - pad * 2);
+      if (j === 0) ctx.moveTo(lx, ly);
+      else ctx.lineTo(lx, ly);
+    }
+    ctx.strokeStyle = green;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  window.deleteServer = function() {
+    if (!confirm('Delete this server and all its metrics?')) return;
+    fetch('/api/servers/' + serverID, {method: 'DELETE'}).then(function(r){
+      if (r.ok) window.location.href = '/servers';
+    });
+  };
+
+  function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.textContent = str || '';
+    return div.innerHTML;
+  }
+
+  loadServer();
+  loadMetrics();
+  setInterval(function(){ loadServer(); loadMetrics(); }, 30000);
+})();
+</script>
+{{end}}

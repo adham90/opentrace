@@ -379,3 +379,167 @@ func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error {
 	a.Dismissed = true
 	return nil
 }
+
+// mockServerStore implements store.ServerStore for testing.
+type mockServerStore struct {
+	mu      sync.Mutex
+	servers map[uuid.UUID]*store.Server
+	byHost  map[string]uuid.UUID
+}
+
+func newMockServerStore() *mockServerStore {
+	return &mockServerStore{
+		servers: make(map[uuid.UUID]*store.Server),
+		byHost:  make(map[string]uuid.UUID),
+	}
+}
+
+func (m *mockServerStore) Register(ctx context.Context, params store.RegisterServerParams) (*store.Server, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if id, exists := m.byHost[params.Hostname]; exists {
+		s := m.servers[id]
+		s.IPAddress = params.IPAddress
+		s.OS = params.OS
+		s.Arch = params.Arch
+		s.AgentVersion = params.AgentVersion
+		s.Status = store.ServerOnline
+		now := time.Now()
+		s.LastSeenAt = &now
+		s.UpdatedAt = now
+		return s, nil
+	}
+
+	now := time.Now()
+	s := &store.Server{
+		ID:           uuid.New(),
+		Hostname:     params.Hostname,
+		IPAddress:    params.IPAddress,
+		OS:           params.OS,
+		Arch:         params.Arch,
+		AgentVersion: params.AgentVersion,
+		Labels:       params.Labels,
+		Status:       store.ServerOnline,
+		LastSeenAt:   &now,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	m.servers[s.ID] = s
+	m.byHost[params.Hostname] = s.ID
+	return s, nil
+}
+
+func (m *mockServerStore) GetByID(ctx context.Context, id uuid.UUID) (*store.Server, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.servers[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return s, nil
+}
+
+func (m *mockServerStore) List(ctx context.Context) ([]store.Server, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]store.Server, 0, len(m.servers))
+	for _, s := range m.servers {
+		result = append(result, *s)
+	}
+	return result, nil
+}
+
+func (m *mockServerStore) UpdateHeartbeat(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.servers[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	now := time.Now()
+	s.LastSeenAt = &now
+	s.Status = store.ServerOnline
+	return nil
+}
+
+func (m *mockServerStore) Delete(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.servers[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	delete(m.byHost, s.Hostname)
+	delete(m.servers, id)
+	return nil
+}
+
+func (m *mockServerStore) MarkStaleOffline(ctx context.Context, threshold time.Duration) (int, error) {
+	return 0, nil
+}
+
+// mockMetricStore implements store.MetricStore for testing.
+type mockMetricStore struct {
+	mu      sync.Mutex
+	metrics []store.MetricPoint
+}
+
+func newMockMetricStore() *mockMetricStore {
+	return &mockMetricStore{}
+}
+
+func (m *mockMetricStore) BatchInsert(ctx context.Context, serverID uuid.UUID, ts time.Time, samples []store.MetricSample) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, s := range samples {
+		m.metrics = append(m.metrics, store.MetricPoint{
+			ServerID:    serverID,
+			Timestamp:   ts,
+			MetricName:  s.Name,
+			MetricValue: s.Value,
+			Unit:        s.Unit,
+			Labels:      s.Labels,
+		})
+	}
+	return len(samples), nil
+}
+
+func (m *mockMetricStore) Query(ctx context.Context, params store.MetricQuery) ([]store.MetricPoint, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []store.MetricPoint
+	for _, mp := range m.metrics {
+		if mp.ServerID != params.ServerID {
+			continue
+		}
+		if params.MetricName != "" && mp.MetricName != params.MetricName {
+			continue
+		}
+		result = append(result, mp)
+	}
+	return result, nil
+}
+
+func (m *mockMetricStore) LatestByServer(ctx context.Context, serverID uuid.UUID) ([]store.MetricPoint, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	latest := make(map[string]store.MetricPoint)
+	for _, mp := range m.metrics {
+		if mp.ServerID != serverID {
+			continue
+		}
+		if existing, ok := latest[mp.MetricName]; !ok || mp.Timestamp.After(existing.Timestamp) {
+			latest[mp.MetricName] = mp
+		}
+	}
+	result := make([]store.MetricPoint, 0, len(latest))
+	for _, mp := range latest {
+		result = append(result, mp)
+	}
+	return result, nil
+}
+
+func (m *mockMetricStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
+	return 0, nil
+}
