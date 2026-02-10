@@ -33,6 +33,9 @@ type Config struct {
 	MaxToolCalls        int
 	MaxObservationBytes int
 
+	DigestSchedule      string // cron expression for digest generation
+	DigestRetentionDays int    // how many days to keep digests
+
 	DevMode bool
 }
 
@@ -99,6 +102,11 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	digestRetention, err := envOrDefaultInt("OPENTRACE_DIGEST_RETENTION", 30)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Config{
 		DataDir:             dataDir,
 		LLMProvider:         envOrDefault("OPENTRACE_LLM_PROVIDER", "ollama"),
@@ -120,6 +128,8 @@ func Load() (*Config, error) {
 		MaxAgentSteps:       maxSteps,
 		MaxToolCalls:        maxTools,
 		MaxObservationBytes: maxObs,
+		DigestSchedule:      envOrDefault("OPENTRACE_DIGEST_SCHEDULE", ""),
+		DigestRetentionDays: digestRetention,
 		DevMode:             os.Getenv("OPENTRACE_DEV") == "true",
 	}, nil
 }
