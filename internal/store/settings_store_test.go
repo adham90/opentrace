@@ -82,3 +82,46 @@ func TestSettingsStore_Upsert(t *testing.T) {
 		t.Errorf("retention = %d, want 60", settings.RetentionDays)
 	}
 }
+
+func TestSettingsStore_APIKey(t *testing.T) {
+	db := setupTestDB(t)
+	ss := NewSettingsStore(db)
+	ctx := context.Background()
+
+	// Default: empty string
+	key, err := ss.GetAPIKey(ctx)
+	if err != nil {
+		t.Fatalf("GetAPIKey (empty): %v", err)
+	}
+	if key != "" {
+		t.Errorf("expected empty default, got %q", key)
+	}
+
+	// Set a key
+	err = ss.SetAPIKey(ctx, "ot_abc123")
+	if err != nil {
+		t.Fatalf("SetAPIKey: %v", err)
+	}
+
+	key, err = ss.GetAPIKey(ctx)
+	if err != nil {
+		t.Fatalf("GetAPIKey (after set): %v", err)
+	}
+	if key != "ot_abc123" {
+		t.Errorf("expected ot_abc123, got %q", key)
+	}
+
+	// Overwrite
+	err = ss.SetAPIKey(ctx, "ot_new456")
+	if err != nil {
+		t.Fatalf("SetAPIKey (overwrite): %v", err)
+	}
+
+	key, err = ss.GetAPIKey(ctx)
+	if err != nil {
+		t.Fatalf("GetAPIKey (after overwrite): %v", err)
+	}
+	if key != "ot_new456" {
+		t.Errorf("expected ot_new456, got %q", key)
+	}
+}

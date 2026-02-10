@@ -777,6 +777,7 @@ func (m *mockSessionStore) DeleteAllForUser(ctx context.Context, userID string) 
 type mockSettingsStore struct {
 	mu        sync.Mutex
 	retention *store.RetentionSettings
+	apiKey    string
 }
 
 func newMockSettingsStore() *mockSettingsStore {
@@ -796,5 +797,18 @@ func (m *mockSettingsStore) SetRetention(ctx context.Context, settings store.Ret
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.retention = &settings
+	return nil
+}
+
+func (m *mockSettingsStore) GetAPIKey(ctx context.Context) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.apiKey, nil
+}
+
+func (m *mockSettingsStore) SetAPIKey(ctx context.Context, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.apiKey = key
 	return nil
 }

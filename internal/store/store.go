@@ -116,4 +116,6 @@ type RetentionSettings struct {
 type SettingsStore interface {
 	GetRetention(ctx context.Context) (*RetentionSettings, error)
 	SetRetention(ctx context.Context, settings RetentionSettings) error
+	GetAPIKey(ctx context.Context) (string, error)
+	SetAPIKey(ctx context.Context, key string) error
 }

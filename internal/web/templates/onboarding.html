@@ -1,0 +1,130 @@
+{{define "content"}}
+<div class="auth-page">
+  <div class="auth-card" style="max-width:520px">
+    {{if eq .Step 1}}
+    <h1><span class="prompt">$</span> setup</h1>
+    <p class="help-text" style="margin-bottom:1.5rem">Welcome to OpenTrace. Create your admin account to get started.</p>
+    {{if .Error}}
+    <div class="alert alert-error">{{.Error}}</div>
+    {{end}}
+    <form method="POST" action="/onboarding" class="auth-form">
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" required autofocus placeholder="you@example.com">
+      </div>
+      <div class="form-group">
+        <label for="display_name">Display name <span style="opacity:0.5">(optional)</span></label>
+        <input type="text" id="display_name" name="display_name" placeholder="Your Name">
+      </div>
+      <div class="form-group">
+        <label for="password">Password <span style="opacity:0.5">(min 8 characters)</span></label>
+        <input type="password" id="password" name="password" required minlength="8" placeholder="choose a password">
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">Create Admin Account</button>
+    </form>
+    {{else}}
+    <h1><span class="prompt">$</span> ready</h1>
+    <p class="help-text" style="margin-bottom:1.5rem">Your admin account has been created. Here's your API key for agents and integrations.</p>
+
+    <div class="card" style="margin-bottom:1.5rem">
+      <h3>API Key</h3>
+      <p class="help-text">Use this key to authenticate agents sending logs and metrics.</p>
+      <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.5rem">
+        <code id="api-key-display" style="flex:1;padding:0.5rem;background:var(--bg-secondary,#1a1a2e);border:1px solid var(--border,#333);border-radius:4px;word-break:break-all;font-size:0.85rem">{{.APIKey}}</code>
+        <button class="btn btn-primary" onclick="copyToClipboard('api-key-display')" style="white-space:nowrap">Copy</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:1.5rem">
+      <h3>Agent Setup</h3>
+      <p class="help-text">Install the OpenTrace agent on your servers:</p>
+      <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.5rem">
+        <code id="agent-cmd" style="flex:1;padding:0.5rem;background:var(--bg-secondary,#1a1a2e);border:1px solid var(--border,#333);border-radius:4px;word-break:break-all;font-size:0.85rem">curl -sSL {{.BaseURL}}/api/agent/install.sh | OPENTRACE_URL={{.BaseURL}} OPENTRACE_API_KEY={{.APIKey}} bash</code>
+        <button class="btn btn-primary" onclick="copyToClipboard('agent-cmd')" style="white-space:nowrap">Copy</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:1.5rem">
+      <h3>MCP Config</h3>
+      <p class="help-text">Add this to your Claude Desktop or MCP client config:</p>
+      <div style="display:flex;gap:0.5rem;align-items:flex-start;margin-bottom:0.5rem">
+        <pre id="mcp-config" style="flex:1;padding:0.5rem;background:var(--bg-secondary,#1a1a2e);border:1px solid var(--border,#333);border-radius:4px;margin:0;font-size:0.8rem;overflow-x:auto">{
+  "mcpServers": {
+    "opentrace": {
+      "command": "opentrace",
+      "args": ["mcp"]
+    }
+  }
+}</pre>
+        <button class="btn btn-primary" onclick="copyToClipboard('mcp-config')" style="white-space:nowrap">Copy</button>
+      </div>
+    </div>
+
+    <a href="/" class="btn btn-primary btn-block" style="text-align:center;text-decoration:none;display:block">Go to Dashboard</a>
+    {{end}}
+  </div>
+</div>
+
+<style>
+.auth-page {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 60vh;
+}
+.auth-card {
+  width: 100%;
+  max-width: 520px;
+  padding: 2rem;
+}
+.auth-card h1 {
+  margin-bottom: 1.5rem;
+}
+.auth-form .form-group {
+  margin-bottom: 1rem;
+}
+.auth-form label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+.auth-form input {
+  width: 100%;
+  padding: 0.5rem;
+  background: var(--bg-secondary, #1a1a2e);
+  border: 1px solid var(--border, #333);
+  color: var(--fg, #e0e0e0);
+  border-radius: 4px;
+}
+.btn-block {
+  width: 100%;
+  margin-top: 1rem;
+}
+.alert-error {
+  background: rgba(255, 80, 80, 0.1);
+  border: 1px solid rgba(255, 80, 80, 0.3);
+  color: #ff5050;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+</style>
+
+<script>
+function copyToClipboard(id) {
+  var el = document.getElementById(id);
+  var text = el.textContent || el.innerText;
+  navigator.clipboard.writeText(text.trim()).then(function(){
+    // brief visual feedback
+    var btn = el.parentElement.querySelector('button');
+    if (btn) {
+      var orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(function(){ btn.textContent = orig; }, 1500);
+    }
+  });
+}
+</script>
+{{end}}

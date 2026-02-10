@@ -44,6 +44,14 @@ func generateMCPToken() (string, error) {
 	return "mcp_" + hex.EncodeToString(b), nil
 }
 
+func generateAPIKey() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return "ot_" + hex.EncodeToString(b), nil
+}
+
 const sessionCookieName = "opentrace_session"
 
 func setSessionCookie(w http.ResponseWriter, token string, maxAge int) {

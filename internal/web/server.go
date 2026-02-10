@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -123,9 +124,13 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Post("/register", srv.handleRegisterSubmit)
 	router.Post("/logout", srv.handleLogout)
 
-	// Pages — require auth when users exist
+	// Onboarding routes (open — guarded inside handler)
+	router.Get("/onboarding", srv.handleOnboardingPage)
+	router.Post("/onboarding", srv.handleOnboardingSubmit)
+
+	// Pages — require auth, redirect to onboarding if no users
 	router.Group(func(r chi.Router) {
-		r.Use(srv.RequireAuthIfEnabled)
+		r.Use(srv.RedirectToOnboardingIfNeeded)
 		r.Get("/", srv.handleOverviewPage)
 		r.Get("/alerts", srv.handleAlertsPage)
 		r.Get("/watchers", srv.handleWatchersPage)
@@ -140,7 +145,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 
 	// Admin pages
 	router.Group(func(r chi.Router) {
-		r.Use(srv.RequireAuthIfEnabled)
+		r.Use(srv.RedirectToOnboardingIfNeeded)
 		r.Use(RequireAdmin)
 		r.Get("/admin/users", srv.handleUsersPage)
 		r.Get("/admin/settings", srv.handleSettingsPage)
@@ -151,22 +156,18 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		// Agent install script (no auth — the script is self-contained)
 		r.Get("/agent/install.sh", srv.handleAgentInstallScript)
 
-		// Log ingestion with API key auth (unchanged)
-		apiKey := ""
-		if cfg != nil {
-			apiKey = cfg.APIKey
-		}
-		r.With(APIKeyAuth(apiKey)).Post("/logs", srv.handleIngestLogs)
+		// Log ingestion with dynamic API key auth
+		r.With(srv.DynamicAPIKeyAuth).Post("/logs", srv.handleIngestLogs)
 
-		// Server registration and metric push with API key auth (unchanged)
+		// Server registration and metric push with dynamic API key auth
 		if srv.serverStore != nil && srv.metricStore != nil {
-			r.With(APIKeyAuth(apiKey)).Post("/servers/register", srv.handleRegisterServer)
-			r.With(APIKeyAuth(apiKey)).Post("/servers/{id}/metrics", srv.handlePushMetrics)
+			r.With(srv.DynamicAPIKeyAuth).Post("/servers/register", srv.handleRegisterServer)
+			r.With(srv.DynamicAPIKeyAuth).Post("/servers/{id}/metrics", srv.handlePushMetrics)
 		}
 
-		// Read API — require auth when users exist
+		// Read API — require auth, 503 if onboarding needed
 		r.Group(func(r chi.Router) {
-			r.Use(srv.requireAuthIfEnabledAPI)
+			r.Use(srv.requireAuthOrOnboardingAPI)
 			r.Get("/environments", srv.handleListEnvironments)
 			r.Get("/services", srv.handleListServices)
 			r.Get("/connectors", srv.handleListConnectors)
@@ -188,9 +189,9 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			}
 		})
 
-		// Write API — require admin when users exist
+		// Write API — require admin, 503 if onboarding needed
 		r.Group(func(r chi.Router) {
-			r.Use(srv.requireAdminIfEnabled)
+			r.Use(srv.requireAdminOrOnboarding)
 			r.Post("/connectors", srv.handleCreateConnectorAPI)
 			r.Post("/connectors/{id}/test", srv.handleTestConnectorAPI)
 			r.Delete("/connectors/{id}", srv.handleDeleteConnectorAPI)
@@ -211,14 +212,16 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 
 		// Settings API (admin only)
 		r.Group(func(r chi.Router) {
-			r.Use(srv.requireAdminIfEnabled)
+			r.Use(srv.requireAdminOrOnboarding)
 			r.Get("/settings/retention", srv.handleGetRetention)
 			r.Put("/settings/retention", srv.handleUpdateRetention)
+			r.Get("/settings/api-key", srv.handleGetAPIKey)
+			r.Post("/settings/api-key", srv.handleRegenerateAPIKey)
 		})
 
 		// User management API (admin only)
 		r.Group(func(r chi.Router) {
-			r.Use(srv.requireAdminIfEnabled)
+			r.Use(srv.requireAdminOrOnboarding)
 			r.Post("/users/{id}/role", srv.handleUpdateUserRole)
 			r.Post("/users/{id}/mcp", srv.handleToggleMCPAccess)
 			r.Post("/users/{id}/active", srv.handleToggleUserActive)
@@ -228,7 +231,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 
 		// Profile API (auth required)
 		r.Group(func(r chi.Router) {
-			r.Use(srv.requireAuthIfEnabledAPI)
+			r.Use(srv.requireAuthOrOnboardingAPI)
 			r.Post("/profile/password", srv.handleChangePassword)
 		})
 
@@ -240,6 +243,20 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 
 	srv.Router = router
 	return srv
+}
+
+// getEffectiveAPIKey returns the API key from the env var (if set) or from the DB.
+func (s *Server) getEffectiveAPIKey(ctx context.Context) string {
+	if s.cfg != nil && s.cfg.APIKey != "" {
+		return s.cfg.APIKey
+	}
+	if s.settingsStore != nil {
+		key, err := s.settingsStore.GetAPIKey(ctx)
+		if err == nil && key != "" {
+			return key
+		}
+	}
+	return ""
 }
 
 func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {

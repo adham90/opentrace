@@ -1,6 +1,26 @@
 {{define "content"}}
 <h2>Settings</h2>
 
+<div class="card" style="max-width:600px;margin-bottom:1.5rem">
+  <h3>API Key</h3>
+  <p class="help-text">
+    This key is used to authenticate agents sending logs and metrics.
+  </p>
+  {{if .EnvKeyOverride}}
+  <div style="background:rgba(255,200,50,0.1);border:1px solid rgba(255,200,50,0.3);color:#e0c040;padding:0.5rem 1rem;border-radius:4px;margin-bottom:1rem;font-size:0.9rem">
+    API key is set via <code>OPENTRACE_API_KEY</code> environment variable. UI management is disabled.
+  </div>
+  {{end}}
+  <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.75rem">
+    <code id="api-key-value" style="flex:1;padding:0.5rem;background:var(--bg-secondary,#1a1a2e);border:1px solid var(--border,#333);border-radius:4px;word-break:break-all;font-size:0.85rem;cursor:pointer" onclick="toggleKeyVisibility()">Loading...</code>
+    <button class="btn btn-primary" onclick="copyAPIKey()" style="white-space:nowrap">Copy</button>
+  </div>
+  {{if not .EnvKeyOverride}}
+  <button class="btn" onclick="confirmRegenerate()" id="regen-btn">Regenerate Key</button>
+  <span id="regen-status" style="margin-left:1em;font-size:0.9rem"></span>
+  {{end}}
+</div>
+
 <div class="card" style="max-width:600px">
   <h3>Data Retention</h3>
   <p class="help-text">
@@ -46,5 +66,62 @@ function saveRetention(e) {
   });
   return false;
 }
+
+// API Key management
+var apiKeyData = {key: '', visible: false};
+
+function loadAPIKey() {
+  fetch('/api/settings/api-key').then(function(r){return r.json()}).then(function(d){
+    apiKeyData.key = d.api_key || '';
+    renderKeyDisplay();
+  }).catch(function(){
+    document.getElementById('api-key-value').textContent = 'Failed to load';
+  });
+}
+
+function renderKeyDisplay() {
+  var el = document.getElementById('api-key-value');
+  if (!el) return;
+  if (!apiKeyData.key) {
+    el.textContent = 'No API key configured';
+    return;
+  }
+  if (apiKeyData.visible) {
+    el.textContent = apiKeyData.key;
+  } else {
+    el.textContent = apiKeyData.key.substring(0, 6) + '••••••••••••••••';
+  }
+}
+
+function toggleKeyVisibility() {
+  apiKeyData.visible = !apiKeyData.visible;
+  renderKeyDisplay();
+}
+
+function copyAPIKey() {
+  if (apiKeyData.key) {
+    navigator.clipboard.writeText(apiKeyData.key);
+  }
+}
+
+function confirmRegenerate() {
+  if (!confirm('Regenerate the API key? All existing agents using the current key will stop working until updated.')) return;
+  var status = document.getElementById('regen-status');
+  status.textContent = 'Generating...';
+  fetch('/api/settings/api-key', {method:'POST'}).then(function(r){
+    if (r.ok) return r.json();
+    return r.json().then(function(d){throw new Error(d.error||'unknown error')});
+  }).then(function(d){
+    apiKeyData.key = d.api_key;
+    apiKeyData.visible = true;
+    renderKeyDisplay();
+    status.textContent = 'Regenerated';
+    setTimeout(function(){ status.textContent = ''; }, 3000);
+  }).catch(function(err){
+    status.textContent = 'Error: ' + err.message;
+  });
+}
+
+loadAPIKey();
 </script>
 {{end}}

@@ -37,6 +37,7 @@ var (
 	profileTmpl        *template.Template
 	usersTmpl          *template.Template
 	settingsTmpl       *template.Template
+	onboardingTmpl     *template.Template
 )
 
 func init() {
@@ -69,6 +70,8 @@ func init() {
 		"templates/layout.html", "templates/users.html"))
 	settingsTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/settings.html"))
+	onboardingTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout_minimal.html", "templates/onboarding.html"))
 }
 
 // templates is used for rendering HTMX fragment responses (e.g. connector-list)
@@ -90,23 +93,24 @@ type LogFilters struct {
 }
 
 type pageData struct {
-	Title         string
-	Nav           string
-	Content       string
-	WatcherID     string
-	ServerID      string
-	DevMode       bool
-	Connectors    interface{}
-	Logs          []store.LogEntry
-	LogFilters    LogFilters
-	LogOffset     int
-	LogLimit      int
-	HasMore       bool
-	MaxLogID      int64
-	User          *store.User
-	IsAdmin       bool
-	RetentionDays int
-	APIKey        string
+	Title          string
+	Nav            string
+	Content        string
+	WatcherID      string
+	ServerID       string
+	DevMode        bool
+	Connectors     interface{}
+	Logs           []store.LogEntry
+	LogFilters     LogFilters
+	LogOffset      int
+	LogLimit       int
+	HasMore        bool
+	MaxLogID       int64
+	User           *store.User
+	IsAdmin        bool
+	RetentionDays  int
+	APIKey         string
+	EnvKeyOverride bool
 }
 
 func (s *Server) isDevMode() bool {
@@ -118,8 +122,8 @@ func (s *Server) newPageData(r *http.Request, title, nav string) pageData {
 	user := UserFromContext(r.Context())
 	isAdmin := user != nil && user.Role == store.RoleAdmin
 	var apiKey string
-	if isAdmin && s.cfg != nil {
-		apiKey = s.cfg.APIKey
+	if isAdmin {
+		apiKey = s.getEffectiveAPIKey(r.Context())
 	}
 	return pageData{
 		Title:   title,
@@ -500,6 +504,7 @@ func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 	} else {
 		data.RetentionDays = 30
 	}
+	data.EnvKeyOverride = s.cfg != nil && s.cfg.APIKey != ""
 	tmpl := s.getTemplate(settingsTmpl,
 		"internal/web/templates/layout.html",
 		"internal/web/templates/settings.html")

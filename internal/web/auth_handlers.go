@@ -32,11 +32,11 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// No users exist → redirect to register
+	// No users exist → redirect to onboarding
 	if s.userStore != nil {
 		count, err := s.userStore.Count(r.Context())
 		if err == nil && count == 0 {
-			http.Redirect(w, r, "/register", http.StatusFound)
+			http.Redirect(w, r, "/onboarding", http.StatusFound)
 			return
 		}
 	}
@@ -116,10 +116,16 @@ func (s *Server) handleRegisterPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Registration is only allowed when: no users exist, or admin is logged in
+	// No users → redirect to onboarding (registration is now admin-only for adding users)
 	count, _ := s.userStore.Count(r.Context())
+	if count == 0 {
+		http.Redirect(w, r, "/onboarding", http.StatusFound)
+		return
+	}
+
+	// Registration only allowed when admin is logged in
 	user := UserFromContext(r.Context())
-	if count > 0 && (user == nil || user.Role != store.RoleAdmin) {
+	if user == nil || user.Role != store.RoleAdmin {
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}

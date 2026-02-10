@@ -73,7 +73,7 @@ func postForm(target string, values url.Values) *http.Request {
 
 // --- Login tests ---
 
-func TestLoginPage_RedirectsToRegisterWhenNoUsers(t *testing.T) {
+func TestLoginPage_RedirectsToOnboardingWhenNoUsers(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)
@@ -84,8 +84,8 @@ func TestLoginPage_RedirectsToRegisterWhenNoUsers(t *testing.T) {
 		t.Fatalf("expected 302, got %d", rec.Code)
 	}
 	loc := rec.Header().Get("Location")
-	if loc != "/register" {
-		t.Fatalf("expected redirect to /register, got %s", loc)
+	if loc != "/onboarding" {
+		t.Fatalf("expected redirect to /onboarding, got %s", loc)
 	}
 }
 

@@ -1,0 +1,40 @@
+{{define "layout_minimal"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenTrace{{if .Title}} — {{.Title}}{{end}}</title>
+  <script>
+  (function(){
+    var t = localStorage.getItem('opentrace-theme');
+    if (t === 'dark' || t === 'light') {
+      document.documentElement.setAttribute('data-theme', t);
+    }
+  })();
+  </script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="content">
+    <div class="content-container">
+      {{template "content" .}}
+    </div>
+  </main>
+  <script>
+  (function(){
+    var themes = ['system', 'dark', 'light'];
+    var icons = {'system': '\u25D4', 'dark': '\u25CF', 'light': '\u25CB'};
+    function getTheme() { return localStorage.getItem('opentrace-theme') || 'system'; }
+    function applyTheme(t) {
+      if (t === 'dark' || t === 'light') {
+        document.documentElement.setAttribute('data-theme', t);
+      } else {
+        document.documentElement.removeAttribute('data-theme');
+      }
+    }
+    applyTheme(getTheme());
+  })();
+  </script>
+  {{if .DevMode}}<script>(function(){var h='';setInterval(function(){fetch('/api/dev/hash').then(function(r){return r.text()}).then(function(v){if(h&&v!==h)location.reload();h=v}).catch(function(){})},1000)})();</script>{{end}}
+</body>
+</html>{{end}}

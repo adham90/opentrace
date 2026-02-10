@@ -32,3 +32,39 @@ func (s *Server) handleUpdateRetention(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, req)
 }
+
+func (s *Server) handleGetAPIKey(w http.ResponseWriter, r *http.Request) {
+	envOverride := s.cfg != nil && s.cfg.APIKey != ""
+	apiKey := s.getEffectiveAPIKey(r.Context())
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"api_key":      apiKey,
+		"env_override": envOverride,
+	})
+}
+
+func (s *Server) handleRegenerateAPIKey(w http.ResponseWriter, r *http.Request) {
+	// Block regeneration if env var override is active
+	if s.cfg != nil && s.cfg.APIKey != "" {
+		writeError(w, http.StatusConflict, "API key is set via OPENTRACE_API_KEY environment variable and cannot be regenerated from the UI")
+		return
+	}
+
+	key, err := generateAPIKey()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate API key")
+		return
+	}
+
+	if s.settingsStore == nil {
+		writeError(w, http.StatusInternalServerError, "settings store not configured")
+		return
+	}
+
+	if err := s.settingsStore.SetAPIKey(r.Context(), key); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to store API key")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"api_key": key})
+}

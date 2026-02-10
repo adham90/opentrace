@@ -216,10 +216,9 @@ func TestRequireAdmin_WithAdmin(t *testing.T) {
 	}
 }
 
-// TestRequireAuthIfEnabled_NoUsers verifies that when no users exist in the
-// store (Count() returns 0), the middleware allows the request through without
-// requiring authentication.
-func TestRequireAuthIfEnabled_NoUsers(t *testing.T) {
+// TestRedirectToOnboarding_NoUsers verifies that when no users exist in the
+// store (Count() returns 0), the middleware redirects to /onboarding.
+func TestRedirectToOnboarding_NoUsers(t *testing.T) {
 	us := newMockUserStore() // empty store, Count() == 0
 	srv := NewServerWithDeps(ServerDeps{
 		DSStore:   newMockStore(),
@@ -227,7 +226,7 @@ func TestRequireAuthIfEnabled_NoUsers(t *testing.T) {
 		UserStore: us,
 	})
 
-	handler := srv.RequireAuthIfEnabled(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := srv.RedirectToOnboardingIfNeeded(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -235,15 +234,19 @@ func TestRequireAuthIfEnabled_NoUsers(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 when no users exist, got %d", rec.Code)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected 302 redirect to /onboarding when no users exist, got %d", rec.Code)
+	}
+	loc := rec.Header().Get("Location")
+	if loc != "/onboarding" {
+		t.Fatalf("expected redirect to /onboarding, got %s", loc)
 	}
 }
 
-// TestRequireAuthIfEnabled_WithUsers verifies that when users exist in the
+// TestRedirectToOnboarding_WithUsers verifies that when users exist in the
 // store (Count() returns 1+) and no user is in the context, the middleware
 // redirects to /login.
-func TestRequireAuthIfEnabled_WithUsers(t *testing.T) {
+func TestRedirectToOnboarding_WithUsers(t *testing.T) {
 	us := newMockUserStore()
 	ctx := context.Background()
 	_, err := us.Create(ctx, store.CreateUserParams{
@@ -262,7 +265,7 @@ func TestRequireAuthIfEnabled_WithUsers(t *testing.T) {
 		UserStore: us,
 	})
 
-	handler := srv.RequireAuthIfEnabled(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := srv.RedirectToOnboardingIfNeeded(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 

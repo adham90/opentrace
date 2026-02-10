@@ -18,6 +18,7 @@ func NewSettingsStore(db *sql.DB) SettingsStore {
 }
 
 const retentionKey = "retention"
+const apiKeyKey = "api_key"
 
 func (s *settingsStore) GetRetention(ctx context.Context) (*RetentionSettings, error) {
 	var raw string
@@ -50,6 +51,32 @@ func (s *settingsStore) SetRetention(ctx context.Context, settings RetentionSett
 	)
 	if err != nil {
 		return fmt.Errorf("upserting retention setting: %w", err)
+	}
+	return nil
+}
+
+func (s *settingsStore) GetAPIKey(ctx context.Context) (string, error) {
+	var val string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT value FROM app_config WHERE key = ?`, apiKeyKey,
+	).Scan(&val)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("querying api key: %w", err)
+	}
+	return val, nil
+}
+
+func (s *settingsStore) SetAPIKey(ctx context.Context, key string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO app_config (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		apiKeyKey, key,
+	)
+	if err != nil {
+		return fmt.Errorf("upserting api key: %w", err)
 	}
 	return nil
 }

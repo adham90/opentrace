@@ -26,6 +26,24 @@ func APIKeyAuth(apiKey string) func(http.Handler) http.Handler {
 	}
 }
 
+// DynamicAPIKeyAuth resolves the API key per-request (env var or DB) and
+// validates the Bearer token. If no key is configured, all requests pass.
+func (s *Server) DynamicAPIKeyAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiKey := s.getEffectiveAPIKey(r.Context())
+		if apiKey == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		header := r.Header.Get("Authorization")
+		if header != "Bearer "+apiKey {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // SessionAuth loads the user from the session cookie into the request context.
 // It never rejects — if no valid session is found, the request continues without a user.
 func (s *Server) SessionAuth(next http.Handler) http.Handler {
@@ -113,9 +131,9 @@ func RequireAuthAPI(next http.Handler) http.Handler {
 	})
 }
 
-// (s *Server) RequireAuthIfEnabled skips auth enforcement when zero users exist
-// (backward compat for existing installs that haven't set up auth yet).
-func (s *Server) RequireAuthIfEnabled(next http.Handler) http.Handler {
+// RedirectToOnboardingIfNeeded redirects to /onboarding when 0 users exist,
+// otherwise enforces auth (redirects to /login).
+func (s *Server) RedirectToOnboardingIfNeeded(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.userStore == nil {
 			next.ServeHTTP(w, r)
@@ -123,16 +141,16 @@ func (s *Server) RequireAuthIfEnabled(next http.Handler) http.Handler {
 		}
 		count, err := s.userStore.Count(r.Context())
 		if err != nil || count == 0 {
-			next.ServeHTTP(w, r)
+			http.Redirect(w, r, "/onboarding", http.StatusFound)
 			return
 		}
-		// Users exist — enforce auth
 		RequireAuth(next).ServeHTTP(w, r)
 	})
 }
 
-// requireAuthIfEnabledAPI is the API variant — returns 401 JSON instead of redirect.
-func (s *Server) requireAuthIfEnabledAPI(next http.Handler) http.Handler {
+// requireAuthOrOnboardingAPI is the API variant — returns 503 when onboarding
+// is needed, otherwise enforces auth with 401 JSON.
+func (s *Server) requireAuthOrOnboardingAPI(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.userStore == nil {
 			next.ServeHTTP(w, r)
@@ -140,15 +158,16 @@ func (s *Server) requireAuthIfEnabledAPI(next http.Handler) http.Handler {
 		}
 		count, err := s.userStore.Count(r.Context())
 		if err != nil || count == 0 {
-			next.ServeHTTP(w, r)
+			writeError(w, http.StatusServiceUnavailable, "onboarding required")
 			return
 		}
 		RequireAuthAPI(next).ServeHTTP(w, r)
 	})
 }
 
-// requireAdminIfEnabled combines auth-if-enabled with admin check for API routes.
-func (s *Server) requireAdminIfEnabled(next http.Handler) http.Handler {
+// requireAdminOrOnboarding is the admin API variant — returns 503 when
+// onboarding is needed, otherwise enforces admin auth.
+func (s *Server) requireAdminOrOnboarding(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.userStore == nil {
 			next.ServeHTTP(w, r)
@@ -156,7 +175,7 @@ func (s *Server) requireAdminIfEnabled(next http.Handler) http.Handler {
 		}
 		count, err := s.userStore.Count(r.Context())
 		if err != nil || count == 0 {
-			next.ServeHTTP(w, r)
+			writeError(w, http.StatusServiceUnavailable, "onboarding required")
 			return
 		}
 		RequireAdminAPI(next).ServeHTTP(w, r)
