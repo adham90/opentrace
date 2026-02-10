@@ -127,6 +127,14 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 	)
 
 	s.AddTool(
+		mcp.NewTool("db_table_stats",
+			mcp.WithDescription("Show table-level statistics: row counts, dead tuples, sequential vs index scans, cache hit ratios, and vacuum status"),
+			mcp.WithString("table_name", mcp.Description("Filter to a specific table name")),
+		),
+		dbTableStatsHandler(deps.Registry),
+	)
+
+	s.AddTool(
 		mcp.NewTool("db_activity",
 			mcp.WithDescription("Show current database activity: connection summary, long-running queries (>10s), idle-in-transaction sessions (>1min), and connection utilization"),
 		),
