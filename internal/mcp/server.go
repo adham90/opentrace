@@ -199,7 +199,8 @@ Use db_query_stats, db_activity, and db_table_stats to discover what to monitor,
 				mcp.WithString("service", mcp.Description("Filter by service name (ai monitors)")),
 				mcp.WithString("level", mcp.Description("Filter by log level (ai monitors)")),
 				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production)")),
-				mcp.WithString("time_range", mcp.Description("Check interval (e.g. 5m, 15m, 1h). Default: 15m")),
+				mcp.WithString("time_range", mcp.Description("Log lookback window (e.g. 5m, 15m, 1h). Also used as run interval if schedule is not set. Default: 15m")),
+			mcp.WithString("schedule", mcp.Description("When to run: cron expression (e.g. '0 9 * * 1-5' for weekdays at 9am), interval (e.g. '5m'), or predefined (@hourly, @daily). If omitted, uses time_range as interval.")),
 				mcp.WithString("query", mcp.Description("Full-text search query for logs (ai monitors)")),
 				mcp.WithString("severity", mcp.Description("Alert severity: info, warning, or critical (default: warning)")),
 				mcp.WithString("model", mcp.Description("LLM model name (ai monitors only)")),
@@ -362,6 +363,14 @@ func createMonitorHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 			timeRange = v
 		}
 
+		schedule := ""
+		if v, ok := args["schedule"].(string); ok && v != "" {
+			if _, err := watcher.ParseSchedule(v); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("invalid schedule expression: %v", err)), nil
+			}
+			schedule = v
+		}
+
 		severity := store.SeverityWarning
 		if v, ok := args["severity"].(string); ok && v != "" {
 			severity = store.WatcherSeverity(v)
@@ -384,6 +393,7 @@ func createMonitorHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 			Severity:    severity,
 			Filters:     filtersJSON,
 			TimeRange:   timeRange,
+			Schedule:    schedule,
 			Model:       model,
 			Effort:      effort,
 			Notify:      json.RawMessage(`["dashboard"]`),

@@ -185,7 +185,7 @@
           <div class="form-grid">
             <div class="form-group">
               <label>Check Every</label>
-              <select id="rule-timerange">
+              <select id="rule-timerange" onchange="onRuleTimerangeChange()">
                 <option value="1m">Every 1 min</option>
                 <option value="5m" selected>Every 5 min</option>
                 <option value="15m">Every 15 min</option>
@@ -200,6 +200,16 @@
                 <option value="warning" selected>Warning</option>
                 <option value="critical">Critical</option>
               </select>
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:8px">
+            <label style="cursor:pointer;font-size:12px;text-transform:none;letter-spacing:0;color:var(--text-dim)" onclick="toggleRuleAdvancedSchedule()">
+              <span id="rule-adv-toggle-icon">&#9654;</span> Advanced: use cron expression
+            </label>
+            <div id="rule-advanced-schedule" style="display:none;margin-top:8px">
+              <input type="text" id="rule-schedule" placeholder="e.g. 0 9 * * 1-5 (weekdays at 9am)" style="font-family:monospace">
+              <div class="form-hint">Standard 5-field cron: min hour dom month dow. Or use @hourly, @daily, @weekly.</div>
+              <div id="rule-schedule-preview" style="margin-top:4px;font-size:12px;color:var(--text-dim)"></div>
             </div>
           </div>
         </div>
@@ -281,7 +291,7 @@
         <div class="modal-section">
           <div class="modal-section-label"><span class="section-number">02</span> Schedule</div>
           <div class="form-group">
-            <label>Run Every</label>
+            <label>Run Every / Log Window</label>
             <select id="watcher-timerange">
               <option value="5m">Every 5 min</option>
               <option value="15m" selected>Every 15 min</option>
@@ -290,7 +300,17 @@
               <option value="6h">Every 6 hours</option>
               <option value="24h">Every 24 hours</option>
             </select>
-            <div class="form-hint">How often this watcher runs AND the log window it analyzes.</div>
+            <div class="form-hint">The log window the AI analyzes. Also the run interval unless an advanced schedule is set below.</div>
+          </div>
+          <div class="form-group" style="margin-top:8px">
+            <label style="cursor:pointer;font-size:12px;text-transform:none;letter-spacing:0;color:var(--text-dim)" onclick="toggleAiAdvancedSchedule()">
+              <span id="ai-adv-toggle-icon">&#9654;</span> Advanced: use cron expression
+            </label>
+            <div id="ai-advanced-schedule" style="display:none;margin-top:8px">
+              <input type="text" id="watcher-schedule" placeholder="e.g. 0 9 * * * (daily at 9am)" style="font-family:monospace">
+              <div class="form-hint">When set, controls when the monitor runs. The dropdown above becomes just the log lookback window.</div>
+              <div id="ai-schedule-preview" style="margin-top:4px;font-size:12px;color:var(--text-dim)"></div>
+            </div>
           </div>
         </div>
 
@@ -447,7 +467,8 @@ function loadWatchers() {
       html += '  <div class="watcher-header">';
       html += '    ' + getMonitorTypeBadge(w);
       html += '    <span class="watcher-title">' + escapeHtml(w.title) + '</span>';
-      html += '    <span class="watcher-meta">every ' + escapeHtml(w.time_range || '15m') + '</span>';
+      var schedLabel = w.schedule ? describeSchedule(w.schedule) : ('every ' + (w.time_range || '15m'));
+      html += '    <span class="watcher-meta">' + escapeHtml(schedLabel) + '</span>';
       if (w.monitor_type !== 'rule' && w.model) {
         html += '    <span class="watcher-meta">' + escapeHtml(w.model) + '</span>';
       }
@@ -633,6 +654,7 @@ function saveRuleMonitor(e) {
   var source = document.getElementById('rule-source').value;
   var dsId = source === 'health' ? document.getElementById('rule-health-datasource').value : document.getElementById('rule-datasource').value;
 
+  var schedule = (document.getElementById('rule-schedule') || {}).value || '';
   var body = {
     title: document.getElementById('rule-title').value,
     monitor_type: 'rule',
@@ -641,6 +663,7 @@ function saveRuleMonitor(e) {
     time_range: document.getElementById('rule-timerange').value,
     environment: document.getElementById('rule-env').value
   };
+  if (schedule) body.schedule = schedule;
   if (dsId) body.data_source_id = dsId;
 
   var method = id ? 'PUT' : 'POST';
@@ -650,7 +673,8 @@ function saveRuleMonitor(e) {
     method: method,
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body)
-  }).then(function() {
+  }).then(function(resp) {
+    if (!resp.ok) return resp.json().then(function(d) { alert(d.error || 'Error saving monitor'); });
     hideRuleModal();
     loadWatchers();
   });
@@ -667,6 +691,14 @@ function editRuleMonitor(id) {
     document.getElementById('rule-timerange').value = w.time_range || '5m';
     document.getElementById('rule-save-btn').textContent = 'Save Changes';
     document.getElementById('rule-modal-title').textContent = 'edit-monitor';
+
+    // Populate schedule if set
+    if (w.schedule) {
+      document.getElementById('rule-schedule').value = w.schedule;
+      document.getElementById('rule-advanced-schedule').style.display = '';
+      document.getElementById('rule-adv-toggle-icon').innerHTML = '&#9660;';
+      document.getElementById('rule-schedule-preview').textContent = '→ ' + describeSchedule(w.schedule);
+    }
 
     if (rc.source === 'query') {
       document.getElementById('rule-query').value = rc.query || '';
@@ -735,6 +767,7 @@ function saveWatcher(e) {
     if (url) notify.push({type: 'webhook', url: url});
   }
 
+  var aiSchedule = (document.getElementById('watcher-schedule') || {}).value || '';
   var body = {
     title: document.getElementById('watcher-title').value,
     description: document.getElementById('watcher-description').value,
@@ -747,6 +780,7 @@ function saveWatcher(e) {
     filters: filters,
     notify: notify
   };
+  if (aiSchedule) body.schedule = aiSchedule;
 
   var method = id ? 'PUT' : 'POST';
   var url = id ? '/api/watchers/' + id : '/api/watchers';
@@ -755,7 +789,8 @@ function saveWatcher(e) {
     method: method,
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body)
-  }).then(function() {
+  }).then(function(resp) {
+    if (!resp.ok) return resp.json().then(function(d) { alert(d.error || 'Error saving monitor'); });
     hideModal();
     loadWatchers();
   });
@@ -773,6 +808,19 @@ function editWatcher(id) {
     document.getElementById('watcher-model').value = w.model || '';
     document.getElementById('watcher-effort').value = w.effort || 'medium';
     document.getElementById('watcher-env').value = w.environment || '';
+
+    // Populate schedule if set
+    if (w.schedule) {
+      document.getElementById('watcher-schedule').value = w.schedule;
+      document.getElementById('ai-advanced-schedule').style.display = '';
+      document.getElementById('ai-adv-toggle-icon').innerHTML = '&#9660;';
+      document.getElementById('ai-schedule-preview').textContent = '→ ' + describeSchedule(w.schedule);
+    } else {
+      document.getElementById('watcher-schedule').value = '';
+      document.getElementById('ai-advanced-schedule').style.display = 'none';
+      document.getElementById('ai-adv-toggle-icon').innerHTML = '&#9654;';
+      document.getElementById('ai-schedule-preview').textContent = '';
+    }
 
     var f = w.filters || {};
     document.getElementById('filter-service').value = f.service || '';
@@ -828,6 +876,65 @@ function escapeHtml(str) {
   div.textContent = str || '';
   return div.innerHTML;
 }
+
+// --- Advanced Schedule ---
+function toggleRuleAdvancedSchedule() {
+  var el = document.getElementById('rule-advanced-schedule');
+  var icon = document.getElementById('rule-adv-toggle-icon');
+  if (el.style.display === 'none') { el.style.display = ''; icon.innerHTML = '&#9660;'; } else { el.style.display = 'none'; icon.innerHTML = '&#9654;'; }
+}
+function toggleAiAdvancedSchedule() {
+  var el = document.getElementById('ai-advanced-schedule');
+  var icon = document.getElementById('ai-adv-toggle-icon');
+  if (el.style.display === 'none') { el.style.display = ''; icon.innerHTML = '&#9660;'; } else { el.style.display = 'none'; icon.innerHTML = '&#9654;'; }
+}
+function onRuleTimerangeChange() {
+  // Clear cron if user picks from dropdown
+  var cronInput = document.getElementById('rule-schedule');
+  if (cronInput) cronInput.value = '';
+  var preview = document.getElementById('rule-schedule-preview');
+  if (preview) preview.textContent = '';
+}
+
+// Schedule preview (client-side description)
+function describeSchedule(expr) {
+  if (!expr) return '';
+  expr = expr.trim();
+  var predefined = {'@hourly':'Every hour','@daily':'Daily at midnight','@weekly':'Once a week','@monthly':'Once a month','@yearly':'Once a year'};
+  if (predefined[expr.toLowerCase()]) return predefined[expr.toLowerCase()];
+  if (/^\@every /.test(expr)) return 'Every ' + expr.slice(7);
+  var m = expr.match(/^(\d+)(s|m|h)$/);
+  if (m) {
+    var n = parseInt(m[1]); var u = m[2];
+    if (u === 's') return n === 1 ? 'Every second' : 'Every ' + n + ' seconds';
+    if (u === 'm') return n === 1 ? 'Every minute' : 'Every ' + n + ' minutes';
+    if (u === 'h') return n === 1 ? 'Every hour' : 'Every ' + n + ' hours';
+  }
+  var parts = expr.split(/\s+/);
+  if (parts.length !== 5) return '';
+  var min=parts[0], hr=parts[1], dom=parts[2], mon=parts[3], dow=parts[4];
+  function fmtTime(h,m) {
+    h=parseInt(h); m=parseInt(m); var ap='AM', dh=h;
+    if(h===0){dh=12;}else if(h===12){ap='PM';}else if(h>12){dh=h-12;ap='PM';}
+    return dh+':'+(m<10?'0':'')+m+' '+ap;
+  }
+  if(min.indexOf('*/')===0 && hr==='*' && dom==='*' && dow==='*') return 'Every '+min.slice(2)+' minutes';
+  if(min==='0' && hr.indexOf('*/')===0 && dom==='*' && dow==='*') return 'Every '+hr.slice(2)+' hours';
+  if(dom==='*' && dow==='*' && min.indexOf('*')<0 && hr.indexOf('*')<0) return 'Daily at '+fmtTime(hr,min);
+  if(dom==='*' && dow==='1-5' && min.indexOf('*')<0 && hr.indexOf('*')<0) return 'Weekdays at '+fmtTime(hr,min);
+  if(dom==='*' && (dow==='0,6'||dow==='6,0') && min.indexOf('*')<0 && hr.indexOf('*')<0) return 'Weekends at '+fmtTime(hr,min);
+  return 'Custom cron schedule';
+}
+
+// Live preview for cron inputs
+document.getElementById('rule-schedule').addEventListener('input', function() {
+  var desc = describeSchedule(this.value);
+  document.getElementById('rule-schedule-preview').textContent = desc ? '→ ' + desc : '';
+});
+document.getElementById('watcher-schedule').addEventListener('input', function() {
+  var desc = describeSchedule(this.value);
+  document.getElementById('ai-schedule-preview').textContent = desc ? '→ ' + desc : '';
+});
 
 loadWatchers();
 loadModels();

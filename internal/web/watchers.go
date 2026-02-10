@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/adham90/opentrace/internal/llm"
 	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/watcher"
 )
 
 type createWatcherRequest struct {
@@ -20,6 +21,7 @@ type createWatcherRequest struct {
 	Severity     store.WatcherSeverity `json:"severity"`
 	Filters      json.RawMessage      `json:"filters"`
 	TimeRange    string               `json:"time_range"`
+	Schedule     string               `json:"schedule,omitempty"`
 	Model        string               `json:"model"`
 	Effort       store.WatcherEffort   `json:"effort"`
 	Notify       json.RawMessage      `json:"notify"`
@@ -35,6 +37,7 @@ type updateWatcherRequest struct {
 	Severity     *store.WatcherSeverity `json:"severity,omitempty"`
 	Filters      json.RawMessage        `json:"filters,omitempty"`
 	TimeRange    *string                `json:"time_range,omitempty"`
+	Schedule     *string                `json:"schedule,omitempty"`
 	Model        *string                `json:"model,omitempty"`
 	Effort       *store.WatcherEffort   `json:"effort,omitempty"`
 	Notify       json.RawMessage        `json:"notify,omitempty"`
@@ -59,13 +62,22 @@ func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	watcher, err := s.watcherStore.Create(r.Context(), store.CreateWatcherParams{
+	// Validate schedule expression if provided
+	if req.Schedule != "" {
+		if _, err := watcher.ParseSchedule(req.Schedule); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid schedule: %v", err))
+			return
+		}
+	}
+
+	result, err := s.watcherStore.Create(r.Context(), store.CreateWatcherParams{
 		Title:        req.Title,
 		Description:  req.Description,
 		Environment:  req.Environment,
 		Severity:     req.Severity,
 		Filters:      req.Filters,
 		TimeRange:    req.TimeRange,
+		Schedule:     req.Schedule,
 		Model:        req.Model,
 		Effort:       req.Effort,
 		Notify:       req.Notify,
@@ -77,7 +89,7 @@ func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create watcher")
 		return
 	}
-	writeJSON(w, http.StatusCreated, watcher)
+	writeJSON(w, http.StatusCreated, result)
 }
 
 func (s *Server) handleListWatchers(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +109,7 @@ func (s *Server) handleGetWatcher(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	watcher, err := s.watcherStore.GetByID(r.Context(), id)
+	mon, err := s.watcherStore.GetByID(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "watcher not found")
@@ -106,7 +118,7 @@ func (s *Server) handleGetWatcher(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to get watcher")
 		return
 	}
-	writeJSON(w, http.StatusOK, watcher)
+	writeJSON(w, http.StatusOK, mon)
 }
 
 func (s *Server) handleUpdateWatcher(w http.ResponseWriter, r *http.Request) {
@@ -122,13 +134,22 @@ func (s *Server) handleUpdateWatcher(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	watcher, err := s.watcherStore.Update(r.Context(), id, store.UpdateWatcherParams{
+	// Validate schedule expression if provided
+	if req.Schedule != nil && *req.Schedule != "" {
+		if _, err := watcher.ParseSchedule(*req.Schedule); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid schedule: %v", err))
+			return
+		}
+	}
+
+	updated, err := s.watcherStore.Update(r.Context(), id, store.UpdateWatcherParams{
 		Title:        req.Title,
 		Description:  req.Description,
 		Environment:  req.Environment,
 		Severity:     req.Severity,
 		Filters:      req.Filters,
 		TimeRange:    req.TimeRange,
+		Schedule:     req.Schedule,
 		Model:        req.Model,
 		Effort:       req.Effort,
 		Notify:       req.Notify,
@@ -144,7 +165,7 @@ func (s *Server) handleUpdateWatcher(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update watcher")
 		return
 	}
-	writeJSON(w, http.StatusOK, watcher)
+	writeJSON(w, http.StatusOK, updated)
 }
 
 func (s *Server) handleDeleteWatcher(w http.ResponseWriter, r *http.Request) {
@@ -180,7 +201,7 @@ func (s *Server) setWatcherStatus(w http.ResponseWriter, r *http.Request, status
 		return
 	}
 
-	watcher, err := s.watcherStore.UpdateStatus(r.Context(), id, status)
+	mon, err := s.watcherStore.UpdateStatus(r.Context(), id, status)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "watcher not found")
@@ -189,7 +210,7 @@ func (s *Server) setWatcherStatus(w http.ResponseWriter, r *http.Request, status
 		writeError(w, http.StatusInternalServerError, "failed to update watcher status")
 		return
 	}
-	writeJSON(w, http.StatusOK, watcher)
+	writeJSON(w, http.StatusOK, mon)
 }
 
 func (s *Server) handleRunWatcherNow(w http.ResponseWriter, r *http.Request) {
@@ -199,7 +220,7 @@ func (s *Server) handleRunWatcherNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	watcher, err := s.watcherStore.GetByID(r.Context(), id)
+	mon, err := s.watcherStore.GetByID(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "watcher not found")
@@ -212,7 +233,7 @@ func (s *Server) handleRunWatcherNow(w http.ResponseWriter, r *http.Request) {
 	// Trigger immediate execution in background.
 	// Use context.Background() — r.Context() is cancelled when the HTTP response is sent.
 	if s.executor != nil {
-		go s.executor.Execute(context.Background(), *watcher)
+		go s.executor.Execute(context.Background(), *mon)
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "triggered"})
