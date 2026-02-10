@@ -191,6 +191,39 @@ func (s *Server) handlePauseWatcher(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleResumeWatcher(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid watcher ID")
+		return
+	}
+
+	// Check if this is an adaptive-error resume
+	mon, err := s.watcherStore.GetByID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "watcher not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get watcher")
+		return
+	}
+
+	if mon.AdaptiveState == store.AdaptiveError {
+		if err := s.watcherStore.ResumeMonitor(r.Context(), id); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusConflict, "monitor is not in error state")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to resume monitor")
+			return
+		}
+		// Re-fetch to return updated state
+		mon, _ = s.watcherStore.GetByID(r.Context(), id)
+		writeJSON(w, http.StatusOK, mon)
+		return
+	}
+
+	// Standard pause → active resume
 	s.setWatcherStatus(w, r, store.WatcherActive)
 }
 

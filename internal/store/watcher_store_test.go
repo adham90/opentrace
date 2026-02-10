@@ -425,3 +425,171 @@ func TestWatcherStore_GetDueWatchers(t *testing.T) {
 		t.Errorf("due watcher ID = %v, want %v", due[0].ID, w1.ID)
 	}
 }
+
+func TestWatcherStore_UpdateAdaptiveState(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewWatcherStore(db)
+	ctx := context.Background()
+
+	w, err := s.Create(ctx, CreateWatcherParams{
+		Title:       "Adaptive Watcher",
+		Description: "Test adaptive",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Verify defaults
+	if w.AdaptiveState != AdaptiveNormal {
+		t.Errorf("default adaptive_state = %q, want normal", w.AdaptiveState)
+	}
+	if w.ConsecutiveCleanRuns != 0 {
+		t.Errorf("default consecutive_clean_runs = %d, want 0", w.ConsecutiveCleanRuns)
+	}
+
+	// Update to escalated
+	escAt := time.Now().UTC().Truncate(time.Second)
+	err = s.UpdateAdaptiveState(ctx, w.ID, UpdateAdaptiveParams{
+		AdaptiveState:        AdaptiveEscalated,
+		ConsecutiveCleanRuns: 0,
+		ConsecutiveErrors:    0,
+		EscalatedAt:          &escAt,
+		TimeRange:            "1m",
+		BaseTimeRange:        "15m",
+	})
+	if err != nil {
+		t.Fatalf("UpdateAdaptiveState: %v", err)
+	}
+
+	got, err := s.GetByID(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.AdaptiveState != AdaptiveEscalated {
+		t.Errorf("adaptive_state = %q, want escalated", got.AdaptiveState)
+	}
+	if got.TimeRange != "1m" {
+		t.Errorf("time_range = %q, want 1m", got.TimeRange)
+	}
+	if got.BaseTimeRange != "15m" {
+		t.Errorf("base_time_range = %q, want 15m", got.BaseTimeRange)
+	}
+	if got.EscalatedAt == nil {
+		t.Fatal("escalated_at should be set")
+	}
+
+	// Update counters
+	err = s.UpdateAdaptiveState(ctx, w.ID, UpdateAdaptiveParams{
+		AdaptiveState:        AdaptiveEscalated,
+		ConsecutiveCleanRuns: 2,
+		ConsecutiveErrors:    0,
+	})
+	if err != nil {
+		t.Fatalf("UpdateAdaptiveState (counters): %v", err)
+	}
+	got, _ = s.GetByID(ctx, w.ID)
+	if got.ConsecutiveCleanRuns != 2 {
+		t.Errorf("consecutive_clean_runs = %d, want 2", got.ConsecutiveCleanRuns)
+	}
+
+	// Not found
+	err = s.UpdateAdaptiveState(ctx, uuid.New(), UpdateAdaptiveParams{AdaptiveState: AdaptiveNormal})
+	if err != ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestWatcherStore_ResumeMonitor(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewWatcherStore(db)
+	ctx := context.Background()
+
+	w, err := s.Create(ctx, CreateWatcherParams{
+		Title:       "Error Watcher",
+		Description: "Will be paused",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Put into adaptive error state
+	err = s.UpdateAdaptiveState(ctx, w.ID, UpdateAdaptiveParams{
+		AdaptiveState:     AdaptiveError,
+		ConsecutiveErrors: 5,
+	})
+	if err != nil {
+		t.Fatalf("UpdateAdaptiveState: %v", err)
+	}
+	s.UpdateStatus(ctx, w.ID, WatcherError)
+
+	// Resume it
+	err = s.ResumeMonitor(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("ResumeMonitor: %v", err)
+	}
+
+	got, _ := s.GetByID(ctx, w.ID)
+	if got.AdaptiveState != AdaptiveNormal {
+		t.Errorf("adaptive_state = %q, want normal", got.AdaptiveState)
+	}
+	if got.ConsecutiveErrors != 0 {
+		t.Errorf("consecutive_errors = %d, want 0", got.ConsecutiveErrors)
+	}
+	if got.Status != WatcherActive {
+		t.Errorf("status = %q, want active", got.Status)
+	}
+
+	// Resume a non-error monitor should fail
+	err = s.ResumeMonitor(ctx, w.ID)
+	if err != ErrNotFound {
+		t.Errorf("resume non-error: expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestWatcherStore_AdaptiveConfig_RoundTrip(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewWatcherStore(db)
+	ctx := context.Background()
+
+	w, err := s.Create(ctx, CreateWatcherParams{
+		Title:       "Config Watcher",
+		Description: "Test config",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Set adaptive_config via raw SQL (simulating what the API would do)
+	cfg := AdaptiveConfig{
+		Enabled:           true,
+		EscalatedInterval: "1m",
+		CooldownRuns:      3,
+		BackoffMultiplier: 2.0,
+		MaxConsecErrors:   5,
+	}
+	cfgJSON, _ := json.Marshal(cfg)
+	_, err = db.ExecContext(ctx,
+		`UPDATE watchers SET adaptive_config = ? WHERE id = ?`,
+		string(cfgJSON), w.ID.String(),
+	)
+	if err != nil {
+		t.Fatalf("setting adaptive_config: %v", err)
+	}
+
+	got, err := s.GetByID(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.AdaptiveConfig == nil {
+		t.Fatal("adaptive_config should not be nil")
+	}
+	if !got.AdaptiveConfig.Enabled {
+		t.Error("adaptive_config.enabled = false, want true")
+	}
+	if got.AdaptiveConfig.EscalatedInterval != "1m" {
+		t.Errorf("escalated_interval = %q, want 1m", got.AdaptiveConfig.EscalatedInterval)
+	}
+	if got.AdaptiveConfig.CooldownRuns != 3 {
+		t.Errorf("cooldown_runs = %d, want 3", got.AdaptiveConfig.CooldownRuns)
+	}
+}
