@@ -18,46 +18,42 @@
 <body>
   <header class="topbar">
     <div class="topbar-inner">
-      <a href="/" class="logo">OPENTRACE</a>
+      <a href="/" class="logo">[opentrace]</a>
       <nav class="topbar-nav">
-        <a href="/" class="nav-item {{if eq .Nav "overview"}}active{{end}}">overview</a>
-        <span class="nav-sep">|</span>
-        <a href="/alerts" class="nav-item {{if eq .Nav "alerts"}}active{{end}}">
-          alerts<span id="alert-badge" class="nav-badge" style="display:none">0</span>
-        </a>
-        <a href="/logs" class="nav-item {{if eq .Nav "logs"}}active{{end}}">logs</a>
-        <span class="nav-sep">|</span>
-        <a href="/watchers" class="nav-item {{if eq .Nav "watchers"}}active{{end}}">watchers</a>
-        <a href="/connectors" class="nav-item {{if eq .Nav "connectors"}}active{{end}}">connectors</a>
-        <a href="/servers" class="nav-item {{if eq .Nav "servers"}}active{{end}}">servers</a>
-        <span class="nav-sep">|</span>
-        <a href="/setup" class="nav-item {{if eq .Nav "setup"}}active{{end}}">setup</a>
+        <a href="/logs" class="nav-item {{if eq .Nav "logs"}}active{{end}}">1:logs</a>
+        <a href="/alerts" class="nav-item {{if eq .Nav "alerts"}}active{{end}}">2:alerts<span id="alert-badge" class="nav-badge" style="display:none">0</span></a>
+        <a href="/watchers" class="nav-item {{if eq .Nav "watchers"}}active{{end}}">3:watchers</a>
+        <a href="/connectors" class="nav-item {{if eq .Nav "connectors"}}active{{end}}">4:connectors</a>
+        <a href="/servers" class="nav-item {{if eq .Nav "servers"}}active{{end}}">5:servers</a>
       </nav>
       <div class="topbar-right">
-        <div class="env-selector">
-          <select id="env-select" onchange="setGlobalEnv(this.value)" title="Filter by environment">
-            <option value="">all envs</option>
-          </select>
-        </div>
+        <select id="env-select" class="topbar-select" onchange="setGlobalEnv(this.value)" title="Filter by environment">
+          <option value="">all envs</option>
+        </select>
+        <span class="topbar-sep">│</span>
         {{if .User}}
         <div class="user-dropdown">
           <button class="user-dropdown-toggle" onclick="toggleUserMenu()">
-            {{.User.DisplayName}}
-            {{if .IsAdmin}}<span class="badge badge-type">admin</span>{{end}}
-            <span class="dropdown-arrow">&#9662;</span>
+            {{.User.DisplayName}}{{if .IsAdmin}} <span class="badge badge-type">admin</span>{{end}}
           </button>
           <div class="user-dropdown-menu" id="user-dropdown-menu">
             {{if .IsAdmin}}<a href="/admin/users" class="dropdown-item">users</a>{{end}}
             {{if .IsAdmin}}<a href="/admin/settings" class="dropdown-item">settings</a>{{end}}
             <a href="/profile" class="dropdown-item">profile</a>
+            <a href="/setup" class="dropdown-item">setup</a>
+            <div class="dropdown-divider"></div>
+            <button class="dropdown-item" onclick="cycleTheme(); event.stopPropagation();">
+              <span id="theme-icon">&#9684;</span> theme: <span id="theme-label">system</span>
+            </button>
             <div class="dropdown-divider"></div>
             <form method="POST" action="/logout"><button type="submit" class="dropdown-item dropdown-item-danger">logout</button></form>
           </div>
         </div>
-        {{end}}
-        <button class="theme-toggle" onclick="cycleTheme()" id="theme-btn" title="Toggle theme">
+        {{else}}
+        <button class="topbar-theme-btn" onclick="cycleTheme()" title="Toggle theme">
           <span id="theme-icon">&#9684;</span> <span id="theme-label">system</span>
         </button>
+        {{end}}
       </div>
     </div>
   </header>
@@ -150,6 +146,20 @@
       var menu = document.getElementById('user-dropdown-menu');
       if (menu && dropdown && !dropdown.contains(e.target)) {
         menu.classList.remove('show');
+      }
+    });
+  })();
+
+  // Keyboard navigation (tmux-style: press 0-4 to switch tabs)
+  (function(){
+    var tabs = {1:'/logs', 2:'/alerts', 3:'/watchers', 4:'/connectors', 5:'/servers'};
+    document.addEventListener('keydown', function(e) {
+      var tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      var n = parseInt(e.key, 10);
+      if (tabs[n]) {
+        window.location.href = tabs[n];
       }
     });
   })();
