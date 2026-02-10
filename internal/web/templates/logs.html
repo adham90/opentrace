@@ -14,7 +14,9 @@
     <input type="text" name="query" placeholder="search messages..." value="{{.LogFilters.Query}}">
   </div>
   <div class="filter-group">
-    <input type="text" name="service" placeholder="service" value="{{.LogFilters.Service}}">
+    <select name="service" id="service-select">
+      <option value="">all services</option>
+    </select>
   </div>
   <div class="filter-group">
     <select name="level">
@@ -26,7 +28,9 @@
     </select>
   </div>
   <div class="filter-group">
-    <input type="text" name="environment" placeholder="environment" value="{{.LogFilters.Environment}}">
+    <select name="environment" id="env-filter-select">
+      <option value="">all envs</option>
+    </select>
   </div>
   <button type="submit" class="btn btn-primary btn-sm">filter</button>
 </form>
@@ -36,13 +40,41 @@
 </div>
 
 <script>
-// Sync global env selector with logs page env filter on load
-(function(){
-  var envInput = document.querySelector('input[name="environment"]') || document.getElementById('environment');
-  if (envInput && !envInput.value && getGlobalEnv()) {
-    envInput.value = getGlobalEnv();
-  }
-})();
+// Populate service and environment dropdowns from API (deferred until layout script loads)
+document.addEventListener('DOMContentLoaded', function(){
+  var currentService = '{{.LogFilters.Service}}';
+  var currentEnv = '{{.LogFilters.Environment}}' || (typeof getGlobalEnv === 'function' ? getGlobalEnv() : '');
+
+  fetch('/api/services').then(function(r){
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  }).then(function(services){
+    var sel = document.getElementById('service-select');
+    if (!sel || !Array.isArray(services)) return;
+    services.forEach(function(s){
+      var opt = document.createElement('option');
+      opt.value = s;
+      opt.textContent = s;
+      if (s === currentService) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  }).catch(function(e){ console.warn('failed to load services:', e); });
+
+  fetch('/api/environments').then(function(r){
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  }).then(function(envs){
+    var sel = document.getElementById('env-filter-select');
+    if (!sel || !Array.isArray(envs)) return;
+    envs.forEach(function(e){
+      var opt = document.createElement('option');
+      opt.value = e;
+      opt.textContent = e;
+      if (e === currentEnv) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  }).catch(function(e){ console.warn('failed to load environments:', e); });
+});
 
 (function(){
   var live = true;

@@ -168,6 +168,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Group(func(r chi.Router) {
 			r.Use(srv.requireAuthIfEnabledAPI)
 			r.Get("/environments", srv.handleListEnvironments)
+			r.Get("/services", srv.handleListServices)
 			r.Get("/connectors", srv.handleListConnectors)
 			r.Get("/models", srv.handleListModels)
 			r.Get("/watchers", srv.handleListWatchers)

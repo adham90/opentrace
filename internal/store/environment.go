@@ -35,3 +35,24 @@ func ListEnvironments(ctx context.Context, db *sql.DB) ([]string, error) {
 	}
 	return envs, rows.Err()
 }
+
+// ListServices returns distinct non-empty service values from the logs table.
+func ListServices(ctx context.Context, db *sql.DB) ([]string, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT DISTINCT service FROM logs WHERE service != '' ORDER BY service`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing services: %w", err)
+	}
+	defer rows.Close()
+
+	var services []string
+	for rows.Next() {
+		var svc string
+		if err := rows.Scan(&svc); err != nil {
+			return nil, fmt.Errorf("scanning service: %w", err)
+		}
+		services = append(services, svc)
+	}
+	return services, rows.Err()
+}

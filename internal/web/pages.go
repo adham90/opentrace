@@ -472,6 +472,22 @@ func (s *Server) handleListEnvironments(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, envs)
 }
 
+func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
+	if s.db == nil {
+		writeJSON(w, http.StatusOK, []string{})
+		return
+	}
+	services, err := store.ListServices(r.Context(), s.db)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list services")
+		return
+	}
+	if services == nil {
+		services = []string{}
+	}
+	writeJSON(w, http.StatusOK, services)
+}
+
 func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 	data := s.newPageData(r, "Settings", "settings")
 	if s.settingsStore != nil {
