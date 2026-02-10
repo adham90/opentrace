@@ -12,6 +12,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/adham90/opentrace/internal/agent"
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/digest"
 	"github.com/adham90/opentrace/internal/store"
 	"github.com/adham90/opentrace/internal/watcher"
 )
@@ -24,9 +25,10 @@ type Deps struct {
 	ServerStore   store.ServerStore
 	MetricStore   store.MetricStore
 	UserStore     store.UserStore
-	RuleEvaluator *watcher.RuleEvaluator
-	MCPToken      string // OPENTRACE_MCP_TOKEN from environment
-	ServerName    string // OPENTRACE_MCP_NAME — custom server name (default: "opentrace")
+	WatcherRunStore store.WatcherRunStore
+	RuleEvaluator   *watcher.RuleEvaluator
+	MCPToken        string // OPENTRACE_MCP_TOKEN from environment
+	ServerName      string // OPENTRACE_MCP_NAME — custom server name (default: "opentrace")
 }
 
 // Serve starts a stdio-based MCP server that exposes all tools from the
@@ -113,6 +115,18 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps) {
 				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production, staging)")),
 			),
 			listAlertsHandler(deps.AlertStore),
+		)
+	}
+
+	// Health digest.
+	if deps.AlertStore != nil && deps.WatcherStore != nil && deps.WatcherRunStore != nil {
+		s.AddTool(
+			mcp.NewTool("get_digest",
+				mcp.WithDescription("Get a health digest summarizing database alerts, monitor status, and trends. Use this when the user asks 'what happened overnight?', 'any issues?', 'daily report', or similar. At the start of a session, consider running this proactively to inform the user of any issues."),
+				mcp.WithString("period", mcp.Description("Time period: 'last_24h' (default), 'last_12h', 'last_7d', 'today', 'yesterday'")),
+				mcp.WithString("environment", mcp.Description("Optional environment filter (e.g. production, staging)")),
+			),
+			getDigestHandler(deps.AlertStore, deps.WatcherStore, deps.WatcherRunStore),
 		)
 	}
 
@@ -648,4 +662,133 @@ func listAlertsHandler(as store.AlertStore) server.ToolHandlerFunc {
 
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+// getDigestHandler returns a handler that generates an on-the-fly health digest.
+func getDigestHandler(as store.AlertStore, ws store.WatcherStore, rs store.WatcherRunStore) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := request.GetArguments()
+
+		now := time.Now().UTC()
+		periodStart := now.Add(-24 * time.Hour)
+		periodEnd := now
+
+		if v, ok := args["period"].(string); ok && v != "" {
+			switch v {
+			case "last_12h":
+				periodStart = now.Add(-12 * time.Hour)
+			case "last_7d":
+				periodStart = now.Add(-7 * 24 * time.Hour)
+			case "today":
+				periodStart = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+			case "yesterday":
+				y := now.AddDate(0, 0, -1)
+				periodStart = time.Date(y.Year(), y.Month(), y.Day(), 0, 0, 0, 0, time.UTC)
+				periodEnd = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+			case "last_24h":
+				// default, already set
+			}
+		}
+
+		environment, _ := args["environment"].(string)
+
+		builder := digest.NewBuilder(as, ws, rs)
+		d, err := builder.Generate(ctx, digest.DigestOpts{
+			PeriodStart: periodStart,
+			PeriodEnd:   periodEnd,
+			Environment: environment,
+			TopN:        10,
+		})
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to generate digest: %v", err)), nil
+		}
+
+		// Build LLM-friendly response
+		resp := buildDigestResponse(d)
+
+		data, err := json.MarshalIndent(resp, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal digest: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// buildDigestResponse converts a Digest into an LLM-friendly response map.
+func buildDigestResponse(d *digest.Digest) map[string]any {
+	summary := fmt.Sprintf("%d new alerts (%d critical, %d warnings, %d info). %d monitors (%d active). %d runs, %d failed.",
+		d.AlertSummary.Total,
+		d.AlertSummary.Critical,
+		d.AlertSummary.Warning,
+		d.AlertSummary.Info,
+		d.MonitorSummary.Total,
+		d.MonitorSummary.Active,
+		d.MonitorSummary.RunsInPeriod,
+		d.MonitorSummary.FailedRuns,
+	)
+
+	alerts := map[string]any{
+		"total_new": d.AlertSummary.Total,
+		"critical":  d.AlertSummary.Critical,
+		"warning":   d.AlertSummary.Warning,
+		"info":      d.AlertSummary.Info,
+		"unread":    d.AlertSummary.Unread,
+	}
+
+	topAlerts := make([]map[string]any, 0, len(d.TopAlerts))
+	for _, a := range d.TopAlerts {
+		topAlerts = append(topAlerts, map[string]any{
+			"monitor":  a.MonitorTitle,
+			"severity": a.Severity,
+			"summary":  a.Summary,
+			"time":     a.CreatedAt.Format(time.RFC3339),
+		})
+	}
+	alerts["top_alerts"] = topAlerts
+
+	monitors := map[string]any{
+		"total":       d.MonitorSummary.Total,
+		"active":      d.MonitorSummary.Active,
+		"errored":     d.MonitorSummary.InError,
+		"failed_runs": d.MonitorSummary.FailedRuns,
+	}
+
+	problematic := make([]map[string]any, 0)
+	for _, m := range d.MonitorHealth {
+		if m.AlertCount > 0 || !m.LastRunOK {
+			entry := map[string]any{
+				"name":             m.Title,
+				"alerts_in_period": m.AlertCount,
+			}
+			if !m.LastRunOK {
+				entry["last_run_failed"] = true
+			}
+			problematic = append(problematic, entry)
+		}
+	}
+	monitors["problematic"] = problematic
+
+	resp := map[string]any{
+		"summary": summary,
+		"status":  string(d.Status),
+		"period": map[string]string{
+			"start": d.PeriodStart.Format(time.RFC3339),
+			"end":   d.PeriodEnd.Format(time.RFC3339),
+		},
+		"alerts":   alerts,
+		"monitors": monitors,
+	}
+
+	if d.Trends != nil {
+		resp["trends"] = map[string]any{
+			"alerts_current":       d.Trends.AlertsCurrentCount,
+			"alerts_previous":      d.Trends.AlertsPrevCount,
+			"alerts_change_pct":    d.Trends.AlertsChangePercent(),
+			"failed_runs_current":  d.Trends.FailedRunsCurrent,
+			"failed_runs_previous": d.Trends.FailedRunsPrev,
+		}
+	}
+
+	return resp
 }

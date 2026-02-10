@@ -134,14 +134,15 @@ func runMCP() error {
 	defer deps.registry.CloseAll()
 
 	return mcpserver.Serve(mcpserver.Deps{
-		Registry:     deps.registry,
-		WatcherStore: deps.watcherStore,
-		AlertStore:   deps.alertStore,
-		ServerStore:  deps.serverStore,
-		MetricStore:  deps.metricStore,
-		UserStore:    deps.userStore,
-		MCPToken:     os.Getenv("OPENTRACE_MCP_TOKEN"),
-		ServerName:   os.Getenv("OPENTRACE_MCP_NAME"),
+		Registry:        deps.registry,
+		WatcherStore:    deps.watcherStore,
+		AlertStore:      deps.alertStore,
+		WatcherRunStore: store.NewWatcherRunStore(deps.db),
+		ServerStore:     deps.serverStore,
+		MetricStore:     deps.metricStore,
+		UserStore:       deps.userStore,
+		MCPToken:        os.Getenv("OPENTRACE_MCP_TOKEN"),
+		ServerName:      os.Getenv("OPENTRACE_MCP_NAME"),
 	})
 }
 

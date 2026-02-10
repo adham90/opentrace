@@ -421,7 +421,67 @@ func (m *mockAlertStore) Prune(ctx context.Context, olderThan time.Duration) (in
 	return 0, nil
 }
 func (m *mockAlertStore) CountBySeverity(ctx context.Context, since, until time.Time, environment string) (map[string]int, error) {
-	return make(map[string]int), nil
+	result := make(map[string]int)
+	for _, a := range m.alerts {
+		if a.CreatedAt.Before(since) || !a.CreatedAt.Before(until) {
+			continue
+		}
+		if environment != "" && a.Environment != environment {
+			continue
+		}
+		result[string(a.Severity)]++
+	}
+	return result, nil
+}
+
+// mockWatcherRunStore implements store.WatcherRunStore for MCP tests.
+type mockWatcherRunStore struct {
+	runs []store.WatcherRun
+}
+
+func (m *mockWatcherRunStore) Create(_ context.Context, watcherID uuid.UUID) (*store.WatcherRun, error) {
+	return nil, nil
+}
+func (m *mockWatcherRunStore) Complete(_ context.Context, _ uuid.UUID, _ string, _ any, _ bool) error {
+	return nil
+}
+func (m *mockWatcherRunStore) Fail(_ context.Context, _ uuid.UUID, _ string) error { return nil }
+func (m *mockWatcherRunStore) FailStaleRuns(_ context.Context, _ time.Duration) (int, error) {
+	return 0, nil
+}
+func (m *mockWatcherRunStore) List(_ context.Context, watcherID uuid.UUID, limit int) ([]store.WatcherRun, error) {
+	var result []store.WatcherRun
+	for _, r := range m.runs {
+		if r.WatcherID == watcherID {
+			result = append(result, r)
+		}
+	}
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+func (m *mockWatcherRunStore) GetByID(_ context.Context, id uuid.UUID) (*store.WatcherRun, error) {
+	return nil, store.ErrNotFound
+}
+func (m *mockWatcherRunStore) Prune(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+func (m *mockWatcherRunStore) CountRuns(_ context.Context, params store.CountRunParams) (int, error) {
+	count := 0
+	for _, r := range m.runs {
+		if r.StartedAt.Before(params.Since) || !r.StartedAt.Before(params.Until) {
+			continue
+		}
+		if params.Status != "" && r.Status != params.Status {
+			continue
+		}
+		if params.WatcherID != nil && r.WatcherID != *params.WatcherID {
+			continue
+		}
+		count++
+	}
+	return count, nil
 }
 
 // --- listMonitorsHandler tests ---
@@ -1044,17 +1104,19 @@ func TestAddReadOnlyTools_RegistersExpectedTools(t *testing.T) {
 	registry := connector.NewRegistry()
 	ws := &mockWatcherStore{}
 	as := &mockAlertStore{}
+	rs := &mockWatcherRunStore{}
 
 	s := server.NewMCPServer("opentrace-test", "0.1.0")
 	deps := Deps{
-		Registry:     registry,
-		WatcherStore: ws,
-		AlertStore:   as,
+		Registry:        registry,
+		WatcherStore:    ws,
+		AlertStore:      as,
+		WatcherRunStore: rs,
 	}
 	addReadOnlyTools(s, deps)
 
 	tools := s.ListTools()
-	expectedTools := []string{"list_connectors", "list_monitors", "list_alerts"}
+	expectedTools := []string{"list_connectors", "list_monitors", "list_alerts", "get_digest"}
 	for _, name := range expectedTools {
 		if _, ok := tools[name]; !ok {
 			t.Errorf("expected read-only tool %q to be registered", name)
@@ -1108,5 +1170,182 @@ func TestAddWriteTools_RegistersConnectorTools(t *testing.T) {
 	// preview_monitor should be registered when RuleEvaluator is provided.
 	if _, ok := tools["preview_monitor"]; !ok {
 		t.Error("expected 'preview_monitor' to be registered by addWriteTools")
+	}
+}
+
+// --- getDigestHandler tests ---
+
+func TestGetDigestHandler_Empty(t *testing.T) {
+	as := &mockAlertStore{}
+	ws := &mockWatcherStore{}
+	rs := &mockWatcherRunStore{}
+
+	handler := getDigestHandler(as, ws, rs)
+	result, err := handler(context.Background(), makeRequest(nil))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatal("expected success result")
+	}
+
+	text := resultText(t, result)
+
+	// Parse the JSON response
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["status"] != "healthy" {
+		t.Errorf("status = %v, want healthy", resp["status"])
+	}
+
+	// Should contain summary
+	if _, ok := resp["summary"].(string); !ok {
+		t.Error("expected summary string in response")
+	}
+}
+
+func TestGetDigestHandler_WithAlerts(t *testing.T) {
+	now := time.Now().UTC()
+	wID := uuid.New()
+
+	as := &mockAlertStore{
+		alerts: []store.Alert{
+			{ID: uuid.New(), WatcherID: &wID, WatcherTitle: "Connection Monitor", Title: "High connections",
+				Summary: "92/100 connections", Severity: store.SeverityCritical, CreatedAt: now.Add(-2 * time.Hour)},
+			{ID: uuid.New(), WatcherID: &wID, WatcherTitle: "Connection Monitor", Title: "Warning level",
+				Summary: "75/100 connections", Severity: store.SeverityWarning, CreatedAt: now.Add(-4 * time.Hour)},
+		},
+	}
+	ws := &mockWatcherStore{
+		watchers: []store.Watcher{
+			{ID: wID, Title: "Connection Monitor", Status: store.WatcherActive},
+		},
+	}
+	rs := &mockWatcherRunStore{
+		runs: []store.WatcherRun{
+			{ID: uuid.New(), WatcherID: wID, StartedAt: now.Add(-1 * time.Hour), Status: "completed"},
+		},
+	}
+
+	handler := getDigestHandler(as, ws, rs)
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"period": "last_24h",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatal("expected success result")
+	}
+
+	text := resultText(t, result)
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["status"] != "critical" {
+		t.Errorf("status = %v, want critical", resp["status"])
+	}
+
+	alerts, ok := resp["alerts"].(map[string]any)
+	if !ok {
+		t.Fatal("expected alerts map in response")
+	}
+	if alerts["critical"] != float64(1) {
+		t.Errorf("critical = %v, want 1", alerts["critical"])
+	}
+	if alerts["warning"] != float64(1) {
+		t.Errorf("warning = %v, want 1", alerts["warning"])
+	}
+}
+
+func TestGetDigestHandler_PeriodYesterday(t *testing.T) {
+	as := &mockAlertStore{}
+	ws := &mockWatcherStore{}
+	rs := &mockWatcherRunStore{}
+
+	handler := getDigestHandler(as, ws, rs)
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"period": "yesterday",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatal("expected success result")
+	}
+
+	text := resultText(t, result)
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	// Verify period is set to yesterday
+	period, ok := resp["period"].(map[string]any)
+	if !ok {
+		t.Fatal("expected period map")
+	}
+
+	startStr, _ := period["start"].(string)
+	endStr, _ := period["end"].(string)
+
+	start, _ := time.Parse(time.RFC3339, startStr)
+	end, _ := time.Parse(time.RFC3339, endStr)
+
+	if end.Sub(start) != 24*time.Hour {
+		t.Errorf("yesterday period duration = %v, want 24h", end.Sub(start))
+	}
+}
+
+func TestGetDigestHandler_EnvironmentFilter(t *testing.T) {
+	now := time.Now().UTC()
+	w1 := uuid.New()
+	w2 := uuid.New()
+
+	as := &mockAlertStore{
+		alerts: []store.Alert{
+			{ID: uuid.New(), WatcherID: &w1, Environment: "production", Severity: store.SeverityCritical, CreatedAt: now.Add(-1 * time.Hour)},
+			{ID: uuid.New(), WatcherID: &w2, Environment: "staging", Severity: store.SeverityWarning, CreatedAt: now.Add(-2 * time.Hour)},
+		},
+	}
+	ws := &mockWatcherStore{
+		watchers: []store.Watcher{
+			{ID: w1, Title: "Prod Monitor", Environment: "production", Status: store.WatcherActive},
+			{ID: w2, Title: "Staging Monitor", Environment: "staging", Status: store.WatcherActive},
+		},
+	}
+	rs := &mockWatcherRunStore{}
+
+	handler := getDigestHandler(as, ws, rs)
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"environment": "production",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := resultText(t, result)
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	alerts, ok := resp["alerts"].(map[string]any)
+	if !ok {
+		t.Fatal("expected alerts map")
+	}
+	// Only production alert should be counted
+	if alerts["critical"] != float64(1) {
+		t.Errorf("critical = %v, want 1", alerts["critical"])
+	}
+	if alerts["warning"] != float64(0) {
+		t.Errorf("warning = %v, want 0 (staging filtered out)", alerts["warning"])
 	}
 }
