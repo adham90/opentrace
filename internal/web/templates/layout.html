@@ -91,6 +91,18 @@
         <div class="shortcut-row"><kbd>6</kbd><span>Go to Digests</span></div>
         <div class="shortcut-row"><kbd>7</kbd><span>Go to Tools</span></div>
       </div>
+      {{if eq .Nav "logs"}}
+      <div class="shortcut-section">
+        <div class="shortcut-section-label">Log Filters</div>
+        <div class="shortcut-row"><kbd>/</kbd><span>Focus search</span></div>
+        <div class="shortcut-row"><kbd>t</kbd> / <kbd>T</kbd><span>Cycle time range</span></div>
+        <div class="shortcut-row"><kbd>l</kbd> / <kbd>L</kbd><span>Cycle log level</span></div>
+        <div class="shortcut-row"><kbd>s</kbd> / <kbd>S</kbd><span>Cycle service</span></div>
+        <div class="shortcut-row"><kbd>e</kbd> / <kbd>E</kbd><span>Cycle environment</span></div>
+        <div class="shortcut-row"><kbd>c</kbd><span>Clear all filters</span></div>
+        <div class="shortcut-row"><kbd>p</kbd><span>Toggle live/paused</span></div>
+      </div>
+      {{end}}
       <div class="shortcut-section">
         <div class="shortcut-section-label">General</div>
         <div class="shortcut-row"><kbd>?</kbd><span>Show this help</span></div>

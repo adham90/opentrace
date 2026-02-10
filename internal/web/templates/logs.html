@@ -23,25 +23,25 @@
   </div>
 
   <div class="filter-bar-tags">
-    <div class="filter-tag" id="tag-time" onclick="cycleTime(1)" title="time range">
+    <div class="filter-tag" id="tag-time" onclick="toggleDropdown('time',event)" title="time range — key: t">
       <span class="filter-tag-key">t:</span>
       <span class="filter-tag-val" id="tag-time-val">all</span>
-      <span class="filter-kbd">t</span>
+      <div class="filter-dropdown" id="drop-time"></div>
     </div>
-    <div class="filter-tag" id="tag-level" onclick="cycleLevel(1)" title="log level">
+    <div class="filter-tag" id="tag-level" onclick="toggleDropdown('level',event)" title="log level — key: l">
       <span class="filter-tag-key">l:</span>
       <span class="filter-tag-val" id="tag-level-val">all</span>
-      <span class="filter-kbd">l</span>
+      <div class="filter-dropdown" id="drop-level"></div>
     </div>
-    <div class="filter-tag" id="tag-service" onclick="cycleService(1)" title="service">
+    <div class="filter-tag" id="tag-service" onclick="toggleDropdown('service',event)" title="service — key: s">
       <span class="filter-tag-key">s:</span>
       <span class="filter-tag-val" id="tag-service-val">all</span>
-      <span class="filter-kbd">s</span>
+      <div class="filter-dropdown" id="drop-service"></div>
     </div>
-    <div class="filter-tag" id="tag-env" onclick="cycleEnv(1)" title="environment">
+    <div class="filter-tag" id="tag-env" onclick="toggleDropdown('env',event)" title="environment — key: e">
       <span class="filter-tag-key">e:</span>
       <span class="filter-tag-val" id="tag-env-val">all</span>
-      <span class="filter-kbd">e</span>
+      <div class="filter-dropdown" id="drop-env"></div>
     </div>
   </div>
 
@@ -155,6 +155,88 @@
   window.cycleEnv = cycleEnv;
   window.clearFilters = clearFilters;
 
+  // ── Dropdown menus ────────────────────────────────────────
+  var openDrop = null;
+
+  function closeAllDropdowns() {
+    document.querySelectorAll('.filter-dropdown.show').forEach(function(d){ d.classList.remove('show'); });
+    openDrop = null;
+  }
+
+  function renderDropdown(dropId, options, labels, currentIdx, selectFn) {
+    var drop = document.getElementById(dropId);
+    var html = '';
+    for (var i = 0; i < options.length; i++) {
+      var cls = i === currentIdx ? 'filter-drop-item drop-active' : 'filter-drop-item';
+      html += '<button type="button" class="' + cls + '" data-idx="' + i + '">' + escapeHtmlLocal(labels[i]) + '</button>';
+    }
+    drop.innerHTML = html;
+    drop.querySelectorAll('.filter-drop-item').forEach(function(btn){
+      btn.addEventListener('click', function(e){
+        e.stopPropagation();
+        selectFn(parseInt(btn.getAttribute('data-idx')));
+        closeAllDropdowns();
+      });
+    });
+  }
+
+  function selectTime(idx) {
+    currentTimeIdx = idx;
+    document.getElementById('f-time-range').value = TIME_OPTIONS[idx];
+    updateTagDisplay('tag-time-val', TIME_LABELS[idx], idx !== 0);
+    flashTag('tag-time');
+    applyFilters();
+  }
+
+  function selectLevel(idx) {
+    currentLevelIdx = idx;
+    document.getElementById('f-level').value = LEVEL_OPTIONS[idx];
+    updateTagDisplay('tag-level-val', LEVEL_LABELS[idx], idx !== 0);
+    flashTag('tag-level');
+    applyFilters();
+  }
+
+  function selectService(idx) {
+    currentServiceIdx = idx;
+    document.getElementById('f-service').value = serviceList[idx];
+    updateTagDisplay('tag-service-val', serviceList[idx] || 'all', idx !== 0);
+    flashTag('tag-service');
+    applyFilters();
+  }
+
+  function selectEnv(idx) {
+    currentEnvIdx = idx;
+    document.getElementById('f-env').value = envList[idx];
+    updateTagDisplay('tag-env-val', envList[idx] || 'all', idx !== 0);
+    flashTag('tag-env');
+    applyFilters();
+  }
+
+  function toggleDropdown(name, e) {
+    e.stopPropagation();
+    var dropId = 'drop-' + name;
+    var drop = document.getElementById(dropId);
+    var wasOpen = drop.classList.contains('show');
+    closeAllDropdowns();
+    if (wasOpen) return;
+
+    if (name === 'time') renderDropdown(dropId, TIME_OPTIONS, TIME_LABELS, currentTimeIdx, selectTime);
+    else if (name === 'level') renderDropdown(dropId, LEVEL_OPTIONS, LEVEL_LABELS, currentLevelIdx, selectLevel);
+    else if (name === 'service') {
+      var sLabels = serviceList.map(function(s){ return s || 'all'; });
+      renderDropdown(dropId, serviceList, sLabels, currentServiceIdx, selectService);
+    } else if (name === 'env') {
+      var eLabels = envList.map(function(e){ return e || 'all'; });
+      renderDropdown(dropId, envList, eLabels, currentEnvIdx, selectEnv);
+    }
+    drop.classList.add('show');
+    openDrop = dropId;
+  }
+  window.toggleDropdown = toggleDropdown;
+
+  // Close dropdown when clicking outside
+  document.addEventListener('click', function(){ closeAllDropdowns(); });
+
   // ── Search focus ──────────────────────────────────────────
   searchInput.addEventListener('focus', function(){ searchWrap.classList.add('focused'); });
   searchInput.addEventListener('blur', function(){ searchWrap.classList.remove('focused'); });
@@ -173,9 +255,11 @@
     // Skip if typing in an input/textarea
     var tag = document.activeElement.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-    // Skip if modal/overlay is open
-    if (document.querySelector('.modal') || document.querySelector('.shortcut-overlay')) return;
+    // Skip if shortcut overlay is visible
+    var overlay = document.getElementById('shortcut-overlay');
+    if (overlay && overlay.style.display !== 'none') return;
 
+    closeAllDropdowns();
     switch(e.key) {
       case '/':
         e.preventDefault();

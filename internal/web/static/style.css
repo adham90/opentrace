@@ -807,7 +807,6 @@ select:focus { outline: none; border-color: var(--green); }
   padding: 0;
   margin-bottom: 16px;
   font-size: 12px;
-  overflow: hidden;
   flex-wrap: wrap;
 }
 
@@ -817,7 +816,9 @@ select:focus { outline: none; border-color: var(--green); }
   flex: 1;
   min-width: 180px;
   border-right: 1px solid var(--border);
+  border-radius: 4px 0 0 4px;
 }
+.filter-bar-actions .filter-bar-btn:last-child { border-radius: 0 4px 4px 0; }
 .filter-bar-search .filter-prompt {
   color: var(--green);
   padding: 8px 0 8px 12px;
@@ -860,6 +861,7 @@ select:focus { outline: none; border-color: var(--green); }
   white-space: nowrap;
   user-select: none;
   font-size: 12px;
+  position: relative;
 }
 .filter-tag:last-child { border-right: none; }
 .filter-tag:hover { color: var(--text-bright); background: var(--bg-tertiary); }
@@ -906,18 +908,40 @@ select:focus { outline: none; border-color: var(--green); }
 .filter-bar-btn:hover { color: var(--text-bright); border-color: var(--border); }
 .filter-bar-btn.btn-clear:hover { color: var(--red); }
 
-/* Keyboard hint shown on filter tags */
-.filter-kbd {
-  font-size: 9px;
-  color: var(--text-dim);
-  opacity: 0.5;
-  margin-left: 6px;
-  padding: 1px 4px;
+/* Filter dropdown menus */
+.filter-dropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 1px);
+  left: 0;
+  min-width: 120px;
+  background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 2px;
-  line-height: 1.3;
+  border-radius: 4px;
+  padding: 4px 0;
+  z-index: 200;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  max-height: 240px;
+  overflow-y: auto;
 }
-.filter-tag:hover .filter-kbd { opacity: 0.8; }
+.filter-dropdown.show { display: block; }
+
+.filter-drop-item {
+  display: block;
+  width: 100%;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.1s, background 0.1s;
+  white-space: nowrap;
+}
+.filter-drop-item:hover { color: var(--text-bright); background: var(--bg-tertiary); }
+.filter-drop-item.drop-active { color: var(--cyan); font-weight: 600; }
 
 /* Responsive: stack on mobile */
 @media (max-width: 699px) {
