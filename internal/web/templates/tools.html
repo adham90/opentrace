@@ -1,0 +1,63 @@
+{{define "content"}}
+<div class="tools-page">
+  <div class="page-header">
+    <h1><span class="prompt">$</span> tools <span class="dim">— MCP tool reference</span></h1>
+  </div>
+
+  <div id="tools-loading" class="empty-state">
+    <p>loading tools<span class="spinner"></span></p>
+  </div>
+
+  <div id="tools-content" style="display:none"></div>
+</div>
+
+<script>
+(function() {
+  function badge(access) {
+    var cls = access === 'admin' ? 'badge-admin' : 'badge-read';
+    return '<span class="badge ' + cls + '">' + access + '</span>';
+  }
+
+  function escapeHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function renderTools(categories) {
+    var html = '';
+    for (var i = 0; i < categories.length; i++) {
+      var cat = categories[i];
+      if (!cat.tools || cat.tools.length === 0) continue;
+      html += '<div class="tools-category">';
+      html += '<div class="tools-category-header">' + escapeHtml(cat.name) + '</div>';
+      html += '<div class="tools-category-desc">' + escapeHtml(cat.description) + '</div>';
+      html += '<div class="tools-grid">';
+      for (var j = 0; j < cat.tools.length; j++) {
+        var t = cat.tools[j];
+        html += '<div class="tool-card">';
+        html += '<div class="tool-card-name"><code>' + escapeHtml(t.name) + '</code></div>';
+        html += '<div class="tool-card-desc">' + escapeHtml(t.description) + '</div>';
+        html += '<div class="tool-card-meta">' + badge(t.access);
+        if (t.requires) {
+          html += ' <span class="text-dim text-xs">' + escapeHtml(t.requires) + '</span>';
+        }
+        html += '</div>';
+        html += '</div>';
+      }
+      html += '</div></div>';
+    }
+    return html;
+  }
+
+  fetch('/api/tools').then(function(r) { return r.json(); }).then(function(data) {
+    document.getElementById('tools-loading').style.display = 'none';
+    var el = document.getElementById('tools-content');
+    el.innerHTML = renderTools(data);
+    el.style.display = 'block';
+  }).catch(function() {
+    document.getElementById('tools-loading').innerHTML = '<p>failed to load tools</p>';
+  });
+})();
+</script>
+{{end}}

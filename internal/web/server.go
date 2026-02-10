@@ -143,6 +143,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Get("/servers", srv.handleServersPage)
 		r.Get("/servers/{id}", srv.handleServerDetailPage)
 		r.Get("/setup", srv.handleSetupPage)
+		r.Get("/tools", srv.handleToolsPage)
 		r.Get("/profile", srv.handleProfilePage)
 	})
 
@@ -184,6 +185,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Get("/alerts", srv.handleListAlerts)
 			r.Get("/alerts/count", srv.handleAlertCount)
 			r.Get("/overview", srv.handleOverviewAPI)
+			r.Get("/tools", srv.handleToolsAPI)
 			r.Get("/logs/poll", srv.handleLogsPoll)
 
 			if srv.serverStore != nil && srv.metricStore != nil {

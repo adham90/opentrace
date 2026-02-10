@@ -25,6 +25,7 @@
         <a href="/watchers" class="nav-item {{if eq .Nav "watchers"}}active{{end}}">3:watchers</a>
         <a href="/connectors" class="nav-item {{if eq .Nav "connectors"}}active{{end}}">4:connectors</a>
         <a href="/servers" class="nav-item {{if eq .Nav "servers"}}active{{end}}">5:servers</a>
+        <a href="/tools" class="nav-item {{if eq .Nav "tools"}}active{{end}}">6:tools</a>
       </nav>
       <div class="topbar-right">
         <select id="env-select" class="topbar-select" onchange="setGlobalEnv(this.value)" title="Filter by environment">
@@ -152,7 +153,7 @@
 
   // Keyboard navigation (tmux-style: press 0-4 to switch tabs)
   (function(){
-    var tabs = {1:'/logs', 2:'/alerts', 3:'/watchers', 4:'/connectors', 5:'/servers'};
+    var tabs = {1:'/logs', 2:'/alerts', 3:'/watchers', 4:'/connectors', 5:'/servers', 6:'/tools'};
     document.addEventListener('keydown', function(e) {
       var tag = e.target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;

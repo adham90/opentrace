@@ -1637,3 +1637,70 @@ select:focus { outline: none; border-color: var(--green); }
   font-weight: 500;
   letter-spacing: 0.2px;
 }
+
+/* ===== Tools Page ===== */
+.tools-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+@media (min-width: 700px) {
+  .tools-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (min-width: 1000px) {
+  .tools-grid { grid-template-columns: 1fr 1fr 1fr; }
+}
+
+.tool-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  background: var(--bg-secondary);
+}
+
+.tool-card-name {
+  font-weight: 600;
+  color: var(--cyan);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.tool-card-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+
+.tool-card-meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.badge-read {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.badge-admin {
+  background: var(--yellow-dim);
+  color: var(--yellow);
+}
+
+.tools-category {
+  margin-bottom: 24px;
+}
+
+.tools-category-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-bright);
+  margin-bottom: 4px;
+}
+
+.tools-category-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
