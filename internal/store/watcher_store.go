@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -122,7 +124,9 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 
 	if ruleConfigStr.Valid {
 		var rc RuleConfig
-		if err := json.Unmarshal([]byte(ruleConfigStr.String), &rc); err == nil {
+		if err := json.Unmarshal([]byte(ruleConfigStr.String), &rc); err != nil {
+			log.Printf("WARN: scanWatcher: invalid rule_config JSON for %s: %v", w.ID, err)
+		} else {
 			w.RuleConfig = &rc
 		}
 	}
@@ -139,7 +143,9 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 	}
 	if adaptiveConfigStr.Valid {
 		var ac AdaptiveConfig
-		if err := json.Unmarshal([]byte(adaptiveConfigStr.String), &ac); err == nil {
+		if err := json.Unmarshal([]byte(adaptiveConfigStr.String), &ac); err != nil {
+			log.Printf("WARN: scanWatcher: invalid adaptive_config JSON for %s: %v", w.ID, err)
+		} else {
 			w.AdaptiveConfig = &ac
 		}
 	}
@@ -169,15 +175,19 @@ func (s *watcherStore) GetByID(ctx context.Context, id uuid.UUID) (*Watcher, err
 }
 
 func (s *watcherStore) List(ctx context.Context, params ListWatcherParams) ([]Watcher, error) {
-	query := `SELECT ` + watcherColumns + ` FROM watchers WHERE 1=1`
+	query := `SELECT ` + watcherColumns + ` FROM watchers`
+	var conditions []string
 	var args []any
 	if params.Environment != "" {
-		query += ` AND environment = ?`
+		conditions = append(conditions, `environment = ?`)
 		args = append(args, params.Environment)
 	}
 	if params.MonitorType != "" {
-		query += ` AND monitor_type = ?`
+		conditions = append(conditions, `monitor_type = ?`)
 		args = append(args, string(params.MonitorType))
+	}
+	if len(conditions) > 0 {
+		query += ` WHERE ` + strings.Join(conditions, ` AND `)
 	}
 	query += ` ORDER BY created_at DESC`
 

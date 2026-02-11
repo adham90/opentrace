@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/adham90/opentrace/internal/agent"
@@ -171,6 +172,7 @@ func (e *Executor) executeAI(ctx context.Context, w store.Watcher, run *store.Wa
 	runCfg.MaxSteps = effortCfg.MaxSteps
 	runCfg.MaxToolCalls = effortCfg.MaxToolCalls
 
+	var mu sync.Mutex
 	var traceEvents []RunEvent
 	var callback agent.EventCallback
 	if e.eventHub != nil {
@@ -182,7 +184,9 @@ func (e *Executor) executeAI(ctx context.Context, w store.Watcher, run *store.Wa
 				Args:     ev.Args,
 				Time:     time.Now(),
 			}
+			mu.Lock()
 			traceEvents = append(traceEvents, re)
+			mu.Unlock()
 			e.eventHub.Publish(run.ID, re)
 		}
 	}
@@ -205,10 +209,12 @@ func (e *Executor) executeAI(ctx context.Context, w store.Watcher, run *store.Wa
 	hasAlert := EvaluateFindings(answer)
 
 	// 8. Complete the run (store trace events as details)
+	mu.Lock()
 	var details any
 	if len(traceEvents) > 0 {
 		details = traceEvents
 	}
+	mu.Unlock()
 	if err := e.runStore.Complete(ctx, run.ID, answer, details, hasAlert); err != nil {
 		log.Printf("watcher %s: failed to complete run: %v", w.ID, err)
 	}

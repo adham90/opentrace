@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -107,35 +108,45 @@ func (s *alertStore) List(ctx context.Context, params ListAlertParams) ([]Alert,
 	}
 
 	query := `SELECT a.id, a.watcher_id, a.run_id, COALESCE(w.title, ''), a.title, a.summary, a.environment, a.severity, a.details, a.read, a.dismissed, a.created_at
-		 FROM alerts a LEFT JOIN watchers w ON a.watcher_id = w.id WHERE 1=1`
+		 FROM alerts a LEFT JOIN watchers w ON a.watcher_id = w.id`
+	var conditions []string
 	var args []any
 
 	if params.DismissedOnly {
-		query += ` AND a.dismissed = 1`
+		conditions = append(conditions, `a.dismissed = 1`)
 	} else if params.UnreadOnly {
-		query += ` AND a.read = 0 AND a.dismissed = 0`
+		conditions = append(conditions, `a.read = 0 AND a.dismissed = 0`)
 	} else {
-		query += ` AND a.dismissed = 0`
+		conditions = append(conditions, `a.dismissed = 0`)
 	}
 
 	if params.Severity != "" {
-		query += ` AND a.severity = ?`
+		conditions = append(conditions, `a.severity = ?`)
 		args = append(args, string(params.Severity))
 	}
 
 	if params.WatcherID != nil {
-		query += ` AND a.watcher_id = ?`
+		conditions = append(conditions, `a.watcher_id = ?`)
 		args = append(args, params.WatcherID.String())
 	}
 
 	if params.Environment != "" {
-		query += ` AND a.environment = ?`
+		conditions = append(conditions, `a.environment = ?`)
 		args = append(args, params.Environment)
+	}
+
+	if len(conditions) > 0 {
+		query += ` WHERE ` + strings.Join(conditions, ` AND `)
 	}
 
 	query += ` ORDER BY a.created_at DESC`
 	query += ` LIMIT ?`
 	args = append(args, limit)
+
+	if params.Offset > 0 {
+		query += ` OFFSET ?`
+		args = append(args, params.Offset)
+	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {

@@ -42,7 +42,10 @@ func (s *Server) handleCreateConnectorAPI(w http.ResponseWriter, r *http.Request
 		configStr := r.FormValue("config")
 		cfg := map[string]any{}
 		if configStr != "" {
-			json.Unmarshal([]byte(configStr), &cfg)
+			if err := json.Unmarshal([]byte(configStr), &cfg); err != nil {
+				http.Error(w, "invalid config JSON", http.StatusBadRequest)
+				return
+			}
 		}
 		connType := store.ConnectorType(r.FormValue("type"))
 		name := r.FormValue("name")

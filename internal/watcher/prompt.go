@@ -3,6 +3,7 @@ package watcher
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -183,7 +184,9 @@ func EvaluateFindings(answer string) bool {
 func parseFilters(raw json.RawMessage) WatcherFilters {
 	var f WatcherFilters
 	if len(raw) > 0 {
-		json.Unmarshal(raw, &f)
+		if err := json.Unmarshal(raw, &f); err != nil {
+			log.Printf("WARN: parseFilters: invalid JSON: %v", err)
+		}
 	}
 	return f
 }

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -151,7 +152,9 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 		}
 		entry.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
 		if metaJSON.Valid && metaJSON.String != "" {
-			json.Unmarshal([]byte(metaJSON.String), &entry.Metadata)
+			if err := json.Unmarshal([]byte(metaJSON.String), &entry.Metadata); err != nil {
+				log.Printf("WARN: log entry %d: invalid metadata JSON: %v", entry.ID, err)
+			}
 		}
 		result = append(result, entry)
 	}

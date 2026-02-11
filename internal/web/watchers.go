@@ -64,12 +64,9 @@ func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate schedule expression if provided
-	if req.Schedule != "" {
-		if _, err := watcher.ParseSchedule(req.Schedule); err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid schedule: %v", err))
-			return
-		}
+	if err := validateSchedule(req.Schedule); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	result, err := s.watcherStore.Create(r.Context(), store.CreateWatcherParams{
@@ -137,10 +134,9 @@ func (s *Server) handleUpdateWatcher(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate schedule expression if provided
-	if req.Schedule != nil && *req.Schedule != "" {
-		if _, err := watcher.ParseSchedule(*req.Schedule); err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid schedule: %v", err))
+	if req.Schedule != nil {
+		if err := validateSchedule(*req.Schedule); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
@@ -310,6 +306,17 @@ func (s *Server) handleGetWatcherRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, run)
 }
 
+// validateSchedule validates a cron schedule expression if non-empty.
+func validateSchedule(schedule string) error {
+	if schedule == "" {
+		return nil
+	}
+	if _, err := watcher.ParseSchedule(schedule); err != nil {
+		return fmt.Errorf("invalid schedule: %v", err)
+	}
+	return nil
+}
+
 func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	var models []llm.ProviderInfo
 	if s.modelRegistry != nil {
@@ -366,7 +373,10 @@ func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 
 			// Send buffered events for catch-up
 			for _, ev := range buffered {
-				data, _ := json.Marshal(ev)
+				data, err := json.Marshal(ev)
+				if err != nil {
+					continue
+				}
 				fmt.Fprintf(w, "data: %s\n\n", data)
 			}
 			flusher.Flush()
@@ -383,7 +393,10 @@ func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 						flusher.Flush()
 						return
 					}
-					data, _ := json.Marshal(ev)
+					data, err := json.Marshal(ev)
+					if err != nil {
+						continue
+					}
 					fmt.Fprintf(w, "data: %s\n\n", data)
 					flusher.Flush()
 				case <-r.Context().Done():

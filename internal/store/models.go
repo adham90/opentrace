@@ -327,6 +327,7 @@ type ListAlertParams struct {
 	WatcherID     *uuid.UUID      `json:"watcher_id,omitempty"`
 	Environment   string          `json:"environment,omitempty"`
 	Limit         int             `json:"limit,omitempty"`
+	Offset        int             `json:"offset,omitempty"`
 }
 
 // ServerStatus represents the health status of a monitored server.

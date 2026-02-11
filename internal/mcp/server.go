@@ -58,8 +58,9 @@ func Serve(deps Deps) error {
 	hasAccess := true
 
 	if deps.UserStore != nil && deps.MCPToken != "" {
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		user, err := deps.UserStore.GetByMCPToken(ctx, deps.MCPToken)
+		cancel()
 		if err != nil || user == nil {
 			// Invalid token — serve with zero tools.
 			hasAccess = false

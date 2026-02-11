@@ -20,8 +20,10 @@ type RunEvent struct {
 // EventHub is an in-memory event broadcaster keyed by run ID.
 // It allows the executor to publish events and SSE handlers to subscribe.
 type EventHub struct {
-	mu   sync.RWMutex
-	runs map[uuid.UUID]*runStream
+	mu     sync.RWMutex
+	runs   map[uuid.UUID]*runStream
+	timers []*time.Timer
+	closed bool
 }
 
 type runStream struct {
@@ -148,10 +150,40 @@ func (h *EventHub) MarkDone(runID uuid.UUID) {
 	rs.mu.Unlock()
 
 	// Schedule cleanup after 60s to allow late subscribers to get buffered events.
-	// Uses time.AfterFunc instead of a goroutine+sleep to avoid holding a goroutine.
-	time.AfterFunc(60*time.Second, func() {
-		h.mu.Lock()
+	h.mu.Lock()
+	if !h.closed {
+		t := time.AfterFunc(60*time.Second, func() {
+			h.mu.Lock()
+			delete(h.runs, runID)
+			h.mu.Unlock()
+		})
+		h.timers = append(h.timers, t)
+	} else {
 		delete(h.runs, runID)
-		h.mu.Unlock()
-	})
+	}
+	h.mu.Unlock()
+}
+
+// Close stops all pending cleanup timers and removes all run streams.
+// Call this during graceful shutdown after the scheduler has stopped.
+func (h *EventHub) Close() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.closed = true
+	for _, t := range h.timers {
+		t.Stop()
+	}
+	h.timers = nil
+	for id, rs := range h.runs {
+		rs.mu.Lock()
+		if !rs.done {
+			rs.done = true
+			for sid, ch := range rs.subs {
+				close(ch)
+				delete(rs.subs, sid)
+			}
+		}
+		rs.mu.Unlock()
+		delete(h.runs, id)
+	}
 }
