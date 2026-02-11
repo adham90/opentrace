@@ -121,8 +121,10 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 
 	cfg := deps.Cfg
 
-	loginLimiter := NewRateLimiter(10, 1*time.Minute)
-	apiLimiter := NewRateLimiter(120, 1*time.Minute)
+	srv.loginLimiter = NewRateLimiter(10, 1*time.Minute)
+	srv.apiLimiter = NewRateLimiter(120, 1*time.Minute)
+	loginLimiter := srv.loginLimiter
+	apiLimiter := srv.apiLimiter
 
 	router := chi.NewRouter()
 	router.Use(middleware.Logger)
@@ -303,6 +305,12 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 
 // Shutdown gracefully shuts down SSE connections and other resources.
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.loginLimiter != nil {
+		s.loginLimiter.Stop()
+	}
+	if s.apiLimiter != nil {
+		s.apiLimiter.Stop()
+	}
 	if s.sseServer != nil {
 		return s.sseServer.Shutdown(ctx)
 	}
