@@ -6,7 +6,8 @@ import (
 	pg_query "github.com/pganalyze/pg_query_go/v6"
 )
 
-// ValidateReadOnly parses the SQL query and rejects anything that isn't a SELECT statement.
+// ValidateReadOnly parses the SQL query and rejects anything that isn't a
+// SELECT or EXPLAIN SELECT statement.
 func ValidateReadOnly(query string) error {
 	result, err := pg_query.Parse(query)
 	if err != nil {
@@ -23,9 +24,18 @@ func ValidateReadOnly(query string) error {
 		if node == nil {
 			return fmt.Errorf("nil statement node")
 		}
-		if node.GetSelectStmt() == nil {
-			return fmt.Errorf("only SELECT statements are allowed")
+		if node.GetSelectStmt() != nil {
+			continue
 		}
+		if ex := node.GetExplainStmt(); ex != nil {
+			// Only allow EXPLAIN wrapping a SELECT.
+			inner := ex.GetQuery()
+			if inner != nil && inner.GetSelectStmt() != nil {
+				continue
+			}
+			return fmt.Errorf("only SELECT statements are allowed inside EXPLAIN")
+		}
+		return fmt.Errorf("only SELECT statements are allowed")
 	}
 
 	return nil

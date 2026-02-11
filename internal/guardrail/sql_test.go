@@ -67,6 +67,34 @@ func TestValidateReadOnly_MultiStatement(t *testing.T) {
 	}
 }
 
+func TestValidateReadOnly_ExplainSelect(t *testing.T) {
+	err := ValidateReadOnly("EXPLAIN SELECT 1")
+	if err != nil {
+		t.Fatalf("expected no error for EXPLAIN SELECT, got: %v", err)
+	}
+}
+
+func TestValidateReadOnly_ExplainAnalyzeSelect(t *testing.T) {
+	err := ValidateReadOnly("EXPLAIN (ANALYZE true, BUFFERS true) SELECT COUNT(*) FROM users")
+	if err != nil {
+		t.Fatalf("expected no error for EXPLAIN ANALYZE SELECT, got: %v", err)
+	}
+}
+
+func TestValidateReadOnly_ExplainInsert(t *testing.T) {
+	err := ValidateReadOnly("EXPLAIN INSERT INTO users (name) VALUES ('test')")
+	if err == nil {
+		t.Fatal("expected error for EXPLAIN INSERT, got nil")
+	}
+}
+
+func TestValidateReadOnly_ExplainDelete(t *testing.T) {
+	err := ValidateReadOnly("EXPLAIN DELETE FROM users WHERE id = 1")
+	if err == nil {
+		t.Fatal("expected error for EXPLAIN DELETE, got nil")
+	}
+}
+
 func TestValidateReadOnly_InvalidSQL(t *testing.T) {
 	err := ValidateReadOnly("NOT VALID SQL AT ALL !!!!")
 	if err == nil {
