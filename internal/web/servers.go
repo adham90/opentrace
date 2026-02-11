@@ -270,16 +270,34 @@ echo "==> Detected ${OS}/${ARCH}"
 # Try to download pre-built binary from GitHub releases
 REPO="adham90/opentrace"
 BINARY_NAME="opentrace"
-DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/${BINARY_NAME}_${OS}_${ARCH}"
 
 install_from_release() {
   echo "==> Downloading from GitHub releases..."
+  # Get latest version tag
+  local latest_url="https://github.com/${REPO}/releases/latest"
+  local version=""
   if command -v curl &>/dev/null; then
-    curl -fsSL -o /tmp/${BINARY_NAME} "${DOWNLOAD_URL}" 2>/dev/null && return 0
+    version=$(curl -fsSL -o /dev/null -w '%{url_effective}' "${latest_url}" 2>/dev/null | grep -oE '[^/]+$' | sed 's/^v//')
   elif command -v wget &>/dev/null; then
-    wget -q -O /tmp/${BINARY_NAME} "${DOWNLOAD_URL}" 2>/dev/null && return 0
+    version=$(wget --spider -S -O /dev/null "${latest_url}" 2>&1 | grep -i 'Location:' | tail -1 | grep -oE '[^/]+$' | sed 's/^v//')
   fi
-  return 1
+  if [ -z "$version" ]; then return 1; fi
+
+  local archive="${BINARY_NAME}_${version}_${OS}_${ARCH}.tar.gz"
+  local download_url="https://github.com/${REPO}/releases/latest/download/${archive}"
+  echo "    Version: v${version}"
+
+  if command -v curl &>/dev/null; then
+    curl -fsSL -o "/tmp/${archive}" "${download_url}" 2>/dev/null || return 1
+  elif command -v wget &>/dev/null; then
+    wget -q -O "/tmp/${archive}" "${download_url}" 2>/dev/null || return 1
+  else
+    return 1
+  fi
+
+  tar -xzf "/tmp/${archive}" -C /tmp "${BINARY_NAME}" 2>/dev/null || return 1
+  rm -f "/tmp/${archive}"
+  return 0
 }
 
 install_from_source() {
