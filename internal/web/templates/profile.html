@@ -53,6 +53,7 @@
           <pre><code id="mcp-config-remote-display">{
   "mcpServers": {
     "opentrace": {
+      "type": "http",
       "url": "<origin>/mcp/sse",
       "headers": {
         "Authorization": "Bearer ••••••••"
@@ -148,6 +149,7 @@ function updateConfigDisplays() {
     var remoteConfig = {
       mcpServers: {
         opentrace: {
+          type: 'http',
           url: window.location.origin + '/mcp/sse',
           headers: {
             Authorization: 'Bearer ' + mcpToken
