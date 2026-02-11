@@ -20,6 +20,7 @@
       <button class="btn-close" onclick="hideModal()">&times;</button>
     </div>
     <form id="connector-form" onsubmit="saveConnector(event)">
+      <input type="hidden" id="conn-id" value="">
       <div class="modal-body">
         <div class="modal-section">
           <div class="modal-section-label">Name</div>
@@ -116,6 +117,7 @@ function loadConnectors() {
 
       html += '  <div class="connector-actions">';
       if (isAdmin) {
+        html += '    <button class="btn btn-sm" onclick="editConnector(\'' + c.id + '\')">Edit</button>';
         html += '    <button class="btn btn-sm" onclick="testConnector(\'' + c.id + '\', this)">Test</button>';
         html += '    <button class="btn btn-sm btn-danger" onclick="deleteConnector(\'' + c.id + '\', \'' + escapeHtml(c.name).replace(/'/g, "\\'") + '\')">Delete</button>';
       }
@@ -128,7 +130,31 @@ function loadConnectors() {
 
 function showCreateModal() {
   document.getElementById('connector-form').reset();
+  document.getElementById('conn-id').value = '';
+  document.getElementById('connector-modal-title').innerHTML = '<span class="prompt">$</span> new-database-connector';
+  var submitBtn = document.querySelector('#connector-form button[type="submit"]');
+  submitBtn.textContent = 'Create Connector';
   document.getElementById('connector-modal').style.display = 'flex';
+}
+
+function editConnector(id) {
+  fetch('/api/connectors/' + id).then(function(r) {
+    if (!r.ok) { showToast('Failed to load connector', 'error'); return; }
+    return r.json();
+  }).then(function(c) {
+    if (!c) return;
+    document.getElementById('connector-form').reset();
+    document.getElementById('conn-id').value = c.id;
+    document.getElementById('conn-name').value = c.name || '';
+    document.getElementById('conn-env').value = c.environment || '';
+    if (c.config && c.config.connection_string) {
+      document.getElementById('cfg-connection-string').value = c.config.connection_string;
+    }
+    document.getElementById('connector-modal-title').innerHTML = '<span class="prompt">$</span> edit-database-connector';
+    var submitBtn = document.querySelector('#connector-form button[type="submit"]');
+    submitBtn.textContent = 'Save Changes';
+    document.getElementById('connector-modal').style.display = 'flex';
+  }).catch(function() { showToast('Network error', 'error'); });
 }
 
 function hideModal() {
@@ -146,6 +172,8 @@ function copySetupSQL(btn) {
 
 function saveConnector(e) {
   e.preventDefault();
+  var connId = document.getElementById('conn-id').value;
+  var isEdit = connId !== '';
   var nameInput = document.getElementById('conn-name');
   var csInput = document.getElementById('cfg-connection-string');
   var environment = document.getElementById('conn-env').value;
@@ -159,28 +187,48 @@ function saveConnector(e) {
   var config = { connection_string: csInput.value };
 
   var submitBtn = e.target.querySelector('button[type="submit"]');
-  setButtonLoading(submitBtn, true, 'creating...');
+  setButtonLoading(submitBtn, true, isEdit ? 'saving...' : 'creating...');
 
-  var body = {type: 'database', name: nameInput.value, config: config};
-  if (environment) body.environment = environment;
-
-  fetch('/api/connectors', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body)
-  }).then(function(r) {
-    setButtonLoading(submitBtn, false);
-    if (r.ok) {
-      showToast('Connector created', 'success');
-      hideModal();
-      loadConnectors();
-    } else {
-      r.json().then(function(d) { showToast(d.error || 'Failed to create connector', 'error'); }).catch(function() { showToast('Failed to create connector', 'error'); });
-    }
-  }).catch(function() {
-    setButtonLoading(submitBtn, false);
-    showToast('Network error — could not create connector', 'error');
-  });
+  if (isEdit) {
+    var body = {name: nameInput.value, config: config, environment: environment};
+    fetch('/api/connectors/' + connId, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    }).then(function(r) {
+      setButtonLoading(submitBtn, false);
+      if (r.ok) {
+        showToast('Connector updated', 'success');
+        hideModal();
+        loadConnectors();
+      } else {
+        r.json().then(function(d) { showToast(d.error || 'Failed to update connector', 'error'); }).catch(function() { showToast('Failed to update connector', 'error'); });
+      }
+    }).catch(function() {
+      setButtonLoading(submitBtn, false);
+      showToast('Network error — could not update connector', 'error');
+    });
+  } else {
+    var body = {type: 'database', name: nameInput.value, config: config};
+    if (environment) body.environment = environment;
+    fetch('/api/connectors', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    }).then(function(r) {
+      setButtonLoading(submitBtn, false);
+      if (r.ok) {
+        showToast('Connector created', 'success');
+        hideModal();
+        loadConnectors();
+      } else {
+        r.json().then(function(d) { showToast(d.error || 'Failed to create connector', 'error'); }).catch(function() { showToast('Failed to create connector', 'error'); });
+      }
+    }).catch(function() {
+      setButtonLoading(submitBtn, false);
+      showToast('Network error — could not create connector', 'error');
+    });
+  }
 }
 
 function testConnector(id, btn) {

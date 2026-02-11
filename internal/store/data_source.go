@@ -140,31 +140,50 @@ func (s *dataSourceStore) List(ctx context.Context, params ListDataSourceParams)
 func (s *dataSourceStore) Update(ctx context.Context, id uuid.UUID, params UpdateDataSourceParams) (*DataSource, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	var statusStr, statusMsg, testedAt, envStr *string
+	var nameStr, statusStr, statusMsg, testedAt, envStr, configStr *string
+	if params.Name != nil {
+		nameStr = params.Name
+	}
+	if params.Config != nil {
+		configJSON, err := json.Marshal(params.Config)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling config: %w", err)
+		}
+		cs := string(configJSON)
+		configStr = &cs
+	}
 	if params.Status != nil {
-		s := string(*params.Status)
-		statusStr = &s
+		st := string(*params.Status)
+		statusStr = &st
 	}
 	if params.StatusMessage != nil {
 		statusMsg = params.StatusMessage
 	}
 	if params.LastTestedAt != nil {
-		s := params.LastTestedAt.UTC().Format(time.RFC3339)
-		testedAt = &s
+		ts := params.LastTestedAt.UTC().Format(time.RFC3339)
+		testedAt = &ts
 	}
 	if params.Environment != nil {
 		envStr = params.Environment
 	}
 
+	// When config changes, reset status to disconnected so the user knows to re-test.
+	if params.Config != nil && params.Status == nil {
+		disconnected := string(StatusDisconnected)
+		statusStr = &disconnected
+	}
+
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE data_sources
-		 SET status = COALESCE(?, status),
+		 SET name = COALESCE(?, name),
+		     config = COALESCE(?, config),
+		     status = COALESCE(?, status),
 		     status_message = COALESCE(?, status_message),
 		     last_tested_at = COALESCE(?, last_tested_at),
 		     environment = COALESCE(?, environment),
 		     updated_at = ?
 		 WHERE id = ?`,
-		statusStr, statusMsg, testedAt, envStr, now, id.String(),
+		nameStr, configStr, statusStr, statusMsg, testedAt, envStr, now, id.String(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("updating data source: %w", err)

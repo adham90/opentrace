@@ -182,6 +182,109 @@ func TestUpdateDataSource_Status(t *testing.T) {
 	}
 }
 
+func TestUpdateDataSource_Name(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewDataSourceStore(db)
+	ctx := context.Background()
+
+	created, err := s.Create(ctx, CreateDataSourceParams{
+		Type:   ConnectorDatabase,
+		Name:   "Old Name",
+		Config: map[string]any{"host": "db.example.com"},
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	newName := "New Name"
+	updated, err := s.Update(ctx, created.ID, UpdateDataSourceParams{
+		Name: &newName,
+	})
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	if updated.Name != "New Name" {
+		t.Errorf("Name = %q, want %q", updated.Name, "New Name")
+	}
+	// Status should remain unchanged when only name is updated
+	if updated.Status != StatusDisconnected {
+		t.Errorf("Status = %q, want %q", updated.Status, StatusDisconnected)
+	}
+}
+
+func TestUpdateDataSource_Config(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewDataSourceStore(db)
+	ctx := context.Background()
+
+	// First create and mark as connected
+	created, err := s.Create(ctx, CreateDataSourceParams{
+		Type:   ConnectorDatabase,
+		Name:   "DB",
+		Config: map[string]any{"connection_string": "postgres://old"},
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	status := StatusConnected
+	now := time.Now()
+	_, err = s.Update(ctx, created.ID, UpdateDataSourceParams{
+		Status: &status, LastTestedAt: &now,
+	})
+	if err != nil {
+		t.Fatalf("Update status failed: %v", err)
+	}
+
+	// Now update config — status should reset to disconnected
+	newConfig := map[string]any{"connection_string": "postgres://new"}
+	updated, err := s.Update(ctx, created.ID, UpdateDataSourceParams{
+		Config: newConfig,
+	})
+	if err != nil {
+		t.Fatalf("Update config failed: %v", err)
+	}
+
+	if updated.Config["connection_string"] != "postgres://new" {
+		t.Errorf("Config = %v, want connection_string=postgres://new", updated.Config)
+	}
+	if updated.Status != StatusDisconnected {
+		t.Errorf("Status = %q, want %q (should reset on config change)", updated.Status, StatusDisconnected)
+	}
+}
+
+func TestUpdateDataSource_NameAndConfig(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewDataSourceStore(db)
+	ctx := context.Background()
+
+	created, err := s.Create(ctx, CreateDataSourceParams{
+		Type:   ConnectorDatabase,
+		Name:   "Old",
+		Config: map[string]any{"host": "old.example.com"},
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	newName := "New"
+	newConfig := map[string]any{"host": "new.example.com"}
+	updated, err := s.Update(ctx, created.ID, UpdateDataSourceParams{
+		Name:   &newName,
+		Config: newConfig,
+	})
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	if updated.Name != "New" {
+		t.Errorf("Name = %q, want %q", updated.Name, "New")
+	}
+	if updated.Config["host"] != "new.example.com" {
+		t.Errorf("Config[host] = %v, want new.example.com", updated.Config["host"])
+	}
+}
+
 func TestDeleteDataSource(t *testing.T) {
 	db := setupTestDB(t)
 	s := NewDataSourceStore(db)

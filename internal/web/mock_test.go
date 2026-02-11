@@ -70,6 +70,12 @@ func (m *mockDataSourceStore) Update(ctx context.Context, id uuid.UUID, params s
 	if !ok {
 		return nil, store.ErrNotFound
 	}
+	if params.Name != nil {
+		ds.Name = *params.Name
+	}
+	if params.Config != nil {
+		ds.Config = params.Config
+	}
 	if params.Status != nil {
 		ds.Status = *params.Status
 	}
@@ -78,6 +84,9 @@ func (m *mockDataSourceStore) Update(ctx context.Context, id uuid.UUID, params s
 	}
 	if params.LastTestedAt != nil {
 		ds.LastTestedAt = params.LastTestedAt
+	}
+	if params.Environment != nil {
+		ds.Environment = *params.Environment
 	}
 	return ds, nil
 }

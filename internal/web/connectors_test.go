@@ -190,6 +190,134 @@ func TestDeleteConnector_NotFound(t *testing.T) {
 	}
 }
 
+func TestGetConnector_Success(t *testing.T) {
+	srv, ms := setupTestServer()
+
+	ds, _ := ms.Create(nil, store.CreateDataSourceParams{
+		Type:   store.ConnectorDatabase,
+		Name:   "Prod DB",
+		Config: map[string]any{"connection_string": "postgres://localhost/db"},
+	})
+
+	url := fmt.Sprintf("/api/connectors/%s", ds.ID)
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var got store.DataSource
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if got.ID != ds.ID {
+		t.Errorf("ID = %v, want %v", got.ID, ds.ID)
+	}
+	if got.Name != "Prod DB" {
+		t.Errorf("Name = %q, want %q", got.Name, "Prod DB")
+	}
+}
+
+func TestGetConnector_NotFound(t *testing.T) {
+	srv, _ := setupTestServer()
+
+	url := fmt.Sprintf("/api/connectors/%s", uuid.New())
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestUpdateConnector_Success(t *testing.T) {
+	srv, ms := setupTestServer()
+
+	ds, _ := ms.Create(nil, store.CreateDataSourceParams{
+		Type:   store.ConnectorDatabase,
+		Name:   "Old Name",
+		Config: map[string]any{"connection_string": "postgres://old"},
+	})
+
+	body := `{"name":"New Name","config":{"connection_string":"postgres://new"}}`
+	url := fmt.Sprintf("/api/connectors/%s", ds.ID)
+	req := httptest.NewRequest(http.MethodPut, url, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var updated store.DataSource
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if updated.Name != "New Name" {
+		t.Errorf("Name = %q, want %q", updated.Name, "New Name")
+	}
+}
+
+func TestUpdateConnector_NotFound(t *testing.T) {
+	srv, _ := setupTestServer()
+
+	body := `{"name":"New Name"}`
+	url := fmt.Sprintf("/api/connectors/%s", uuid.New())
+	req := httptest.NewRequest(http.MethodPut, url, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestUpdateConnector_EmptyName(t *testing.T) {
+	srv, ms := setupTestServer()
+
+	ds, _ := ms.Create(nil, store.CreateDataSourceParams{
+		Type:   store.ConnectorDatabase,
+		Name:   "DB",
+		Config: map[string]any{},
+	})
+
+	body := `{"name":""}`
+	url := fmt.Sprintf("/api/connectors/%s", ds.ID)
+	req := httptest.NewRequest(http.MethodPut, url, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestUpdateConnector_InvalidBody(t *testing.T) {
+	srv, _ := setupTestServer()
+
+	url := fmt.Sprintf("/api/connectors/%s", uuid.New())
+	req := httptest.NewRequest(http.MethodPut, url, bytes.NewBufferString("{invalid"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
 func TestDeleteConnector_InvalidUUID(t *testing.T) {
 	srv, _ := setupTestServer()
 

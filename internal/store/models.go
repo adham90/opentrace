@@ -45,6 +45,8 @@ type CreateDataSourceParams struct {
 }
 
 type UpdateDataSourceParams struct {
+	Name          *string          `json:"name,omitempty"`
+	Config        map[string]any   `json:"config,omitempty"`
 	Status        *ConnectorStatus `json:"status,omitempty"`
 	StatusMessage *string          `json:"status_message,omitempty"`
 	LastTestedAt  *time.Time       `json:"last_tested_at,omitempty"`
@@ -100,12 +102,12 @@ type ServiceLogCount struct {
 	ErrorCount int    `json:"error_count"`
 }
 
-// MonitorType represents the evaluation strategy.
-type MonitorType string
+// WatcherType represents the evaluation strategy (AI or rule-based).
+type WatcherType string
 
 const (
-	MonitorTypeAI   MonitorType = "ai"
-	MonitorTypeRule MonitorType = "rule"
+	WatcherTypeAI   WatcherType = "ai"
+	WatcherTypeRule WatcherType = "rule"
 )
 
 // RuleSource identifies what the rule evaluates.
@@ -142,7 +144,7 @@ type RuleConfig struct {
 	LatencyThreshold int          `json:"latency_threshold_ms,omitempty"`
 }
 
-// LogFilter defines log search criteria for rule monitors.
+// LogFilter defines log search criteria for rule watchers.
 type LogFilter struct {
 	Service     string `json:"service,omitempty"`
 	Level       string `json:"level,omitempty"`
@@ -177,7 +179,7 @@ const (
 	WatcherError  WatcherStatus = "error"
 )
 
-// AdaptiveState represents the adaptive scheduling state of a monitor.
+// AdaptiveState represents the adaptive scheduling state of a watcher.
 type AdaptiveState string
 
 const (
@@ -189,7 +191,7 @@ const (
 	AdaptiveError     AdaptiveState = "error"
 )
 
-// AdaptiveConfig configures adaptive scheduling for a monitor.
+// AdaptiveConfig configures adaptive scheduling for a watcher.
 type AdaptiveConfig struct {
 	Enabled            bool    `json:"enabled"`
 	EscalatedInterval  string  `json:"escalated_interval,omitempty"`
@@ -218,7 +220,7 @@ type Watcher struct {
 	Effort       WatcherEffort   `json:"effort"`
 	Status       WatcherStatus   `json:"status"`
 	Notify       json.RawMessage `json:"notify"`
-	MonitorType  MonitorType     `json:"monitor_type"`
+	WatcherType  WatcherType     `json:"watcher_type"`
 	RuleConfig   *RuleConfig     `json:"rule_config,omitempty"`
 	DataSourceID *string         `json:"data_source_id,omitempty"`
 	LastRunAt    *time.Time      `json:"last_run_at,omitempty"`

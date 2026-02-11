@@ -219,6 +219,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Get("/environments", srv.handleListEnvironments)
 			r.Get("/services", srv.handleListServices)
 			r.Get("/connectors", srv.handleListConnectors)
+			r.Get("/connectors/{id}", srv.handleGetConnectorAPI)
 			r.Get("/models", srv.handleListModels)
 			r.Get("/watchers", srv.handleListWatchers)
 			r.Get("/watchers/{id}", srv.handleGetWatcher)
@@ -245,6 +246,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Group(func(r chi.Router) {
 			r.Use(srv.requireAdminOrOnboarding)
 			r.Post("/connectors", srv.handleCreateConnectorAPI)
+			r.Put("/connectors/{id}", srv.handleUpdateConnectorAPI)
 			r.Post("/connectors/{id}/test", srv.handleTestConnectorAPI)
 			r.Delete("/connectors/{id}", srv.handleDeleteConnectorAPI)
 			r.Post("/watchers", srv.handleCreateWatcher)

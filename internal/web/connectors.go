@@ -168,6 +168,85 @@ func (s *Server) handleTestConnectorAPI(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, updated)
 }
 
+func (s *Server) handleGetConnectorAPI(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid connector ID")
+		return
+	}
+
+	ds, err := s.dsStore.GetByID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "connector not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get connector")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ds)
+}
+
+type updateConnectorRequest struct {
+	Name        *string        `json:"name,omitempty"`
+	Environment *string        `json:"environment,omitempty"`
+	Config      map[string]any `json:"config,omitempty"`
+}
+
+func (s *Server) handleUpdateConnectorAPI(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid connector ID")
+		return
+	}
+
+	var req updateConnectorRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Name != nil && *req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name cannot be empty")
+		return
+	}
+
+	params := store.UpdateDataSourceParams{
+		Name:        req.Name,
+		Environment: req.Environment,
+		Config:      req.Config,
+	}
+
+	// Unregister old connector from registry when config changes
+	if req.Config != nil {
+		ds, err := s.dsStore.GetByID(r.Context(), id)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "connector not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to get connector")
+			return
+		}
+		s.registry.Unregister(connector.ConnectorType(ds.Type))
+	}
+
+	updated, err := s.dsStore.Update(r.Context(), id, params)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "connector not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to update connector")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, updated)
+}
+
 func (s *Server) handleDeleteConnectorAPI(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
