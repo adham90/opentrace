@@ -369,28 +369,58 @@ sudo systemctl enable --now opentrace-agent
 
 ## Deployment
 
-### Docker
+### One-Click Deploy
+
+| Platform | Deploy | Notes |
+|---|---|---|
+| **DigitalOcean** | [![Deploy to DO](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/adham90/opentrace/tree/main) | App Platform, ~$5/mo |
+| **Railway** | [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template?template=https://github.com/adham90/opentrace) | Free tier available |
+| **Render** | [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/adham90/opentrace) | Free tier, persistent disk |
+| **Hetzner** | `./deploy/deploy.sh` | Full VPS with Caddy + backups, ~$4/mo |
+
+### Docker (recommended)
 
 ```bash
-# Build the image
-docker build -t opentrace .
-
-# Run
-docker run -p 8080:8080 \
-  -e OPENTRACE_LISTEN_ADDR=:8080 \
-  -e OPENTRACE_LLM_PROVIDER=ollama \
-  -e OPENTRACE_OLLAMA_URL=http://host.docker.internal:11434 \
-  -v opentrace-data:/root/.opentrace \
-  opentrace
+docker run -d --name opentrace \
+  -p 8080:8080 \
+  -v opentrace-data:/data \
+  -e OPENTRACE_LLM_PROVIDER=anthropic \
+  -e OPENTRACE_ANTHROPIC_API_KEY=sk-ant-xxx \
+  ghcr.io/adham90/opentrace:latest
 ```
 
 ### Docker Compose
 
 ```bash
-docker-compose up -d
+# Development (builds from source)
+docker compose up -d
+
+# Production (pre-built image + auto-updates via Watchtower)
+docker compose -f docker-compose.prod.yml up -d
 ```
 
-The included `docker-compose.yml` runs OpenTrace with PostgreSQL (for database connectors) and Ollama (for local LLM inference).
+The production compose file pulls from `ghcr.io/adham90/opentrace:latest` and includes [Watchtower](https://containrrr.dev/watchtower/) for automatic hourly updates.
+
+### Fly.io
+
+```bash
+fly launch --copy-config --no-deploy
+fly secrets set OPENTRACE_LLM_PROVIDER=anthropic OPENTRACE_ANTHROPIC_API_KEY=sk-ant-xxx
+fly deploy
+```
+
+### Binary
+
+Download from [GitHub Releases](https://github.com/adham90/opentrace/releases):
+
+```bash
+# Linux amd64
+curl -L https://github.com/adham90/opentrace/releases/latest/download/opentrace_linux_amd64.tar.gz | tar xz
+cp .env.example .env  # edit with your config
+./opentrace
+```
+
+Binaries are available for Linux, macOS, and Windows (amd64 + arm64).
 
 ### Systemd Service
 
@@ -417,6 +447,16 @@ WantedBy=multi-user.target
 ```bash
 sudo systemctl enable --now opentrace
 ```
+
+### Updates
+
+OpenTrace checks for new versions automatically. When an update is available, a banner appears at the top of the dashboard with a link to the release notes.
+
+**Auto-updates (Docker):** Use `docker-compose.prod.yml` which includes Watchtower — it checks for new images hourly and restarts automatically.
+
+**Manual update (Docker):** `docker compose pull && docker compose up -d`
+
+**Manual update (binary):** Download the new release and restart the service.
 
 ### Data Storage
 
