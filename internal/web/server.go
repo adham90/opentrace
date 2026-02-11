@@ -53,6 +53,8 @@ type Server struct {
 	selfUpdater    *selfUpdater
 	sseServer      *mcpgoserver.SSEServer
 	restartCh      chan struct{} // closed when a self-update wants to restart
+	loginLimiter   *RateLimiter
+	apiLimiter     *RateLimiter
 	logsConnMu     sync.Mutex
 	metricsConnMu  sync.Mutex
 }
@@ -137,7 +139,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Get("/api/version/banner", srv.handleVersionBanner)
 
 	// MCP SSE transport — authenticated via Bearer token (MCP token).
-	if srv.userStore != nil {
+	if srv.userStore != nil && srv.registry != nil {
 		sseServer := srv.setupMCPSSE()
 		srv.sseServer = sseServer
 		router.Route("/mcp", func(r chi.Router) {

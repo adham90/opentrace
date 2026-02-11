@@ -32,16 +32,12 @@ type Deps struct {
 	ServerName      string // OPENTRACE_MCP_NAME — custom server name (default: "opentrace")
 }
 
-// Serve starts a stdio-based MCP server that exposes all tools from the
-// given connector registry plus watcher/alert management tools.
-// It blocks until the connection is closed.
-//
-// When UserStore and MCPToken are provided, the token is validated against the
-// user database. Invalid/disabled tokens result in zero tools being registered
-// (the server stays alive but is useless). Members get read-only tools; admins
-// get all tools. When no UserStore is provided (backward compat), all tools
-// are registered.
-func Serve(deps Deps) error {
+// NewConfiguredServer creates an MCPServer and registers tools based on the
+// access level. When isAdmin is true, both read-only and write tools are
+// registered; otherwise only read-only tools are registered.
+// This is used by both the stdio transport (Serve) and the SSE transport
+// (web server).
+func NewConfiguredServer(deps Deps, isAdmin bool) *server.MCPServer {
 	name := deps.ServerName
 	if name == "" {
 		name = "opentrace"
@@ -53,8 +49,28 @@ func Serve(deps Deps) error {
 		server.WithToolCapabilities(false),
 	)
 
+	b := &CatalogBuilder{}
+	addReadOnlyTools(s, deps, b)
+
+	if isAdmin {
+		addWriteTools(s, deps, b)
+	}
+
+	return s
+}
+
+// Serve starts a stdio-based MCP server that exposes all tools from the
+// given connector registry plus watcher/alert management tools.
+// It blocks until the connection is closed.
+//
+// When UserStore and MCPToken are provided, the token is validated against the
+// user database. Invalid/disabled tokens result in zero tools being registered
+// (the server stays alive but is useless). Members get read-only tools; admins
+// get all tools. When no UserStore is provided (backward compat), all tools
+// are registered.
+func Serve(deps Deps) error {
 	// Determine access level.
-	isAdmin := true    // default: full access (backward compat)
+	isAdmin := true // default: full access (backward compat)
 	hasAccess := true
 
 	if deps.UserStore != nil && deps.MCPToken != "" {
@@ -71,18 +87,15 @@ func Serve(deps Deps) error {
 
 	if !hasAccess {
 		// Start server with zero tools — stays alive but useless.
+		name := deps.ServerName
+		if name == "" {
+			name = "opentrace"
+		}
+		s := server.NewMCPServer(name, "0.1.0", server.WithToolCapabilities(false))
 		return server.ServeStdio(s)
 	}
 
-	// Read-only tools (available to all authenticated users).
-	b := &CatalogBuilder{}
-	addReadOnlyTools(s, deps, b)
-
-	// Write tools (admin only).
-	if isAdmin {
-		addWriteTools(s, deps, b)
-	}
-
+	s := NewConfiguredServer(deps, isAdmin)
 	return server.ServeStdio(s)
 }
 

@@ -41,9 +41,35 @@
       <p class="text-dim" style="margin: 0 0 0.75rem 0;">
         Copy this JSON into <code>~/.claude/settings.json</code> (global) or your project's <code>.mcp.json</code> file.
       </p>
-      <div class="code-block" style="position: relative;">
-        <button class="copy-btn" id="mcp-config-copy-btn" onclick="copyMCPConfig(this)" disabled>copy</button>
-        <pre><code id="mcp-config-display">{
+
+      <div class="mcp-config-tabs" style="margin-bottom: 0.5rem;">
+        <button class="mcp-tab active" onclick="switchMCPTab('remote', this)" id="mcp-tab-remote">Remote (URL)</button>
+        <button class="mcp-tab" onclick="switchMCPTab('local', this)" id="mcp-tab-local">Local (stdio)</button>
+      </div>
+
+      <div id="mcp-config-remote">
+        <div class="code-block" style="position: relative;">
+          <button class="copy-btn" id="mcp-config-remote-copy-btn" onclick="copyMCPConfig('remote', this)" disabled>copy</button>
+          <pre><code id="mcp-config-remote-display">{
+  "mcpServers": {
+    "opentrace": {
+      "url": "<origin>/mcp/sse",
+      "headers": {
+        "Authorization": "Bearer ••••••••"
+      }
+    }
+  }
+}</code></pre>
+        </div>
+        <p class="text-dim" style="margin: 0.5rem 0 0 0; font-size: 0.8rem;">
+          Works with any remote OpenTrace deployment. Click <strong>reveal</strong> above to load your token, then copy.
+        </p>
+      </div>
+
+      <div id="mcp-config-local" style="display: none;">
+        <div class="code-block" style="position: relative;">
+          <button class="copy-btn" id="mcp-config-local-copy-btn" onclick="copyMCPConfig('local', this)" disabled>copy</button>
+          <pre><code id="mcp-config-local-display">{
   "mcpServers": {
     "opentrace": {
       "command": "opentrace",
@@ -54,10 +80,11 @@
     }
   }
 }</code></pre>
+        </div>
+        <p class="text-dim" style="margin: 0.5rem 0 0 0; font-size: 0.8rem;">
+          Requires the <code>opentrace</code> binary installed locally. Click <strong>reveal</strong> above to load your token, then copy.
+        </p>
       </div>
-      <p class="text-dim" style="margin: 0.5rem 0 0 0; font-size: 0.8rem;">
-        Click <strong>reveal</strong> above to load your token into the config, then copy.
-      </p>
       {{else}}
       <p class="text-dim">MCP access is disabled for your account. Contact an admin to enable it.</p>
       {{end}}
@@ -104,34 +131,63 @@ function revealToken() {
     mcpToken = d.mcp_token;
     display.textContent = mcpToken;
     btn.textContent = 'copy';
-    updateConfigDisplay();
+    updateConfigDisplays();
   }).catch(function() {
     btn.textContent = 'error';
     setTimeout(function() { btn.textContent = 'reveal'; }, 2000);
   });
 }
 
-function updateConfigDisplay() {
-  var el = document.getElementById('mcp-config-display');
-  var btn = document.getElementById('mcp-config-copy-btn');
-  if (!mcpToken || !el) return;
-  var config = {
-    mcpServers: {
-      opentrace: {
-        command: 'opentrace',
-        args: ['mcp'],
-        env: {
-          OPENTRACE_MCP_TOKEN: mcpToken
+function updateConfigDisplays() {
+  if (!mcpToken) return;
+
+  // Remote (URL) config
+  var remoteEl = document.getElementById('mcp-config-remote-display');
+  var remoteBtn = document.getElementById('mcp-config-remote-copy-btn');
+  if (remoteEl) {
+    var remoteConfig = {
+      mcpServers: {
+        opentrace: {
+          url: window.location.origin + '/mcp/sse',
+          headers: {
+            Authorization: 'Bearer ' + mcpToken
+          }
         }
       }
-    }
-  };
-  el.textContent = JSON.stringify(config, null, 2);
-  btn.disabled = false;
+    };
+    remoteEl.textContent = JSON.stringify(remoteConfig, null, 2);
+    remoteBtn.disabled = false;
+  }
+
+  // Local (stdio) config
+  var localEl = document.getElementById('mcp-config-local-display');
+  var localBtn = document.getElementById('mcp-config-local-copy-btn');
+  if (localEl) {
+    var localConfig = {
+      mcpServers: {
+        opentrace: {
+          command: 'opentrace',
+          args: ['mcp'],
+          env: {
+            OPENTRACE_MCP_TOKEN: mcpToken
+          }
+        }
+      }
+    };
+    localEl.textContent = JSON.stringify(localConfig, null, 2);
+    localBtn.disabled = false;
+  }
 }
 
-function copyMCPConfig(btn) {
-  var el = document.getElementById('mcp-config-display');
+function switchMCPTab(tab, btn) {
+  document.getElementById('mcp-config-remote').style.display = tab === 'remote' ? '' : 'none';
+  document.getElementById('mcp-config-local').style.display = tab === 'local' ? '' : 'none';
+  document.querySelectorAll('.mcp-tab').forEach(function(t) { t.classList.remove('active'); });
+  btn.classList.add('active');
+}
+
+function copyMCPConfig(variant, btn) {
+  var el = document.getElementById('mcp-config-' + variant + '-display');
   navigator.clipboard.writeText(el.textContent);
   btn.textContent = 'copied!';
   setTimeout(function() { btn.textContent = 'copy'; }, 1500);
@@ -182,6 +238,30 @@ function copyMCPConfig(btn) {
   border-radius: 4px;
   margin-bottom: 1rem;
   font-size: 0.9rem;
+}
+.mcp-config-tabs {
+  display: flex;
+  gap: 0;
+}
+.mcp-tab {
+  padding: 0.4rem 1rem;
+  background: transparent;
+  border: 1px solid var(--border, #333);
+  color: var(--fg-dim, #999);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.mcp-tab:first-child {
+  border-radius: 4px 0 0 4px;
+}
+.mcp-tab:last-child {
+  border-radius: 0 4px 4px 0;
+  border-left: none;
+}
+.mcp-tab.active {
+  background: var(--accent, #6c63ff);
+  color: #fff;
+  border-color: var(--accent, #6c63ff);
 }
 </style>
 {{end}}

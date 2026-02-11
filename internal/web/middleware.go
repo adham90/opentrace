@@ -76,33 +76,50 @@ type RateLimiter struct {
 	entries  map[string]*rateLimitEntry
 	limit    int
 	window   time.Duration
+	done     chan struct{}
 }
 
 // NewRateLimiter creates a rate limiter allowing limit requests per window per IP.
 // It starts a background goroutine that evicts expired entries every 5 minutes.
+// Call Stop() to terminate the background goroutine.
 func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 	rl := &RateLimiter{
 		entries: make(map[string]*rateLimitEntry),
 		limit:   limit,
 		window:  window,
+		done:    make(chan struct{}),
 	}
 	go rl.cleanup()
 	return rl
+}
+
+// Stop terminates the background cleanup goroutine.
+func (rl *RateLimiter) Stop() {
+	select {
+	case <-rl.done:
+	default:
+		close(rl.done)
+	}
 }
 
 // cleanup periodically evicts expired entries to prevent unbounded map growth.
 func (rl *RateLimiter) cleanup() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
-		rl.mu.Lock()
-		now := time.Now()
-		for ip, entry := range rl.entries {
-			if now.After(entry.resetAt) {
-				delete(rl.entries, ip)
+	for {
+		select {
+		case <-rl.done:
+			return
+		case <-ticker.C:
+			rl.mu.Lock()
+			now := time.Now()
+			for ip, entry := range rl.entries {
+				if now.After(entry.resetAt) {
+					delete(rl.entries, ip)
+				}
 			}
+			rl.mu.Unlock()
 		}
-		rl.mu.Unlock()
 	}
 }
 
@@ -186,7 +203,7 @@ func (s *Server) DynamicAPIKeyAuth(next http.Handler) http.Handler {
 func (s *Server) SessionAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip session lookups for paths that don't need authentication
-		if strings.HasPrefix(r.URL.Path, "/static/") || r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/api/version") {
+		if strings.HasPrefix(r.URL.Path, "/static/") || r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/api/version") || strings.HasPrefix(r.URL.Path, "/mcp/") {
 			next.ServeHTTP(w, r)
 			return
 		}
