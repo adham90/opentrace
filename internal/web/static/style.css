@@ -2414,3 +2414,32 @@ th.sortable.sort-desc::after { content: '\25BC'; opacity: 0.8; }
   margin-left: 6px;
   vertical-align: middle;
 }
+
+/* Update banner */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--blue);
+  color: #fff;
+  font-size: 13px;
+}
+.update-banner a {
+  color: #fff;
+  text-decoration: underline;
+}
+.update-banner-dismiss {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0.8;
+}
+.update-banner-dismiss:hover {
+  opacity: 1;
+}

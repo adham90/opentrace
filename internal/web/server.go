@@ -46,10 +46,11 @@ type Server struct {
 	executor      *watcher.Executor
 	eventHub      *watcher.EventHub
 	modelRegistry *llm.ModelRegistry
-	ruleEvaluator *watcher.RuleEvaluator
-	toolCatalog   *mcpserver.ToolCatalog
-	logsConnMu    sync.Mutex
-	metricsConnMu sync.Mutex
+	ruleEvaluator  *watcher.RuleEvaluator
+	toolCatalog    *mcpserver.ToolCatalog
+	versionChecker *versionChecker
+	logsConnMu     sync.Mutex
+	metricsConnMu  sync.Mutex
 }
 
 // ServerDeps holds all dependencies for the web server.
@@ -104,9 +105,10 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		toolCatalog:   deps.ToolCatalog,
 		cfg:           deps.Cfg,
 		executor:      deps.Executor,
-		eventHub:      deps.EventHub,
-		modelRegistry: deps.ModelRegistry,
-		ruleEvaluator: deps.RuleEvaluator,
+		eventHub:       deps.EventHub,
+		modelRegistry:  deps.ModelRegistry,
+		ruleEvaluator:  deps.RuleEvaluator,
+		versionChecker: newVersionChecker("adham90", "opentrace"),
 	}
 
 	cfg := deps.Cfg
@@ -125,6 +127,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 
 	router.Get("/healthz", srv.handleHealthCheck)
 	router.Get("/api/version", srv.handleVersion)
+	router.Get("/api/version/check", srv.handleVersionCheck)
+	router.Get("/api/version/banner", srv.handleVersionBanner)
 
 	// Static files
 	if cfg != nil && cfg.DevMode {
@@ -301,6 +305,34 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		"commit":  version.Commit,
 		"date":    version.Date,
 	})
+}
+
+func (s *Server) handleVersionCheck(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.versionChecker.check()
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"current_version":  version.Version,
+			"update_available": false,
+			"error":            err.Error(),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleVersionBanner(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.versionChecker.check()
+	if err != nil || !resp.UpdateAvailable {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<div class="update-banner" id="update-banner">
+  <span>OpenTrace <strong>v%s</strong> is available (you have v%s).</span>
+  <a href="%s" target="_blank" rel="noopener">View release notes</a>
+  <button onclick="this.closest('.update-banner').remove()" class="update-banner-dismiss" aria-label="Dismiss">&times;</button>
+</div>`, resp.LatestVersion, resp.CurrentVersion, resp.ReleaseURL)
 }
 
 // handleDevHash returns a hash of UI file modification times for live-reload.

@@ -186,7 +186,7 @@ func (s *Server) DynamicAPIKeyAuth(next http.Handler) http.Handler {
 func (s *Server) SessionAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip session lookups for paths that don't need authentication
-		if strings.HasPrefix(r.URL.Path, "/static/") || r.URL.Path == "/healthz" || r.URL.Path == "/api/version" {
+		if strings.HasPrefix(r.URL.Path, "/static/") || r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/api/version") {
 			next.ServeHTTP(w, r)
 			return
 		}
