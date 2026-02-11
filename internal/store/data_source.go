@@ -28,18 +28,28 @@ func (s *dataSourceStore) Create(ctx context.Context, params CreateDataSourcePar
 	}
 
 	id := uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
 
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO data_sources (id, type, name, environment, config, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id.String(), params.Type, params.Name, params.Environment, string(configJSON), now, now,
+		id.String(), params.Type, params.Name, params.Environment, string(configJSON), nowStr, nowStr,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("inserting data source: %w", err)
 	}
 
-	return s.GetByID(ctx, id)
+	return &DataSource{
+		ID:          id,
+		Type:        params.Type,
+		Name:        params.Name,
+		Environment: params.Environment,
+		Config:      params.Config,
+		Status:      StatusDisconnected,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}, nil
 }
 
 func (s *dataSourceStore) GetByID(ctx context.Context, id uuid.UUID) (*DataSource, error) {
@@ -78,11 +88,15 @@ func (s *dataSourceStore) GetByID(ctx context.Context, id uuid.UUID) (*DataSourc
 
 func (s *dataSourceStore) List(ctx context.Context, params ListDataSourceParams) ([]DataSource, error) {
 	query := `SELECT id, type, name, environment, config, status, status_message, last_tested_at, created_at, updated_at
-		 FROM data_sources`
+		 FROM data_sources WHERE 1=1`
 	var args []any
 	if params.Environment != "" {
-		query += ` WHERE environment = ?`
+		query += ` AND environment = ?`
 		args = append(args, params.Environment)
+	}
+	if params.Type != "" {
+		query += ` AND type = ?`
+		args = append(args, string(params.Type))
 	}
 	query += ` ORDER BY created_at DESC`
 

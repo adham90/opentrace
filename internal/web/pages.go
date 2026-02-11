@@ -475,22 +475,15 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 		Servers:    map[string]int{"total": 0, "online": 0, "offline": 0},
 	}
 
-	// Alerts stats
+	// Alerts stats — use aggregate counts instead of fetching all rows
 	if s.alertStore != nil {
-		alerts, err := s.alertStore.List(ctx, store.ListAlertParams{Limit: 500, Environment: env})
-		if err == nil {
-			for _, a := range alerts {
-				if !a.Dismissed {
-					stats.Alerts["total"]++
-					switch a.Severity {
-					case store.SeverityCritical:
-						stats.Alerts["critical"]++
-					case store.SeverityWarning:
-						stats.Alerts["warning"]++
-					case store.SeverityInfo:
-						stats.Alerts["info"]++
-					}
-				}
+		if total, err := s.alertStore.CountTotal(ctx, env); err == nil {
+			stats.Alerts["total"] = total
+		}
+		oneHourAgo := time.Now().Add(-1 * time.Hour)
+		if bySev, err := s.alertStore.CountBySeverity(ctx, oneHourAgo, time.Now(), env); err == nil {
+			for sev, count := range bySev {
+				stats.Alerts[sev] = count
 			}
 		}
 	}
@@ -513,21 +506,24 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Logs stats (last hour)
+	// Logs stats (last hour) — use COUNT query instead of fetching rows
 	if s.logStore != nil {
-		oneHourAgo := time.Now().Add(-1 * time.Hour)
-		logs, err := s.logStore.Search(ctx, store.LogSearchParams{
-			Start:       &oneHourAgo,
+		now := time.Now()
+		logOneHourAgo := now.Add(-1 * time.Hour)
+		counts, err := s.logStore.CountByLevel(ctx, store.LogCountParams{
+			Since:       logOneHourAgo,
+			Until:       now,
 			Environment: env,
-			Limit:       10000,
 		})
 		if err == nil {
-			stats.Logs["last_hour"] = len(logs)
-			for _, l := range logs {
-				if l.Level == "ERROR" {
-					stats.Logs["errors_last_hour"]++
+			total := 0
+			for level, count := range counts {
+				total += count
+				if level == "ERROR" {
+					stats.Logs["errors_last_hour"] = count
 				}
 			}
+			stats.Logs["last_hour"] = total
 		}
 	}
 

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -132,8 +133,8 @@ func TestParseNotifiers_Empty(t *testing.T) {
 }
 
 func TestSendAll(t *testing.T) {
-	var called int
-	mock := &mockNotifier{onSend: func() { called++ }}
+	var called atomic.Int32
+	mock := &mockNotifier{onSend: func() { called.Add(1) }}
 
 	alert := store.Alert{
 		ID:    uuid.New(),
@@ -141,8 +142,19 @@ func TestSendAll(t *testing.T) {
 	}
 
 	SendAll(context.Background(), []Notifier{mock, mock, mock}, alert)
-	if called != 3 {
-		t.Errorf("called = %d, want 3", called)
+
+	// SendAll is async — wait briefly for goroutines to complete
+	deadline := time.After(2 * time.Second)
+	for called.Load() < 3 {
+		select {
+		case <-deadline:
+			t.Fatalf("called = %d, want 3 (timed out)", called.Load())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if got := called.Load(); got != 3 {
+		t.Errorf("called = %d, want 3", got)
 	}
 }
 

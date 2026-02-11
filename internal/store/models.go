@@ -53,7 +53,8 @@ type UpdateDataSourceParams struct {
 
 // ListDataSourceParams defines filters for listing data sources.
 type ListDataSourceParams struct {
-	Environment string `json:"environment,omitempty"`
+	Environment string        `json:"environment,omitempty"`
+	Type        ConnectorType `json:"type,omitempty"`
 }
 
 // LogEntry represents an ingested log line.

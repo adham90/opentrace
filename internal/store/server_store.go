@@ -22,7 +22,8 @@ func NewServerStore(db *sql.DB) ServerStore {
 }
 
 func (s *serverStore) Register(ctx context.Context, params RegisterServerParams) (*Server, error) {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
 
 	labelsJSON := "{}"
 	if params.Labels != nil {
@@ -33,45 +34,67 @@ func (s *serverStore) Register(ctx context.Context, params RegisterServerParams)
 		labelsJSON = string(b)
 	}
 
+	// Use a transaction to prevent race conditions between SELECT and INSERT/UPDATE
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
 	// Check if server with this hostname already exists
 	var existingID string
-	err := s.db.QueryRowContext(ctx,
+	err = tx.QueryRowContext(ctx,
 		`SELECT id FROM servers WHERE hostname = ?`, params.Hostname,
 	).Scan(&existingID)
 
+	var serverID uuid.UUID
+
 	if err == nil {
 		// Update existing server
-		_, err := s.db.ExecContext(ctx,
+		serverID, _ = uuid.Parse(existingID)
+		_, err := tx.ExecContext(ctx,
 			`UPDATE servers SET ip_address = ?, os = ?, arch = ?, agent_version = ?,
 			 labels = ?, status = 'online', last_seen_at = ?, updated_at = ?
 			 WHERE id = ?`,
 			params.IPAddress, params.OS, params.Arch, params.AgentVersion,
-			labelsJSON, now, now, existingID,
+			labelsJSON, nowStr, nowStr, existingID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("updating server: %w", err)
 		}
-		id, _ := uuid.Parse(existingID)
-		return s.GetByID(ctx, id)
-	}
-
-	if !errors.Is(err, sql.ErrNoRows) {
+	} else if errors.Is(err, sql.ErrNoRows) {
+		// Insert new server
+		serverID = uuid.New()
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO servers (id, hostname, ip_address, os, arch, agent_version, labels, status, last_seen_at, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, 'online', ?, ?, ?)`,
+			serverID.String(), params.Hostname, params.IPAddress, params.OS, params.Arch,
+			params.AgentVersion, labelsJSON, nowStr, nowStr, nowStr,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("inserting server: %w", err)
+		}
+	} else {
 		return nil, fmt.Errorf("checking existing server: %w", err)
 	}
 
-	// Insert new server
-	id := uuid.New()
-	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO servers (id, hostname, ip_address, os, arch, agent_version, labels, status, last_seen_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 'online', ?, ?, ?)`,
-		id.String(), params.Hostname, params.IPAddress, params.OS, params.Arch,
-		params.AgentVersion, labelsJSON, now, now, now,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("inserting server: %w", err)
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit: %w", err)
 	}
 
-	return s.GetByID(ctx, id)
+	return &Server{
+		ID:           serverID,
+		Hostname:     params.Hostname,
+		IPAddress:    params.IPAddress,
+		OS:           params.OS,
+		Arch:         params.Arch,
+		AgentVersion: params.AgentVersion,
+		Labels:       params.Labels,
+		Status:       ServerOnline,
+		LastSeenAt:   &now,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}, nil
 }
 
 func (s *serverStore) GetByID(ctx context.Context, id uuid.UUID) (*Server, error) {

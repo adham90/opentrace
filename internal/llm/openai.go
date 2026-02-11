@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 )
 
 // OpenAIProvider implements LLMProvider using the OpenAI API.
@@ -24,7 +23,7 @@ func NewOpenAIProvider(baseURL, model, apiKey string) *OpenAIProvider {
 		baseURL: baseURL,
 		model:   model,
 		apiKey:  apiKey,
-		client:  &http.Client{Timeout: 120 * time.Second},
+		client:  newHTTPClient(),
 	}
 }
 

@@ -21,7 +21,8 @@ func NewUserStore(db *sql.DB) UserStore {
 
 func (s *userStore) Create(ctx context.Context, params CreateUserParams) (*User, error) {
 	id := uuid.New().String()
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
 
 	role := params.Role
 	if role == "" {
@@ -36,7 +37,7 @@ func (s *userStore) Create(ctx context.Context, params CreateUserParams) (*User,
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO users (id, email, password_hash, display_name, role, mcp_token, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, params.Email, params.PasswordHash, params.DisplayName, string(role), mcpToken, now, now,
+		id, params.Email, params.PasswordHash, params.DisplayName, string(role), mcpToken, nowStr, nowStr,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed: users.email") {
@@ -45,7 +46,17 @@ func (s *userStore) Create(ctx context.Context, params CreateUserParams) (*User,
 		return nil, fmt.Errorf("creating user: %w", err)
 	}
 
-	return s.GetByID(ctx, id)
+	return &User{
+		ID:           id,
+		Email:        params.Email,
+		PasswordHash: params.PasswordHash,
+		DisplayName:  params.DisplayName,
+		Role:         role,
+		MCPToken:     mcpToken,
+		IsActive:     true,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}, nil
 }
 
 func (s *userStore) GetByID(ctx context.Context, id string) (*User, error) {
@@ -72,7 +83,7 @@ func (s *userStore) GetByMCPToken(ctx context.Context, token string) (*User, err
 func (s *userStore) List(ctx context.Context) ([]User, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, email, password_hash, display_name, role, mcp_enabled, mcp_token, is_active, created_at, updated_at
-		 FROM users ORDER BY created_at ASC`,
+		 FROM users ORDER BY created_at ASC LIMIT 1000`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing users: %w", err)

@@ -30,6 +30,7 @@ type Scheduler struct {
 	mu       sync.Mutex
 	running  bool
 	cancelFn context.CancelFunc
+	wg       sync.WaitGroup
 }
 
 // NewScheduler creates a new digest Scheduler.
@@ -100,18 +101,27 @@ func (s *Scheduler) Start(ctx context.Context) {
 	ctx, s.cancelFn = context.WithCancel(ctx)
 	s.mu.Unlock()
 
-	go s.loop(ctx)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.loop(ctx)
+	}()
 }
 
-// Stop gracefully stops the scheduler.
+// Stop gracefully stops the scheduler and waits for the loop to finish.
 func (s *Scheduler) Stop() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.cancelFn != nil {
 		s.cancelFn()
 		s.cancelFn = nil
 	}
+	s.mu.Unlock()
+
+	s.wg.Wait()
+
+	s.mu.Lock()
 	s.running = false
+	s.mu.Unlock()
 }
 
 func (s *Scheduler) loop(ctx context.Context) {

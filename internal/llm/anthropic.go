@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 )
 
 // AnthropicProvider implements LLMProvider using the Anthropic Messages API.
@@ -25,7 +24,7 @@ func NewAnthropicProvider(baseURL, model, apiKey string) *AnthropicProvider {
 		baseURL: baseURL,
 		model:   model,
 		apiKey:  apiKey,
-		client:  &http.Client{Timeout: 120 * time.Second},
+		client:  newHTTPClient(),
 	}
 }
 

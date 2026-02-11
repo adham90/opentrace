@@ -104,17 +104,14 @@ func (s *Server) ensureLogsConnector(ctx context.Context) {
 	}
 
 	// Check if a logs data source row already exists in the DB
-	sources, err := s.dsStore.List(ctx, store.ListDataSourceParams{})
+	sources, err := s.dsStore.List(ctx, store.ListDataSourceParams{Type: store.ConnectorLogs})
 	if err != nil {
 		log.Printf("WARN: ensureLogsConnector: failed to list data sources: %v", err)
 		return
 	}
 	var dsID *store.DataSource
-	for i := range sources {
-		if sources[i].Type == store.ConnectorLogs {
-			dsID = &sources[i]
-			break
-		}
+	if len(sources) > 0 {
+		dsID = &sources[0]
 	}
 
 	// Create DB row if it doesn't exist

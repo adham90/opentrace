@@ -173,7 +173,9 @@ func runAgent() error {
 }
 
 func run() error {
-	ctx := context.Background()
+	ctx, cancelCtx := context.WithCancel(context.Background())
+	defer cancelCtx()
+
 	deps, err := initApp(ctx)
 	if err != nil {
 		return err
@@ -248,8 +250,11 @@ func run() error {
 	})
 
 	httpServer := &http.Server{
-		Addr:    deps.cfg.ListenAddr,
-		Handler: srv.Router,
+		Addr:         deps.cfg.ListenAddr,
+		Handler:      srv.Router,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 60 * time.Second, // higher for SSE endpoints
+		IdleTimeout:  120 * time.Second,
 	}
 
 	// Graceful shutdown
@@ -285,11 +290,16 @@ func run() error {
 	go func() {
 		ticker := time.NewTicker(15 * time.Minute)
 		defer ticker.Stop()
-		for range ticker.C {
-			if n, err := deps.sessionStore.DeleteExpired(context.Background()); err != nil {
-				log.Printf("WARN: session cleanup: %v", err)
-			} else if n > 0 {
-				log.Printf("cleaned %d expired session(s)", n)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if n, err := deps.sessionStore.DeleteExpired(ctx); err != nil {
+					log.Printf("WARN: session cleanup: %v", err)
+				} else if n > 0 {
+					log.Printf("cleaned %d expired session(s)", n)
+				}
 			}
 		}
 	}()
@@ -298,11 +308,16 @@ func run() error {
 	go func() {
 		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()
-		for range ticker.C {
-			if n, err := deps.serverStore.MarkStaleOffline(context.Background(), 2*time.Minute); err != nil {
-				log.Printf("WARN: MarkStaleOffline: %v", err)
-			} else if n > 0 {
-				log.Printf("marked %d stale server(s) offline", n)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if n, err := deps.serverStore.MarkStaleOffline(ctx, 2*time.Minute); err != nil {
+					log.Printf("WARN: MarkStaleOffline: %v", err)
+				} else if n > 0 {
+					log.Printf("marked %d stale server(s) offline", n)
+				}
 			}
 		}
 	}()
@@ -320,8 +335,12 @@ func run() error {
 
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
-		for range ticker.C {
-			ctx := context.Background()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
 
 			// Read global retention setting from DB each tick
 			settings, err := deps.settingsStore.GetRetention(ctx)
@@ -378,12 +397,15 @@ func run() error {
 	<-done
 	log.Println("shutting down...")
 
+	// Cancel the root context to signal all background goroutines to stop
+	cancelCtx()
+
 	sched.Stop()
 	digestSched.Stop()
 	deps.registry.CloseAll()
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
 
 	return httpServer.Shutdown(shutdownCtx)
 }

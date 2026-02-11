@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/adham90/opentrace/internal/llm"
 )
@@ -119,55 +120,90 @@ func (a *Agent) RunWithCallback(ctx context.Context, query string, tools []Tool,
 			ToolCalls: resp.ToolCalls,
 		})
 
+		// Execute tool calls concurrently when multiple are requested
+		type toolResult struct {
+			index   int
+			message llm.ChatMessage
+		}
+
+		// Pre-validate all tool calls and check budget
+		validCalls := make([]struct {
+			tc   llm.ToolCall
+			tool Tool
+		}, 0, len(resp.ToolCalls))
+
 		for _, tc := range resp.ToolCalls {
-			// Look up tool
 			tool, ok := toolMap[tc.Name]
 			if !ok {
 				errMsg := fmt.Sprintf("Unknown tool %q. Available: %s", tc.Name, toolNames(tools))
 				emit(Event{Type: "error", Content: errMsg})
 				messages = append(messages, llm.ChatMessage{
-					Role:       "tool",
-					Content:    errMsg,
-					ToolCallID: tc.ID,
+					Role: "tool", Content: errMsg, ToolCallID: tc.ID,
 				})
 				continue
 			}
 
-			// Validate args
 			if err := ValidateArgs(tool.Params, tc.Args); err != nil {
 				errMsg := fmt.Sprintf("Invalid arguments for tool %q: %s", tc.Name, err)
 				emit(Event{Type: "error", Content: errMsg})
 				messages = append(messages, llm.ChatMessage{
-					Role:       "tool",
-					Content:    errMsg,
-					ToolCallID: tc.ID,
+					Role: "tool", Content: errMsg, ToolCallID: tc.ID,
 				})
 				continue
 			}
 
-			// Check tool budget
 			if toolCallCount >= a.cfg.MaxToolCalls {
 				return "", fmt.Errorf("agent: tool call budget exhausted (%d calls)", a.cfg.MaxToolCalls)
 			}
 			toolCallCount++
+			validCalls = append(validCalls, struct {
+				tc   llm.ToolCall
+				tool Tool
+			}{tc, tool})
+		}
 
-			emit(Event{Type: "tool_call", ToolName: tc.Name, Args: tc.Args})
-
-			// Execute tool
-			result, err := tool.Handler(ctx, tc.Args)
+		if len(validCalls) == 1 {
+			// Single tool call — execute inline (no goroutine overhead)
+			vc := validCalls[0]
+			emit(Event{Type: "tool_call", ToolName: vc.tc.Name, Args: vc.tc.Args})
+			result, err := vc.tool.Handler(ctx, vc.tc.Args)
 			if err != nil {
 				result = fmt.Sprintf("Tool error: %s", err)
 			}
-
 			result = TruncateObservation(result, a.cfg.MaxObservationBytes)
-			emit(Event{Type: "observation", Content: result, ToolName: tc.Name})
-
-			// Append tool result to history
+			emit(Event{Type: "observation", Content: result, ToolName: vc.tc.Name})
 			messages = append(messages, llm.ChatMessage{
-				Role:       "tool",
-				Content:    result,
-				ToolCallID: tc.ID,
+				Role: "tool", Content: result, ToolCallID: vc.tc.ID,
 			})
+		} else if len(validCalls) > 1 {
+			// Multiple tool calls — execute concurrently
+			results := make([]toolResult, len(validCalls))
+			var wg sync.WaitGroup
+			for i, vc := range validCalls {
+				emit(Event{Type: "tool_call", ToolName: vc.tc.Name, Args: vc.tc.Args})
+				wg.Add(1)
+				go func(idx int, tc llm.ToolCall, tool Tool) {
+					defer wg.Done()
+					result, err := tool.Handler(ctx, tc.Args)
+					if err != nil {
+						result = fmt.Sprintf("Tool error: %s", err)
+					}
+					result = TruncateObservation(result, a.cfg.MaxObservationBytes)
+					results[idx] = toolResult{
+						index: idx,
+						message: llm.ChatMessage{
+							Role: "tool", Content: result, ToolCallID: tc.ID,
+						},
+					}
+				}(i, vc.tc, vc.tool)
+			}
+			wg.Wait()
+
+			// Append results in order and emit observations
+			for i, r := range results {
+				emit(Event{Type: "observation", Content: r.message.Content, ToolName: validCalls[i].tc.Name})
+				messages = append(messages, r.message)
+			}
 		}
 	}
 

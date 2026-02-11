@@ -147,11 +147,11 @@ func (h *EventHub) MarkDone(runID uuid.UUID) {
 	}
 	rs.mu.Unlock()
 
-	// Schedule cleanup after 60s to allow late subscribers to get buffered events
-	go func() {
-		time.Sleep(60 * time.Second)
+	// Schedule cleanup after 60s to allow late subscribers to get buffered events.
+	// Uses time.AfterFunc instead of a goroutine+sleep to avoid holding a goroutine.
+	time.AfterFunc(60*time.Second, func() {
 		h.mu.Lock()
 		delete(h.runs, runID)
 		h.mu.Unlock()
-	}()
+	})
 }

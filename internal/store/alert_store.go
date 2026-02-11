@@ -28,7 +28,8 @@ func (s *alertStore) Create(ctx context.Context, params CreateAlertParams) (*Ale
 	}
 
 	id := uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
 
 	var watcherIDStr, runIDStr *string
 	if params.WatcherID != nil {
@@ -50,13 +51,23 @@ func (s *alertStore) Create(ctx context.Context, params CreateAlertParams) (*Ale
 		`INSERT INTO alerts (id, watcher_id, run_id, title, summary, environment, severity, details, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id.String(), watcherIDStr, runIDStr, params.Title, params.Summary,
-		params.Environment, string(severity), detailsStr, now,
+		params.Environment, string(severity), detailsStr, nowStr,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating alert: %w", err)
 	}
 
-	return s.GetByID(ctx, id)
+	return &Alert{
+		ID:          id,
+		WatcherID:   params.WatcherID,
+		RunID:       params.RunID,
+		Title:       params.Title,
+		Summary:     params.Summary,
+		Environment: params.Environment,
+		Severity:    severity,
+		Details:     params.Details,
+		CreatedAt:   now,
+	}, nil
 }
 
 func (s *alertStore) GetByID(ctx context.Context, id uuid.UUID) (*Alert, error) {

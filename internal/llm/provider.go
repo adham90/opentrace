@@ -1,6 +1,11 @@
 package llm
 
-import "context"
+import (
+	"context"
+	"net"
+	"net/http"
+	"time"
+)
 
 // ChatMessage represents a single message in a conversation.
 type ChatMessage struct {
@@ -49,4 +54,24 @@ type ChatResponse struct {
 // LLMProvider abstracts chat completion across different LLM backends.
 type LLMProvider interface {
 	ChatCompletion(ctx context.Context, req ChatRequest) (ChatResponse, error)
+}
+
+// sharedTransport is a shared HTTP transport for all LLM provider HTTP clients.
+// This enables connection pooling and reuse across providers.
+var sharedTransport = &http.Transport{
+	MaxIdleConns:        100,
+	MaxIdleConnsPerHost: 10,
+	IdleConnTimeout:     90 * time.Second,
+	DialContext: (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).DialContext,
+}
+
+// newHTTPClient returns an HTTP client using the shared transport.
+func newHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout:   120 * time.Second,
+		Transport: sharedTransport,
+	}
 }

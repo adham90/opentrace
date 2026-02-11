@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
 
 // GeminiProvider implements LLMProvider using the Google Gemini REST API.
@@ -26,7 +25,7 @@ func NewGeminiProvider(baseURL, model, apiKey string) *GeminiProvider {
 		baseURL: baseURL,
 		model:   model,
 		apiKey:  apiKey,
-		client:  &http.Client{Timeout: 120 * time.Second},
+		client:  newHTTPClient(),
 	}
 }
 

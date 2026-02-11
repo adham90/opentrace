@@ -109,9 +109,19 @@ func (re *RuleEvaluator) evaluateLogs(ctx context.Context, w store.Watcher) (*Ev
 	window := ParseTimeRange(cfg.TimeWindow)
 	start := time.Now().Add(-window)
 
+	// Cap fetch limit based on threshold to avoid fetching excessive rows.
+	// We only need threshold+1 rows to determine if the condition triggers.
+	limit := int(cfg.Threshold) + 1
+	if limit < 100 {
+		limit = 100
+	}
+	if limit > 10000 {
+		limit = 10000
+	}
+
 	params := store.LogSearchParams{
 		Start: &start,
-		Limit: 10000,
+		Limit: limit,
 	}
 	if cfg.Filter != nil {
 		params.Service = cfg.Filter.Service

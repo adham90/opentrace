@@ -118,19 +118,21 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Use(middleware.Recoverer)
 	router.Use(middleware.RequestID)
 	router.Use(SecurityHeaders)
-	router.Use(MaxBodySize(10 << 20)) // 10 MB global body limit
-	router.Use(srv.SessionAuth)
+	router.Use(middleware.Compress(5)) // gzip compression
+	router.Use(MaxBodySize(10 << 20))  // 10 MB global body limit
+	router.Use(srv.SessionAuth)        // skips /static/ and /healthz paths internally
 
 	router.Get("/healthz", srv.handleHealthCheck)
 
 	// Static files
 	if cfg != nil && cfg.DevMode {
-		// Dev mode: serve from disk for live editing
+		// Dev mode: serve from disk for live editing (no cache)
 		router.Handle("/static/*", http.StripPrefix("/static/",
 			http.FileServer(http.Dir("internal/web/static"))))
 	} else {
 		staticSub, _ := fs.Sub(staticFS, "static")
-		router.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+		router.Handle("/static/*", http.StripPrefix("/static/",
+			StaticCacheHeaders(http.FileServer(http.FS(staticSub)))))
 	}
 
 	// Always-open auth routes (login/register rate-limited)

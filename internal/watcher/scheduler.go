@@ -33,6 +33,7 @@ type Scheduler struct {
 	maxConc      int
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
+	sem          chan struct{} // concurrency limiter, reused across polls
 }
 
 // NewScheduler creates a new watcher scheduler.
@@ -61,6 +62,7 @@ func NewScheduler(opts SchedulerOpts) *Scheduler {
 		watcherStore: opts.WatcherStore,
 		poll:         poll,
 		maxConc:      maxConc,
+		sem:          make(chan struct{}, maxConc),
 	}
 }
 
@@ -112,20 +114,17 @@ func (s *Scheduler) pollAndExecute(ctx context.Context) {
 
 	log.Printf("watcher: found %d due watcher(s)", len(watchers))
 
-	// Use a semaphore to limit concurrency
-	sem := make(chan struct{}, s.maxConc)
-
 	for _, w := range watchers {
 		if ctx.Err() != nil {
 			return
 		}
 
-		sem <- struct{}{} // acquire
+		s.sem <- struct{}{} // acquire
 		s.wg.Add(1)
 
 		go func(w store.Watcher) {
 			defer s.wg.Done()
-			defer func() { <-sem }() // release
+			defer func() { <-s.sem }() // release
 
 			log.Printf("watcher: executing %q (%s)", w.Title, w.ID)
 			s.executor.Execute(ctx, w)

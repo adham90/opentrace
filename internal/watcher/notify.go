@@ -123,12 +123,17 @@ func ParseNotifiers(raw json.RawMessage) []Notifier {
 	return notifiers
 }
 
-// SendAll dispatches an alert to all configured notifiers.
-// Errors are logged but do not stop other notifiers.
+// SendAll dispatches an alert to all configured notifiers asynchronously.
+// Each notifier runs in its own goroutine with a 30-second timeout.
+// Errors are logged but do not block the caller.
 func SendAll(ctx context.Context, notifiers []Notifier, alert store.Alert) {
 	for _, n := range notifiers {
-		if err := n.Send(ctx, alert); err != nil {
-			log.Printf("watcher: notification error: %v", err)
-		}
+		go func(n Notifier) {
+			sendCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := n.Send(sendCtx, alert); err != nil {
+				log.Printf("watcher: notification error: %v", err)
+			}
+		}(n)
 	}
 }

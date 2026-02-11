@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,11 +46,30 @@ type RateLimiter struct {
 }
 
 // NewRateLimiter creates a rate limiter allowing limit requests per window per IP.
+// It starts a background goroutine that evicts expired entries every 5 minutes.
 func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
-	return &RateLimiter{
+	rl := &RateLimiter{
 		entries: make(map[string]*rateLimitEntry),
 		limit:   limit,
 		window:  window,
+	}
+	go rl.cleanup()
+	return rl
+}
+
+// cleanup periodically evicts expired entries to prevent unbounded map growth.
+func (rl *RateLimiter) cleanup() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		rl.mu.Lock()
+		now := time.Now()
+		for ip, entry := range rl.entries {
+			if now.After(entry.resetAt) {
+				delete(rl.entries, ip)
+			}
+		}
+		rl.mu.Unlock()
 	}
 }
 
@@ -77,6 +97,14 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 			return
 		}
 		rl.mu.Unlock()
+		next.ServeHTTP(w, r)
+	})
+}
+
+// StaticCacheHeaders wraps a handler to set long-lived cache headers for static assets.
+func StaticCacheHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -120,8 +148,15 @@ func (s *Server) DynamicAPIKeyAuth(next http.Handler) http.Handler {
 
 // SessionAuth loads the user from the session cookie into the request context.
 // It never rejects — if no valid session is found, the request continues without a user.
+// Skips DB lookups for static assets and health checks.
 func (s *Server) SessionAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip session lookups for paths that don't need authentication
+		if strings.HasPrefix(r.URL.Path, "/static/") || r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		if s.sessionStore == nil || s.userStore == nil {
 			next.ServeHTTP(w, r)
 			return

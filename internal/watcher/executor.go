@@ -187,8 +187,12 @@ func (e *Executor) executeAI(ctx context.Context, w store.Watcher, run *store.Wa
 		}
 	}
 
+	// Apply a 5-minute timeout to the AI agent execution to prevent runaway LLM calls
+	execCtx, execCancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer execCancel()
+
 	ag := agent.New(provider, runCfg)
-	answer, err := ag.RunWithCallback(ctx, query, tools, callback, nil)
+	answer, err := ag.RunWithCallback(execCtx, query, tools, callback, nil)
 	if err != nil {
 		errMsg := fmt.Sprintf("agent error: %v", err)
 		log.Printf("watcher %s (%s): %s", w.ID, w.Title, errMsg)

@@ -21,7 +21,7 @@ func NewOllamaProvider(baseURL, chatModel string) *OllamaProvider {
 	return &OllamaProvider{
 		baseURL: baseURL,
 		model:   chatModel,
-		client:  &http.Client{Timeout: 120 * time.Second},
+		client:  newHTTPClient(),
 	}
 }
 
