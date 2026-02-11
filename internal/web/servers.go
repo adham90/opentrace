@@ -325,6 +325,18 @@ else
   exit 1
 fi
 
+# Stop existing service before replacing binary
+UPGRADING=false
+if command -v systemctl &>/dev/null && systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+  UPGRADING=true
+  echo "==> Stopping existing ${SERVICE_NAME} service..."
+  if [ "$(id -u)" -eq 0 ]; then
+    systemctl stop "$SERVICE_NAME"
+  else
+    sudo systemctl stop "$SERVICE_NAME"
+  fi
+fi
+
 # Move binary to install dir
 echo "==> Installing to ${INSTALL_DIR}/${BINARY_NAME}"
 chmod +x /tmp/${BINARY_NAME}
@@ -343,7 +355,11 @@ fi
 
 # Create systemd service if available
 if command -v systemctl &>/dev/null; then
-  echo "==> Creating systemd service..."
+  if [ "$UPGRADING" = true ]; then
+    echo "==> Upgrading existing service..."
+  else
+    echo "==> Creating systemd service..."
+  fi
 
   SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
   SERVICE_CONTENT="[Unit]

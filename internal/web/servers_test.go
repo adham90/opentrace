@@ -311,6 +311,34 @@ func TestAgentInstallScript_HTTPS(t *testing.T) {
 	}
 }
 
+func TestAgentInstallScript_HandlesReinstall(t *testing.T) {
+	srv := newTestServerWithMetrics()
+
+	req := httptest.NewRequest("GET", "/api/agent/install.sh?key=abc", nil)
+	req.Host = "trace.example.com"
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	body := w.Body.String()
+
+	// Must stop existing service before replacing binary
+	if !strings.Contains(body, "systemctl stop") {
+		t.Error("script should stop existing service before replacing binary")
+	}
+
+	// Must check if service is already running
+	if !strings.Contains(body, "systemctl is-active") {
+		t.Error("script should check if service is already active")
+	}
+
+	// Stop must come before mv (binary replacement)
+	stopIdx := strings.Index(body, "systemctl stop")
+	mvIdx := strings.Index(body, `mv /tmp/${BINARY_NAME}`)
+	if stopIdx > mvIdx {
+		t.Error("script must stop the service before replacing the binary")
+	}
+}
+
 func TestAgentInstallScript_EmptyAPIKey(t *testing.T) {
 	srv := newTestServerWithMetrics()
 
