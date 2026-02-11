@@ -977,9 +977,10 @@ func (m *mockDigestStore) DeleteOlderThan(ctx context.Context, before time.Time)
 
 // mockSettingsStore implements store.SettingsStore for testing.
 type mockSettingsStore struct {
-	mu        sync.Mutex
-	retention *store.RetentionSettings
-	apiKey    string
+	mu         sync.Mutex
+	retention  *store.RetentionSettings
+	apiKey     string
+	autoUpdate bool
 }
 
 func newMockSettingsStore() *mockSettingsStore {
@@ -1012,5 +1013,18 @@ func (m *mockSettingsStore) SetAPIKey(ctx context.Context, key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.apiKey = key
+	return nil
+}
+
+func (m *mockSettingsStore) GetAutoUpdate(ctx context.Context) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.autoUpdate, nil
+}
+
+func (m *mockSettingsStore) SetAutoUpdate(ctx context.Context, enabled bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.autoUpdate = enabled
 	return nil
 }

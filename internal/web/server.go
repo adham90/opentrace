@@ -21,6 +21,7 @@ import (
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/llm"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
+	mcpgoserver "github.com/mark3labs/mcp-go/server"
 	"github.com/adham90/opentrace/internal/store"
 	"github.com/adham90/opentrace/internal/version"
 	"github.com/adham90/opentrace/internal/watcher"
@@ -49,6 +50,9 @@ type Server struct {
 	ruleEvaluator  *watcher.RuleEvaluator
 	toolCatalog    *mcpserver.ToolCatalog
 	versionChecker *versionChecker
+	selfUpdater    *selfUpdater
+	sseServer      *mcpgoserver.SSEServer
+	restartCh      chan struct{} // closed when a self-update wants to restart
 	logsConnMu     sync.Mutex
 	metricsConnMu  sync.Mutex
 }
@@ -109,6 +113,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		modelRegistry:  deps.ModelRegistry,
 		ruleEvaluator:  deps.RuleEvaluator,
 		versionChecker: newVersionChecker("adham90", "opentrace"),
+		selfUpdater:    newSelfUpdater("adham90", "opentrace"),
+		restartCh:      make(chan struct{}),
 	}
 
 	cfg := deps.Cfg
@@ -129,6 +135,17 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Get("/api/version", srv.handleVersion)
 	router.Get("/api/version/check", srv.handleVersionCheck)
 	router.Get("/api/version/banner", srv.handleVersionBanner)
+
+	// MCP SSE transport — authenticated via Bearer token (MCP token).
+	if srv.userStore != nil {
+		sseServer := srv.setupMCPSSE()
+		srv.sseServer = sseServer
+		router.Route("/mcp", func(r chi.Router) {
+			r.Use(srv.MCPTokenAuth)
+			r.Handle("/sse", sseServer.SSEHandler())
+			r.Handle("/message", sseServer.MessageHandler())
+		})
+	}
 
 	// Static files
 	if cfg != nil && cfg.DevMode {
@@ -250,6 +267,9 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Put("/settings/retention", srv.handleUpdateRetention)
 			r.Get("/settings/api-key", srv.handleGetAPIKey)
 			r.Post("/settings/api-key", srv.handleRegenerateAPIKey)
+			r.Get("/settings/auto-update", srv.handleGetAutoUpdate)
+			r.Put("/settings/auto-update", srv.handleSetAutoUpdate)
+			r.Post("/version/update", srv.handleSelfUpdate)
 		})
 
 		// User management API (admin only)
@@ -279,6 +299,21 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	return srv
 }
 
+// Shutdown gracefully shuts down SSE connections and other resources.
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s.sseServer != nil {
+		return s.sseServer.Shutdown(ctx)
+	}
+	return nil
+}
+
+// RestartCh returns a channel that is closed when the server wants to restart
+// (e.g., after a self-update). The caller should listen on this channel and
+// perform the actual process restart.
+func (s *Server) RestartCh() <-chan struct{} {
+	return s.restartCh
+}
+
 // getEffectiveAPIKey returns the API key from the env var (if set) or from the DB.
 func (s *Server) getEffectiveAPIKey(ctx context.Context) string {
 	if s.cfg != nil && s.cfg.APIKey != "" {
@@ -302,13 +337,17 @@ func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version": version.Version,
-		"commit":  version.Commit,
-		"date":    version.Date,
+		"version":   version.Version,
+		"commit":    version.Commit,
+		"date":      version.Date,
+		"is_docker": isDocker(),
 	})
 }
 
 func (s *Server) handleVersionCheck(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("force") == "1" {
+		s.versionChecker.invalidateCache()
+	}
 	resp, err := s.versionChecker.check()
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{

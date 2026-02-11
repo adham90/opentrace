@@ -19,6 +19,7 @@ type versionChecker struct {
 	latest      *releaseInfo
 	cacheTTL    time.Duration
 	owner, repo string
+	baseURL     string // override for testing; empty = use GitHub API
 }
 
 type releaseInfo struct {
@@ -43,6 +44,12 @@ func newVersionChecker(owner, repo string) *versionChecker {
 		owner:    owner,
 		repo:     repo,
 	}
+}
+
+func (vc *versionChecker) invalidateCache() {
+	vc.mu.Lock()
+	vc.latest = nil
+	vc.mu.Unlock()
 }
 
 func (vc *versionChecker) check() (*versionCheckResponse, error) {
@@ -89,7 +96,12 @@ func (vc *versionChecker) getLatestRelease() (*releaseInfo, error) {
 		return vc.latest, nil
 	}
 
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", vc.owner, vc.repo)
+	var url string
+	if vc.baseURL != "" {
+		url = vc.baseURL + "/repos/" + vc.owner + "/" + vc.repo + "/releases/latest"
+	} else {
+		url = fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", vc.owner, vc.repo)
+	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {

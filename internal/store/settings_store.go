@@ -19,6 +19,7 @@ func NewSettingsStore(db *sql.DB) SettingsStore {
 
 const retentionKey = "retention"
 const apiKeyKey = "api_key"
+const autoUpdateKey = "auto_update"
 
 func (s *settingsStore) GetRetention(ctx context.Context) (*RetentionSettings, error) {
 	var raw string
@@ -77,6 +78,36 @@ func (s *settingsStore) SetAPIKey(ctx context.Context, key string) error {
 	)
 	if err != nil {
 		return fmt.Errorf("upserting api key: %w", err)
+	}
+	return nil
+}
+
+func (s *settingsStore) GetAutoUpdate(ctx context.Context) (bool, error) {
+	var val string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT value FROM app_config WHERE key = ?`, autoUpdateKey,
+	).Scan(&val)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("querying auto_update: %w", err)
+	}
+	return val == "1", nil
+}
+
+func (s *settingsStore) SetAutoUpdate(ctx context.Context, enabled bool) error {
+	val := "0"
+	if enabled {
+		val = "1"
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO app_config (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		autoUpdateKey, val,
+	)
+	if err != nil {
+		return fmt.Errorf("upserting auto_update: %w", err)
 	}
 	return nil
 }

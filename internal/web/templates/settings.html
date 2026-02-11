@@ -10,19 +10,33 @@
       <div><span class="text-dim">Built:</span> <span id="ver-date">...</span></div>
     </div>
     <div id="ver-status" style="margin-bottom:0.75rem"></div>
-    <div id="ver-instructions" style="display:none">
-      <p class="help-text" style="margin-bottom:0.5rem"><strong>How to update:</strong></p>
-      <div style="background:var(--bg-secondary,#1a1a2e);border:1px solid var(--border,#333);border-radius:4px;padding:0.75rem;font-size:0.85rem">
-        <div style="margin-bottom:0.5rem"><strong>Docker Compose:</strong></div>
-        <code>docker compose pull && docker compose up -d</code>
-        <div style="margin-top:0.75rem;margin-bottom:0.5rem"><strong>Docker Compose (auto-update):</strong></div>
-        <code>docker compose -f docker-compose.prod.yml up -d</code>
-        <div style="margin-top:0.75rem;margin-bottom:0.5rem"><strong>Binary:</strong></div>
-        <span>Download from <a id="ver-release-link" href="#" target="_blank" rel="noopener">GitHub Releases</a> and restart the service.</span>
-      </div>
+
+    <div id="ver-update-actions" style="display:none;margin-bottom:0.75rem">
+      <button class="btn btn-primary" onclick="performUpdate()" id="ver-update-btn" style="margin-right:0.5rem">Update now</button>
+      <span id="ver-update-status" style="font-size:0.9rem"></span>
     </div>
-    <button class="btn" onclick="checkForUpdates()" id="ver-check-btn" style="margin-top:0.75rem">Check for updates</button>
-    <span id="ver-check-status" style="margin-left:1em;font-size:0.9rem"></span>
+
+    <div id="ver-docker-notice" style="display:none;background:rgba(100,180,255,0.1);border:1px solid rgba(100,180,255,0.3);color:#80b8ff;padding:0.5rem 1rem;border-radius:4px;margin-bottom:0.75rem;font-size:0.85rem">
+      Running in Docker. Updates are handled by your container orchestrator.<br>
+      <code style="margin-top:0.25rem;display:inline-block">docker compose pull && docker compose up -d</code>
+    </div>
+
+    <div id="ver-instructions" style="display:none">
+      <p class="help-text" style="margin-bottom:0.5rem"><strong>Release notes:</strong></p>
+      <div id="ver-release-notes" style="background:var(--bg-secondary,#1a1a2e);border:1px solid var(--border,#333);border-radius:4px;padding:0.75rem;font-size:0.85rem;max-height:200px;overflow-y:auto;white-space:pre-wrap"></div>
+    </div>
+
+    <div style="margin-top:0.75rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
+      <button class="btn" onclick="checkForUpdates()" id="ver-check-btn">Check for updates</button>
+      <span id="ver-check-status" style="font-size:0.9rem"></span>
+    </div>
+
+    <div id="ver-auto-update" style="display:none;margin-top:0.75rem">
+      <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.9rem">
+        <input type="checkbox" id="auto-update-toggle" onchange="toggleAutoUpdate(this.checked)">
+        <span>Auto-update (check every hour and apply automatically)</span>
+      </label>
+    </div>
   </div>
 </div>
 
@@ -66,6 +80,8 @@
 </div>
 
 <script nonce="{{.CSPNonce}}">
+var versionState = {isDocker: false, latestVersion: '', currentVersion: ''};
+
 function saveRetention(e) {
   e.preventDefault();
   var days = parseInt(document.getElementById('retention-days').value, 10);
@@ -149,12 +165,20 @@ function confirmRegenerate() {
 
 loadAPIKey();
 
-// Version check
+// Version & Update management
 function loadVersion() {
   fetch('/api/version').then(function(r){return r.json()}).then(function(d){
+    versionState.currentVersion = d.version;
+    versionState.isDocker = d.is_docker;
     document.getElementById('ver-current').textContent = d.version;
     document.getElementById('ver-commit').textContent = d.commit === 'unknown' ? '-' : d.commit.substring(0, 7);
     document.getElementById('ver-date').textContent = d.date === 'unknown' ? '-' : d.date;
+
+    // Show/hide auto-update toggle based on Docker and dev
+    if (!d.is_docker && d.version !== 'dev') {
+      document.getElementById('ver-auto-update').style.display = 'block';
+      loadAutoUpdateSetting();
+    }
   }).catch(function(){
     document.getElementById('ver-current').textContent = 'error';
   });
@@ -165,29 +189,111 @@ function checkForUpdates() {
   var status = document.getElementById('ver-check-status');
   btn.disabled = true;
   status.textContent = 'Checking...';
-  fetch('/api/version/check').then(function(r){return r.json()}).then(function(d){
+  fetch('/api/version/check?force=1').then(function(r){return r.json()}).then(function(d){
     btn.disabled = false;
     status.textContent = '';
     var el = document.getElementById('ver-status');
     var instructions = document.getElementById('ver-instructions');
+    var updateActions = document.getElementById('ver-update-actions');
+    var dockerNotice = document.getElementById('ver-docker-notice');
+
+    updateActions.style.display = 'none';
+    dockerNotice.style.display = 'none';
+    instructions.style.display = 'none';
+
     if (d.error) {
       el.innerHTML = '<span style="color:var(--yellow)">Could not check: ' + d.error + '</span>';
-      instructions.style.display = 'none';
     } else if (d.current_version === 'dev') {
       el.innerHTML = '<span style="color:var(--text-dim)">Running a dev build — update checks are skipped.</span>';
-      instructions.style.display = 'none';
     } else if (d.update_available) {
+      versionState.latestVersion = d.latest_version;
       el.innerHTML = '<span style="color:var(--green)">&#10003; Update available: <strong>v' + d.latest_version + '</strong></span>';
-      instructions.style.display = 'block';
-      var link = document.getElementById('ver-release-link');
-      if (d.release_url) link.href = d.release_url;
+
+      if (d.release_notes) {
+        document.getElementById('ver-release-notes').textContent = d.release_notes;
+        instructions.style.display = 'block';
+      }
+
+      if (versionState.isDocker) {
+        dockerNotice.style.display = 'block';
+      } else {
+        updateActions.style.display = 'block';
+        document.getElementById('ver-update-btn').textContent = 'Update to v' + d.latest_version;
+      }
     } else {
       el.innerHTML = '<span style="color:var(--green)">&#10003; You are running the latest version.</span>';
-      instructions.style.display = 'none';
     }
   }).catch(function(err){
     btn.disabled = false;
     status.textContent = 'Error: ' + err.message;
+  });
+}
+
+function performUpdate() {
+  var btn = document.getElementById('ver-update-btn');
+  var status = document.getElementById('ver-update-status');
+
+  if (!confirm('Update OpenTrace to v' + versionState.latestVersion + '? The server will restart automatically.')) return;
+
+  btn.disabled = true;
+  status.textContent = 'Downloading...';
+  status.style.color = '';
+
+  fetch('/api/version/update', {method:'POST'}).then(function(r){
+    if (r.ok) return r.json();
+    return r.json().then(function(d){throw new Error(d.error||'update failed')});
+  }).then(function(d){
+    status.textContent = 'Updated ' + d.old_version + ' → ' + d.new_version + '. Restarting...';
+    status.style.color = 'var(--green)';
+    btn.style.display = 'none';
+    pollForRestart(d.new_version);
+  }).catch(function(err){
+    btn.disabled = false;
+    status.textContent = 'Error: ' + err.message;
+    status.style.color = 'var(--red, #ff6060)';
+  });
+}
+
+function pollForRestart(expectedVersion) {
+  var status = document.getElementById('ver-update-status');
+  var attempts = 0;
+  var maxAttempts = 30; // 60 seconds max
+
+  var poll = setInterval(function() {
+    attempts++;
+    if (attempts > maxAttempts) {
+      clearInterval(poll);
+      status.textContent = 'Server did not come back. Please check manually.';
+      status.style.color = 'var(--yellow)';
+      return;
+    }
+
+    fetch('/healthz').then(function(r){return r.json()}).then(function(d){
+      if (d.version === expectedVersion) {
+        clearInterval(poll);
+        status.textContent = 'Updated to v' + expectedVersion + '. Reloading...';
+        setTimeout(function(){ location.reload(); }, 500);
+      }
+    }).catch(function(){
+      // Server is still restarting, keep polling
+    });
+  }, 2000);
+}
+
+function loadAutoUpdateSetting() {
+  fetch('/api/settings/auto-update').then(function(r){return r.json()}).then(function(d){
+    document.getElementById('auto-update-toggle').checked = d.enabled;
+  }).catch(function(){});
+}
+
+function toggleAutoUpdate(enabled) {
+  fetch('/api/settings/auto-update', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({enabled: enabled})
+  }).catch(function(err){
+    // Revert on error
+    document.getElementById('auto-update-toggle').checked = !enabled;
   });
 }
 

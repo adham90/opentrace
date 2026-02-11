@@ -188,4 +188,6 @@ type SettingsStore interface {
 	SetRetention(ctx context.Context, settings RetentionSettings) error
 	GetAPIKey(ctx context.Context) (string, error)
 	SetAPIKey(ctx context.Context, key string) error
+	GetAutoUpdate(ctx context.Context) (bool, error)
+	SetAutoUpdate(ctx context.Context, enabled bool) error
 }

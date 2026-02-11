@@ -403,6 +403,46 @@ func run() error {
 		}
 	}()
 
+	// Background: auto-update check (every hour)
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if isDockerEnv() {
+					continue
+				}
+				if deps.settingsStore == nil {
+					continue
+				}
+				enabled, err := deps.settingsStore.GetAutoUpdate(ctx)
+				if err != nil || !enabled {
+					continue
+				}
+				updater := web.NewSelfUpdater("adham90", "opentrace")
+				result, err := updater.Update(ctx)
+				if err != nil {
+					log.Printf("auto-update: %v", err)
+					continue
+				}
+				log.Printf("auto-update: updated %s → %s, restarting...", result.OldVersion, result.NewVersion)
+				// Trigger restart via the server's restart channel
+				select {
+				case <-srv.RestartCh():
+					// Already closing
+				default:
+					// Signal restart (close is done by the server when it gets RestartCh)
+					// We need to trigger shutdown; send signal to self
+					p, _ := os.FindProcess(os.Getpid())
+					p.Signal(os.Interrupt)
+				}
+			}
+		}
+	}()
+
 	go func() {
 		log.Printf("listening on %s", deps.cfg.ListenAddr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -410,8 +450,15 @@ func run() error {
 		}
 	}()
 
-	<-done
-	log.Println("shutting down...")
+	// Wait for either OS signal or self-update restart request
+	shouldRestart := false
+	select {
+	case <-done:
+		log.Println("shutting down...")
+	case <-srv.RestartCh():
+		log.Println("restarting after self-update...")
+		shouldRestart = true
+	}
 
 	// Cancel the root context to signal all background goroutines to stop
 	cancelCtx()
@@ -423,7 +470,30 @@ func run() error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
-	return httpServer.Shutdown(shutdownCtx)
+	// Shutdown SSE sessions before the HTTP server.
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("SSE shutdown error: %v", err)
+	}
+
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("HTTP shutdown error: %v", err)
+	}
+
+	if shouldRestart {
+		execPath, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("restart: cannot find executable: %w", err)
+		}
+		log.Printf("exec %s %v", execPath, os.Args)
+		return syscall.Exec(execPath, os.Args, os.Environ())
+	}
+
+	return nil
+}
+
+func isDockerEnv() bool {
+	_, err := os.Stat("/.dockerenv")
+	return err == nil
 }
 
 // reconnectConnectors re-registers connectors that were previously connected.
