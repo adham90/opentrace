@@ -131,6 +131,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Use(middleware.Recoverer)
 	router.Use(middleware.RequestID)
 	router.Use(SecurityHeaders)
+	router.Use(skipCompressForSSE)     // must come before Compress — disables gzip for SSE
 	router.Use(middleware.Compress(5)) // gzip compression
 	router.Use(MaxBodySize(10 << 20))  // 10 MB global body limit
 	router.Use(srv.SessionAuth)        // skips /static/ and /healthz paths internally
