@@ -1292,14 +1292,14 @@ select:focus { outline: none; border-color: var(--green); }
 .badge-backoff { background: rgba(251, 191, 36, 0.15); color: var(--yellow); }
 .badge-adaptive-error { background: rgba(239, 68, 68, 0.2); color: var(--red); font-weight: 600; }
 
-/* ===== Monitor Type Selection Grid ===== */
-.monitor-type-grid {
+/* ===== Watcher Type Selection Grid ===== */
+.watcher-type-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
 
-.monitor-type-card {
+.watcher-type-card {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1314,16 +1314,16 @@ select:focus { outline: none; border-color: var(--green); }
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
 }
-.monitor-type-card:hover {
+.watcher-type-card:hover {
   border-color: var(--green);
   background: var(--bg-tertiary);
 }
 
-.monitor-type-icon { font-size: 20px; margin-bottom: 2px; }
-.monitor-type-name { font-weight: 600; color: var(--text-bright); }
-.monitor-type-desc { font-size: 11px; color: var(--text-dim); }
+.watcher-type-icon { font-size: 20px; margin-bottom: 2px; }
+.watcher-type-name { font-weight: 600; color: var(--text-bright); }
+.watcher-type-desc { font-size: 11px; color: var(--text-dim); }
 
-/* ===== Monitor Templates ===== */
+/* ===== Watcher Templates ===== */
 .templates-grid { display: flex; flex-direction: column; gap: 12px; }
 
 .template-category { margin-bottom: 4px; }

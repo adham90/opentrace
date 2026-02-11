@@ -44,9 +44,9 @@ func (s *watcherStore) Create(ctx context.Context, params CreateWatcherParams) (
 	if notify == nil {
 		notify = json.RawMessage(`["dashboard"]`)
 	}
-	monitorType := params.MonitorType
-	if monitorType == "" {
-		monitorType = MonitorTypeAI
+	watcherType := params.WatcherType
+	if watcherType == "" {
+		watcherType = WatcherTypeAI
 	}
 
 	var ruleConfigStr *string
@@ -73,11 +73,11 @@ func (s *watcherStore) Create(ctx context.Context, params CreateWatcherParams) (
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO watchers (id, title, description, environment, severity, filters, time_range, schedule, model, effort, notify, monitor_type, rule_config, data_source_id, adaptive_config, next_run_at, created_at, updated_at)
+		`INSERT INTO watchers (id, title, description, environment, severity, filters, time_range, schedule, model, effort, notify, watcher_type, rule_config, data_source_id, adaptive_config, next_run_at, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id.String(), params.Title, params.Description, params.Environment, string(severity),
 		string(filters), timeRange, params.Schedule, params.Model, string(effort), string(notify),
-		string(monitorType), ruleConfigStr, params.DataSourceID, adaptiveConfigStr,
+		string(watcherType), ruleConfigStr, params.DataSourceID, adaptiveConfigStr,
 		now, now, now,
 	)
 	if err != nil {
@@ -89,7 +89,7 @@ func (s *watcherStore) Create(ctx context.Context, params CreateWatcherParams) (
 
 // watcherColumns is the SELECT column list for watcher queries.
 const watcherColumns = `id, title, description, environment, severity, filters, time_range, schedule, model, effort, status, notify,
-	monitor_type, rule_config, data_source_id,
+	watcher_type, rule_config, data_source_id,
 	last_run_at, next_run_at, last_error, created_at, updated_at,
 	adaptive_config, adaptive_state, consecutive_clean_runs, consecutive_errors, escalated_at, base_time_range`
 
@@ -99,14 +99,14 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 	var filtersStr, notifyStr string
 	var createdAt, updatedAt string
 	var lastRunAt, nextRunAt sql.NullString
-	var monitorTypeStr string
+	var watcherTypeStr string
 	var ruleConfigStr, dataSourceID sql.NullString
 	var adaptiveConfigStr, escalatedAt, baseTimeRange sql.NullString
 
 	err := sc.Scan(
 		&w.ID, &w.Title, &w.Description, &w.Environment, &w.Severity, &filtersStr,
 		&w.TimeRange, &w.Schedule, &w.Model, &w.Effort, &w.Status, &notifyStr,
-		&monitorTypeStr, &ruleConfigStr, &dataSourceID,
+		&watcherTypeStr, &ruleConfigStr, &dataSourceID,
 		&lastRunAt, &nextRunAt, &w.LastError,
 		&createdAt, &updatedAt,
 		&adaptiveConfigStr, &w.AdaptiveState, &w.ConsecutiveCleanRuns, &w.ConsecutiveErrors,
@@ -118,7 +118,7 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 
 	w.Filters = json.RawMessage(filtersStr)
 	w.Notify = json.RawMessage(notifyStr)
-	w.MonitorType = MonitorType(monitorTypeStr)
+	w.WatcherType = WatcherType(watcherTypeStr)
 	w.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	w.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
 
@@ -182,9 +182,9 @@ func (s *watcherStore) List(ctx context.Context, params ListWatcherParams) ([]Wa
 		conditions = append(conditions, `environment = ?`)
 		args = append(args, params.Environment)
 	}
-	if params.MonitorType != "" {
-		conditions = append(conditions, `monitor_type = ?`)
-		args = append(args, string(params.MonitorType))
+	if params.WatcherType != "" {
+		conditions = append(conditions, `watcher_type = ?`)
+		args = append(args, string(params.WatcherType))
 	}
 	if len(conditions) > 0 {
 		query += ` WHERE ` + strings.Join(conditions, ` AND `)
@@ -215,7 +215,7 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 	var titleStr, descStr, envStr *string
 	var sevStr, effortStr *string
 	var filtersStr, timeRangeStr, scheduleStr, modelStr, notifyStr *string
-	var monitorTypeStr, ruleConfigStr, dataSourceIDStr *string
+	var watcherTypeStr, ruleConfigStr, dataSourceIDStr *string
 	if params.Title != nil {
 		titleStr = params.Title
 	}
@@ -250,9 +250,9 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 		s := string(params.Notify)
 		notifyStr = &s
 	}
-	if params.MonitorType != nil {
-		s := string(*params.MonitorType)
-		monitorTypeStr = &s
+	if params.WatcherType != nil {
+		s := string(*params.WatcherType)
+		watcherTypeStr = &s
 	}
 	if params.RuleConfig != nil {
 		b, err := json.Marshal(params.RuleConfig)
@@ -288,14 +288,14 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 		     model            = COALESCE(?, model),
 		     effort           = COALESCE(?, effort),
 		     notify           = COALESCE(?, notify),
-		     monitor_type     = COALESCE(?, monitor_type),
+		     watcher_type     = COALESCE(?, watcher_type),
 		     rule_config      = COALESCE(?, rule_config),
 		     data_source_id   = COALESCE(?, data_source_id),
 		     adaptive_config  = COALESCE(?, adaptive_config),
 		     updated_at       = ?
 		 WHERE id = ?`,
 		titleStr, descStr, envStr, sevStr, filtersStr, timeRangeStr, scheduleStr, modelStr, effortStr, notifyStr,
-		monitorTypeStr, ruleConfigStr, dataSourceIDStr, adaptiveConfigStr,
+		watcherTypeStr, ruleConfigStr, dataSourceIDStr, adaptiveConfigStr,
 		now, id.String(),
 	)
 	if err != nil {
@@ -425,7 +425,7 @@ func (s *watcherStore) UpdateAdaptiveState(ctx context.Context, id uuid.UUID, pa
 	return nil
 }
 
-func (s *watcherStore) ResumeMonitor(ctx context.Context, id uuid.UUID) error {
+func (s *watcherStore) ResumeWatcher(ctx context.Context, id uuid.UUID) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE watchers
@@ -440,7 +440,7 @@ func (s *watcherStore) ResumeMonitor(ctx context.Context, id uuid.UUID) error {
 		now, now, id.String(),
 	)
 	if err != nil {
-		return fmt.Errorf("resuming monitor: %w", err)
+		return fmt.Errorf("resuming watcher: %w", err)
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {

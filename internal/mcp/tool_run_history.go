@@ -13,26 +13,26 @@ import (
 	"github.com/adham90/opentrace/internal/store"
 )
 
-// monitorRunHistoryHandler returns a handler that shows recent execution history
-// for a monitor: run status, duration, summary, errors, and alert rate.
-func monitorRunHistoryHandler(ws store.WatcherStore, rs store.WatcherRunStore) server.ToolHandlerFunc {
+// watcherRunHistoryHandler returns a handler that shows recent execution history
+// for a watcher: run status, duration, summary, errors, and alert rate.
+func watcherRunHistoryHandler(ws store.WatcherStore, rs store.WatcherRunStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 
-		monitorIDStr, _ := args["monitor_id"].(string)
-		if monitorIDStr == "" {
-			return mcp.NewToolResultError("monitor_id is required"), nil
+		watcherIDStr, _ := args["watcher_id"].(string)
+		if watcherIDStr == "" {
+			return mcp.NewToolResultError("watcher_id is required"), nil
 		}
 
-		monitorID, err := uuid.Parse(monitorIDStr)
+		watcherID, err := uuid.Parse(watcherIDStr)
 		if err != nil {
-			return mcp.NewToolResultError("invalid monitor_id format"), nil
+			return mcp.NewToolResultError("invalid watcher_id format"), nil
 		}
 
-		// Fetch monitor metadata.
-		monitor, err := ws.GetByID(ctx, monitorID)
+		// Fetch watcher metadata.
+		w, err := ws.GetByID(ctx, watcherID)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("monitor not found: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("watcher not found: %v", err)), nil
 		}
 
 		limit := 20
@@ -49,7 +49,7 @@ func monitorRunHistoryHandler(ws store.WatcherStore, rs store.WatcherRunStore) s
 		}
 
 		// Fetch runs with optional filter.
-		runs, err := rs.ListWithFilter(ctx, monitorID, limit, statusFilter)
+		runs, err := rs.ListWithFilter(ctx, watcherID, limit, statusFilter)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to list runs: %v", err)), nil
 		}
@@ -92,9 +92,9 @@ func monitorRunHistoryHandler(ws store.WatcherStore, rs store.WatcherRunStore) s
 		// Compute stats from last 24h.
 		now := time.Now().UTC()
 		since := now.Add(-24 * time.Hour)
-		totalRuns, _ := rs.CountRuns(ctx, store.CountRunParams{Since: since, Until: now, WatcherID: &monitorID})
-		completedRuns, _ := rs.CountRuns(ctx, store.CountRunParams{Since: since, Until: now, WatcherID: &monitorID, Status: "completed"})
-		failedRuns, _ := rs.CountRuns(ctx, store.CountRunParams{Since: since, Until: now, WatcherID: &monitorID, Status: "error"})
+		totalRuns, _ := rs.CountRuns(ctx, store.CountRunParams{Since: since, Until: now, WatcherID: &watcherID})
+		completedRuns, _ := rs.CountRuns(ctx, store.CountRunParams{Since: since, Until: now, WatcherID: &watcherID, Status: "completed"})
+		failedRuns, _ := rs.CountRuns(ctx, store.CountRunParams{Since: since, Until: now, WatcherID: &watcherID, Status: "error"})
 
 		// Count alerted runs from the fetched data (approximate).
 		alertedCount := 0
@@ -118,19 +118,19 @@ func monitorRunHistoryHandler(ws store.WatcherStore, rs store.WatcherRunStore) s
 			"period_covered":   "last 24 hours",
 		}
 
-		monitorInfo := map[string]any{
-			"id":       monitor.ID.String(),
-			"title":    monitor.Title,
-			"type":     string(monitor.MonitorType),
-			"status":   string(monitor.Status),
-			"schedule": monitor.Schedule,
+		watcherInfo := map[string]any{
+			"id":       w.ID.String(),
+			"title":    w.Title,
+			"type":     string(w.WatcherType),
+			"status":   string(w.Status),
+			"schedule": w.Schedule,
 		}
-		if monitor.TimeRange != "" {
-			monitorInfo["time_range"] = monitor.TimeRange
+		if w.TimeRange != "" {
+			watcherInfo["time_range"] = w.TimeRange
 		}
 
 		resp := map[string]any{
-			"monitor": monitorInfo,
+			"watcher": watcherInfo,
 			"runs":    entries,
 			"stats":   stats,
 		}

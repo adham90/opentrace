@@ -38,7 +38,6 @@ var (
 	usersTmpl          *template.Template
 	settingsTmpl       *template.Template
 	toolsTmpl          *template.Template
-	digestsTmpl        *template.Template
 	onboardingTmpl     *template.Template
 )
 
@@ -74,8 +73,6 @@ func init() {
 		"templates/layout.html", "templates/settings.html"))
 	toolsTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/tools.html"))
-	digestsTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
-		"templates/layout.html", "templates/digests.html"))
 	onboardingTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout_minimal.html", "templates/onboarding.html"))
 }

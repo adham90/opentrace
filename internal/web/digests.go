@@ -5,14 +5,6 @@ import (
 	"strconv"
 )
 
-func (s *Server) handleDigestsPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Digests", "digests")
-	tmpl := s.getTemplate(digestsTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/digests.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
-}
-
 func (s *Server) handleGetLatestDigest(w http.ResponseWriter, r *http.Request) {
 	if s.digestStore == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "unavailable", "message": "digest store not configured"})

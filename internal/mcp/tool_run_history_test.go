@@ -10,26 +10,26 @@ import (
 	"github.com/adham90/opentrace/internal/store"
 )
 
-func TestMonitorRunHistoryHandler_Success(t *testing.T) {
-	monitorID := uuid.New()
+func TestWatcherRunHistoryHandler_Success(t *testing.T) {
+	watcherID := uuid.New()
 	now := time.Now().UTC()
 	finished := now.Add(-1 * time.Minute)
 
 	ws := &mockWatcherStore{
 		watchers: []store.Watcher{
-			{ID: monitorID, Title: "Connection Monitor", Status: store.WatcherActive, MonitorType: store.MonitorTypeRule, Schedule: "*/5 * * * *", TimeRange: "5m"},
+			{ID: watcherID, Title: "Connection Watcher", Status: store.WatcherActive, WatcherType: store.WatcherTypeRule, Schedule: "*/5 * * * *", TimeRange: "5m"},
 		},
 	}
 	rs := &mockWatcherRunStore{
 		runs: []store.WatcherRun{
-			{ID: uuid.New(), WatcherID: monitorID, StartedAt: now.Add(-2 * time.Minute), FinishedAt: &finished, Status: "completed", HasAlert: true},
-			{ID: uuid.New(), WatcherID: monitorID, StartedAt: now.Add(-7 * time.Minute), FinishedAt: &finished, Status: "completed", HasAlert: false},
+			{ID: uuid.New(), WatcherID: watcherID, StartedAt: now.Add(-2 * time.Minute), FinishedAt: &finished, Status: "completed", HasAlert: true},
+			{ID: uuid.New(), WatcherID: watcherID, StartedAt: now.Add(-7 * time.Minute), FinishedAt: &finished, Status: "completed", HasAlert: false},
 		},
 	}
 
-	handler := monitorRunHistoryHandler(ws, rs)
+	handler := watcherRunHistoryHandler(ws, rs)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"monitor_id": monitorID.String(),
+		"watcher_id": watcherID.String(),
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -44,12 +44,12 @@ func TestMonitorRunHistoryHandler_Success(t *testing.T) {
 		t.Fatalf("failed to parse JSON: %v", err)
 	}
 
-	monitor, ok := resp["monitor"].(map[string]any)
+	watcher, ok := resp["watcher"].(map[string]any)
 	if !ok {
-		t.Fatal("expected monitor field")
+		t.Fatal("expected watcher field")
 	}
-	if monitor["title"] != "Connection Monitor" {
-		t.Errorf("monitor title = %v, want Connection Monitor", monitor["title"])
+	if watcher["title"] != "Connection Watcher" {
+		t.Errorf("watcher title = %v, want Connection Watcher", watcher["title"])
 	}
 
 	runs, ok := resp["runs"].([]any)
@@ -61,50 +61,50 @@ func TestMonitorRunHistoryHandler_Success(t *testing.T) {
 	}
 }
 
-func TestMonitorRunHistoryHandler_InvalidMonitorID(t *testing.T) {
+func TestWatcherRunHistoryHandler_InvalidWatcherID(t *testing.T) {
 	ws := &mockWatcherStore{}
 	rs := &mockWatcherRunStore{}
 
-	handler := monitorRunHistoryHandler(ws, rs)
+	handler := watcherRunHistoryHandler(ws, rs)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"monitor_id": "not-a-uuid",
+		"watcher_id": "not-a-uuid",
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !result.IsError {
-		t.Fatal("expected error for invalid monitor_id")
+		t.Fatal("expected error for invalid watcher_id")
 	}
 }
 
-func TestMonitorRunHistoryHandler_MonitorNotFound(t *testing.T) {
+func TestWatcherRunHistoryHandler_WatcherNotFound(t *testing.T) {
 	ws := &mockWatcherStore{}
 	rs := &mockWatcherRunStore{}
 
-	handler := monitorRunHistoryHandler(ws, rs)
+	handler := watcherRunHistoryHandler(ws, rs)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"monitor_id": uuid.New().String(),
+		"watcher_id": uuid.New().String(),
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !result.IsError {
-		t.Fatal("expected error for non-existent monitor")
+		t.Fatal("expected error for non-existent watcher")
 	}
 }
 
-func TestMonitorRunHistoryHandler_EmptyRuns(t *testing.T) {
-	monitorID := uuid.New()
+func TestWatcherRunHistoryHandler_EmptyRuns(t *testing.T) {
+	watcherID := uuid.New()
 	ws := &mockWatcherStore{
 		watchers: []store.Watcher{
-			{ID: monitorID, Title: "Test Monitor", Status: store.WatcherActive},
+			{ID: watcherID, Title: "Test Watcher", Status: store.WatcherActive},
 		},
 	}
 	rs := &mockWatcherRunStore{}
 
-	handler := monitorRunHistoryHandler(ws, rs)
+	handler := watcherRunHistoryHandler(ws, rs)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"monitor_id": monitorID.String(),
+		"watcher_id": watcherID.String(),
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -128,29 +128,29 @@ func TestMonitorRunHistoryHandler_EmptyRuns(t *testing.T) {
 	}
 }
 
-func TestMonitorRunHistoryHandler_StatusFilter(t *testing.T) {
-	monitorID := uuid.New()
+func TestWatcherRunHistoryHandler_StatusFilter(t *testing.T) {
+	watcherID := uuid.New()
 	now := time.Now().UTC()
 	finished := now.Add(-1 * time.Minute)
 
 	ws := &mockWatcherStore{
 		watchers: []store.Watcher{
-			{ID: monitorID, Title: "Test", Status: store.WatcherActive},
+			{ID: watcherID, Title: "Test", Status: store.WatcherActive},
 		},
 	}
 	rs := &mockWatcherRunStore{
 		runs: []store.WatcherRun{
-			{ID: uuid.New(), WatcherID: monitorID, StartedAt: now, FinishedAt: &finished, Status: "completed", HasAlert: false},
-			{ID: uuid.New(), WatcherID: monitorID, StartedAt: now, FinishedAt: &finished, Status: "error", HasAlert: false},
-			{ID: uuid.New(), WatcherID: monitorID, StartedAt: now, FinishedAt: &finished, Status: "completed", HasAlert: true},
+			{ID: uuid.New(), WatcherID: watcherID, StartedAt: now, FinishedAt: &finished, Status: "completed", HasAlert: false},
+			{ID: uuid.New(), WatcherID: watcherID, StartedAt: now, FinishedAt: &finished, Status: "error", HasAlert: false},
+			{ID: uuid.New(), WatcherID: watcherID, StartedAt: now, FinishedAt: &finished, Status: "completed", HasAlert: true},
 		},
 	}
 
-	handler := monitorRunHistoryHandler(ws, rs)
+	handler := watcherRunHistoryHandler(ws, rs)
 
 	// Filter for alerted runs only.
 	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"monitor_id":    monitorID.String(),
+		"watcher_id":    watcherID.String(),
 		"status_filter": "alerted",
 	}))
 	if err != nil {
@@ -175,16 +175,16 @@ func TestMonitorRunHistoryHandler_StatusFilter(t *testing.T) {
 	}
 }
 
-func TestMonitorRunHistoryHandler_MissingMonitorID(t *testing.T) {
+func TestWatcherRunHistoryHandler_MissingWatcherID(t *testing.T) {
 	ws := &mockWatcherStore{}
 	rs := &mockWatcherRunStore{}
 
-	handler := monitorRunHistoryHandler(ws, rs)
+	handler := watcherRunHistoryHandler(ws, rs)
 	result, err := handler(context.Background(), makeRequest(map[string]any{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !result.IsError {
-		t.Fatal("expected error for missing monitor_id")
+		t.Fatal("expected error for missing watcher_id")
 	}
 }

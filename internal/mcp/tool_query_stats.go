@@ -114,10 +114,10 @@ LIMIT %d`, orderBy, limit)
 			"limit":       limit,
 			"total_found": len(rows),
 			"queries":     rows,
-			"hint":        "Use these stats to identify slow queries, high-frequency queries, or queries with poor cache hit ratios. Consider creating monitors for the most impactful ones.",
+			"hint":        "Use these stats to identify slow queries, high-frequency queries, or queries with poor cache hit ratios. Consider creating watchers for the most impactful ones.",
 		}
 
-		appendExistingMonitors(resp, fetchExistingMonitors(ctx, ws))
+		appendExistingWatchers(resp, fetchExistingWatchers(ctx, ws))
 
 		data, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {

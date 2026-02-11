@@ -91,7 +91,7 @@ function loadConnectors() {
   fetch('/api/connectors' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r) { return r.json(); }).then(function(connectors) {
     var container = document.getElementById('connectors-list');
     if (!connectors || connectors.length === 0) {
-      container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No connectors yet</p><p class="empty-state-desc">Connect OpenTrace to your PostgreSQL databases so monitors can query them.</p>' + (isAdmin ? '<button class="btn btn-primary" onclick="showCreateModal()">+ Add your first database</button>' : '') + '</div>';
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No connectors yet</p><p class="empty-state-desc">Connect OpenTrace to your PostgreSQL databases so watchers can query them.</p>' + (isAdmin ? '<button class="btn btn-primary" onclick="showCreateModal()">+ Add your first database</button>' : '') + '</div>';
       return;
     }
 
@@ -292,6 +292,6 @@ window.loadPageData = loadConnectors;
   {{end}}
 </div>
 {{else}}
-<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No connectors yet</p><p class="empty-state-desc">Connectors link OpenTrace to your databases and log sources so monitors can query them.</p></div>
+<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No connectors yet</p><p class="empty-state-desc">Connectors link OpenTrace to your databases and log sources so watchers can query them.</p></div>
 {{end}}
 {{end}}

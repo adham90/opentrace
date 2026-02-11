@@ -13,9 +13,9 @@ import (
 	"github.com/adham90/opentrace/internal/store"
 )
 
-// suggestMonitorsHandler returns a handler that analyzes the current system
-// state and suggests monitors the user should create.
-func suggestMonitorsHandler(ws store.WatcherStore, ls store.LogStore) server.ToolHandlerFunc {
+// suggestWatchersHandler returns a handler that analyzes the current system
+// state and suggests watchers the user should create.
+func suggestWatchersHandler(ws store.WatcherStore, ls store.LogStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 
@@ -24,16 +24,16 @@ func suggestMonitorsHandler(ws store.WatcherStore, ls store.LogStore) server.Too
 			focus = v
 		}
 
-		// Load existing monitors.
-		var existingMonitors []store.Watcher
+		// Load existing watchers.
+		var existingWatchers []store.Watcher
 		if ws != nil {
-			monitors, err := ws.List(ctx, store.ListWatcherParams{})
+			watchers, err := ws.List(ctx, store.ListWatcherParams{})
 			if err == nil {
-				existingMonitors = monitors
+				existingWatchers = watchers
 			}
 		}
 
-		// Categorize existing monitors.
+		// Categorize existing watchers.
 		coverage := map[string]int{
 			"performance": 0,
 			"errors":      0,
@@ -41,9 +41,9 @@ func suggestMonitorsHandler(ws store.WatcherStore, ls store.LogStore) server.Too
 			"security":    0,
 		}
 		existingTitles := map[string]bool{}
-		for _, m := range existingMonitors {
+		for _, m := range existingWatchers {
 			existingTitles[m.Title] = true
-			cat := categorizeMonitor(m)
+			cat := categorizeWatcher(m)
 			coverage[cat]++
 		}
 
@@ -63,16 +63,16 @@ func suggestMonitorsHandler(ws store.WatcherStore, ls store.LogStore) server.Too
 				for _, c := range levels {
 					total += c
 				}
-				if errorCount > 10 && !hasMonitorLike(existingMonitors, "error") {
+				if errorCount > 10 && !hasWatcherLike(existingWatchers, "error") {
 					errRate := float64(errorCount) / float64(total) * 100
 					suggestions = append(suggestions, map[string]any{
 						"priority": "high",
 						"category": "errors",
-						"title":    "Monitor error rate",
-						"reason":   fmt.Sprintf("%.1f%% error rate (%d errors in the last hour) with no error rate monitor", errRate, errorCount),
-						"monitor_config": map[string]any{
+						"title":    "Error rate watcher",
+						"reason":   fmt.Sprintf("%.1f%% error rate (%d errors in the last hour) with no error rate watcher", errRate, errorCount),
+						"watcher_config": map[string]any{
 							"title":        "Error Rate Alert",
-							"monitor_type": "rule",
+							"watcher_type": "rule",
 							"rule_config": map[string]any{
 								"source":    "logs",
 								"filter":    map[string]any{"level": "error"},
@@ -107,15 +107,15 @@ func suggestMonitorsHandler(ws store.WatcherStore, ls store.LogStore) server.Too
 				}
 				for pattern, count := range patterns {
 					if count > 10 && float64(count)/float64(len(errorLogs)) > 0.2 {
-						if !hasMonitorLike(existingMonitors, pattern) {
+						if !hasWatcherLike(existingWatchers, pattern) {
 							suggestions = append(suggestions, map[string]any{
 								"priority": "medium",
 								"category": "errors",
-								"title":    fmt.Sprintf("Monitor '%s' error pattern", truncate(pattern, 50)),
+								"title":    fmt.Sprintf("'%s' error pattern watcher", truncate(pattern, 50)),
 								"reason":   fmt.Sprintf("%d occurrences of this pattern in the last hour (%.0f%% of errors)", count, float64(count)/float64(len(errorLogs))*100),
-								"monitor_config": map[string]any{
+								"watcher_config": map[string]any{
 									"title":        fmt.Sprintf("Error Pattern: %s", truncate(samples[pattern], 40)),
-									"monitor_type": "rule",
+									"watcher_type": "rule",
 									"rule_config": map[string]any{
 										"source":    "logs",
 										"filter":    map[string]any{"query": truncate(samples[pattern], 60)},
@@ -136,16 +136,16 @@ func suggestMonitorsHandler(ws store.WatcherStore, ls store.LogStore) server.Too
 
 		// Standard gap checks.
 		if focus == "all" || focus == "health" {
-			if !hasMonitorLike(existingMonitors, "connection") && !hasMonitorLike(existingMonitors, "pool") {
+			if !hasWatcherLike(existingWatchers, "connection") && !hasWatcherLike(existingWatchers, "pool") {
 				gaps = append(gaps, "No connection pool monitoring")
 				suggestions = append(suggestions, map[string]any{
 					"priority": "high",
 					"category": "health",
-					"title":    "Monitor database connection utilization",
-					"reason":   "No monitor covering connection pool health or saturation",
-					"monitor_config": map[string]any{
+					"title":    "Connection utilization watcher",
+					"reason":   "No watcher covering connection pool health or saturation",
+					"watcher_config": map[string]any{
 						"title":        "Connection Pool Utilization",
-						"monitor_type": "rule",
+						"watcher_type": "rule",
 						"rule_config": map[string]any{
 							"source":    "query",
 							"query":     "SELECT count(*) FROM pg_stat_activity WHERE state != 'idle'",
@@ -158,27 +158,27 @@ func suggestMonitorsHandler(ws store.WatcherStore, ls store.LogStore) server.Too
 					},
 				})
 			}
-			if !hasMonitorLike(existingMonitors, "replication") && !hasMonitorLike(existingMonitors, "replica") {
+			if !hasWatcherLike(existingWatchers, "replication") && !hasWatcherLike(existingWatchers, "replica") {
 				gaps = append(gaps, "No replication lag monitoring")
 			}
-			if !hasMonitorLike(existingMonitors, "vacuum") && !hasMonitorLike(existingMonitors, "dead tuple") {
+			if !hasWatcherLike(existingWatchers, "vacuum") && !hasWatcherLike(existingWatchers, "dead tuple") {
 				gaps = append(gaps, "No dead tuple / vacuum monitoring")
 			}
-			if !hasMonitorLike(existingMonitors, "disk") {
+			if !hasWatcherLike(existingWatchers, "disk") {
 				gaps = append(gaps, "No disk space monitoring")
 			}
 		}
 
 		if focus == "all" || focus == "performance" {
-			if !hasMonitorLike(existingMonitors, "slow") && !hasMonitorLike(existingMonitors, "query") {
+			if !hasWatcherLike(existingWatchers, "slow") && !hasWatcherLike(existingWatchers, "query") {
 				suggestions = append(suggestions, map[string]any{
 					"priority": "medium",
 					"category": "performance",
-					"title":    "Monitor slow queries",
-					"reason":   "No monitor covering query execution time",
-					"monitor_config": map[string]any{
+					"title":    "Slow query watcher",
+					"reason":   "No watcher covering query execution time",
+					"watcher_config": map[string]any{
 						"title":        "Slow Query Alert",
-						"monitor_type": "rule",
+						"watcher_type": "rule",
 						"rule_config": map[string]any{
 							"source":    "query",
 							"query":     "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND now() - query_start > interval '5 seconds'",
@@ -194,7 +194,7 @@ func suggestMonitorsHandler(ws store.WatcherStore, ls store.LogStore) server.Too
 		}
 
 		if focus == "all" || focus == "security" {
-			if !hasMonitorLike(existingMonitors, "auth") && !hasMonitorLike(existingMonitors, "login") {
+			if !hasWatcherLike(existingWatchers, "auth") && !hasWatcherLike(existingWatchers, "login") {
 				gaps = append(gaps, "No authentication failure monitoring")
 			}
 		}
@@ -212,7 +212,7 @@ func suggestMonitorsHandler(ws store.WatcherStore, ls store.LogStore) server.Too
 
 		resp := map[string]any{
 			"existing_coverage": map[string]any{
-				"total_monitors": len(existingMonitors),
+				"total_watchers": len(existingWatchers),
 				"categories":     coverage,
 			},
 			"suggestions": suggestions,
@@ -226,8 +226,8 @@ func suggestMonitorsHandler(ws store.WatcherStore, ls store.LogStore) server.Too
 	}
 }
 
-// categorizeMonitor assigns a category based on monitor title/config.
-func categorizeMonitor(m store.Watcher) string {
+// categorizeWatcher assigns a category based on watcher title/config.
+func categorizeWatcher(m store.Watcher) string {
 	title := m.Title
 	switch {
 	case containsAny(title, "slow", "query", "performance", "index", "latency"):
@@ -243,9 +243,9 @@ func categorizeMonitor(m store.Watcher) string {
 	}
 }
 
-// hasMonitorLike checks if any existing monitor's title contains the keyword.
-func hasMonitorLike(monitors []store.Watcher, keyword string) bool {
-	for _, m := range monitors {
+// hasWatcherLike checks if any existing watcher's title contains the keyword.
+func hasWatcherLike(watchers []store.Watcher, keyword string) bool {
+	for _, m := range watchers {
 		if containsAny(m.Title, keyword) {
 			return true
 		}

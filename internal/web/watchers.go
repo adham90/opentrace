@@ -25,7 +25,7 @@ type createWatcherRequest struct {
 	Model          string                `json:"model"`
 	Effort         store.WatcherEffort   `json:"effort"`
 	Notify         json.RawMessage       `json:"notify"`
-	MonitorType    store.MonitorType     `json:"monitor_type"`
+	WatcherType    store.WatcherType     `json:"watcher_type"`
 	RuleConfig     *store.RuleConfig     `json:"rule_config,omitempty"`
 	DataSourceID   *string               `json:"data_source_id,omitempty"`
 	AdaptiveConfig *store.AdaptiveConfig `json:"adaptive_config,omitempty"`
@@ -42,7 +42,7 @@ type updateWatcherRequest struct {
 	Model          *string                `json:"model,omitempty"`
 	Effort         *store.WatcherEffort   `json:"effort,omitempty"`
 	Notify         json.RawMessage        `json:"notify,omitempty"`
-	MonitorType    *store.MonitorType     `json:"monitor_type,omitempty"`
+	WatcherType    *store.WatcherType     `json:"watcher_type,omitempty"`
 	RuleConfig     *store.RuleConfig      `json:"rule_config,omitempty"`
 	DataSourceID   *string                `json:"data_source_id,omitempty"`
 	AdaptiveConfig *store.AdaptiveConfig  `json:"adaptive_config,omitempty"`
@@ -58,9 +58,9 @@ func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "title is required")
 		return
 	}
-	// AI monitors require a description; rule monitors don't
-	if req.MonitorType != store.MonitorTypeRule && req.Description == "" {
-		writeError(w, http.StatusBadRequest, "description is required for AI monitors")
+	// AI watchers require a description; rule watchers don't
+	if req.WatcherType != store.WatcherTypeRule && req.Description == "" {
+		writeError(w, http.StatusBadRequest, "description is required for AI watchers")
 		return
 	}
 
@@ -80,7 +80,7 @@ func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
 		Model:          req.Model,
 		Effort:         req.Effort,
 		Notify:         req.Notify,
-		MonitorType:    req.MonitorType,
+		WatcherType:    req.WatcherType,
 		RuleConfig:     req.RuleConfig,
 		DataSourceID:   req.DataSourceID,
 		AdaptiveConfig: req.AdaptiveConfig,
@@ -152,7 +152,7 @@ func (s *Server) handleUpdateWatcher(w http.ResponseWriter, r *http.Request) {
 		Model:          req.Model,
 		Effort:         req.Effort,
 		Notify:         req.Notify,
-		MonitorType:    req.MonitorType,
+		WatcherType:    req.WatcherType,
 		RuleConfig:     req.RuleConfig,
 		DataSourceID:   req.DataSourceID,
 		AdaptiveConfig: req.AdaptiveConfig,
@@ -209,12 +209,12 @@ func (s *Server) handleResumeWatcher(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if mon.AdaptiveState == store.AdaptiveError {
-		if err := s.watcherStore.ResumeMonitor(r.Context(), id); err != nil {
+		if err := s.watcherStore.ResumeWatcher(r.Context(), id); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
-				writeError(w, http.StatusConflict, "monitor is not in error state")
+				writeError(w, http.StatusConflict, "watcher is not in error state")
 				return
 			}
-			writeError(w, http.StatusInternalServerError, "failed to resume monitor")
+			writeError(w, http.StatusInternalServerError, "failed to resume watcher")
 			return
 		}
 		// Re-fetch to return updated state

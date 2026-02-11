@@ -11,7 +11,7 @@ import (
 )
 
 func TestAlertDetailsHandler_Success(t *testing.T) {
-	monitorID := uuid.New()
+	watcherID := uuid.New()
 	runID := uuid.New()
 	alertID := uuid.New()
 	now := time.Now().UTC()
@@ -19,8 +19,8 @@ func TestAlertDetailsHandler_Success(t *testing.T) {
 	as := &mockAlertStore{
 		alerts: []store.Alert{
 			{
-				ID: alertID, WatcherID: &monitorID, RunID: &runID,
-				WatcherTitle: "Connection Monitor",
+				ID: alertID, WatcherID: &watcherID, RunID: &runID,
+				WatcherTitle: "Connection Watcher",
 				Title: "High connections", Summary: "92/100 connections",
 				Severity: store.SeverityCritical, CreatedAt: now,
 			},
@@ -28,13 +28,13 @@ func TestAlertDetailsHandler_Success(t *testing.T) {
 	}
 	ws := &mockWatcherStore{
 		watchers: []store.Watcher{
-			{ID: monitorID, Title: "Connection Monitor", MonitorType: store.MonitorTypeRule, Status: store.WatcherActive, TimeRange: "5m"},
+			{ID: watcherID, Title: "Connection Watcher", WatcherType: store.WatcherTypeRule, Status: store.WatcherActive, TimeRange: "5m"},
 		},
 	}
 	finished := now.Add(2 * time.Second)
 	rs := &mockWatcherRunStore{
 		runs: []store.WatcherRun{
-			{ID: runID, WatcherID: monitorID, StartedAt: now.Add(-2 * time.Second), FinishedAt: &finished, Status: "completed", HasAlert: true},
+			{ID: runID, WatcherID: watcherID, StartedAt: now.Add(-2 * time.Second), FinishedAt: &finished, Status: "completed", HasAlert: true},
 		},
 	}
 
@@ -63,8 +63,8 @@ func TestAlertDetailsHandler_Success(t *testing.T) {
 		t.Errorf("severity = %v, want critical", alert["severity"])
 	}
 
-	if _, ok := resp["monitor"]; !ok {
-		t.Error("expected monitor field")
+	if _, ok := resp["watcher"]; !ok {
+		t.Error("expected watcher field")
 	}
 
 	if _, ok := resp["triggering_run"]; !ok {
@@ -101,25 +101,25 @@ func TestAlertDetailsHandler_MissingAlertID(t *testing.T) {
 }
 
 func TestAlertDetailsHandler_WithCorrelatedAlerts(t *testing.T) {
-	monitorID := uuid.New()
+	watcherID := uuid.New()
 	alertID := uuid.New()
 	now := time.Now().UTC()
 
 	as := &mockAlertStore{
 		alerts: []store.Alert{
 			{
-				ID: alertID, WatcherID: &monitorID,
+				ID: alertID, WatcherID: &watcherID,
 				Title: "Alert 1", Summary: "First alert",
 				Severity: store.SeverityCritical, CreatedAt: now,
 			},
 			{
-				ID: uuid.New(), WatcherID: &monitorID,
-				WatcherTitle: "Other Monitor",
+				ID: uuid.New(), WatcherID: &watcherID,
+				WatcherTitle: "Other Watcher",
 				Title: "Alert 2", Summary: "Correlated alert",
 				Severity: store.SeverityWarning, CreatedAt: now.Add(-2 * time.Minute),
 			},
 			{
-				ID: uuid.New(), WatcherID: &monitorID,
+				ID: uuid.New(), WatcherID: &watcherID,
 				Title: "Alert 3", Summary: "Too far away",
 				Severity: store.SeverityInfo, CreatedAt: now.Add(-10 * time.Minute),
 			},

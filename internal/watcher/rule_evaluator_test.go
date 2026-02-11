@@ -146,7 +146,7 @@ func TestRuleEvaluator_EvaluateLogs(t *testing.T) {
 	// 3 logs, threshold > 5 → no alert
 	w := store.Watcher{
 		ID:          uuid.New(),
-		MonitorType: store.MonitorTypeRule,
+		WatcherType: store.WatcherTypeRule,
 		RuleConfig: &store.RuleConfig{
 			Source:    store.RuleSourceLogs,
 			Metric:    "count",
@@ -187,7 +187,7 @@ func TestRuleEvaluator_NilRuleConfig(t *testing.T) {
 
 	w := store.Watcher{
 		ID:          uuid.New(),
-		MonitorType: store.MonitorTypeRule,
+		WatcherType: store.WatcherTypeRule,
 	}
 
 	_, err := re.Evaluate(context.Background(), w)
@@ -201,7 +201,7 @@ func TestRuleEvaluator_UnknownSource(t *testing.T) {
 
 	w := store.Watcher{
 		ID:          uuid.New(),
-		MonitorType: store.MonitorTypeRule,
+		WatcherType: store.WatcherTypeRule,
 		RuleConfig: &store.RuleConfig{
 			Source: store.RuleSource("unknown"),
 		},

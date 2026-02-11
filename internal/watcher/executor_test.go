@@ -270,7 +270,7 @@ func (m *mockWatcherStore) getRunTime(id uuid.UUID) (time.Time, time.Time) {
 func (m *mockWatcherStore) UpdateAdaptiveState(ctx context.Context, id uuid.UUID, params store.UpdateAdaptiveParams) error {
 	return nil
 }
-func (m *mockWatcherStore) ResumeMonitor(ctx context.Context, id uuid.UUID) error {
+func (m *mockWatcherStore) ResumeWatcher(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 

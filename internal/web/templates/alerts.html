@@ -19,12 +19,12 @@
       <span class="filter-tag-val" id="tag-severity-val">all</span>
       <div class="filter-dropdown" id="drop-severity"></div>
     </div>
-    <div class="filter-tag" id="tag-monitor" onclick="toggleAlertDropdown('monitor',event)" title="monitor — key: m">
+    <div class="filter-tag" id="tag-watcher" onclick="toggleAlertDropdown('watcher',event)" title="watcher — key: m">
       <span class="filter-tag-key">m:</span>
-      <span class="filter-tag-val" id="tag-monitor-val">all</span>
-      <div class="filter-dropdown" id="drop-monitor"></div>
+      <span class="filter-tag-val" id="tag-watcher-val">all</span>
+      <div class="filter-dropdown" id="drop-watcher"></div>
     </div>
-    <div class="filter-tag" id="tag-group" onclick="toggleGrouping(event)" title="group by monitor — key: g">
+    <div class="filter-tag" id="tag-group" onclick="toggleGrouping(event)" title="group by watcher — key: g">
       <span class="filter-tag-key">g:</span>
       <span class="filter-tag-val" id="tag-group-val">off</span>
     </div>
@@ -47,8 +47,8 @@
   <div class="empty-state" id="alerts-empty" style="display:none">
     <div class="empty-icon">--</div>
     <p class="empty-state-title" id="empty-title">No alerts yet</p>
-    <p class="empty-state-desc" id="empty-desc">Alerts are generated when your monitors detect an issue. Set up a monitor to start receiving alerts.</p>
-    <a href="/watchers" class="btn btn-primary" id="empty-action">Set up a monitor</a>
+    <p class="empty-state-desc" id="empty-desc">Alerts are generated when your watchers detect an issue. Set up a watcher to start receiving alerts.</p>
+    <a href="/watchers" class="btn btn-primary" id="empty-action">Set up a watcher</a>
   </div>
 </div>
 
@@ -63,10 +63,10 @@ var STATUS_OPTIONS = ['unread', 'all', 'dismissed'];
 var STATUS_LABELS  = ['unread', 'all', 'dismissed'];
 var SEV_OPTIONS = ['', 'critical', 'warning', 'info'];
 var SEV_LABELS  = ['all', 'crit', 'warn', 'info'];
-var monitorList = [{id:'', title:'all'}];
+var watcherList = [{id:'', title:'all'}];
 var currentStatusIdx = 0;
 var currentSevIdx = 0;
-var currentMonitorIdx = 0;
+var currentWatcherIdx = 0;
 var grouped = false;
 
 // ── URL sync ──────────────────────────────────────────────
@@ -80,13 +80,13 @@ function initFromUrl() {
   if (si >= 0) currentSevIdx = si;
   var wid = params.get('watcher_id') || '';
   if (wid) {
-    for (var i = 0; i < monitorList.length; i++) {
-      if (monitorList[i].id === wid) { currentMonitorIdx = i; break; }
+    for (var i = 0; i < watcherList.length; i++) {
+      if (watcherList[i].id === wid) { currentWatcherIdx = i; break; }
     }
   }
   updateTagDisplay('tag-status-val', STATUS_LABELS[currentStatusIdx], currentStatusIdx !== 0);
   updateTagDisplay('tag-severity-val', SEV_LABELS[currentSevIdx], currentSevIdx !== 0);
-  updateTagDisplay('tag-monitor-val', monitorList[currentMonitorIdx].title, currentMonitorIdx !== 0);
+  updateTagDisplay('tag-watcher-val', watcherList[currentWatcherIdx].title, currentWatcherIdx !== 0);
   updateTagDisplay('tag-group-val', grouped ? 'on' : 'off', grouped);
 }
 
@@ -94,7 +94,7 @@ function syncToUrl() {
   var params = new URLSearchParams();
   if (STATUS_OPTIONS[currentStatusIdx] !== 'unread') params.set('status', STATUS_OPTIONS[currentStatusIdx]);
   if (SEV_OPTIONS[currentSevIdx]) params.set('severity', SEV_OPTIONS[currentSevIdx]);
-  if (monitorList[currentMonitorIdx].id) params.set('watcher_id', monitorList[currentMonitorIdx].id);
+  if (watcherList[currentWatcherIdx].id) params.set('watcher_id', watcherList[currentWatcherIdx].id);
   var qs = params.toString();
   var url = window.location.pathname + (qs ? '?' + qs : '');
   history.replaceState(null, '', url);
@@ -149,10 +149,10 @@ function toggleAlertDropdown(name, e) {
 
   if (name === 'status') renderDropdown(dropId, STATUS_OPTIONS, STATUS_LABELS, currentStatusIdx, selectStatus);
   else if (name === 'severity') renderDropdown(dropId, SEV_OPTIONS, SEV_LABELS, currentSevIdx, selectSeverity);
-  else if (name === 'monitor') {
-    var ids = monitorList.map(function(m){ return m.id; });
-    var mLabels = monitorList.map(function(m){ return m.title; });
-    renderDropdown(dropId, ids, mLabels, currentMonitorIdx, selectMonitor);
+  else if (name === 'watcher') {
+    var ids = watcherList.map(function(m){ return m.id; });
+    var mLabels = watcherList.map(function(m){ return m.title; });
+    renderDropdown(dropId, ids, mLabels, currentWatcherIdx, selectWatcher);
   }
   drop.classList.add('show');
   openDrop = dropId;
@@ -182,10 +182,10 @@ function selectSeverity(idx) {
   loadAlerts();
 }
 
-function selectMonitor(idx) {
-  currentMonitorIdx = idx;
-  updateTagDisplay('tag-monitor-val', monitorList[idx].title, idx !== 0);
-  flashTag('tag-monitor');
+function selectWatcher(idx) {
+  currentWatcherIdx = idx;
+  updateTagDisplay('tag-watcher-val', watcherList[idx].title, idx !== 0);
+  flashTag('tag-watcher');
   selectedAlerts = {};
   updateBulkBar();
   syncToUrl();
@@ -208,19 +208,19 @@ function cycleStatus(dir) {
 function cycleSeverity(dir) {
   selectSeverity((currentSevIdx + dir + SEV_OPTIONS.length) % SEV_OPTIONS.length);
 }
-function cycleMonitor(dir) {
-  selectMonitor((currentMonitorIdx + dir + monitorList.length) % monitorList.length);
+function cycleWatcher(dir) {
+  selectWatcher((currentWatcherIdx + dir + watcherList.length) % watcherList.length);
 }
 
 // ── Clear all ─────────────────────────────────────────────
 function clearAlertFilters() {
   currentStatusIdx = 0;
   currentSevIdx = 0;
-  currentMonitorIdx = 0;
+  currentWatcherIdx = 0;
   grouped = false;
   updateTagDisplay('tag-status-val', STATUS_LABELS[0], false);
   updateTagDisplay('tag-severity-val', SEV_LABELS[0], false);
-  updateTagDisplay('tag-monitor-val', monitorList[0].title, false);
+  updateTagDisplay('tag-watcher-val', watcherList[0].title, false);
   updateTagDisplay('tag-group-val', 'off', false);
   selectedAlerts = {};
   updateBulkBar();
@@ -243,29 +243,29 @@ document.addEventListener('keydown', function(e){
     case 'S': e.preventDefault(); cycleStatus(-1); break;
     case 'v': e.preventDefault(); cycleSeverity(1); break;
     case 'V': e.preventDefault(); cycleSeverity(-1); break;
-    case 'm': e.preventDefault(); cycleMonitor(1); break;
-    case 'M': e.preventDefault(); cycleMonitor(-1); break;
+    case 'm': e.preventDefault(); cycleWatcher(1); break;
+    case 'M': e.preventDefault(); cycleWatcher(-1); break;
     case 'g': e.preventDefault(); toggleGrouping(null); break;
     case 'c': e.preventDefault(); clearAlertFilters(); break;
   }
 });
 
-// ── Load watchers into monitorList ────────────────────────
+// ── Load watchers into watcherList ────────────────────────
 function loadWatchers() {
   fetch('/api/watchers' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r) { return r.json(); }).then(function(watchers) {
-    monitorList = [{id:'', title:'all'}];
+    watcherList = [{id:'', title:'all'}];
     (watchers || []).forEach(function(w) {
-      monitorList.push({id: w.id, title: w.title});
+      watcherList.push({id: w.id, title: w.title});
     });
-    // Re-resolve currentMonitorIdx from URL
+    // Re-resolve currentWatcherIdx from URL
     var params = new URLSearchParams(window.location.search);
     var wid = params.get('watcher_id') || '';
     if (wid) {
-      for (var i = 0; i < monitorList.length; i++) {
-        if (monitorList[i].id === wid) { currentMonitorIdx = i; break; }
+      for (var i = 0; i < watcherList.length; i++) {
+        if (watcherList[i].id === wid) { currentWatcherIdx = i; break; }
       }
     }
-    updateTagDisplay('tag-monitor-val', monitorList[currentMonitorIdx].title, currentMonitorIdx !== 0);
+    updateTagDisplay('tag-watcher-val', watcherList[currentWatcherIdx].title, currentWatcherIdx !== 0);
   }).catch(function() {});
 }
 
@@ -273,7 +273,7 @@ function loadWatchers() {
 function loadAlerts() {
   var status = STATUS_OPTIONS[currentStatusIdx];
   var severity = SEV_OPTIONS[currentSevIdx];
-  var watcherId = monitorList[currentMonitorIdx].id;
+  var watcherId = watcherList[currentWatcherIdx].id;
   var url = '/api/alerts?limit=100';
   if (status === 'unread') url += '&unread=true';
   if (status === 'dismissed') url += '&dismissed=true';
@@ -359,7 +359,7 @@ function renderAlerts() {
       action.style.display = 'none';
     } else {
       title.textContent = 'No alerts yet';
-      desc.textContent = 'Alerts are generated when your monitors detect an issue. Set up a monitor to start receiving alerts.';
+      desc.textContent = 'Alerts are generated when your watchers detect an issue. Set up a watcher to start receiving alerts.';
       action.style.display = '';
     }
     return;
@@ -381,7 +381,7 @@ function renderGrouped(expandedIDs, status) {
   allAlerts.forEach(function(a) {
     var key = a.watcher_id || '__none__';
     if (!groups[key]) {
-      groups[key] = { title: a.watcher_title || 'Unknown monitor', alerts: [] };
+      groups[key] = { title: a.watcher_title || 'Unknown watcher', alerts: [] };
       order.push(key);
     }
     groups[key].alerts.push(a);

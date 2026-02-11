@@ -23,14 +23,14 @@ func (s *digestStore) Save(ctx context.Context, d SaveDigestParams) error {
 
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO digests (id, environment, status, period_start, period_end,
-		 alert_total, alert_critical, alert_warning, monitor_total, monitor_errored,
+		 alert_total, alert_critical, alert_warning, watcher_total, watcher_errored,
 		 failed_runs, data, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		d.ID, d.Environment, d.Status,
 		d.PeriodStart.UTC().Format(time.RFC3339),
 		d.PeriodEnd.UTC().Format(time.RFC3339),
 		d.AlertTotal, d.AlertCritical, d.AlertWarning,
-		d.MonitorTotal, d.MonitorErrored, d.FailedRuns,
+		d.WatcherTotal, d.WatcherErrored, d.FailedRuns,
 		d.Data, now,
 	)
 	if err != nil {
@@ -41,7 +41,7 @@ func (s *digestStore) Save(ctx context.Context, d SaveDigestParams) error {
 
 func (s *digestStore) GetLatest(ctx context.Context, environment string) (*StoredDigest, error) {
 	query := `SELECT id, environment, status, period_start, period_end,
-	          alert_total, alert_critical, alert_warning, monitor_total, monitor_errored,
+	          alert_total, alert_critical, alert_warning, watcher_total, watcher_errored,
 	          failed_runs, data, created_at
 	          FROM digests WHERE 1=1`
 	var args []any
@@ -59,7 +59,7 @@ func (s *digestStore) GetLatest(ctx context.Context, environment string) (*Store
 	err := s.db.QueryRowContext(ctx, query, args...).Scan(
 		&d.ID, &d.Environment, &d.Status, &periodStart, &periodEnd,
 		&d.AlertTotal, &d.AlertCritical, &d.AlertWarning,
-		&d.MonitorTotal, &d.MonitorErrored, &d.FailedRuns,
+		&d.WatcherTotal, &d.WatcherErrored, &d.FailedRuns,
 		&d.Data, &createdAt,
 	)
 	if err != nil {
@@ -82,7 +82,7 @@ func (s *digestStore) List(ctx context.Context, limit int, environment string) (
 	}
 
 	query := `SELECT id, environment, status, period_start, period_end,
-	          alert_total, alert_critical, alert_warning, monitor_total, monitor_errored,
+	          alert_total, alert_critical, alert_warning, watcher_total, watcher_errored,
 	          failed_runs, data, created_at
 	          FROM digests WHERE 1=1`
 	var args []any
@@ -109,7 +109,7 @@ func (s *digestStore) List(ctx context.Context, limit int, environment string) (
 		if err := rows.Scan(
 			&d.ID, &d.Environment, &d.Status, &periodStart, &periodEnd,
 			&d.AlertTotal, &d.AlertCritical, &d.AlertWarning,
-			&d.MonitorTotal, &d.MonitorErrored, &d.FailedRuns,
+			&d.WatcherTotal, &d.WatcherErrored, &d.FailedRuns,
 			&d.Data, &createdAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning digest: %w", err)

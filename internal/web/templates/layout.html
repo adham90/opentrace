@@ -42,8 +42,7 @@
         <a href="/watchers" class="nav-item {{if eq .Nav "watchers"}}active{{end}}">3:watchers</a>
         <a href="/connectors" class="nav-item {{if eq .Nav "connectors"}}active{{end}}">4:connectors</a>
         <a href="/servers" class="nav-item {{if eq .Nav "servers"}}active{{end}}">5:servers</a>
-        <a href="/digests" class="nav-item {{if eq .Nav "digests"}}active{{end}}">6:digests</a>
-        <a href="/tools" class="nav-item {{if eq .Nav "tools"}}active{{end}}">7:tools</a>
+        <a href="/tools" class="nav-item {{if eq .Nav "tools"}}active{{end}}">6:tools</a>
       </nav>
       <div class="topbar-right">
         <div class="topbar-env-tag" id="topbar-env-tag" onclick="toggleTopbarEnv(event)" title="Filter by environment">
@@ -92,8 +91,7 @@
         <div class="shortcut-row"><kbd>3</kbd><span>Go to Watchers</span></div>
         <div class="shortcut-row"><kbd>4</kbd><span>Go to Connectors</span></div>
         <div class="shortcut-row"><kbd>5</kbd><span>Go to Servers</span></div>
-        <div class="shortcut-row"><kbd>6</kbd><span>Go to Digests</span></div>
-        <div class="shortcut-row"><kbd>7</kbd><span>Go to Tools</span></div>
+        <div class="shortcut-row"><kbd>6</kbd><span>Go to Tools</span></div>
       </div>
       {{if eq .Nav "logs"}}
       <div class="shortcut-section">
@@ -112,14 +110,14 @@
         <div class="shortcut-section-label">Alert Filters</div>
         <div class="shortcut-row"><kbd>s</kbd> / <kbd>S</kbd><span>Cycle status</span></div>
         <div class="shortcut-row"><kbd>v</kbd> / <kbd>V</kbd><span>Cycle severity</span></div>
-        <div class="shortcut-row"><kbd>m</kbd> / <kbd>M</kbd><span>Cycle monitor</span></div>
+        <div class="shortcut-row"><kbd>m</kbd> / <kbd>M</kbd><span>Cycle watcher</span></div>
         <div class="shortcut-row"><kbd>g</kbd><span>Toggle grouping</span></div>
         <div class="shortcut-row"><kbd>c</kbd><span>Clear all filters</span></div>
       </div>
       {{end}}
       {{if eq .Nav "watchers"}}
       <div class="shortcut-section">
-        <div class="shortcut-section-label">Monitor Filters</div>
+        <div class="shortcut-section-label">Watcher Filters</div>
         <div class="shortcut-row"><kbd>s</kbd> / <kbd>S</kbd><span>Cycle status</span></div>
         <div class="shortcut-row"><kbd>t</kbd> / <kbd>T</kbd><span>Cycle type</span></div>
         <div class="shortcut-row"><kbd>v</kbd> / <kbd>V</kbd><span>Cycle severity</span></div>
@@ -355,7 +353,7 @@
 
   // Keyboard navigation + shortcut overlay
   (function(){
-    var tabs = {1:'/logs', 2:'/alerts', 3:'/watchers', 4:'/connectors', 5:'/servers', 6:'/digests', 7:'/tools'};
+    var tabs = {1:'/logs', 2:'/alerts', 3:'/watchers', 4:'/connectors', 5:'/servers', 6:'/tools'};
 
     window.toggleShortcuts = function() {
       var overlay = document.getElementById('shortcut-overlay');

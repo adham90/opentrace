@@ -159,7 +159,7 @@ func (m *mockWatcherStore) UpdateRunTime(_ context.Context, _ uuid.UUID, _, _ ti
 func (m *mockWatcherStore) UpdateAdaptiveState(ctx context.Context, id uuid.UUID, params store.UpdateAdaptiveParams) error {
 	return nil
 }
-func (m *mockWatcherStore) ResumeMonitor(ctx context.Context, id uuid.UUID) error {
+func (m *mockWatcherStore) ResumeWatcher(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
@@ -248,8 +248,8 @@ func TestBuilder_Generate_EmptyPeriod(t *testing.T) {
 	if d.AlertSummary.Total != 0 {
 		t.Errorf("alert total = %d, want 0", d.AlertSummary.Total)
 	}
-	if d.MonitorSummary.Total != 0 {
-		t.Errorf("monitor total = %d, want 0", d.MonitorSummary.Total)
+	if d.WatcherSummary.Total != 0 {
+		t.Errorf("watcher total = %d, want 0", d.WatcherSummary.Total)
 	}
 	if len(d.TopAlerts) != 0 {
 		t.Errorf("top alerts = %d, want 0", len(d.TopAlerts))
@@ -269,15 +269,15 @@ func TestBuilder_Generate_MixedAlerts(t *testing.T) {
 	wID := uuid.New()
 	as := &mockAlertStore{
 		alerts: []store.Alert{
-			{ID: uuid.New(), WatcherID: &wID, WatcherTitle: "Monitor A", Title: "Critical issue", Summary: "bad", Severity: store.SeverityCritical, CreatedAt: now.Add(-2 * time.Hour)},
-			{ID: uuid.New(), WatcherID: &wID, WatcherTitle: "Monitor A", Title: "Warning issue", Summary: "warn", Severity: store.SeverityWarning, CreatedAt: now.Add(-3 * time.Hour)},
-			{ID: uuid.New(), WatcherID: &wID, WatcherTitle: "Monitor A", Title: "Info issue", Summary: "info", Severity: store.SeverityInfo, CreatedAt: now.Add(-4 * time.Hour)},
+			{ID: uuid.New(), WatcherID: &wID, WatcherTitle: "Watcher A", Title: "Critical issue", Summary: "bad", Severity: store.SeverityCritical, CreatedAt: now.Add(-2 * time.Hour)},
+			{ID: uuid.New(), WatcherID: &wID, WatcherTitle: "Watcher A", Title: "Warning issue", Summary: "warn", Severity: store.SeverityWarning, CreatedAt: now.Add(-3 * time.Hour)},
+			{ID: uuid.New(), WatcherID: &wID, WatcherTitle: "Watcher A", Title: "Info issue", Summary: "info", Severity: store.SeverityInfo, CreatedAt: now.Add(-4 * time.Hour)},
 		},
 	}
 
 	ws := &mockWatcherStore{
 		watchers: []store.Watcher{
-			{ID: wID, Title: "Monitor A", Status: store.WatcherActive,
+			{ID: wID, Title: "Watcher A", Status: store.WatcherActive,
 				Filters: json.RawMessage("{}"), Notify: json.RawMessage("{}")},
 		},
 	}
@@ -328,7 +328,7 @@ func TestBuilder_Generate_MixedAlerts(t *testing.T) {
 	}
 }
 
-func TestBuilder_Generate_MonitorHealth(t *testing.T) {
+func TestBuilder_Generate_WatcherHealth(t *testing.T) {
 	now := time.Now().UTC()
 	periodStart := now.Add(-24 * time.Hour)
 
@@ -337,9 +337,9 @@ func TestBuilder_Generate_MonitorHealth(t *testing.T) {
 
 	ws := &mockWatcherStore{
 		watchers: []store.Watcher{
-			{ID: w1, Title: "Active Monitor", Status: store.WatcherActive,
+			{ID: w1, Title: "Active Watcher", Status: store.WatcherActive,
 				Filters: json.RawMessage("{}"), Notify: json.RawMessage("{}")},
-			{ID: w2, Title: "Error Monitor", Status: store.WatcherError,
+			{ID: w2, Title: "Error Watcher", Status: store.WatcherError,
 				Filters: json.RawMessage("{}"), Notify: json.RawMessage("{}")},
 		},
 	}
@@ -360,41 +360,41 @@ func TestBuilder_Generate_MonitorHealth(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Monitor in error state → status should be degraded
+	// Watcher in error state → status should be degraded
 	if d.Status != StatusDegraded {
 		t.Errorf("status = %q, want %q", d.Status, StatusDegraded)
 	}
 
-	if d.MonitorSummary.Total != 2 {
-		t.Errorf("total monitors = %d, want 2", d.MonitorSummary.Total)
+	if d.WatcherSummary.Total != 2 {
+		t.Errorf("total watchers = %d, want 2", d.WatcherSummary.Total)
 	}
-	if d.MonitorSummary.Active != 1 {
-		t.Errorf("active = %d, want 1", d.MonitorSummary.Active)
+	if d.WatcherSummary.Active != 1 {
+		t.Errorf("active = %d, want 1", d.WatcherSummary.Active)
 	}
-	if d.MonitorSummary.InError != 1 {
-		t.Errorf("in_error = %d, want 1", d.MonitorSummary.InError)
+	if d.WatcherSummary.InError != 1 {
+		t.Errorf("in_error = %d, want 1", d.WatcherSummary.InError)
 	}
-	if d.MonitorSummary.RunsInPeriod != 2 {
-		t.Errorf("runs = %d, want 2", d.MonitorSummary.RunsInPeriod)
+	if d.WatcherSummary.RunsInPeriod != 2 {
+		t.Errorf("runs = %d, want 2", d.WatcherSummary.RunsInPeriod)
 	}
-	if d.MonitorSummary.FailedRuns != 1 {
-		t.Errorf("failed runs = %d, want 1", d.MonitorSummary.FailedRuns)
+	if d.WatcherSummary.FailedRuns != 1 {
+		t.Errorf("failed runs = %d, want 1", d.WatcherSummary.FailedRuns)
 	}
 
-	// Check per-monitor health
-	if len(d.MonitorHealth) != 2 {
-		t.Fatalf("monitor health entries = %d, want 2", len(d.MonitorHealth))
+	// Check per-watcher health
+	if len(d.WatcherHealth) != 2 {
+		t.Fatalf("watcher health entries = %d, want 2", len(d.WatcherHealth))
 	}
 }
 
-func TestBuilder_Generate_MonitorNoRuns(t *testing.T) {
+func TestBuilder_Generate_WatcherNoRuns(t *testing.T) {
 	now := time.Now().UTC()
 	periodStart := now.Add(-24 * time.Hour)
 
 	w1 := uuid.New()
 	ws := &mockWatcherStore{
 		watchers: []store.Watcher{
-			{ID: w1, Title: "Idle Monitor", Status: store.WatcherActive,
+			{ID: w1, Title: "Idle Watcher", Status: store.WatcherActive,
 				Filters: json.RawMessage("{}"), Notify: json.RawMessage("{}")},
 		},
 	}
@@ -412,11 +412,11 @@ func TestBuilder_Generate_MonitorNoRuns(t *testing.T) {
 		t.Errorf("status = %q, want %q", d.Status, StatusHealthy)
 	}
 
-	if len(d.MonitorHealth) != 1 {
-		t.Fatalf("monitor health = %d, want 1", len(d.MonitorHealth))
+	if len(d.WatcherHealth) != 1 {
+		t.Fatalf("watcher health = %d, want 1", len(d.WatcherHealth))
 	}
-	if !d.MonitorHealth[0].LastRunOK {
-		t.Error("monitor with no runs should show LastRunOK=true")
+	if !d.WatcherHealth[0].LastRunOK {
+		t.Error("watcher with no runs should show LastRunOK=true")
 	}
 }
 
@@ -476,9 +476,9 @@ func TestBuilder_Generate_EnvironmentFilter(t *testing.T) {
 
 	ws := &mockWatcherStore{
 		watchers: []store.Watcher{
-			{ID: w1, Title: "Prod Monitor", Environment: "production", Status: store.WatcherActive,
+			{ID: w1, Title: "Prod Watcher", Environment: "production", Status: store.WatcherActive,
 				Filters: json.RawMessage("{}"), Notify: json.RawMessage("{}")},
-			{ID: w2, Title: "Staging Monitor", Environment: "staging", Status: store.WatcherActive,
+			{ID: w2, Title: "Staging Watcher", Environment: "staging", Status: store.WatcherActive,
 				Filters: json.RawMessage("{}"), Notify: json.RawMessage("{}")},
 		},
 	}
@@ -496,7 +496,7 @@ func TestBuilder_Generate_EnvironmentFilter(t *testing.T) {
 	if d.AlertSummary.Total != 1 {
 		t.Errorf("total alerts = %d, want 1 (production only)", d.AlertSummary.Total)
 	}
-	if d.MonitorSummary.Total != 1 {
-		t.Errorf("total monitors = %d, want 1 (production only)", d.MonitorSummary.Total)
+	if d.WatcherSummary.Total != 1 {
+		t.Errorf("total watchers = %d, want 1 (production only)", d.WatcherSummary.Total)
 	}
 }

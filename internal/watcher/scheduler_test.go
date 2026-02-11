@@ -33,7 +33,7 @@ func (s *schedulerWatcherStore) GetDueWatchers(ctx context.Context) ([]store.Wat
 func (s *schedulerWatcherStore) UpdateAdaptiveState(ctx context.Context, id uuid.UUID, params store.UpdateAdaptiveParams) error {
 	return nil
 }
-func (s *schedulerWatcherStore) ResumeMonitor(ctx context.Context, id uuid.UUID) error {
+func (s *schedulerWatcherStore) ResumeWatcher(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 

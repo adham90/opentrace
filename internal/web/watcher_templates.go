@@ -10,7 +10,7 @@ import (
 )
 
 type previewRequest struct {
-	MonitorType  store.MonitorType `json:"monitor_type"`
+	WatcherType  store.WatcherType `json:"watcher_type"`
 	RuleConfig   *store.RuleConfig `json:"rule_config"`
 	DataSourceID *string           `json:"data_source_id,omitempty"`
 }
@@ -22,15 +22,15 @@ type previewResponse struct {
 	QueryTimeMS  int64    `json:"query_time_ms"`
 }
 
-func (s *Server) handleMonitorPreview(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleWatcherPreview(w http.ResponseWriter, r *http.Request) {
 	var req previewRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	if req.MonitorType != store.MonitorTypeRule {
-		writeError(w, http.StatusBadRequest, "preview is only supported for rule monitors")
+	if req.WatcherType != store.WatcherTypeRule {
+		writeError(w, http.StatusBadRequest, "preview is only supported for rule watchers")
 		return
 	}
 	if req.RuleConfig == nil {
@@ -45,7 +45,7 @@ func (s *Server) handleMonitorPreview(w http.ResponseWriter, r *http.Request) {
 
 	// Build a temporary watcher from the request
 	tempWatcher := store.Watcher{
-		MonitorType: store.MonitorTypeRule,
+		WatcherType: store.WatcherTypeRule,
 		RuleConfig:  req.RuleConfig,
 	}
 	if req.DataSourceID != nil {
@@ -73,18 +73,18 @@ func (s *Server) handleMonitorPreview(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// MonitorTemplate represents a pre-built monitor configuration.
-type MonitorTemplate struct {
+// WatcherTemplate represents a pre-built watcher configuration.
+type WatcherTemplate struct {
 	ID          string            `json:"id"`
 	Name        string            `json:"name"`
 	Description string            `json:"description"`
 	Category    string            `json:"category"`
-	MonitorType store.MonitorType `json:"monitor_type"`
+	WatcherType store.WatcherType `json:"watcher_type"`
 	RuleConfig  store.RuleConfig  `json:"rule_config"`
 	Severity    string            `json:"severity"`
 	TimeRange   string            `json:"time_range"`
 }
 
-func (s *Server) handleMonitorTemplates(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleWatcherTemplates(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, watcher.BuiltinTemplates())
 }

@@ -256,12 +256,12 @@ func TestWatcherStore_EffortField(t *testing.T) {
 	}
 }
 
-func TestWatcherStore_MonitorType(t *testing.T) {
+func TestWatcherStore_WatcherType(t *testing.T) {
 	db := setupTestDB(t)
 	s := NewWatcherStore(db)
 	ctx := context.Background()
 
-	// Default monitor_type is "ai"
+	// Default watcher_type is "ai"
 	w, err := s.Create(ctx, CreateWatcherParams{
 		Title:       "AI Watcher",
 		Description: "Uses AI evaluation",
@@ -269,8 +269,8 @@ func TestWatcherStore_MonitorType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if w.MonitorType != MonitorTypeAI {
-		t.Errorf("default monitor_type = %q, want %q", w.MonitorType, MonitorTypeAI)
+	if w.WatcherType != WatcherTypeAI {
+		t.Errorf("default watcher_type = %q, want %q", w.WatcherType, WatcherTypeAI)
 	}
 	if w.RuleConfig != nil {
 		t.Error("expected nil RuleConfig for AI watcher")
@@ -279,12 +279,12 @@ func TestWatcherStore_MonitorType(t *testing.T) {
 		t.Error("expected nil DataSourceID for AI watcher")
 	}
 
-	// Create a rule monitor with rule_config
+	// Create a rule watcher with rule_config
 	dsID := "ds-123"
 	ruleW, err := s.Create(ctx, CreateWatcherParams{
-		Title:       "Query Monitor",
+		Title:       "Query Watcher",
 		Description: "Checks connection count",
-		MonitorType: MonitorTypeRule,
+		WatcherType: WatcherTypeRule,
 		RuleConfig: &RuleConfig{
 			Source:    RuleSourceQuery,
 			Query:     "SELECT count(*) FROM pg_stat_activity",
@@ -297,8 +297,8 @@ func TestWatcherStore_MonitorType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create rule watcher: %v", err)
 	}
-	if ruleW.MonitorType != MonitorTypeRule {
-		t.Errorf("monitor_type = %q, want %q", ruleW.MonitorType, MonitorTypeRule)
+	if ruleW.WatcherType != WatcherTypeRule {
+		t.Errorf("watcher_type = %q, want %q", ruleW.WatcherType, WatcherTypeRule)
 	}
 	if ruleW.RuleConfig == nil {
 		t.Fatal("expected non-nil RuleConfig")
@@ -328,7 +328,7 @@ func TestWatcherStore_MonitorType(t *testing.T) {
 		t.Errorf("GetByID rule query = %q", got.RuleConfig.Query)
 	}
 
-	// List returns monitor_type
+	// List returns watcher_type
 	list, err := s.List(ctx, ListWatcherParams{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -337,18 +337,18 @@ func TestWatcherStore_MonitorType(t *testing.T) {
 		t.Fatalf("List len = %d, want 2", len(list))
 	}
 	// Check both types are present (order depends on timestamp resolution)
-	types := map[MonitorType]bool{}
+	types := map[WatcherType]bool{}
 	for _, w := range list {
-		types[w.MonitorType] = true
+		types[w.WatcherType] = true
 	}
-	if !types[MonitorTypeAI] || !types[MonitorTypeRule] {
+	if !types[WatcherTypeAI] || !types[WatcherTypeRule] {
 		t.Errorf("expected both ai and rule in list, got %v", types)
 	}
 
 	// Update rule_config
-	newType := MonitorTypeRule
+	newType := WatcherTypeRule
 	updated, err := s.Update(ctx, w.ID, UpdateWatcherParams{
-		MonitorType: &newType,
+		WatcherType: &newType,
 		RuleConfig: &RuleConfig{
 			Source:    RuleSourceLogs,
 			Metric:    "count",
@@ -364,8 +364,8 @@ func TestWatcherStore_MonitorType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if updated.MonitorType != MonitorTypeRule {
-		t.Errorf("updated monitor_type = %q, want rule", updated.MonitorType)
+	if updated.WatcherType != WatcherTypeRule {
+		t.Errorf("updated watcher_type = %q, want rule", updated.WatcherType)
 	}
 	if updated.RuleConfig == nil {
 		t.Fatal("expected updated RuleConfig")
@@ -499,7 +499,7 @@ func TestWatcherStore_UpdateAdaptiveState(t *testing.T) {
 	}
 }
 
-func TestWatcherStore_ResumeMonitor(t *testing.T) {
+func TestWatcherStore_ResumeWatcher(t *testing.T) {
 	db := setupTestDB(t)
 	s := NewWatcherStore(db)
 	ctx := context.Background()
@@ -523,9 +523,9 @@ func TestWatcherStore_ResumeMonitor(t *testing.T) {
 	s.UpdateStatus(ctx, w.ID, WatcherError)
 
 	// Resume it
-	err = s.ResumeMonitor(ctx, w.ID)
+	err = s.ResumeWatcher(ctx, w.ID)
 	if err != nil {
-		t.Fatalf("ResumeMonitor: %v", err)
+		t.Fatalf("ResumeWatcher: %v", err)
 	}
 
 	got, _ := s.GetByID(ctx, w.ID)
@@ -539,8 +539,8 @@ func TestWatcherStore_ResumeMonitor(t *testing.T) {
 		t.Errorf("status = %q, want active", got.Status)
 	}
 
-	// Resume a non-error monitor should fail
-	err = s.ResumeMonitor(ctx, w.ID)
+	// Resume a non-error watcher should fail
+	err = s.ResumeWatcher(ctx, w.ID)
 	if err != ErrNotFound {
 		t.Errorf("resume non-error: expected ErrNotFound, got %v", err)
 	}

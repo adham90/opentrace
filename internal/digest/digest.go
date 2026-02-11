@@ -13,7 +13,7 @@ const (
 	StatusDegraded       DigestStatus = "degraded"
 )
 
-// Digest is a structured health summary covering alerts, monitors, and trends
+// Digest is a structured health summary covering alerts, watchers, and trends
 // for a given time period.
 type Digest struct {
 	ID             string         `json:"id"`
@@ -23,9 +23,9 @@ type Digest struct {
 	Environment    string         `json:"environment,omitempty"`
 	Status         DigestStatus   `json:"status"`
 	AlertSummary   AlertSummary   `json:"alert_summary"`
-	MonitorSummary MonitorSummary `json:"monitor_summary"`
+	WatcherSummary WatcherSummary `json:"watcher_summary"`
 	TopAlerts      []AlertItem    `json:"top_alerts"`
-	MonitorHealth  []MonitorHealth `json:"monitor_health"`
+	WatcherHealth  []WatcherHealth `json:"watcher_health"`
 	Trends         *Trends        `json:"trends,omitempty"`
 }
 
@@ -39,8 +39,8 @@ type AlertSummary struct {
 	NewInPeriod int `json:"new_in_period"`
 }
 
-// MonitorSummary holds aggregate monitor counts.
-type MonitorSummary struct {
+// WatcherSummary holds aggregate watcher counts.
+type WatcherSummary struct {
 	Total        int `json:"total"`
 	Active       int `json:"active"`
 	Paused       int `json:"paused"`
@@ -52,15 +52,15 @@ type MonitorSummary struct {
 // AlertItem is a single alert entry in the digest.
 type AlertItem struct {
 	ID           string    `json:"id"`
-	MonitorTitle string    `json:"monitor_title"`
+	WatcherTitle string    `json:"watcher_title"`
 	Severity     string    `json:"severity"`
 	Summary      string    `json:"summary"`
 	CreatedAt    time.Time `json:"created_at"`
 	Read         bool      `json:"read"`
 }
 
-// MonitorHealth shows the health of a single monitor during the digest period.
-type MonitorHealth struct {
+// WatcherHealth shows the health of a single watcher during the digest period.
+type WatcherHealth struct {
 	ID         string     `json:"id"`
 	Title      string     `json:"title"`
 	Status     string     `json:"status"`

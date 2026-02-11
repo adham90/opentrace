@@ -20,8 +20,8 @@ func TestCatalogBuilder_AddAndBuild(t *testing.T) {
 	b := &CatalogBuilder{}
 	b.Add("db_query_stats", "Show top queries", "Database Introspection", "read", "database connector")
 	b.Add("db_table_stats", "Show table stats", "Database Introspection", "read", "database connector")
-	b.Add("list_monitors", "List monitors", "Monitors", "read", "")
-	b.Add("create_monitor", "Create monitor", "Monitors", "admin", "")
+	b.Add("list_watchers", "List watchers", "Watchers", "read", "")
+	b.Add("create_watcher", "Create watcher", "Watchers", "admin", "")
 	b.Add("list_alerts", "List alerts", "Alerts", "read", "")
 
 	cat := b.Build()
@@ -35,8 +35,8 @@ func TestCatalogBuilder_AddAndBuild(t *testing.T) {
 	if categories[0].Name != "Database Introspection" {
 		t.Errorf("category[0] = %q, want %q", categories[0].Name, "Database Introspection")
 	}
-	if categories[1].Name != "Monitors" {
-		t.Errorf("category[1] = %q, want %q", categories[1].Name, "Monitors")
+	if categories[1].Name != "Watchers" {
+		t.Errorf("category[1] = %q, want %q", categories[1].Name, "Watchers")
 	}
 	if categories[2].Name != "Alerts" {
 		t.Errorf("category[2] = %q, want %q", categories[2].Name, "Alerts")
@@ -47,7 +47,7 @@ func TestCatalogBuilder_AddAndBuild(t *testing.T) {
 		t.Errorf("Database Introspection tools = %d, want 2", len(categories[0].Tools))
 	}
 	if len(categories[1].Tools) != 2 {
-		t.Errorf("Monitors tools = %d, want 2", len(categories[1].Tools))
+		t.Errorf("Watchers tools = %d, want 2", len(categories[1].Tools))
 	}
 	if len(categories[2].Tools) != 1 {
 		t.Errorf("Alerts tools = %d, want 1", len(categories[2].Tools))
@@ -68,7 +68,7 @@ func TestCatalogBuilder_AddAndBuild(t *testing.T) {
 
 func TestCatalogBuilder_CategoryDescriptions(t *testing.T) {
 	b := &CatalogBuilder{}
-	b.Add("list_monitors", "List monitors", "Monitors", "read", "")
+	b.Add("list_watchers", "List watchers", "Watchers", "read", "")
 
 	cat := b.Build()
 	categories := cat.Categories()
@@ -118,12 +118,12 @@ func TestBuildCatalog_WithDeps(t *testing.T) {
 
 	// Verify key tools are present.
 	expected := []string{
-		"list_connectors", "list_monitors", "list_alerts", "get_digest",
+		"list_connectors", "list_watchers", "list_alerts", "get_digest",
 		"db_query_stats", "db_table_stats", "db_activity", "db_locks",
 		"log_stats", "trace_lookup", "compare_periods",
 		"db_index_analysis", "connection_pool_stats",
-		"explain_query", "create_monitor", "suggest_monitors",
-		"monitor_run_history", "alert_details",
+		"explain_query", "create_watcher", "suggest_watchers",
+		"watcher_run_history", "alert_details",
 	}
 	for _, name := range expected {
 		if !toolNames[name] {
@@ -147,11 +147,11 @@ func TestBuildCatalog_MinimalDeps(t *testing.T) {
 	}
 
 	// Tools that require WatcherStore should be absent.
-	if toolNames["list_monitors"] {
-		t.Error("list_monitors should not be in catalog without WatcherStore")
+	if toolNames["list_watchers"] {
+		t.Error("list_watchers should not be in catalog without WatcherStore")
 	}
-	if toolNames["create_monitor"] {
-		t.Error("create_monitor should not be in catalog without WatcherStore")
+	if toolNames["create_watcher"] {
+		t.Error("create_watcher should not be in catalog without WatcherStore")
 	}
 
 	// Tools that don't require optional deps should be present.

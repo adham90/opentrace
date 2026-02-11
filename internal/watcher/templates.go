@@ -2,19 +2,19 @@ package watcher
 
 import "github.com/adham90/opentrace/internal/store"
 
-// Template represents a pre-built monitor configuration.
+// Template represents a pre-built watcher configuration.
 type Template struct {
 	ID          string           `json:"id"`
 	Name        string           `json:"name"`
 	Description string           `json:"description"`
 	Category    string           `json:"category"`
-	MonitorType store.MonitorType `json:"monitor_type"`
+	WatcherType store.WatcherType `json:"watcher_type"`
 	RuleConfig  store.RuleConfig `json:"rule_config"`
 	Severity    string           `json:"severity"`
 	TimeRange   string           `json:"time_range"`
 }
 
-// BuiltinTemplates returns the list of pre-built monitor templates.
+// BuiltinTemplates returns the list of pre-built watcher templates.
 func BuiltinTemplates() []Template {
 	return []Template{
 		// Database category
@@ -23,7 +23,7 @@ func BuiltinTemplates() []Template {
 			Name:        "Stuck Transactions",
 			Description: "Alert when transactions are idle for more than 5 minutes",
 			Category:    "database",
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			RuleConfig: store.RuleConfig{
 				Source:    store.RuleSourceQuery,
 				Query:     "SELECT count(*) FROM pg_stat_activity WHERE state = 'idle in transaction' AND now() - xact_start > interval '5 minutes'",
@@ -39,7 +39,7 @@ func BuiltinTemplates() []Template {
 			Name:        "Connection Saturation",
 			Description: "Alert when active connections exceed threshold",
 			Category:    "database",
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			RuleConfig: store.RuleConfig{
 				Source:    store.RuleSourceQuery,
 				Query:     "SELECT count(*) FROM pg_stat_activity",
@@ -55,7 +55,7 @@ func BuiltinTemplates() []Template {
 			Name:        "Long-Running Queries",
 			Description: "Alert when queries run for more than 30 seconds",
 			Category:    "database",
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			RuleConfig: store.RuleConfig{
 				Source:    store.RuleSourceQuery,
 				Query:     "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND now() - query_start > interval '30 seconds'",
@@ -71,7 +71,7 @@ func BuiltinTemplates() []Template {
 			Name:        "Replication Lag",
 			Description: "Alert when replication lag exceeds 60 seconds",
 			Category:    "database",
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			RuleConfig: store.RuleConfig{
 				Source:    store.RuleSourceQuery,
 				Query:     "SELECT EXTRACT(EPOCH FROM replay_lag) FROM pg_stat_replication",
@@ -87,7 +87,7 @@ func BuiltinTemplates() []Template {
 			Name:        "Dead Tuple Bloat",
 			Description: "Alert when dead tuples exceed threshold on any table",
 			Category:    "database",
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			RuleConfig: store.RuleConfig{
 				Source:    store.RuleSourceQuery,
 				Query:     "SELECT max(n_dead_tup) FROM pg_stat_user_tables",
@@ -103,7 +103,7 @@ func BuiltinTemplates() []Template {
 			Name:        "Table Size Growth",
 			Description: "Alert when any table exceeds 1GB",
 			Category:    "database",
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			RuleConfig: store.RuleConfig{
 				Source:    store.RuleSourceQuery,
 				Query:     "SELECT max(pg_total_relation_size(relid)) / (1024*1024*1024.0) FROM pg_stat_user_tables",
@@ -121,7 +121,7 @@ func BuiltinTemplates() []Template {
 			Name:        "Error Rate Spike",
 			Description: "Alert when error logs exceed threshold in time window",
 			Category:    "logs",
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			RuleConfig: store.RuleConfig{
 				Source:   store.RuleSourceLogs,
 				Metric:   "count",
@@ -140,7 +140,7 @@ func BuiltinTemplates() []Template {
 			Name:        "Silent Service (Heartbeat)",
 			Description: "Alert when a service stops producing logs",
 			Category:    "logs",
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			RuleConfig: store.RuleConfig{
 				Source:     store.RuleSourceLogs,
 				Metric:     "count",
@@ -157,7 +157,7 @@ func BuiltinTemplates() []Template {
 			Name:        "Auth Failure Spike",
 			Description: "Alert when authentication failures exceed threshold",
 			Category:    "logs",
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			RuleConfig: store.RuleConfig{
 				Source:   store.RuleSourceLogs,
 				Metric:   "count",
@@ -176,7 +176,7 @@ func BuiltinTemplates() []Template {
 			Name:        "Specific Error Pattern",
 			Description: "Alert when a specific error message appears",
 			Category:    "logs",
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			RuleConfig: store.RuleConfig{
 				Source:     store.RuleSourceLogs,
 				Metric:     "count",
@@ -195,7 +195,7 @@ func BuiltinTemplates() []Template {
 			Name:        "Database Connectivity",
 			Description: "Alert when database connection fails",
 			Category:    "health",
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			RuleConfig: store.RuleConfig{
 				Source: store.RuleSourceHealth,
 				Checks: []string{"connection"},
@@ -208,7 +208,7 @@ func BuiltinTemplates() []Template {
 			Name:        "Database Latency",
 			Description: "Alert when database ping latency exceeds 2 seconds",
 			Category:    "health",
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			RuleConfig: store.RuleConfig{
 				Source:           store.RuleSourceHealth,
 				Checks:           []string{"connection", "latency"},

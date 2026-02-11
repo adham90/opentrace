@@ -50,7 +50,7 @@ type WatcherStore interface {
 	GetDueWatchers(ctx context.Context) ([]Watcher, error)
 	UpdateRunTime(ctx context.Context, id uuid.UUID, lastRun, nextRun time.Time) error
 	UpdateAdaptiveState(ctx context.Context, id uuid.UUID, params UpdateAdaptiveParams) error
-	ResumeMonitor(ctx context.Context, id uuid.UUID) error
+	ResumeWatcher(ctx context.Context, id uuid.UUID) error
 }
 
 // CountRunParams defines filters for counting watcher runs in a time period.
@@ -154,8 +154,8 @@ type SaveDigestParams struct {
 	AlertTotal      int
 	AlertCritical   int
 	AlertWarning    int
-	MonitorTotal    int
-	MonitorErrored  int
+	WatcherTotal    int
+	WatcherErrored  int
 	FailedRuns      int
 	Data            string // full JSON blob
 }
@@ -170,8 +170,8 @@ type StoredDigest struct {
 	AlertTotal     int       `json:"alert_total"`
 	AlertCritical  int       `json:"alert_critical"`
 	AlertWarning   int       `json:"alert_warning"`
-	MonitorTotal   int       `json:"monitor_total"`
-	MonitorErrored int       `json:"monitor_errored"`
+	WatcherTotal   int       `json:"watcher_total"`
+	WatcherErrored int       `json:"watcher_errored"`
 	FailedRuns     int       `json:"failed_runs"`
 	Data           string    `json:"data"`
 	CreatedAt      time.Time `json:"created_at"`

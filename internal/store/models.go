@@ -250,7 +250,7 @@ type CreateWatcherParams struct {
 	Model        string          `json:"model"`
 	Effort       WatcherEffort   `json:"effort"`
 	Notify       json.RawMessage `json:"notify"`
-	MonitorType  MonitorType     `json:"monitor_type"`
+	WatcherType  WatcherType     `json:"watcher_type"`
 	RuleConfig      *RuleConfig     `json:"rule_config,omitempty"`
 	DataSourceID    *string         `json:"data_source_id,omitempty"`
 	AdaptiveConfig  *AdaptiveConfig `json:"adaptive_config,omitempty"`
@@ -268,7 +268,7 @@ type UpdateWatcherParams struct {
 	Model        *string          `json:"model,omitempty"`
 	Effort       *WatcherEffort   `json:"effort,omitempty"`
 	Notify       json.RawMessage  `json:"notify,omitempty"`
-	MonitorType  *MonitorType     `json:"monitor_type,omitempty"`
+	WatcherType  *WatcherType     `json:"watcher_type,omitempty"`
 	RuleConfig      *RuleConfig      `json:"rule_config,omitempty"`
 	DataSourceID    *string          `json:"data_source_id,omitempty"`
 	AdaptiveConfig  *AdaptiveConfig  `json:"adaptive_config,omitempty"`
@@ -277,7 +277,7 @@ type UpdateWatcherParams struct {
 // ListWatcherParams defines filters for listing watchers.
 type ListWatcherParams struct {
 	Environment string      `json:"environment,omitempty"`
-	MonitorType MonitorType `json:"monitor_type,omitempty"`
+	WatcherType WatcherType `json:"watcher_type,omitempty"`
 }
 
 // WatcherRun represents a single execution of a watcher.

@@ -9,7 +9,7 @@ import (
 	"github.com/adham90/opentrace/internal/store"
 )
 
-func TestSuggestMonitorsHandler_NoExisting(t *testing.T) {
+func TestSuggestWatchersHandler_NoExisting(t *testing.T) {
 	now := time.Now().UTC()
 	ws := &mockWatcherStore{}
 	ls := &mockLogStore{
@@ -29,7 +29,7 @@ func TestSuggestMonitorsHandler_NoExisting(t *testing.T) {
 		},
 	}
 
-	handler := suggestMonitorsHandler(ws, ls)
+	handler := suggestWatchersHandler(ws, ls)
 	result, err := handler(context.Background(), makeRequest(map[string]any{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -49,7 +49,7 @@ func TestSuggestMonitorsHandler_NoExisting(t *testing.T) {
 		t.Fatal("expected suggestions field")
 	}
 	if len(suggestions) == 0 {
-		t.Error("expected at least 1 suggestion with no existing monitors and errors")
+		t.Error("expected at least 1 suggestion with no existing watchers and errors")
 	}
 
 	// Should have gaps.
@@ -59,22 +59,22 @@ func TestSuggestMonitorsHandler_NoExisting(t *testing.T) {
 	}
 }
 
-func TestSuggestMonitorsHandler_FullCoverage(t *testing.T) {
+func TestSuggestWatchersHandler_FullCoverage(t *testing.T) {
 	ws := &mockWatcherStore{
 		watchers: []store.Watcher{
-			{Title: "Slow Query Monitor", Status: store.WatcherActive},
+			{Title: "Slow Query Watcher", Status: store.WatcherActive},
 			{Title: "Error Rate Alert", Status: store.WatcherActive},
 			{Title: "Connection Pool Health", Status: store.WatcherActive},
 			{Title: "Replication Lag", Status: store.WatcherActive},
 			{Title: "Vacuum Status", Status: store.WatcherActive},
 			{Title: "Disk Usage", Status: store.WatcherActive},
 			{Title: "Auth Failure Detection", Status: store.WatcherActive},
-			{Title: "Login Rate Monitor", Status: store.WatcherActive},
+			{Title: "Login Rate Watcher", Status: store.WatcherActive},
 		},
 	}
 	ls := &mockLogStore{}
 
-	handler := suggestMonitorsHandler(ws, ls)
+	handler := suggestWatchersHandler(ws, ls)
 	result, err := handler(context.Background(), makeRequest(map[string]any{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -85,8 +85,8 @@ func TestSuggestMonitorsHandler_FullCoverage(t *testing.T) {
 	json.Unmarshal([]byte(text), &resp)
 
 	coverage := resp["existing_coverage"].(map[string]any)
-	if coverage["total_monitors"].(float64) != 8 {
-		t.Errorf("total_monitors = %v, want 8", coverage["total_monitors"])
+	if coverage["total_watchers"].(float64) != 8 {
+		t.Errorf("total_watchers = %v, want 8", coverage["total_watchers"])
 	}
 
 	// With full coverage, suggestions should be minimal.
@@ -97,11 +97,11 @@ func TestSuggestMonitorsHandler_FullCoverage(t *testing.T) {
 	}
 }
 
-func TestSuggestMonitorsHandler_FocusPerformance(t *testing.T) {
+func TestSuggestWatchersHandler_FocusPerformance(t *testing.T) {
 	ws := &mockWatcherStore{}
 	ls := &mockLogStore{}
 
-	handler := suggestMonitorsHandler(ws, ls)
+	handler := suggestWatchersHandler(ws, ls)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"focus": "performance",
 	}))
@@ -122,8 +122,8 @@ func TestSuggestMonitorsHandler_FocusPerformance(t *testing.T) {
 	}
 }
 
-func TestSuggestMonitorsHandler_NilStores(t *testing.T) {
-	handler := suggestMonitorsHandler(nil, nil)
+func TestSuggestWatchersHandler_NilStores(t *testing.T) {
+	handler := suggestWatchersHandler(nil, nil)
 	result, err := handler(context.Background(), makeRequest(map[string]any{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

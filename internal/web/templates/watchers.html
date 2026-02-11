@@ -1,9 +1,9 @@
 {{define "content"}}
 <div class="watchers-page">
   <div class="page-header">
-    <h1><span class="prompt">$</span> monitors</h1>
+    <h1><span class="prompt">$</span> watchers</h1>
     <div class="actions">
-      {{if .IsAdmin}}<button class="btn btn-primary" onclick="showNewMonitorModal()">+ New Monitor</button>{{end}}
+      {{if .IsAdmin}}<button class="btn btn-primary" onclick="showNewWatcherModal()">+ New Watcher</button>{{end}}
     </div>
   </div>
 
@@ -32,39 +32,39 @@
   </div>
 
   <div id="watchers-list" class="watchers-list">
-    <div class="loading-state">loading monitors</div>
+    <div class="loading-state">loading watchers</div>
   </div>
 </div>
 
-<!-- New Monitor Type Selection Modal -->
-<div id="new-monitor-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="new-monitor-title" style="display:none" onclick="if(event.target===this)hideNewMonitorModal()">
+<!-- New Watcher Type Selection Modal -->
+<div id="new-watcher-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="new-watcher-title" style="display:none" onclick="if(event.target===this)hideNewWatcherModal()">
   <div class="modal-content">
     <div class="modal-header">
-      <h3 id="new-monitor-title"><span class="prompt">$</span> new-monitor</h3>
-      <button class="btn-close" onclick="hideNewMonitorModal()">&times;</button>
+      <h3 id="new-watcher-title"><span class="prompt">$</span> new-watcher</h3>
+      <button class="btn-close" onclick="hideNewWatcherModal()">&times;</button>
     </div>
     <div class="modal-body">
-      <p style="margin-bottom:16px;color:var(--text-dim)">What would you like to monitor?</p>
-      <div class="monitor-type-grid">
-        <button class="monitor-type-card" onclick="showRuleModal('query')">
-          <div class="monitor-type-icon">&#8689;</div>
-          <div class="monitor-type-name">Query</div>
-          <div class="monitor-type-desc">Run SQL against your DB</div>
+      <p style="margin-bottom:16px;color:var(--text-dim)">What would you like to watch?</p>
+      <div class="watcher-type-grid">
+        <button class="watcher-type-card" onclick="showRuleModal('query')">
+          <div class="watcher-type-icon">&#8689;</div>
+          <div class="watcher-type-name">Query</div>
+          <div class="watcher-type-desc">Run SQL against your DB</div>
         </button>
-        <button class="monitor-type-card" onclick="showRuleModal('logs')">
-          <div class="monitor-type-icon">&#9776;</div>
-          <div class="monitor-type-name">Logs</div>
-          <div class="monitor-type-desc">Watch log patterns &amp; volume</div>
+        <button class="watcher-type-card" onclick="showRuleModal('logs')">
+          <div class="watcher-type-icon">&#9776;</div>
+          <div class="watcher-type-name">Logs</div>
+          <div class="watcher-type-desc">Watch log patterns &amp; volume</div>
         </button>
-        <button class="monitor-type-card" onclick="showRuleModal('health')">
-          <div class="monitor-type-icon">&#9829;</div>
-          <div class="monitor-type-name">Health</div>
-          <div class="monitor-type-desc">Check if databases are alive</div>
+        <button class="watcher-type-card" onclick="showRuleModal('health')">
+          <div class="watcher-type-icon">&#9829;</div>
+          <div class="watcher-type-name">Health</div>
+          <div class="watcher-type-desc">Check if databases are alive</div>
         </button>
-        <button class="monitor-type-card" onclick="hideNewMonitorModal();showCreateModal()">
-          <div class="monitor-type-icon">&#10023;</div>
-          <div class="monitor-type-name">AI</div>
-          <div class="monitor-type-desc">Let AI analyze your data</div>
+        <button class="watcher-type-card" onclick="hideNewWatcherModal();showCreateModal()">
+          <div class="watcher-type-icon">&#10023;</div>
+          <div class="watcher-type-name">AI</div>
+          <div class="watcher-type-desc">Let AI analyze your data</div>
         </button>
       </div>
 
@@ -76,11 +76,11 @@
   </div>
 </div>
 
-<!-- Rule Monitor Wizard (query/logs/health) -->
+<!-- Rule Watcher Wizard (query/logs/health) -->
 <div id="rule-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="rule-modal-title" style="display:none" onclick="if(event.target===this)hideRuleModal()">
   <div class="modal-content">
     <div class="modal-header">
-      <h3><span class="prompt">$</span> <span id="rule-modal-title">new-query-monitor</span></h3>
+      <h3><span class="prompt">$</span> <span id="rule-modal-title">new-query-watcher</span></h3>
       <button class="btn-close" onclick="hideRuleModal()">&times;</button>
     </div>
 
@@ -97,7 +97,7 @@
       <span class="wizard-step-indicator" data-step="5" onclick="wizardGoTo(5)"><span class="wizard-step-num">5</span> Review</span>
     </div>
 
-    <form id="rule-form" onsubmit="saveRuleMonitor(event)">
+    <form id="rule-form" onsubmit="saveRuleWatcher(event)">
       <input type="hidden" id="rule-source" value="query">
       <input type="hidden" id="rule-watcher-id" value="">
 
@@ -105,7 +105,7 @@
       <div class="wizard-step-content active" data-step="1">
         <div class="modal-body">
           <div class="modal-section modal-section-primary">
-            <div class="modal-section-label"><span class="section-number">01</span> Monitor</div>
+            <div class="modal-section-label"><span class="section-number">01</span> Watcher</div>
             <div class="form-group">
               <label>Name</label>
               <input type="text" id="rule-title" required placeholder="e.g. Stuck transactions on production">
@@ -260,7 +260,7 @@
                 <input type="text" id="rule-schedule" placeholder="e.g. 0 9 * * 1-5 (weekdays at 9am)" style="font-family:monospace">
                 <div class="form-hint">Standard 5-field cron: min hour dom month dow. Or use @hourly, @daily, @weekly.</div>
                 <div id="rule-schedule-preview" style="margin-top:4px;font-size:12px;color:var(--text-dim)"></div>
-                <div class="schedule-help">Check interval = how often the monitor runs. The dropdown above becomes the lookback window when a cron schedule is set.</div>
+                <div class="schedule-help">Check interval = how often the watcher runs. The dropdown above becomes the lookback window when a cron schedule is set.</div>
               </div>
             </div>
           </div>
@@ -294,7 +294,7 @@
                   <div class="form-group">
                     <label>Max Consecutive Errors</label>
                     <input type="number" id="rule-adaptive-max-errors" placeholder="5" min="1">
-                    <div class="form-hint">Errors before pausing monitor</div>
+                    <div class="form-hint">Errors before pausing watcher</div>
                   </div>
                 </div>
                 <div class="form-group" style="margin-top:8px">
@@ -337,7 +337,7 @@
         <div class="wizard-footer-right">
           <button type="button" class="btn" id="rule-wizard-back" onclick="wizardBack()" style="display:none">Back</button>
           <button type="button" class="btn btn-primary" id="rule-wizard-next" onclick="wizardNext()">Next</button>
-          <button type="submit" class="btn btn-primary" id="rule-save-btn" style="display:none">Create Monitor</button>
+          <button type="submit" class="btn btn-primary" id="rule-save-btn" style="display:none">Create Watcher</button>
         </div>
       </div>
     </form>
@@ -348,16 +348,16 @@
 <div id="watcher-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="ai-modal-title" style="display:none" onclick="if(event.target===this)hideModal()">
   <div class="modal-content">
     <div class="modal-header">
-      <h3><span class="prompt">$</span> <span id="ai-modal-title">new-ai-monitor</span></h3>
+      <h3><span class="prompt">$</span> <span id="ai-modal-title">new-ai-watcher</span></h3>
       <button class="btn-close" onclick="hideModal()">&times;</button>
     </div>
     <form id="watcher-form" onsubmit="saveWatcher(event)">
       <div class="modal-body">
         <input type="hidden" id="watcher-id" value="">
 
-        <!-- 01 What to Monitor -->
+        <!-- 01 What to Watch -->
         <div class="modal-section modal-section-primary">
-          <div class="modal-section-label"><span class="section-number">01</span> What to Monitor</div>
+          <div class="modal-section-label"><span class="section-number">01</span> What to Watch</div>
           <div class="form-group">
             <label>Watcher Name</label>
             <input type="text" id="watcher-title" required placeholder="e.g. Payment failures spike">
@@ -432,7 +432,7 @@
               <input type="text" id="watcher-schedule" placeholder="e.g. 0 9 * * * (daily at 9am)" style="font-family:monospace">
               <div class="form-hint">Standard 5-field cron: min hour dom month dow. Or use @hourly, @daily, @weekly.</div>
               <div id="ai-schedule-preview" style="margin-top:4px;font-size:12px;color:var(--text-dim)"></div>
-              <div class="schedule-help">When a cron schedule is set, it controls when the monitor runs. The dropdown above becomes just the log lookback window (how far back the AI looks).</div>
+              <div class="schedule-help">When a cron schedule is set, it controls when the watcher runs. The dropdown above becomes just the log lookback window (how far back the AI looks).</div>
             </div>
           </div>
         </div>
@@ -496,7 +496,7 @@
                 <div class="form-group">
                   <label>Max Consecutive Errors</label>
                   <input type="number" id="ai-adaptive-max-errors" placeholder="5" min="1">
-                  <div class="form-hint">Errors before pausing monitor</div>
+                  <div class="form-hint">Errors before pausing watcher</div>
                 </div>
               </div>
               <div class="form-group" style="margin-top:8px">
@@ -547,7 +547,7 @@
 
       <div class="modal-footer">
         <button type="button" class="btn" onclick="hideModal()">Cancel</button>
-        <button type="submit" class="btn btn-primary" id="modal-save-btn">Create Monitor</button>
+        <button type="submit" class="btn btn-primary" id="modal-save-btn">Create Watcher</button>
       </div>
     </form>
   </div>
@@ -570,7 +570,7 @@ var allWatchers = [];
 var openDrop = null;
 
 function getWatcherType(w) {
-  if (w.monitor_type === 'rule' && w.rule_config) return w.rule_config.source || 'query';
+  if (w.watcher_type === 'rule' && w.rule_config) return w.rule_config.source || 'query';
   return 'ai';
 }
 
@@ -591,7 +591,7 @@ function updateFilterCount(filtered, total) {
   if (currentStatusIdx === 0 && currentTypeIdx === 0 && currentSevIdx === 0) {
     el.textContent = '';
   } else {
-    el.textContent = filtered + ' of ' + total + ' monitors';
+    el.textContent = filtered + ' of ' + total + ' watchers';
   }
 }
 
@@ -778,7 +778,7 @@ function loadDataSources() {
 }
 
 function loadTemplates() {
-  fetch('/api/monitors/templates').then(function(r) { return r.json(); }).then(function(templates) {
+  fetch('/api/watchers/templates').then(function(r) { return r.json(); }).then(function(templates) {
     var container = document.getElementById('templates-list');
     if (!templates || !templates.length) { container.innerHTML = ''; return; }
     var byCategory = {};
@@ -801,8 +801,8 @@ function loadTemplates() {
   });
 }
 
-function getMonitorTypeBadge(w) {
-  if (w.monitor_type === 'rule' && w.rule_config) {
+function getWatcherTypeBadge(w) {
+  if (w.watcher_type === 'rule' && w.rule_config) {
     var src = w.rule_config.source;
     if (src === 'query') return '<span class="badge badge-type badge-query">query</span>';
     if (src === 'logs') return '<span class="badge badge-type badge-logs">logs</span>';
@@ -827,11 +827,11 @@ function getAdaptiveBadge(w) {
 function renderWatchers(watchers) {
   var container = document.getElementById('watchers-list');
   if (!allWatchers || allWatchers.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No monitors yet</p><p class="empty-state-desc">Monitors watch your databases and logs for problems, then alert you when something needs attention.</p>' + (isAdmin ? '<button class="btn btn-primary" onclick="showNewMonitorModal()">+ Create your first monitor</button>' : '') + '</div>';
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No watchers yet</p><p class="empty-state-desc">Watchers watch your databases and logs for problems, then alert you when something needs attention.</p>' + (isAdmin ? '<button class="btn btn-primary" onclick="showNewWatcherModal()">+ Create your first watcher</button>' : '') + '</div>';
     return;
   }
   if (!watchers || watchers.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No matching monitors</p><p class="empty-state-desc">Try adjusting your filters or <button class="btn btn-sm" onclick="clearWatcherFilters()">clear all</button></p></div>';
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No matching watchers</p><p class="empty-state-desc">Try adjusting your filters or <button class="btn btn-sm" onclick="clearWatcherFilters()">clear all</button></p></div>';
     return;
   }
 
@@ -843,11 +843,11 @@ function renderWatchers(watchers) {
 
     html += '<div class="watcher-card">';
     html += '  <div class="watcher-header">';
-    html += '    ' + getMonitorTypeBadge(w);
+    html += '    ' + getWatcherTypeBadge(w);
     html += '    <span class="watcher-title">' + escapeHtml(w.title) + '</span>';
     var schedLabel = w.schedule ? describeSchedule(w.schedule) : ('every ' + (w.time_range || '15m'));
     html += '    <span class="watcher-meta">' + escapeHtml(schedLabel) + '</span>';
-    if (w.monitor_type !== 'rule' && w.model) {
+    if (w.watcher_type !== 'rule' && w.model) {
       html += '    <span class="watcher-meta">' + escapeHtml(w.model) + '</span>';
     }
     html += '    <span class="watcher-status ' + statusClass + '">' + statusIcon + ' ' + w.status + '</span>';
@@ -860,15 +860,15 @@ function renderWatchers(watchers) {
     html += '  </div>';
     html += '  <div class="watcher-actions">';
     if (isAdmin) {
-      if (w.monitor_type === 'rule') {
-        html += '    <button class="btn btn-sm" onclick="editRuleMonitor(\'' + w.id + '\')">Edit</button>';
+      if (w.watcher_type === 'rule') {
+        html += '    <button class="btn btn-sm" onclick="editRuleWatcher(\'' + w.id + '\')">Edit</button>';
       } else {
         html += '    <button class="btn btn-sm" onclick="editWatcher(\'' + w.id + '\')">Edit</button>';
       }
       if (w.status === 'active') {
         html += '    <button class="btn btn-sm" onclick="pauseWatcher(\'' + w.id + '\')">Pause</button>';
       } else if (w.adaptive_state === 'error') {
-        html += '    <button class="btn btn-sm btn-resume" onclick="resumeWatcher(\'' + w.id + '\')">Resume Monitor</button>';
+        html += '    <button class="btn btn-sm btn-resume" onclick="resumeWatcher(\'' + w.id + '\')">Resume Watcher</button>';
       } else {
         html += '    <button class="btn btn-sm" onclick="resumeWatcher(\'' + w.id + '\')">Resume</button>';
       }
@@ -893,14 +893,14 @@ function loadWatchers() {
   });
 }
 
-// New monitor modal
-function showNewMonitorModal() {
+// New watcher modal
+function showNewWatcherModal() {
   loadDataSources();
   loadTemplates();
-  document.getElementById('new-monitor-modal').style.display = 'flex';
+  document.getElementById('new-watcher-modal').style.display = 'flex';
 }
-function hideNewMonitorModal() {
-  document.getElementById('new-monitor-modal').style.display = 'none';
+function hideNewWatcherModal() {
+  document.getElementById('new-watcher-modal').style.display = 'none';
 }
 
 // Wizard state
@@ -908,19 +908,19 @@ var wizardCurrentStep = 1;
 var wizardTotalSteps = 5;
 var wizardIsEditing = false;
 
-// Rule monitor modal
+// Rule watcher modal
 function showRuleModal(source) {
-  hideNewMonitorModal();
+  hideNewWatcherModal();
   document.getElementById('rule-source').value = source;
   document.getElementById('rule-watcher-id').value = '';
   document.getElementById('rule-form').reset();
   document.getElementById('rule-source').value = source;
   document.getElementById('rule-preview-result').style.display = 'none';
-  document.getElementById('rule-save-btn').textContent = 'Create Monitor';
+  document.getElementById('rule-save-btn').textContent = 'Create Watcher';
   wizardIsEditing = false;
 
-  var titles = {query: 'new-query-monitor', logs: 'new-log-monitor', health: 'new-health-monitor'};
-  document.getElementById('rule-modal-title').textContent = titles[source] || 'new-monitor';
+  var titles = {query: 'new-query-watcher', logs: 'new-log-watcher', health: 'new-health-watcher'};
+  document.getElementById('rule-modal-title').textContent = titles[source] || 'new-watcher';
 
   // Show/hide source-specific sections
   document.getElementById('rule-query-section').style.display = source === 'query' ? '' : 'none';
@@ -928,7 +928,7 @@ function showRuleModal(source) {
   document.getElementById('rule-health-section').style.display = source === 'health' ? '' : 'none';
   document.getElementById('rule-condition-section').style.display = source !== 'health' ? '' : 'none';
 
-  // For health monitors, skip alert condition step (step 3 becomes severity only)
+  // For health watchers, skip alert condition step (step 3 becomes severity only)
   var step3Label = document.getElementById('wizard-step3-label');
   if (source === 'health') {
     step3Label.textContent = 'Severity';
@@ -1006,7 +1006,7 @@ function validateWizardStep(step) {
   var source = document.getElementById('rule-source').value;
   if (step === 1) {
     var titleInput = document.getElementById('rule-title');
-    return validateField(titleInput, [{required: true, message: 'Monitor name is required'}, {minLength: 3, message: 'Name must be at least 3 characters'}]);
+    return validateField(titleInput, [{required: true, message: 'Watcher name is required'}, {minLength: 3, message: 'Name must be at least 3 characters'}]);
   }
   if (step === 2) {
     if (source === 'query') {
@@ -1035,7 +1035,7 @@ function renderWizardSummary() {
 
   // Name & Env
   html += '<div class="summary-section">';
-  html += '<div class="summary-section-label">Monitor</div>';
+  html += '<div class="summary-section-label">Watcher</div>';
   html += '<div class="summary-row"><span class="summary-key">Name</span><span class="summary-val">' + escapeHtml(document.getElementById('rule-title').value) + '</span></div>';
   html += '<div class="summary-row"><span class="summary-key">Type</span><span class="summary-val">' + source + '</span></div>';
   var env = document.getElementById('rule-env').value;
@@ -1105,7 +1105,7 @@ function renderWizardSummary() {
 }
 
 function applyTemplate(t) {
-  hideNewMonitorModal();
+  hideNewWatcherModal();
   var rc = t.rule_config;
   showRuleModal(rc.source);
   wizardIsEditing = true; // Allow jumping to any step
@@ -1187,12 +1187,12 @@ function runPreview() {
   result.style.display = 'none';
 
   var body = {
-    monitor_type: 'rule',
+    watcher_type: 'rule',
     rule_config: buildRuleConfig(),
     data_source_id: document.getElementById('rule-datasource').value || undefined
   };
 
-  fetch('/api/monitors/preview', {
+  fetch('/api/watchers/preview', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body)
@@ -1210,14 +1210,14 @@ function runPreview() {
   });
 }
 
-function saveRuleMonitor(e) {
+function saveRuleWatcher(e) {
   e.preventDefault();
   var titleInput = document.getElementById('rule-title');
   var source = document.getElementById('rule-source').value;
 
   // Validate required fields
   var valid = true;
-  if (!validateField(titleInput, [{required: true, message: 'Monitor name is required'}, {minLength: 3, message: 'Name must be at least 3 characters'}])) valid = false;
+  if (!validateField(titleInput, [{required: true, message: 'Watcher name is required'}, {minLength: 3, message: 'Name must be at least 3 characters'}])) valid = false;
 
   if (source === 'query') {
     var dsInput = document.getElementById('rule-datasource');
@@ -1238,7 +1238,7 @@ function saveRuleMonitor(e) {
   var schedule = (document.getElementById('rule-schedule') || {}).value || '';
   var body = {
     title: document.getElementById('rule-title').value,
-    monitor_type: 'rule',
+    watcher_type: 'rule',
     rule_config: buildRuleConfig(),
     severity: document.getElementById('rule-severity').value,
     time_range: document.getElementById('rule-timerange').value,
@@ -1257,18 +1257,18 @@ function saveRuleMonitor(e) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body)
   }).then(function(resp) {
-    if (!resp.ok) return resp.json().then(function(d) { setButtonLoading(btn, false); showToast(d.error || 'Error saving monitor', 'error'); });
+    if (!resp.ok) return resp.json().then(function(d) { setButtonLoading(btn, false); showToast(d.error || 'Error saving watcher', 'error'); });
     setButtonLoading(btn, false);
-    showToast(id ? 'Monitor updated' : 'Monitor created', 'success');
+    showToast(id ? 'Watcher updated' : 'Watcher created', 'success');
     hideRuleModal();
     loadWatchers();
   }).catch(function() {
     setButtonLoading(btn, false);
-    showToast('Network error — could not save monitor', 'error');
+    showToast('Network error — could not save watcher', 'error');
   });
 }
 
-function editRuleMonitor(id) {
+function editRuleWatcher(id) {
   fetch('/api/watchers/' + id).then(function(r) { return r.json(); }).then(function(w) {
     var rc = w.rule_config || {};
     showRuleModal(rc.source || 'query');
@@ -1279,7 +1279,7 @@ function editRuleMonitor(id) {
     document.getElementById('rule-severity').value = w.severity || 'warning';
     document.getElementById('rule-timerange').value = w.time_range || '5m';
     document.getElementById('rule-save-btn').textContent = 'Save Changes';
-    document.getElementById('rule-modal-title').textContent = 'edit-monitor';
+    document.getElementById('rule-modal-title').textContent = 'edit-watcher';
 
     // Populate schedule if set
     if (w.schedule) {
@@ -1320,8 +1320,8 @@ function editRuleMonitor(id) {
 
 // AI watcher modal (existing)
 function showCreateModal() {
-  document.getElementById('ai-modal-title').textContent = 'new-ai-monitor';
-  document.getElementById('modal-save-btn').textContent = 'Create Monitor';
+  document.getElementById('ai-modal-title').textContent = 'new-ai-watcher';
+  document.getElementById('modal-save-btn').textContent = 'Create Watcher';
   document.getElementById('watcher-id').value = '';
   document.getElementById('watcher-form').reset();
   document.getElementById('webhook-url-group').classList.remove('show');
@@ -1345,7 +1345,7 @@ function saveWatcher(e) {
 
   // Validate required fields
   var valid = true;
-  if (!validateField(titleInput, [{required: true, message: 'Monitor name is required'}, {minLength: 3, message: 'Name must be at least 3 characters'}])) valid = false;
+  if (!validateField(titleInput, [{required: true, message: 'Watcher name is required'}, {minLength: 3, message: 'Name must be at least 3 characters'}])) valid = false;
   if (!validateField(descInput, [{required: true, message: 'Analysis instructions are required'}, {minLength: 10, message: 'Please provide more detailed instructions'}])) valid = false;
   if (!valid) return;
 
@@ -1373,7 +1373,7 @@ function saveWatcher(e) {
   var body = {
     title: document.getElementById('watcher-title').value,
     description: document.getElementById('watcher-description').value,
-    monitor_type: 'ai',
+    watcher_type: 'ai',
     severity: document.getElementById('watcher-severity').value,
     time_range: document.getElementById('watcher-timerange').value,
     model: document.getElementById('watcher-model').value,
@@ -1394,20 +1394,20 @@ function saveWatcher(e) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body)
   }).then(function(resp) {
-    if (!resp.ok) return resp.json().then(function(d) { setButtonLoading(btn, false); showToast(d.error || 'Error saving monitor', 'error'); });
+    if (!resp.ok) return resp.json().then(function(d) { setButtonLoading(btn, false); showToast(d.error || 'Error saving watcher', 'error'); });
     setButtonLoading(btn, false);
-    showToast(id ? 'Monitor updated' : 'Monitor created', 'success');
+    showToast(id ? 'Watcher updated' : 'Watcher created', 'success');
     hideModal();
     loadWatchers();
   }).catch(function() {
     setButtonLoading(btn, false);
-    showToast('Network error — could not save monitor', 'error');
+    showToast('Network error — could not save watcher', 'error');
   });
 }
 
 function editWatcher(id) {
   fetch('/api/watchers/' + id).then(function(r) { return r.json(); }).then(function(w) {
-    document.getElementById('ai-modal-title').textContent = 'edit-ai-monitor';
+    document.getElementById('ai-modal-title').textContent = 'edit-ai-watcher';
     document.getElementById('modal-save-btn').textContent = 'Save Changes';
     document.getElementById('watcher-id').value = w.id;
     document.getElementById('watcher-title').value = w.title;
@@ -1455,22 +1455,22 @@ function editWatcher(id) {
 
 function pauseWatcher(id) {
   fetch('/api/watchers/' + id + '/pause', { method: 'POST' }).then(function(r) {
-    if (r.ok) showToast('Monitor paused', 'info');
-    else showToast('Failed to pause monitor', 'error');
+    if (r.ok) showToast('Watcher paused', 'info');
+    else showToast('Failed to pause watcher', 'error');
     loadWatchers();
   }).catch(function() { showToast('Network error', 'error'); });
 }
 
 function resumeWatcher(id) {
   fetch('/api/watchers/' + id + '/resume', { method: 'POST' }).then(function(r) {
-    if (r.ok) showToast('Monitor resumed', 'success');
-    else showToast('Failed to resume monitor', 'error');
+    if (r.ok) showToast('Watcher resumed', 'success');
+    else showToast('Failed to resume watcher', 'error');
     loadWatchers();
   }).catch(function() { showToast('Network error', 'error'); });
 }
 
 function runNow(id) {
-  showToast('Monitor run triggered', 'info');
+  showToast('Watcher run triggered', 'info');
   fetch('/api/watchers/' + id + '/run', { method: 'POST' }).then(function(r) {
     if (!r.ok) showToast('Failed to trigger run', 'error');
     loadWatchers();
@@ -1478,10 +1478,10 @@ function runNow(id) {
 }
 
 function deleteWatcher(id) {
-  if (!confirm('Delete this monitor?')) return;
+  if (!confirm('Delete this watcher?')) return;
   fetch('/api/watchers/' + id, { method: 'DELETE' }).then(function(r) {
-    if (r.ok) showToast('Monitor deleted', 'success');
-    else showToast('Failed to delete monitor', 'error');
+    if (r.ok) showToast('Watcher deleted', 'success');
+    else showToast('Failed to delete watcher', 'error');
     loadWatchers();
   }).catch(function() { showToast('Network error', 'error'); });
 }

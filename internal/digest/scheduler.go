@@ -77,9 +77,9 @@ func (s *Scheduler) GenerateAndStore(ctx context.Context, environment string) er
 		AlertTotal:     d.AlertSummary.Total,
 		AlertCritical:  d.AlertSummary.Critical,
 		AlertWarning:   d.AlertSummary.Warning,
-		MonitorTotal:   d.MonitorSummary.Total,
-		MonitorErrored: d.MonitorSummary.InError,
-		FailedRuns:     d.MonitorSummary.FailedRuns,
+		WatcherTotal:   d.WatcherSummary.Total,
+		WatcherErrored: d.WatcherSummary.InError,
+		FailedRuns:     d.WatcherSummary.FailedRuns,
 		Data:           string(data),
 	})
 	if err != nil {

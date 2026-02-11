@@ -154,10 +154,10 @@ LEFT JOIN pg_statio_user_tables io
 			"total_tables": len(tables),
 			"tables":       tables,
 			"warnings":     warnings,
-			"hint":         "Tables with high dead tuple ratios, low index usage, or low cache hit ratios are good candidates for monitors.",
+			"hint":         "Tables with high dead tuple ratios, low index usage, or low cache hit ratios are good candidates for watchers.",
 		}
 
-		appendExistingMonitors(resp, fetchExistingMonitors(ctx, ws))
+		appendExistingWatchers(resp, fetchExistingWatchers(ctx, ws))
 
 		data, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {

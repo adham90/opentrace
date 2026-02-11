@@ -155,7 +155,7 @@ func runSeed() error {
 			},
 		},
 		{
-			Title:       "Slow Query Monitor",
+			Title:       "Slow Query Watcher",
 			Description: "Detect slow database queries across all services",
 			Environment: "production",
 			Severity:    store.SeverityWarning,
@@ -175,7 +175,7 @@ func runSeed() error {
 			},
 		},
 		{
-			Title:       "Error Rate Monitor",
+			Title:       "Error Rate Watcher",
 			Description: "Watch for unusual error patterns in all services",
 			Environment: "",
 			Severity:    store.SeverityWarning,
@@ -191,7 +191,7 @@ func runSeed() error {
 		},
 		{
 			Title:       "Staging Health Check",
-			Description: "Monitor staging environment for issues before prod deploy",
+			Description: "Watch staging environment for issues before prod deploy",
 			Environment: "staging",
 			Severity:    store.SeverityInfo,
 			Filters:     json.RawMessage(`{}`),
@@ -201,7 +201,7 @@ func runSeed() error {
 		},
 		{
 			Title:       "Connection Saturation",
-			Description: "Monitor PostgreSQL connection pool usage and alert on saturation",
+			Description: "Watch PostgreSQL connection pool usage and alert on saturation",
 			Environment: "production",
 			Severity:    store.SeverityCritical,
 			Filters:     json.RawMessage(`{"service":"gateway"}`),
@@ -239,12 +239,12 @@ func runSeed() error {
 			},
 		},
 
-		// --- Rule monitors: query source ---
+		// --- Rule watchers: query source ---
 		{
 			Title:       "Idle-in-Transaction Sessions",
 			Environment: "production",
 			Severity:    store.SeverityWarning,
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "5m",
 			Filters:     json.RawMessage(`{}`),
 			Notify:      json.RawMessage(`["dashboard"]`),
@@ -260,7 +260,7 @@ func runSeed() error {
 			Title:       "Dead Tuples on Orders Table",
 			Environment: "production",
 			Severity:    store.SeverityCritical,
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "15m",
 			Schedule:    "*/15 * * * *",
 			Filters:     json.RawMessage(`{}`),
@@ -284,7 +284,7 @@ func runSeed() error {
 			Title:       "Long-Running Queries",
 			Environment: "production",
 			Severity:    store.SeverityWarning,
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "5m",
 			Filters:     json.RawMessage(`{}`),
 			Notify:      json.RawMessage(`["dashboard"]`),
@@ -297,12 +297,12 @@ func runSeed() error {
 			},
 		},
 
-		// --- Rule monitors: logs source ---
+		// --- Rule watchers: logs source ---
 		{
 			Title:       "Error Log Volume",
 			Environment: "production",
 			Severity:    store.SeverityWarning,
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "5m",
 			Filters:     json.RawMessage(`{}`),
 			Notify:      json.RawMessage(`["dashboard"]`),
@@ -321,7 +321,7 @@ func runSeed() error {
 			Title:       "Payment Service Timeouts",
 			Environment: "production",
 			Severity:    store.SeverityCritical,
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "5m",
 			Filters:     json.RawMessage(`{}`),
 			Notify:      json.RawMessage(`["dashboard"]`),
@@ -349,7 +349,7 @@ func runSeed() error {
 			Title:       "Gateway 503 Errors",
 			Environment: "production",
 			Severity:    store.SeverityWarning,
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "15m",
 			Filters:     json.RawMessage(`{}`),
 			Notify:      json.RawMessage(`["dashboard"]`),
@@ -366,12 +366,12 @@ func runSeed() error {
 			},
 		},
 
-		// --- Rule monitors: health source ---
+		// --- Rule watchers: health source ---
 		{
 			Title:       "Primary DB Health",
 			Environment: "production",
 			Severity:    store.SeverityCritical,
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "1m",
 			Filters:     json.RawMessage(`{}`),
 			Notify:      json.RawMessage(`["dashboard"]`),
@@ -385,7 +385,7 @@ func runSeed() error {
 			Title:       "Replica DB Health",
 			Environment: "production",
 			Severity:    store.SeverityWarning,
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "5m",
 			Schedule:    "*/5 * * * *",
 			Filters:     json.RawMessage(`{}`),
@@ -399,7 +399,7 @@ func runSeed() error {
 			Title:       "Staging DB Connectivity",
 			Environment: "staging",
 			Severity:    store.SeverityInfo,
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "15m",
 			Schedule:    "@hourly",
 			Filters:     json.RawMessage(`{}`),
@@ -438,7 +438,7 @@ func runSeed() error {
 		BaseTimeRange:        "15m",
 	})
 
-	// [1] Slow Query Monitor → relaxed (been quiet for a while)
+	// [1] Slow Query Watcher → relaxed (been quiet for a while)
 	watcherStore.UpdateAdaptiveState(ctx, watcherIDs[1], store.UpdateAdaptiveParams{
 		AdaptiveState:        store.AdaptiveRelaxed,
 		ConsecutiveCleanRuns: 25,
@@ -447,7 +447,7 @@ func runSeed() error {
 		BaseTimeRange:        "30m",
 	})
 
-	// [2] Error Rate Monitor → error (paused after 5 consecutive errors)
+	// [2] Error Rate Watcher → error (paused after 5 consecutive errors)
 	watcherStore.UpdateAdaptiveState(ctx, watcherIDs[2], store.UpdateAdaptiveParams{
 		AdaptiveState:        store.AdaptiveError,
 		ConsecutiveCleanRuns: 0,
@@ -500,7 +500,7 @@ func runSeed() error {
 		}
 	}
 
-	// Escalated monitor (Payment Error Spike) — recent alerting runs
+	// Escalated watcher (Payment Error Spike) — recent alerting runs
 	for j := 0; j < 8; j++ {
 		run, err := runStore.Create(ctx, watcherIDs[0])
 		if err != nil {
@@ -513,7 +513,7 @@ func runSeed() error {
 		}
 	}
 
-	// Error monitor (Error Rate Monitor) — 5 consecutive failures
+	// Error watcher (Error Rate Watcher) — 5 consecutive failures
 	for j := 0; j < 5; j++ {
 		run, err := runStore.Create(ctx, watcherIDs[2])
 		if err != nil {
@@ -522,7 +522,7 @@ func runSeed() error {
 		runStore.Fail(ctx, run.ID, "LLM provider returned 503: service temporarily unavailable")
 	}
 
-	// Sustained monitor (Connection Saturation) — long alerting history
+	// Sustained watcher (Connection Saturation) — long alerting history
 	for j := 0; j < 12; j++ {
 		run, err := runStore.Create(ctx, watcherIDs[4])
 		if err != nil {
@@ -531,7 +531,7 @@ func runSeed() error {
 		runStore.Complete(ctx, run.ID, "ALERT: Active connections at 92/100 (threshold: 80). Connection pool nearing exhaustion.", nil, true)
 	}
 
-	// Backing off monitor (Replication Lag) — a few errors
+	// Backing off watcher (Replication Lag) — a few errors
 	for j := 0; j < 4; j++ {
 		run, err := runStore.Create(ctx, watcherIDs[5])
 		if err != nil {
@@ -544,7 +544,7 @@ func runSeed() error {
 		}
 	}
 
-	// Rule monitor runs
+	// Rule watcher runs
 	// [6] Idle-in-Transaction — mix of clean and alert
 	for j := 0; j < 5; j++ {
 		run, err := runStore.Create(ctx, watcherIDs[6])
@@ -650,7 +650,7 @@ func runSeed() error {
 		}
 	}
 
-	log.Println("  watcher runs: created (including adaptive-state and rule-monitor scenarios)")
+	log.Println("  watcher runs: created (including adaptive-state and rule-watcher scenarios)")
 
 	// --- Alerts ---
 	alertStore := store.NewAlertStore(deps.db)
@@ -692,7 +692,7 @@ func runSeed() error {
 			Environment: "production",
 			Severity:    store.SeverityWarning,
 		},
-		// Rule monitor alerts
+		// Rule watcher alerts
 		{
 			WatcherID:   &watcherIDs[6],
 			Title:       "Idle-in-transaction sessions detected",
@@ -772,25 +772,25 @@ func runSeed() error {
 		alertTotal    int
 		alertCritical int
 		alertWarning  int
-		monitorTotal  int
-		monitorErr    int
+		watcherTotal  int
+		watcherErr    int
 		failedRuns    int
 	}
 	digestSeeds := []digestSeed{
-		{daysAgo: 6, status: "healthy", alertTotal: 1, alertCritical: 0, alertWarning: 1, monitorTotal: 4, monitorErr: 0, failedRuns: 0},
-		{daysAgo: 5, status: "healthy", alertTotal: 0, alertCritical: 0, alertWarning: 0, monitorTotal: 4, monitorErr: 0, failedRuns: 0},
-		{daysAgo: 4, status: "needs_attention", alertTotal: 3, alertCritical: 0, alertWarning: 3, monitorTotal: 4, monitorErr: 0, failedRuns: 1},
-		{daysAgo: 3, status: "critical", alertTotal: 7, alertCritical: 3, alertWarning: 4, monitorTotal: 4, monitorErr: 1, failedRuns: 2},
-		{daysAgo: 2, status: "needs_attention", alertTotal: 4, alertCritical: 1, alertWarning: 3, monitorTotal: 4, monitorErr: 1, failedRuns: 1},
-		{daysAgo: 1, status: "healthy", alertTotal: 2, alertCritical: 0, alertWarning: 2, monitorTotal: 4, monitorErr: 0, failedRuns: 0},
-		{daysAgo: 0, status: "critical", alertTotal: 5, alertCritical: 2, alertWarning: 3, monitorTotal: 4, monitorErr: 0, failedRuns: 1},
+		{daysAgo: 6, status: "healthy", alertTotal: 1, alertCritical: 0, alertWarning: 1, watcherTotal: 4, watcherErr: 0, failedRuns: 0},
+		{daysAgo: 5, status: "healthy", alertTotal: 0, alertCritical: 0, alertWarning: 0, watcherTotal: 4, watcherErr: 0, failedRuns: 0},
+		{daysAgo: 4, status: "needs_attention", alertTotal: 3, alertCritical: 0, alertWarning: 3, watcherTotal: 4, watcherErr: 0, failedRuns: 1},
+		{daysAgo: 3, status: "critical", alertTotal: 7, alertCritical: 3, alertWarning: 4, watcherTotal: 4, watcherErr: 1, failedRuns: 2},
+		{daysAgo: 2, status: "needs_attention", alertTotal: 4, alertCritical: 1, alertWarning: 3, watcherTotal: 4, watcherErr: 1, failedRuns: 1},
+		{daysAgo: 1, status: "healthy", alertTotal: 2, alertCritical: 0, alertWarning: 2, watcherTotal: 4, watcherErr: 0, failedRuns: 0},
+		{daysAgo: 0, status: "critical", alertTotal: 5, alertCritical: 2, alertWarning: 3, watcherTotal: 4, watcherErr: 0, failedRuns: 1},
 	}
 
 	for _, ds := range digestSeeds {
 		periodEnd := now.AddDate(0, 0, -ds.daysAgo)
 		periodStart := periodEnd.Add(-24 * time.Hour)
-		data := fmt.Sprintf(`{"status":"%s","alert_summary":{"total":%d,"critical":%d,"warning":%d},"monitor_summary":{"total":%d,"in_error":%d,"failed_runs":%d}}`,
-			ds.status, ds.alertTotal, ds.alertCritical, ds.alertWarning, ds.monitorTotal, ds.monitorErr, ds.failedRuns)
+		data := fmt.Sprintf(`{"status":"%s","alert_summary":{"total":%d,"critical":%d,"warning":%d},"watcher_summary":{"total":%d,"in_error":%d,"failed_runs":%d}}`,
+			ds.status, ds.alertTotal, ds.alertCritical, ds.alertWarning, ds.watcherTotal, ds.watcherErr, ds.failedRuns)
 		if err := digestStore.Save(ctx, store.SaveDigestParams{
 			ID:             uuid.New().String(),
 			Environment:    "",
@@ -800,8 +800,8 @@ func runSeed() error {
 			AlertTotal:     ds.alertTotal,
 			AlertCritical:  ds.alertCritical,
 			AlertWarning:   ds.alertWarning,
-			MonitorTotal:   ds.monitorTotal,
-			MonitorErrored: ds.monitorErr,
+			WatcherTotal:   ds.watcherTotal,
+			WatcherErrored: ds.watcherErr,
 			FailedRuns:     ds.failedRuns,
 			Data:           data,
 		}); err != nil {

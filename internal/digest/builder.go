@@ -47,10 +47,10 @@ func (b *Builder) Generate(ctx context.Context, opts DigestOpts) (*Digest, error
 		return nil, fmt.Errorf("building alert data: %w", err)
 	}
 
-	// 2. Build monitor summary and per-monitor health
-	monitorSummary, monitorHealth, err := b.buildMonitorData(ctx, opts)
+	// 2. Build watcher summary and per-watcher health
+	watcherSummary, watcherHealth, err := b.buildWatcherData(ctx, opts)
 	if err != nil {
-		return nil, fmt.Errorf("building monitor data: %w", err)
+		return nil, fmt.Errorf("building watcher data: %w", err)
 	}
 
 	// 3. Build trends (compare with previous period of same duration)
@@ -59,7 +59,7 @@ func (b *Builder) Generate(ctx context.Context, opts DigestOpts) (*Digest, error
 		return nil, fmt.Errorf("building trends: %w", err)
 	}
 
-	status := DeriveStatus(alertSummary, monitorSummary)
+	status := DeriveStatus(alertSummary, watcherSummary)
 
 	d := &Digest{
 		ID:             uuid.New().String(),
@@ -69,9 +69,9 @@ func (b *Builder) Generate(ctx context.Context, opts DigestOpts) (*Digest, error
 		Environment:    opts.Environment,
 		Status:         status,
 		AlertSummary:   alertSummary,
-		MonitorSummary: monitorSummary,
+		WatcherSummary: watcherSummary,
 		TopAlerts:      topAlerts,
-		MonitorHealth:  monitorHealth,
+		WatcherHealth:  watcherHealth,
 		Trends:         trends,
 	}
 
@@ -138,7 +138,7 @@ func (b *Builder) buildAlertData(ctx context.Context, opts DigestOpts) (AlertSum
 	for _, a := range inPeriod {
 		topAlerts = append(topAlerts, AlertItem{
 			ID:           a.ID.String(),
-			MonitorTitle: a.WatcherTitle,
+			WatcherTitle: a.WatcherTitle,
 			Severity:     string(a.Severity),
 			Summary:      a.Summary,
 			CreatedAt:    a.CreatedAt,
@@ -149,17 +149,17 @@ func (b *Builder) buildAlertData(ctx context.Context, opts DigestOpts) (AlertSum
 	return summary, topAlerts, nil
 }
 
-func (b *Builder) buildMonitorData(ctx context.Context, opts DigestOpts) (MonitorSummary, []MonitorHealth, error) {
+func (b *Builder) buildWatcherData(ctx context.Context, opts DigestOpts) (WatcherSummary, []WatcherHealth, error) {
 	watchers, err := b.watcherStore.List(ctx, store.ListWatcherParams{
 		Environment: opts.Environment,
 	})
 	if err != nil {
-		return MonitorSummary{}, nil, err
+		return WatcherSummary{}, nil, err
 	}
 
-	summary := MonitorSummary{Total: len(watchers)}
+	summary := WatcherSummary{Total: len(watchers)}
 
-	health := make([]MonitorHealth, 0, len(watchers))
+	health := make([]WatcherHealth, 0, len(watchers))
 	for _, w := range watchers {
 		switch w.Status {
 		case store.WatcherActive:
@@ -177,7 +177,7 @@ func (b *Builder) buildMonitorData(ctx context.Context, opts DigestOpts) (Monito
 			WatcherID: &w.ID,
 		})
 		if err != nil {
-			return MonitorSummary{}, nil, err
+			return WatcherSummary{}, nil, err
 		}
 
 		failedCount, err := b.runStore.CountRuns(ctx, store.CountRunParams{
@@ -187,7 +187,7 @@ func (b *Builder) buildMonitorData(ctx context.Context, opts DigestOpts) (Monito
 			WatcherID: &w.ID,
 		})
 		if err != nil {
-			return MonitorSummary{}, nil, err
+			return WatcherSummary{}, nil, err
 		}
 
 		summary.RunsInPeriod += runCount
@@ -200,7 +200,7 @@ func (b *Builder) buildMonitorData(ctx context.Context, opts DigestOpts) (Monito
 			Limit:       1000,
 		})
 		if err != nil {
-			return MonitorSummary{}, nil, err
+			return WatcherSummary{}, nil, err
 		}
 		alertCount := 0
 		for _, a := range watcherAlerts {
@@ -213,13 +213,13 @@ func (b *Builder) buildMonitorData(ctx context.Context, opts DigestOpts) (Monito
 		lastRunOK := true
 		runs, err := b.runStore.List(ctx, w.ID, 1)
 		if err != nil {
-			return MonitorSummary{}, nil, err
+			return WatcherSummary{}, nil, err
 		}
 		if len(runs) > 0 && runs[0].Status == "error" {
 			lastRunOK = false
 		}
 
-		h := MonitorHealth{
+		h := WatcherHealth{
 			ID:         w.ID.String(),
 			Title:      w.Title,
 			Status:     string(w.Status),

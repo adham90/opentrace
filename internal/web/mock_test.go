@@ -181,9 +181,9 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 	if effort == "" {
 		effort = store.EffortMedium
 	}
-	monitorType := params.MonitorType
-	if monitorType == "" {
-		monitorType = store.MonitorTypeAI
+	watcherType := params.WatcherType
+	if watcherType == "" {
+		watcherType = store.WatcherTypeAI
 	}
 	now := time.Now()
 	w := &store.Watcher{
@@ -191,7 +191,7 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 		Environment: params.Environment,
 		Severity: sev, Filters: filters, TimeRange: timeRange,
 		Model: params.Model, Effort: effort, Status: store.WatcherActive, Notify: notify,
-		MonitorType: monitorType, RuleConfig: params.RuleConfig, DataSourceID: params.DataSourceID,
+		WatcherType: watcherType, RuleConfig: params.RuleConfig, DataSourceID: params.DataSourceID,
 		NextRunAt: &now, CreatedAt: now, UpdatedAt: now,
 	}
 	m.watchers[w.ID] = w
@@ -300,7 +300,7 @@ func (m *mockWatcherStore) UpdateAdaptiveState(ctx context.Context, id uuid.UUID
 	return nil
 }
 
-func (m *mockWatcherStore) ResumeMonitor(ctx context.Context, id uuid.UUID) error {
+func (m *mockWatcherStore) ResumeWatcher(ctx context.Context, id uuid.UUID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	w, ok := m.watchers[id]
@@ -932,8 +932,8 @@ func (m *mockDigestStore) Save(ctx context.Context, d store.SaveDigestParams) er
 		AlertTotal:     d.AlertTotal,
 		AlertCritical:  d.AlertCritical,
 		AlertWarning:   d.AlertWarning,
-		MonitorTotal:   d.MonitorTotal,
-		MonitorErrored: d.MonitorErrored,
+		WatcherTotal:   d.WatcherTotal,
+		WatcherErrored: d.WatcherErrored,
 		FailedRuns:     d.FailedRuns,
 		Data:           d.Data,
 		CreatedAt:      time.Now(),

@@ -261,12 +261,12 @@ func TestHandleListModels(t *testing.T) {
 	}
 }
 
-func TestHandleCreateRuleMonitor(t *testing.T) {
+func TestHandleCreateRuleWatcher(t *testing.T) {
 	srv := newTestServerWithWatchers()
 
 	body := `{
-		"title": "Connection count monitor",
-		"monitor_type": "rule",
+		"title": "Connection count watcher",
+		"watcher_type": "rule",
 		"rule_config": {
 			"source": "query",
 			"query": "SELECT count(*) FROM pg_stat_activity",
@@ -290,8 +290,8 @@ func TestHandleCreateRuleMonitor(t *testing.T) {
 
 	var watcher store.Watcher
 	json.NewDecoder(w.Body).Decode(&watcher)
-	if watcher.MonitorType != store.MonitorTypeRule {
-		t.Errorf("monitor_type = %q, want %q", watcher.MonitorType, store.MonitorTypeRule)
+	if watcher.WatcherType != store.WatcherTypeRule {
+		t.Errorf("watcher_type = %q, want %q", watcher.WatcherType, store.WatcherTypeRule)
 	}
 	if watcher.RuleConfig == nil {
 		t.Fatal("expected non-nil rule_config")
@@ -304,10 +304,10 @@ func TestHandleCreateRuleMonitor(t *testing.T) {
 	}
 }
 
-func TestHandleMonitorTemplates(t *testing.T) {
+func TestHandleWatcherTemplates(t *testing.T) {
 	srv := newTestServerWithWatchers()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/monitors/templates", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/watchers/templates", nil)
 	w := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)
 

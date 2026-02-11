@@ -1,9 +1,9 @@
 package digest
 
-// DeriveStatus computes the overall digest status from alert and monitor summaries.
+// DeriveStatus computes the overall digest status from alert and watcher summaries.
 // Priority: degraded > critical > needs_attention > info_only > healthy.
-func DeriveStatus(alerts AlertSummary, monitors MonitorSummary) DigestStatus {
-	if monitors.InError > 0 {
+func DeriveStatus(alerts AlertSummary, watchers WatcherSummary) DigestStatus {
+	if watchers.InError > 0 {
 		return StatusDegraded
 	}
 	if alerts.Critical > 0 {

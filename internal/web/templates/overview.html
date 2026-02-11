@@ -108,7 +108,7 @@
     fetch('/api/alerts?limit=5' + (getGlobalEnv() ? '&env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r){ return r.json(); }).then(function(alerts){
       var container = document.getElementById('recent-alerts');
       if (!alerts || alerts.length === 0) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">no recent alerts</p><p class="empty-state-desc">Alerts from your monitors will appear here when issues are detected.</p></div>';
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">no recent alerts</p><p class="empty-state-desc">Alerts from your watchers will appear here when issues are detected.</p></div>';
         return;
       }
       var html = '';
@@ -147,7 +147,7 @@
     fetch('/api/digests/latest' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r){ return r.json(); }).then(function(d){
       var container = document.getElementById('digest-summary');
       if (!d || d.status === 'empty' || d.status === 'unavailable') {
-        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">no digest yet</p><p class="empty-state-desc">Health digests are generated periodically from your monitor results.</p></div>';
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">no digest yet</p><p class="empty-state-desc">Health digests are generated periodically from your watcher results.</p></div>';
         return;
       }
       var sc = d.status === 'critical' || d.status === 'degraded' ? 'status-error' : d.status === 'needs_attention' ? 'status-warn' : d.status === 'healthy' ? 'status-ok' : '';
@@ -158,7 +158,7 @@
       html += '<span class="dim">|</span>';
       html += '<span>' + d.alert_total + ' alerts (' + d.alert_critical + ' critical)</span>';
       html += '<span class="dim">|</span>';
-      html += '<span>' + d.monitor_total + ' monitors (' + d.monitor_errored + ' errors)</span>';
+      html += '<span>' + d.watcher_total + ' watchers (' + d.watcher_errored + ' errors)</span>';
       html += '<span class="dim">|</span>';
       html += '<span>' + d.failed_runs + ' failed runs</span>';
       html += '</div>';

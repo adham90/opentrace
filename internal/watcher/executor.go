@@ -48,7 +48,7 @@ func NewExecutor(
 	}
 }
 
-// SetRuleEvaluator sets the rule evaluator for handling rule-based monitors.
+// SetRuleEvaluator sets the rule evaluator for handling rule-based watchers.
 func (e *Executor) SetRuleEvaluator(re *RuleEvaluator) {
 	e.ruleEvaluator = re
 }
@@ -72,9 +72,9 @@ func (e *Executor) Execute(ctx context.Context, w store.Watcher) {
 		defer e.eventHub.MarkDone(run.ID)
 	}
 
-	// Dispatch by monitor type
-	switch w.MonitorType {
-	case store.MonitorTypeRule:
+	// Dispatch by watcher type
+	switch w.WatcherType {
+	case store.WatcherTypeRule:
 		e.executeRule(ctx, w, run)
 	default: // "ai" or empty (backward compat)
 		e.executeAI(ctx, w, run)
@@ -262,7 +262,7 @@ func (e *Executor) finalizeRun(ctx context.Context, w *store.Watcher, outcome Ru
 
 		if tr.ShouldPause {
 			if _, err := e.watcherStore.UpdateStatus(ctx, w.ID, store.WatcherError); err != nil {
-				log.Printf("watcher %s: failed to pause monitor: %v", w.ID, err)
+				log.Printf("watcher %s: failed to pause watcher: %v", w.ID, err)
 			}
 		}
 

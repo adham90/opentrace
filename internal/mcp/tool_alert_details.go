@@ -14,7 +14,7 @@ import (
 )
 
 // alertDetailsHandler returns a handler that provides full details for a specific
-// alert: triggering monitor, run data, and correlated alerts.
+// alert: triggering watcher, run data, and correlated alerts.
 func alertDetailsHandler(as store.AlertStore, ws store.WatcherStore, rs store.WatcherRunStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
@@ -52,25 +52,25 @@ func alertDetailsHandler(as store.AlertStore, ws store.WatcherStore, rs store.Wa
 			},
 		}
 
-		// Fetch the monitor config if available.
+		// Fetch the watcher config if available.
 		if alert.WatcherID != nil && ws != nil {
-			monitor, err := ws.GetByID(ctx, *alert.WatcherID)
-			if err == nil && monitor != nil {
-				monitorInfo := map[string]any{
-					"id":          monitor.ID.String(),
-					"title":       monitor.Title,
-					"type":        string(monitor.MonitorType),
-					"environment": monitor.Environment,
-					"schedule":    monitor.Schedule,
-					"time_range":  monitor.TimeRange,
+			watcher, err := ws.GetByID(ctx, *alert.WatcherID)
+			if err == nil && watcher != nil {
+				watcherInfo := map[string]any{
+					"id":          watcher.ID.String(),
+					"title":       watcher.Title,
+					"type":        string(watcher.WatcherType),
+					"environment": watcher.Environment,
+					"schedule":    watcher.Schedule,
+					"time_range":  watcher.TimeRange,
 				}
-				if monitor.Description != "" {
-					monitorInfo["description"] = monitor.Description
+				if watcher.Description != "" {
+					watcherInfo["description"] = watcher.Description
 				}
-				if monitor.RuleConfig != nil {
-					monitorInfo["rule_config"] = monitor.RuleConfig
+				if watcher.RuleConfig != nil {
+					watcherInfo["rule_config"] = watcher.RuleConfig
 				}
-				resp["monitor"] = monitorInfo
+				resp["watcher"] = watcherInfo
 			}
 		}
 
@@ -115,7 +115,7 @@ func alertDetailsHandler(as store.AlertStore, ws store.WatcherStore, rs store.Wa
 					offset := a.CreatedAt.Sub(alert.CreatedAt).Seconds()
 					correlatedEntries = append(correlatedEntries, map[string]any{
 						"id":                  a.ID.String(),
-						"monitor_title":       a.WatcherTitle,
+						"watcher_title":       a.WatcherTitle,
 						"severity":            string(a.Severity),
 						"summary":             a.Summary,
 						"created_at":          a.CreatedAt.Format(time.RFC3339),
@@ -128,7 +128,7 @@ func alertDetailsHandler(as store.AlertStore, ws store.WatcherStore, rs store.Wa
 			}
 		}
 
-		// Context: counts for this alert's monitor.
+		// Context: counts for this alert's watcher.
 		if alert.WatcherID != nil {
 			now := time.Now().UTC()
 			alertsLast24h, _ := as.List(ctx, store.ListAlertParams{
@@ -142,7 +142,7 @@ func alertDetailsHandler(as store.AlertStore, ws store.WatcherStore, rs store.Wa
 				}
 			}
 			resp["context"] = map[string]any{
-				"same_monitor_alerts_24h": count24h,
+				"same_watcher_alerts_24h": count24h,
 			}
 		}
 

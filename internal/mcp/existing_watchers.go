@@ -7,19 +7,19 @@ import (
 	"github.com/adham90/opentrace/internal/store"
 )
 
-// monitorSummary is a lightweight representation of an existing monitor
+// watcherSummary is a lightweight representation of an existing watcher
 // included in introspection tool responses to help the AI avoid duplicates.
-type monitorSummary struct {
+type watcherSummary struct {
 	Title       string `json:"title"`
-	MonitorType string `json:"monitor_type"`
+	WatcherType string `json:"watcher_type"`
 	Status      string `json:"status"`
 	Source      string `json:"source,omitempty"`
 	Query       string `json:"query,omitempty"`
 }
 
-// fetchExistingMonitors returns a slice of monitor summaries from the WatcherStore.
+// fetchExistingWatchers returns a slice of watcher summaries from the WatcherStore.
 // Returns nil if the store is nil or an error occurs.
-func fetchExistingMonitors(ctx context.Context, ws store.WatcherStore) []monitorSummary {
+func fetchExistingWatchers(ctx context.Context, ws store.WatcherStore) []watcherSummary {
 	if ws == nil {
 		return nil
 	}
@@ -29,11 +29,11 @@ func fetchExistingMonitors(ctx context.Context, ws store.WatcherStore) []monitor
 		return nil
 	}
 
-	summaries := make([]monitorSummary, 0, len(watchers))
+	summaries := make([]watcherSummary, 0, len(watchers))
 	for _, w := range watchers {
-		s := monitorSummary{
+		s := watcherSummary{
 			Title:       w.Title,
-			MonitorType: string(w.MonitorType),
+			WatcherType: string(w.WatcherType),
 			Status:      string(w.Status),
 		}
 		if w.RuleConfig != nil {
@@ -51,12 +51,12 @@ func fetchExistingMonitors(ctx context.Context, ws store.WatcherStore) []monitor
 	return summaries
 }
 
-// appendExistingMonitors adds an "existing_monitors" field to the response map
-// if there are any monitors to include.
-func appendExistingMonitors(resp map[string]any, monitors []monitorSummary) {
-	if len(monitors) == 0 {
+// appendExistingWatchers adds an "existing_watchers" field to the response map
+// if there are any watchers to include.
+func appendExistingWatchers(resp map[string]any, watchers []watcherSummary) {
+	if len(watchers) == 0 {
 		return
 	}
-	resp["existing_monitors"] = monitors
-	resp["existing_monitors_hint"] = fmt.Sprintf("There are %d existing monitors. Check for overlap before suggesting new ones.", len(monitors))
+	resp["existing_watchers"] = watchers
+	resp["existing_watchers_hint"] = fmt.Sprintf("There are %d existing watchers. Check for overlap before suggesting new ones.", len(watchers))
 }

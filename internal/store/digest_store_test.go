@@ -22,8 +22,8 @@ func TestDigestStore_SaveAndGetLatest(t *testing.T) {
 		AlertTotal:    5,
 		AlertCritical: 2,
 		AlertWarning:  3,
-		MonitorTotal:  8,
-		MonitorErrored: 1,
+		WatcherTotal:  8,
+		WatcherErrored: 1,
 		FailedRuns:    2,
 		Data:          `{"summary":"test digest"}`,
 	})

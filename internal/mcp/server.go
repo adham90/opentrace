@@ -119,24 +119,24 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 	)
 	b.Add("list_connectors", "List all active OpenTrace connectors and their tools", "Connectors", "read", "")
 
-	// Monitor list.
+	// Watcher list.
 	if deps.WatcherStore != nil {
 		maybeAddTool(s,
-			mcp.NewTool("list_monitors",
-				mcp.WithDescription("List all configured monitors with their status"),
+			mcp.NewTool("list_watchers",
+				mcp.WithDescription("List all configured watchers with their status"),
 				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production, staging)")),
-				mcp.WithString("monitor_type", mcp.Description("Filter by monitor type: ai or rule")),
+				mcp.WithString("watcher_type", mcp.Description("Filter by watcher type: ai or rule")),
 			),
-			listMonitorsHandler(deps.WatcherStore),
+			listWatchersHandler(deps.WatcherStore),
 		)
-		b.Add("list_monitors", "List all configured monitors with their status", "Monitors", "read", "")
+		b.Add("list_watchers", "List all configured watchers with their status", "Watchers", "read", "")
 	}
 
 	// Alert list.
 	if deps.AlertStore != nil {
 		maybeAddTool(s,
 			mcp.NewTool("list_alerts",
-				mcp.WithDescription("List recent alerts from watchers"),
+				mcp.WithDescription("List recent alerts from watchers. Use when the user asks 'are there any alerts?', 'what's wrong?', or to find alert IDs for acknowledge_alert/dismiss_alert."),
 				mcp.WithNumber("limit", mcp.Description("Maximum number of alerts to return (default: 10)")),
 				mcp.WithBoolean("unread_only", mcp.Description("Only show unread alerts (default: false)")),
 				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production, staging)")),
@@ -150,13 +150,13 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 	if deps.AlertStore != nil && deps.WatcherStore != nil && deps.WatcherRunStore != nil {
 		maybeAddTool(s,
 			mcp.NewTool("get_digest",
-				mcp.WithDescription("Get a health digest summarizing database alerts, monitor status, and trends. Use this when the user asks 'what happened overnight?', 'any issues?', 'daily report', or similar. At the start of a session, consider running this proactively to inform the user of any issues."),
+				mcp.WithDescription("Get a health digest summarizing database alerts, watcher status, and trends. Use this when the user asks 'what happened overnight?', 'any issues?', 'daily report', or similar. At the start of a session, consider running this proactively to inform the user of any issues."),
 				mcp.WithString("period", mcp.Description("Time period: 'last_24h' (default), 'last_12h', 'last_7d', 'today', 'yesterday'")),
 				mcp.WithString("environment", mcp.Description("Optional environment filter (e.g. production, staging)")),
 			),
 			getDigestHandler(deps.AlertStore, deps.WatcherStore, deps.WatcherRunStore),
 		)
-		b.Add("get_digest", "Get a health digest summarizing alerts, monitor status, and trends", "Alerts", "read", "")
+		b.Add("get_digest", "Get a health digest summarizing alerts, watcher status, and trends", "Alerts", "read", "")
 	}
 
 	// Database introspection tools (Postgres runtime stats).
@@ -187,25 +187,25 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 	)
 	b.Add("db_activity", "Show current database activity: connections, long-running queries, idle sessions", "Database Introspection", "read", "database connector")
 
-	// Monitor run history.
+	// Watcher run history.
 	if deps.WatcherStore != nil && deps.WatcherRunStore != nil {
 		maybeAddTool(s,
-			mcp.NewTool("monitor_run_history",
-				mcp.WithDescription("Show recent execution history for a monitor: run status, duration, summary, errors, and alert rate. Use when investigating why a monitor is firing too often, missing issues, or showing errors."),
-				mcp.WithString("monitor_id", mcp.Required(), mcp.Description("Monitor UUID (from list_monitors)")),
+			mcp.NewTool("watcher_run_history",
+				mcp.WithDescription("Show recent execution history for a watcher: run status, duration, summary, errors, and alert rate. Use when investigating why a watcher is firing too often, missing issues, or showing errors."),
+				mcp.WithString("watcher_id", mcp.Required(), mcp.Description("Watcher UUID (from list_watchers)")),
 				mcp.WithNumber("limit", mcp.Description("Maximum runs to return (default: 20, max: 100)")),
 				mcp.WithString("status_filter", mcp.Description("Filter by run status: 'all' (default), 'completed', 'failed', 'error', 'alerted'")),
 			),
-			monitorRunHistoryHandler(deps.WatcherStore, deps.WatcherRunStore),
+			watcherRunHistoryHandler(deps.WatcherStore, deps.WatcherRunStore),
 		)
-		b.Add("monitor_run_history", "Show execution history for a specific monitor with outcome trends", "Monitors", "read", "")
+		b.Add("watcher_run_history", "Show execution history for a specific watcher with outcome trends", "Watchers", "read", "")
 	}
 
 	// Alert details.
 	if deps.AlertStore != nil {
 		maybeAddTool(s,
 			mcp.NewTool("alert_details",
-				mcp.WithDescription("Get full details for a specific alert: the triggering monitor configuration, the run that produced it, and correlated alerts from the same time window."),
+				mcp.WithDescription("Get full details for a specific alert: the triggering watcher configuration, the run that produced it, and correlated alerts from the same time window."),
 				mcp.WithString("alert_id", mcp.Required(), mcp.Description("Alert UUID (from list_alerts)")),
 				mcp.WithBoolean("include_correlated", mcp.Description("Include other alerts within +/- 5 minutes (default: true)")),
 			),
@@ -322,9 +322,37 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 		connectionPoolStatsHandler(deps.Registry),
 	)
 	b.Add("connection_pool_stats", "Show connection pool health: utilization, per-application breakdown, and warnings", "Database Introspection", "read", "database connector")
+
+	// Replication status (read-only — queries pg_stat_replication and related views).
+	maybeAddTool(s,
+		mcp.NewTool("replication_status",
+			mcp.WithDescription("Check PostgreSQL replication health: server role (primary/replica), connected replicas, replication lag, slot status, and WAL archival. Use when investigating 'replica is behind', 'replication slot bloat', or 'WAL archive failures'."),
+		),
+		replicationStatusHandler(deps.Registry),
+	)
+	b.Add("replication_status", "Check replication lag, slot status, connected replicas, and WAL archival health", "Database Introspection", "read", "database connector")
+
+	// Log search (read-only — searches log entries).
+	if deps.LogStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("log_search",
+				mcp.WithDescription("Search log entries with full-text search and filters. Returns individual log entries (unlike log_stats which returns aggregated counts). Use when you need to find specific log messages, investigate errors, or look up events by trace ID."),
+				mcp.WithString("query", mcp.Description("Full-text search query (searches message content)")),
+				mcp.WithString("service", mcp.Description("Filter by service name")),
+				mcp.WithString("level", mcp.Description("Filter by log level: debug, info, warn, error, fatal")),
+				mcp.WithString("trace_id", mcp.Description("Filter by trace/correlation ID")),
+				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production, staging)")),
+				mcp.WithString("time_range", mcp.Description("Lookback window: '15m', '1h' (default: all), '6h', '24h', '7d'")),
+				mcp.WithNumber("limit", mcp.Description("Maximum entries to return (default: 50, max: 200)")),
+				mcp.WithNumber("offset", mcp.Description("Skip this many entries for pagination (default: 0)")),
+			),
+			logSearchHandler(deps.LogStore),
+		)
+		b.Add("log_search", "Search log entries with full-text search and filters", "Log Intelligence", "read", "")
+	}
 }
 
-// addWriteTools registers write/admin tools (connector tools, create_monitor, preview_monitor).
+// addWriteTools registers write/admin tools (connector tools, create_watcher, preview_watcher).
 // When s is nil (catalog-only mode), tools are only cataloged via b.
 func addWriteTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 	// All connector tools (run queries, etc.).
@@ -347,73 +375,170 @@ func addWriteTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 	)
 	b.Add("explain_query", "Run EXPLAIN ANALYZE on a query and return the execution plan with optimization tips", "Database Introspection", "admin", "database connector")
 
-	// Create monitor.
+	// Create watcher.
 	if deps.WatcherStore != nil {
 		maybeAddTool(s,
-			mcp.NewTool("create_monitor",
-				mcp.WithDescription(`Create a new monitor. Use monitor_type=ai for AI-powered analysis or monitor_type=rule for threshold-based checks.
+			mcp.NewTool("create_watcher",
+				mcp.WithDescription(`Create a new watcher. Use watcher_type=ai for AI-powered analysis or watcher_type=rule for threshold-based checks.
 
-Natural language examples for rule monitors:
+Natural language examples for rule watchers:
 - "Alert when active connections exceed 80" → rule_config: {"source":"query","query":"SELECT count(*) FROM pg_stat_activity WHERE state='active'","metric":"value","operator":"gt","threshold":80}
 - "Alert when dead tuples on users table exceed 10000" → rule_config: {"source":"query","query":"SELECT n_dead_tup FROM pg_stat_user_tables WHERE relname='users'","metric":"value","operator":"gt","threshold":10000}
 - "Alert when slow queries exceed 5 seconds average" → rule_config: {"source":"query","query":"SELECT mean_exec_time FROM pg_stat_statements ORDER BY mean_exec_time DESC LIMIT 1","metric":"value","operator":"gt","threshold":5000}
 
-Use db_query_stats, db_activity, and db_table_stats to discover what to monitor, then use this tool to create the monitor.`),
-				mcp.WithString("title", mcp.Required(), mcp.Description("Title for the monitor")),
-				mcp.WithString("monitor_type", mcp.Description("Monitor type: ai (default) or rule")),
-				mcp.WithString("description", mcp.Description("Instructions for the AI agent (required for ai monitors)")),
-				mcp.WithString("rule_config", mcp.Description("JSON object for rule monitors: {source, query, metric, operator, threshold, filter, checks, latency_threshold_ms}")),
-				mcp.WithString("data_source_id", mcp.Description("Data source ID for query/health rule monitors")),
-				mcp.WithString("service", mcp.Description("Filter by service name (ai monitors)")),
-				mcp.WithString("level", mcp.Description("Filter by log level (ai monitors)")),
+Use db_query_stats, db_activity, and db_table_stats to discover what to monitor, then use this tool to create the watcher.`),
+				mcp.WithString("title", mcp.Required(), mcp.Description("Title for the watcher")),
+				mcp.WithString("watcher_type", mcp.Description("Watcher type: ai (default) or rule")),
+				mcp.WithString("description", mcp.Description("Instructions for the AI agent (required for ai watchers)")),
+				mcp.WithString("rule_config", mcp.Description(`JSON string for rule watchers. Example: {"source":"query","query":"SELECT count(*) FROM pg_stat_activity WHERE state='active'","metric":"value","operator":"gt","threshold":80}. Fields: source (query|logs|health), query (SQL SELECT), metric (value|count), operator (gt|lt|gte|lte|eq|neq), threshold (number).`)),
+				mcp.WithString("data_source_id", mcp.Description("Data source ID for query/health rule watchers")),
+				mcp.WithString("service", mcp.Description("Filter by service name (ai watchers)")),
+				mcp.WithString("level", mcp.Description("Filter by log level (ai watchers)")),
 				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production)")),
 				mcp.WithString("time_range", mcp.Description("Log lookback window (e.g. 5m, 15m, 1h). Also used as run interval if schedule is not set. Default: 15m")),
 			mcp.WithString("schedule", mcp.Description("When to run: cron expression (e.g. '0 9 * * 1-5' for weekdays at 9am), interval (e.g. '5m'), or predefined (@hourly, @daily). If omitted, uses time_range as interval.")),
-				mcp.WithString("query", mcp.Description("Full-text search query for logs (ai monitors)")),
+				mcp.WithString("query", mcp.Description("Full-text search query for logs (ai watchers)")),
 				mcp.WithString("severity", mcp.Description("Alert severity: info, warning, or critical (default: warning)")),
-				mcp.WithString("model", mcp.Description("LLM model name (ai monitors only)")),
-				mcp.WithString("effort", mcp.Description("Analysis effort: low, medium (default), or high (ai monitors only)")),
-				mcp.WithString("watcher_environment", mcp.Description("Environment to assign to the monitor (e.g. production, staging)")),
+				mcp.WithString("model", mcp.Description("LLM model name (ai watchers only)")),
+				mcp.WithString("effort", mcp.Description("Analysis effort: low, medium (default), or high (ai watchers only)")),
+				mcp.WithString("watcher_environment", mcp.Description("Environment to assign to the watcher (e.g. production, staging)")),
 			),
-			createMonitorHandler(deps.WatcherStore),
+			createWatcherHandler(deps.WatcherStore),
 		)
-		b.Add("create_monitor", "Create a new AI or rule-based monitor with SQL query and schedule", "Monitors", "admin", "")
+		b.Add("create_watcher", "Create a new AI or rule-based watcher with SQL query and schedule", "Watchers", "admin", "")
 	}
 
-	// Preview monitor (rule evaluation without saving).
+	// Preview watcher (rule evaluation without saving).
 	if deps.RuleEvaluator != nil {
 		maybeAddTool(s,
-			mcp.NewTool("preview_monitor",
-				mcp.WithDescription(`Run a rule monitor evaluation ad-hoc without saving. Returns the current value and whether it would trigger an alert.
+			mcp.NewTool("preview_watcher",
+				mcp.WithDescription(`Run a rule watcher evaluation ad-hoc without saving. Returns the current value and whether it would trigger an alert.
 
-Use this to test a rule_config before creating a monitor. The query in rule_config must be a valid SELECT statement. For example: {"source":"query","query":"SELECT count(*) FROM pg_stat_activity WHERE state='active'","metric":"value","operator":"gt","threshold":80}
+Use this to test a rule_config before creating a watcher. The query in rule_config must be a valid SELECT statement. For example: {"source":"query","query":"SELECT count(*) FROM pg_stat_activity WHERE state='active'","metric":"value","operator":"gt","threshold":80}
 
-Tip: Use db_query_stats, db_activity, or db_table_stats first to understand the database, then preview a monitor rule to verify it works before creating it.`),
+Tip: Use db_query_stats, db_activity, or db_table_stats first to understand the database, then preview a watcher rule to verify it works before creating it.`),
 				mcp.WithString("rule_config", mcp.Required(), mcp.Description("JSON object: {source, query, metric, operator, threshold, filter, checks, latency_threshold_ms}")),
-				mcp.WithString("data_source_id", mcp.Description("Data source ID for query/health rule monitors")),
+				mcp.WithString("data_source_id", mcp.Description("Data source ID for query/health rule watchers")),
 			),
-			previewMonitorHandler(deps.RuleEvaluator),
+			previewWatcherHandler(deps.RuleEvaluator),
 		)
-		b.Add("preview_monitor", "Run a rule monitor evaluation ad-hoc without saving", "Monitors", "admin", "")
+		b.Add("preview_watcher", "Run a rule watcher evaluation ad-hoc without saving", "Watchers", "admin", "")
 	}
 
-	// Suggest monitors (admin — suggests creating monitors with ready-to-use configs).
+	// Kill query (admin — cancels or terminates a backend process).
+	maybeAddTool(s,
+		mcp.NewTool("kill_query",
+			mcp.WithDescription("Cancel or terminate a long-running query by PID. Use after db_activity shows problematic queries. By default uses pg_cancel_backend (graceful); set force=true for pg_terminate_backend."),
+			mcp.WithNumber("pid", mcp.Required(), mcp.Description("Process ID of the backend to cancel (from db_activity)")),
+			mcp.WithBoolean("force", mcp.Description("Use pg_terminate_backend instead of pg_cancel_backend (default: false). Terminate is more aggressive — use only if cancel doesn't work.")),
+		),
+		killQueryHandler(deps.Registry),
+	)
+	b.Add("kill_query", "Cancel or terminate a long-running query by PID", "Database Introspection", "admin", "database connector")
+
+	// Alert management tools (admin).
+	if deps.AlertStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("acknowledge_alert",
+				mcp.WithDescription("Mark a specific alert as read/acknowledged. Use after reviewing an alert via alert_details."),
+				mcp.WithString("alert_id", mcp.Required(), mcp.Description("Alert UUID (from list_alerts)")),
+			),
+			acknowledgeAlertHandler(deps.AlertStore),
+		)
+		b.Add("acknowledge_alert", "Mark an alert as read/acknowledged", "Alerts", "admin", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("acknowledge_all_alerts",
+				mcp.WithDescription("Mark all alerts as read/acknowledged. Optionally filter by environment."),
+				mcp.WithString("environment", mcp.Description("Only acknowledge alerts in this environment (e.g. production)")),
+			),
+			acknowledgeAllAlertsHandler(deps.AlertStore),
+		)
+		b.Add("acknowledge_all_alerts", "Mark all alerts as read", "Alerts", "admin", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("dismiss_alert",
+				mcp.WithDescription("Dismiss a specific alert (hides it from the default view). Use for false positives or resolved issues."),
+				mcp.WithString("alert_id", mcp.Required(), mcp.Description("Alert UUID (from list_alerts)")),
+			),
+			dismissAlertHandler(deps.AlertStore),
+		)
+		b.Add("dismiss_alert", "Dismiss an alert (hide from default view)", "Alerts", "admin", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("dismiss_all_alerts",
+				mcp.WithDescription("Dismiss all alerts. Optionally filter by environment."),
+				mcp.WithString("environment", mcp.Description("Only dismiss alerts in this environment (e.g. production)")),
+			),
+			dismissAllAlertsHandler(deps.AlertStore),
+		)
+		b.Add("dismiss_all_alerts", "Dismiss all alerts", "Alerts", "admin", "")
+	}
+
+	// Watcher lifecycle tools (admin).
+	if deps.WatcherStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("update_watcher",
+				mcp.WithDescription("Update an existing watcher's configuration. Only the fields you provide will be changed."),
+				mcp.WithString("watcher_id", mcp.Required(), mcp.Description("Watcher UUID (from list_watchers)")),
+				mcp.WithString("title", mcp.Description("New title")),
+				mcp.WithString("description", mcp.Description("New description/instructions")),
+				mcp.WithString("environment", mcp.Description("New environment assignment")),
+				mcp.WithString("severity", mcp.Description("New severity: info, warning, or critical")),
+				mcp.WithString("time_range", mcp.Description("New log lookback window (e.g. 5m, 15m, 1h)")),
+				mcp.WithString("schedule", mcp.Description("New schedule: cron expression, interval, or @hourly/@daily")),
+				mcp.WithString("effort", mcp.Description("New analysis effort: low, medium, high (AI watchers only)")),
+				mcp.WithString("rule_config", mcp.Description("New rule configuration JSON (rule watchers only)")),
+			),
+			updateWatcherHandler(deps.WatcherStore),
+		)
+		b.Add("update_watcher", "Update a watcher's configuration", "Watchers", "admin", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("delete_watcher",
+				mcp.WithDescription("Permanently delete a watcher. Historical alerts and run data are preserved. Use pause_watcher instead if you want to temporarily stop it."),
+				mcp.WithString("watcher_id", mcp.Required(), mcp.Description("Watcher UUID (from list_watchers)")),
+			),
+			deleteWatcherHandler(deps.WatcherStore),
+		)
+		b.Add("delete_watcher", "Permanently delete a watcher (alerts preserved)", "Watchers", "admin", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("pause_watcher",
+				mcp.WithDescription("Pause a watcher so it stops running until resumed. Use when a watcher is noisy and needs tuning."),
+				mcp.WithString("watcher_id", mcp.Required(), mcp.Description("Watcher UUID (from list_watchers)")),
+			),
+			pauseWatcherHandler(deps.WatcherStore),
+		)
+		b.Add("pause_watcher", "Pause a watcher (stops running until resumed)", "Watchers", "admin", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("resume_watcher",
+				mcp.WithDescription("Resume a paused watcher so it starts running again on its schedule."),
+				mcp.WithString("watcher_id", mcp.Required(), mcp.Description("Watcher UUID (from list_watchers)")),
+			),
+			resumeWatcherHandler(deps.WatcherStore),
+		)
+		b.Add("resume_watcher", "Resume a paused watcher", "Watchers", "admin", "")
+	}
+
+	// Suggest watchers (admin — suggests creating watchers with ready-to-use configs).
 	if deps.WatcherStore != nil || deps.LogStore != nil {
 		maybeAddTool(s,
-			mcp.NewTool("suggest_monitors",
-				mcp.WithDescription(`Analyze the current system state and suggest monitors the user should create.
+			mcp.NewTool("suggest_watchers",
+				mcp.WithDescription(`Analyze the current system state and suggest watchers the user should create.
 
-Returns prioritized suggestions with ready-to-use monitor configurations based on:
+Returns prioritized suggestions with ready-to-use watcher configurations based on:
 - Current error patterns in logs
 - Gaps in monitoring coverage (connection pool, replication, disk, security)
 - Focus areas: "all" (default), "performance", "errors", "health", "security"
 
-Each suggestion includes a monitor_config that can be passed directly to create_monitor.`),
+Each suggestion includes a watcher_config that can be passed directly to create_watcher.`),
 				mcp.WithString("focus", mcp.Description("Focus area: all, performance, errors, health, security (default: all)")),
 			),
-			suggestMonitorsHandler(deps.WatcherStore, deps.LogStore),
+			suggestWatchersHandler(deps.WatcherStore, deps.LogStore),
 		)
-		b.Add("suggest_monitors", "Analyze system state and suggest monitors to create, with ready-to-use configs", "Monitors", "admin", "")
+		b.Add("suggest_watchers", "Analyze system state and suggest watchers to create, with ready-to-use configs", "Watchers", "admin", "")
 	}
 }
 
@@ -482,12 +607,12 @@ func listConnectorsHandler(registry *connector.Registry) server.ToolHandlerFunc 
 	}
 }
 
-// monitorListEntry is a compact representation of a monitor for the list_monitors MCP tool.
-type monitorListEntry struct {
+// watcherListEntry is a compact representation of a watcher for the list_watchers MCP tool.
+type watcherListEntry struct {
 	ID                   string `json:"id"`
 	Title                string `json:"title"`
 	Status               string `json:"status"`
-	MonitorType          string `json:"monitor_type"`
+	WatcherType          string `json:"watcher_type"`
 	Environment          string `json:"environment,omitempty"`
 	Severity             string `json:"severity"`
 	TimeRange            string `json:"time_range"`
@@ -500,33 +625,33 @@ type monitorListEntry struct {
 	ConsecutiveErrors    int    `json:"consecutive_errors,omitempty"`
 }
 
-// listMonitorsHandler returns a handler that lists all monitors.
-func listMonitorsHandler(ws store.WatcherStore) server.ToolHandlerFunc {
+// listWatchersHandler returns a handler that lists all watchers.
+func listWatchersHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 		var params store.ListWatcherParams
 		if v, ok := args["environment"].(string); ok && v != "" {
 			params.Environment = v
 		}
-		if v, ok := args["monitor_type"].(string); ok && v != "" {
-			params.MonitorType = store.MonitorType(v)
+		if v, ok := args["watcher_type"].(string); ok && v != "" {
+			params.WatcherType = store.WatcherType(v)
 		}
 		watchers, err := ws.List(ctx, params)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to list monitors: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to list watchers: %v. Check that the database is accessible.", err)), nil
 		}
 
 		if len(watchers) == 0 {
-			return mcp.NewToolResultText("No monitors configured."), nil
+			return mcp.NewToolResultText("No watchers configured."), nil
 		}
 
-		entries := make([]monitorListEntry, 0, len(watchers))
+		entries := make([]watcherListEntry, 0, len(watchers))
 		for _, w := range watchers {
-			e := monitorListEntry{
+			e := watcherListEntry{
 				ID:          w.ID.String(),
 				Title:       w.Title,
 				Status:      string(w.Status),
-				MonitorType: string(w.MonitorType),
+				WatcherType: string(w.WatcherType),
 				Environment: w.Environment,
 				Severity:    string(w.Severity),
 				TimeRange:   w.TimeRange,
@@ -548,7 +673,7 @@ func listMonitorsHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 
 		data, err := json.MarshalIndent(entries, "", "  ")
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal monitors: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal watchers: %v", err)), nil
 		}
 
 		return mcp.NewToolResultText(string(data)), nil
@@ -583,8 +708,8 @@ func effectiveInterval(w store.Watcher) string {
 	}
 }
 
-// createMonitorHandler returns a handler that creates a new monitor (AI or rule).
-func createMonitorHandler(ws store.WatcherStore) server.ToolHandlerFunc {
+// createWatcherHandler returns a handler that creates a new watcher (AI or rule).
+func createWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 
@@ -593,17 +718,17 @@ func createMonitorHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 			return mcp.NewToolResultError("title is required"), nil
 		}
 
-		monitorType := store.MonitorTypeAI
-		if v, ok := args["monitor_type"].(string); ok && v != "" {
-			monitorType = store.MonitorType(v)
+		watcherType := store.WatcherTypeAI
+		if v, ok := args["watcher_type"].(string); ok && v != "" {
+			watcherType = store.WatcherType(v)
 		}
 
 		description, _ := args["description"].(string)
-		if monitorType == store.MonitorTypeAI && description == "" {
-			return mcp.NewToolResultError("description is required for ai monitors"), nil
+		if watcherType == store.WatcherTypeAI && description == "" {
+			return mcp.NewToolResultError("description is required for ai watchers"), nil
 		}
 
-		// Build filters from individual params (for AI monitors).
+		// Build filters from individual params (for AI watchers).
 		filters := make(map[string]string)
 		if v, ok := args["service"].(string); ok && v != "" {
 			filters["service"] = v
@@ -650,7 +775,7 @@ func createMonitorHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 			Title:       title,
 			Description: description,
 			Environment: watcherEnv,
-			MonitorType: monitorType,
+			WatcherType: watcherType,
 			Severity:    severity,
 			Filters:     filtersJSON,
 			TimeRange:   timeRange,
@@ -660,11 +785,11 @@ func createMonitorHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 			Notify:      json.RawMessage(`["dashboard"]`),
 		}
 
-		// Parse rule_config JSON string for rule monitors.
-		if monitorType == store.MonitorTypeRule {
+		// Parse rule_config JSON string for rule watchers.
+		if watcherType == store.WatcherTypeRule {
 			rcStr, _ := args["rule_config"].(string)
 			if rcStr == "" {
-				return mcp.NewToolResultError("rule_config is required for rule monitors"), nil
+				return mcp.NewToolResultError("rule_config is required for rule watchers"), nil
 			}
 			var rc store.RuleConfig
 			if err := json.Unmarshal([]byte(rcStr), &rc); err != nil {
@@ -677,22 +802,22 @@ func createMonitorHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 			params.DataSourceID = &v
 		}
 
-		monitor, err := ws.Create(ctx, params)
+		w, err := ws.Create(ctx, params)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to create monitor: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to create watcher: %v", err)), nil
 		}
 
-		data, err := json.MarshalIndent(monitor, "", "  ")
+		data, err := json.MarshalIndent(w, "", "  ")
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal monitor: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal watcher: %v", err)), nil
 		}
 
-		return mcp.NewToolResultText(fmt.Sprintf("Monitor created successfully:\n%s", string(data))), nil
+		return mcp.NewToolResultText(fmt.Sprintf("Watcher created successfully:\n%s", string(data))), nil
 	}
 }
 
-// previewMonitorHandler returns a handler that runs a rule evaluation ad-hoc.
-func previewMonitorHandler(re *watcher.RuleEvaluator) server.ToolHandlerFunc {
+// previewWatcherHandler returns a handler that runs a rule evaluation ad-hoc.
+func previewWatcherHandler(re *watcher.RuleEvaluator) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 
@@ -707,7 +832,7 @@ func previewMonitorHandler(re *watcher.RuleEvaluator) server.ToolHandlerFunc {
 		}
 
 		tempWatcher := store.Watcher{
-			MonitorType: store.MonitorTypeRule,
+			WatcherType: store.WatcherTypeRule,
 			RuleConfig:  &rc,
 		}
 		if v, ok := args["data_source_id"].(string); ok && v != "" {
@@ -748,7 +873,7 @@ func previewMonitorHandler(re *watcher.RuleEvaluator) server.ToolHandlerFunc {
 
 		// Add recommendation based on result.
 		if result.HasAlert {
-			resp["recommendation"] = fmt.Sprintf("This rule WOULD trigger an alert. Current value (%.2f) exceeds threshold (%.2f). Consider adjusting the threshold or creating this monitor.", *result.Value, rc.Threshold)
+			resp["recommendation"] = fmt.Sprintf("This rule WOULD trigger an alert. Current value (%.2f) exceeds threshold (%.2f). Consider adjusting the threshold or creating this watcher.", *result.Value, rc.Threshold)
 		} else {
 			if result.Value != nil {
 				resp["recommendation"] = fmt.Sprintf("This rule would NOT trigger. Current value (%.2f) is within threshold (%.2f). The rule is correctly configured for normal conditions.", *result.Value, rc.Threshold)
@@ -895,7 +1020,7 @@ func listAlertsHandler(as store.AlertStore) server.ToolHandlerFunc {
 			Limit:       limit,
 		})
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to list alerts: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to list alerts: %v. Check that the database is accessible.", err)), nil
 		}
 
 		if len(alerts) == 0 {
@@ -964,15 +1089,15 @@ func getDigestHandler(as store.AlertStore, ws store.WatcherStore, rs store.Watch
 
 // buildDigestResponse converts a Digest into an LLM-friendly response map.
 func buildDigestResponse(d *digest.Digest) map[string]any {
-	summary := fmt.Sprintf("%d new alerts (%d critical, %d warnings, %d info). %d monitors (%d active). %d runs, %d failed.",
+	summary := fmt.Sprintf("%d new alerts (%d critical, %d warnings, %d info). %d watchers (%d active). %d runs, %d failed.",
 		d.AlertSummary.Total,
 		d.AlertSummary.Critical,
 		d.AlertSummary.Warning,
 		d.AlertSummary.Info,
-		d.MonitorSummary.Total,
-		d.MonitorSummary.Active,
-		d.MonitorSummary.RunsInPeriod,
-		d.MonitorSummary.FailedRuns,
+		d.WatcherSummary.Total,
+		d.WatcherSummary.Active,
+		d.WatcherSummary.RunsInPeriod,
+		d.WatcherSummary.FailedRuns,
 	)
 
 	alerts := map[string]any{
@@ -986,7 +1111,7 @@ func buildDigestResponse(d *digest.Digest) map[string]any {
 	topAlerts := make([]map[string]any, 0, len(d.TopAlerts))
 	for _, a := range d.TopAlerts {
 		topAlerts = append(topAlerts, map[string]any{
-			"monitor":  a.MonitorTitle,
+			"watcher":  a.WatcherTitle,
 			"severity": a.Severity,
 			"summary":  a.Summary,
 			"time":     a.CreatedAt.Format(time.RFC3339),
@@ -994,15 +1119,15 @@ func buildDigestResponse(d *digest.Digest) map[string]any {
 	}
 	alerts["top_alerts"] = topAlerts
 
-	monitors := map[string]any{
-		"total":       d.MonitorSummary.Total,
-		"active":      d.MonitorSummary.Active,
-		"errored":     d.MonitorSummary.InError,
-		"failed_runs": d.MonitorSummary.FailedRuns,
+	watchers := map[string]any{
+		"total":       d.WatcherSummary.Total,
+		"active":      d.WatcherSummary.Active,
+		"errored":     d.WatcherSummary.InError,
+		"failed_runs": d.WatcherSummary.FailedRuns,
 	}
 
 	problematic := make([]map[string]any, 0)
-	for _, m := range d.MonitorHealth {
+	for _, m := range d.WatcherHealth {
 		if m.AlertCount > 0 || !m.LastRunOK {
 			entry := map[string]any{
 				"name":             m.Title,
@@ -1014,7 +1139,7 @@ func buildDigestResponse(d *digest.Digest) map[string]any {
 			problematic = append(problematic, entry)
 		}
 	}
-	monitors["problematic"] = problematic
+	watchers["problematic"] = problematic
 
 	resp := map[string]any{
 		"summary": summary,
@@ -1024,7 +1149,7 @@ func buildDigestResponse(d *digest.Digest) map[string]any {
 			"end":   d.PeriodEnd.Format(time.RFC3339),
 		},
 		"alerts":   alerts,
-		"monitors": monitors,
+		"watchers": watchers,
 	}
 
 	if d.Trends != nil {

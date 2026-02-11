@@ -180,7 +180,7 @@ LIMIT 20`
 			resp["utilization_percent"] = float64(totalConns) / float64(maxConns) * 100
 		}
 
-		appendExistingMonitors(resp, fetchExistingMonitors(ctx, ws))
+		appendExistingWatchers(resp, fetchExistingWatchers(ctx, ws))
 
 		data, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {

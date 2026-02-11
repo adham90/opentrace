@@ -352,15 +352,15 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 	if effort == "" {
 		effort = store.EffortMedium
 	}
-	mt := params.MonitorType
+	mt := params.WatcherType
 	if mt == "" {
-		mt = store.MonitorTypeAI
+		mt = store.WatcherTypeAI
 	}
 	w := &store.Watcher{
 		ID:           uuid.New(),
 		Title:        params.Title,
 		Description:  params.Description,
-		MonitorType:  mt,
+		WatcherType:  mt,
 		RuleConfig:   params.RuleConfig,
 		DataSourceID: params.DataSourceID,
 		Severity:     params.Severity,
@@ -402,7 +402,7 @@ func (m *mockWatcherStore) UpdateAdaptiveState(ctx context.Context, id uuid.UUID
 	return nil
 }
 
-func (m *mockWatcherStore) ResumeMonitor(ctx context.Context, id uuid.UUID) error {
+func (m *mockWatcherStore) ResumeWatcher(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
@@ -540,11 +540,11 @@ func (m *mockWatcherRunStore) CountRuns(_ context.Context, params store.CountRun
 	return count, nil
 }
 
-// --- listMonitorsHandler tests ---
+// --- listWatchersHandler tests ---
 
-func TestListMonitorsHandler_Empty(t *testing.T) {
+func TestListWatchersHandler_Empty(t *testing.T) {
 	ws := &mockWatcherStore{}
-	handler := listMonitorsHandler(ws)
+	handler := listWatchersHandler(ws)
 
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {
@@ -552,19 +552,19 @@ func TestListMonitorsHandler_Empty(t *testing.T) {
 	}
 
 	text := resultText(t, result)
-	if text != "No monitors configured." {
-		t.Errorf("text = %q, want %q", text, "No monitors configured.")
+	if text != "No watchers configured." {
+		t.Errorf("text = %q, want %q", text, "No watchers configured.")
 	}
 }
 
-func TestListMonitorsHandler_WithMonitors(t *testing.T) {
+func TestListWatchersHandler_WithWatchers(t *testing.T) {
 	ws := &mockWatcherStore{
 		watchers: []store.Watcher{
-			{ID: uuid.New(), Title: "Error Monitor", Status: store.WatcherActive, MonitorType: store.MonitorTypeAI},
-			{ID: uuid.New(), Title: "Connection Check", Status: store.WatcherActive, MonitorType: store.MonitorTypeRule},
+			{ID: uuid.New(), Title: "Error Watcher", Status: store.WatcherActive, WatcherType: store.WatcherTypeAI},
+			{ID: uuid.New(), Title: "Connection Check", Status: store.WatcherActive, WatcherType: store.WatcherTypeRule},
 		},
 	}
-	handler := listMonitorsHandler(ws)
+	handler := listWatchersHandler(ws)
 
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {
@@ -575,26 +575,26 @@ func TestListMonitorsHandler_WithMonitors(t *testing.T) {
 	}
 
 	text := resultText(t, result)
-	if !contains(text, "Error Monitor") {
-		t.Error("expected output to contain 'Error Monitor'")
+	if !contains(text, "Error Watcher") {
+		t.Error("expected output to contain 'Error Watcher'")
 	}
 	if !contains(text, "Connection Check") {
 		t.Error("expected output to contain 'Connection Check'")
 	}
 }
 
-func TestListMonitorsHandler_FilterByType(t *testing.T) {
+func TestListWatchersHandler_FilterByType(t *testing.T) {
 	ws := &mockWatcherStore{
 		watchers: []store.Watcher{
-			{ID: uuid.New(), Title: "AI Monitor", Status: store.WatcherActive, MonitorType: store.MonitorTypeAI},
-			{ID: uuid.New(), Title: "Rule Monitor", Status: store.WatcherActive, MonitorType: store.MonitorTypeRule},
+			{ID: uuid.New(), Title: "AI Watcher", Status: store.WatcherActive, WatcherType: store.WatcherTypeAI},
+			{ID: uuid.New(), Title: "Rule Watcher", Status: store.WatcherActive, WatcherType: store.WatcherTypeRule},
 		},
 	}
 	// Override List to check the filter is passed.
-	handler := listMonitorsHandler(ws)
+	handler := listWatchersHandler(ws)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"monitor_type": "rule",
+		"watcher_type": "rule",
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -606,9 +606,9 @@ func TestListMonitorsHandler_FilterByType(t *testing.T) {
 	// The real store filters by type via the SQL query.
 }
 
-func TestListMonitorsHandler_Error(t *testing.T) {
+func TestListWatchersHandler_Error(t *testing.T) {
 	ws := &mockWatcherStore{err: errors.New("db error")}
-	handler := listMonitorsHandler(ws)
+	handler := listWatchersHandler(ws)
 
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {
@@ -619,14 +619,14 @@ func TestListMonitorsHandler_Error(t *testing.T) {
 	}
 }
 
-// --- createMonitorHandler tests ---
+// --- createWatcherHandler tests ---
 
-func TestCreateMonitorHandler_AISuccess(t *testing.T) {
+func TestCreateWatcherHandler_AISuccess(t *testing.T) {
 	ws := &mockWatcherStore{}
-	handler := createMonitorHandler(ws)
+	handler := createWatcherHandler(ws)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"title":       "Error Monitor",
+		"title":       "Error Watcher",
 		"description": "Watch for error spikes in production",
 		"service":     "api",
 		"level":       "error",
@@ -643,18 +643,18 @@ func TestCreateMonitorHandler_AISuccess(t *testing.T) {
 	}
 
 	text := resultText(t, result)
-	if !contains(text, "Monitor created successfully") {
-		t.Errorf("text = %q, want it to contain 'Monitor created successfully'", text)
+	if !contains(text, "Watcher created successfully") {
+		t.Errorf("text = %q, want it to contain 'Watcher created successfully'", text)
 	}
 
 	if ws.created == nil {
-		t.Fatal("monitor was not created")
+		t.Fatal("watcher was not created")
 	}
-	if ws.created.Title != "Error Monitor" {
-		t.Errorf("title = %q, want %q", ws.created.Title, "Error Monitor")
+	if ws.created.Title != "Error Watcher" {
+		t.Errorf("title = %q, want %q", ws.created.Title, "Error Watcher")
 	}
-	if ws.created.MonitorType != store.MonitorTypeAI {
-		t.Errorf("monitor_type = %q, want %q", ws.created.MonitorType, store.MonitorTypeAI)
+	if ws.created.WatcherType != store.WatcherTypeAI {
+		t.Errorf("watcher_type = %q, want %q", ws.created.WatcherType, store.WatcherTypeAI)
 	}
 	if ws.created.TimeRange != "10m" {
 		t.Errorf("time_range = %q, want %q", ws.created.TimeRange, "10m")
@@ -670,13 +670,13 @@ func TestCreateMonitorHandler_AISuccess(t *testing.T) {
 	}
 }
 
-func TestCreateMonitorHandler_RuleSuccess(t *testing.T) {
+func TestCreateWatcherHandler_RuleSuccess(t *testing.T) {
 	ws := &mockWatcherStore{}
-	handler := createMonitorHandler(ws)
+	handler := createWatcherHandler(ws)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"title":          "Connection count",
-		"monitor_type":   "rule",
+		"watcher_type":   "rule",
 		"rule_config":    `{"source":"query","query":"SELECT count(*) FROM pg_stat_activity","metric":"value","operator":"gt","threshold":100}`,
 		"data_source_id": "ds-123",
 		"severity":       "warning",
@@ -691,10 +691,10 @@ func TestCreateMonitorHandler_RuleSuccess(t *testing.T) {
 	}
 
 	if ws.created == nil {
-		t.Fatal("monitor was not created")
+		t.Fatal("watcher was not created")
 	}
-	if ws.created.MonitorType != store.MonitorTypeRule {
-		t.Errorf("monitor_type = %q, want %q", ws.created.MonitorType, store.MonitorTypeRule)
+	if ws.created.WatcherType != store.WatcherTypeRule {
+		t.Errorf("watcher_type = %q, want %q", ws.created.WatcherType, store.WatcherTypeRule)
 	}
 	if ws.created.RuleConfig == nil {
 		t.Fatal("expected rule_config to be set")
@@ -707,26 +707,26 @@ func TestCreateMonitorHandler_RuleSuccess(t *testing.T) {
 	}
 }
 
-func TestCreateMonitorHandler_RuleMissingConfig(t *testing.T) {
+func TestCreateWatcherHandler_RuleMissingConfig(t *testing.T) {
 	ws := &mockWatcherStore{}
-	handler := createMonitorHandler(ws)
+	handler := createWatcherHandler(ws)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"title":        "Rule without config",
-		"monitor_type": "rule",
+		"watcher_type": "rule",
 	}))
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !result.IsError {
-		t.Fatal("expected error for rule monitor without rule_config")
+		t.Fatal("expected error for rule watcher without rule_config")
 	}
 }
 
-func TestCreateMonitorHandler_MissingTitle(t *testing.T) {
+func TestCreateWatcherHandler_MissingTitle(t *testing.T) {
 	ws := &mockWatcherStore{}
-	handler := createMonitorHandler(ws)
+	handler := createWatcherHandler(ws)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"description": "some description",
@@ -740,28 +740,28 @@ func TestCreateMonitorHandler_MissingTitle(t *testing.T) {
 	}
 }
 
-func TestCreateMonitorHandler_AIMissingDescription(t *testing.T) {
+func TestCreateWatcherHandler_AIMissingDescription(t *testing.T) {
 	ws := &mockWatcherStore{}
-	handler := createMonitorHandler(ws)
+	handler := createWatcherHandler(ws)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"title": "No description AI monitor",
+		"title": "No description AI watcher",
 	}))
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !result.IsError {
-		t.Fatal("expected error for AI monitor without description")
+		t.Fatal("expected error for AI watcher without description")
 	}
 }
 
-func TestCreateMonitorHandler_Defaults(t *testing.T) {
+func TestCreateWatcherHandler_Defaults(t *testing.T) {
 	ws := &mockWatcherStore{}
-	handler := createMonitorHandler(ws)
+	handler := createWatcherHandler(ws)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"title":       "Simple Monitor",
+		"title":       "Simple Watcher",
 		"description": "Just watch",
 	}))
 
@@ -778,16 +778,16 @@ func TestCreateMonitorHandler_Defaults(t *testing.T) {
 	if ws.created.Severity != store.SeverityWarning {
 		t.Errorf("default severity = %q, want %q", ws.created.Severity, store.SeverityWarning)
 	}
-	if ws.created.MonitorType != store.MonitorTypeAI {
-		t.Errorf("default monitor_type = %q, want %q", ws.created.MonitorType, store.MonitorTypeAI)
+	if ws.created.WatcherType != store.WatcherTypeAI {
+		t.Errorf("default watcher_type = %q, want %q", ws.created.WatcherType, store.WatcherTypeAI)
 	}
 }
 
-// --- previewMonitorHandler tests ---
+// --- previewWatcherHandler tests ---
 
-func TestPreviewMonitorHandler_MissingConfig(t *testing.T) {
+func TestPreviewWatcherHandler_MissingConfig(t *testing.T) {
 	re := watcher.NewRuleEvaluator(connector.NewRegistry(), nil, nil)
-	handler := previewMonitorHandler(re)
+	handler := previewWatcherHandler(re)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{}))
 	if err != nil {
@@ -798,9 +798,9 @@ func TestPreviewMonitorHandler_MissingConfig(t *testing.T) {
 	}
 }
 
-func TestPreviewMonitorHandler_InvalidJSON(t *testing.T) {
+func TestPreviewWatcherHandler_InvalidJSON(t *testing.T) {
 	re := watcher.NewRuleEvaluator(connector.NewRegistry(), nil, nil)
-	handler := previewMonitorHandler(re)
+	handler := previewWatcherHandler(re)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"rule_config": "not-json",
@@ -813,7 +813,7 @@ func TestPreviewMonitorHandler_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestPreviewMonitorHandler_EnhancedResponse(t *testing.T) {
+func TestPreviewWatcherHandler_EnhancedResponse(t *testing.T) {
 	// Set up a registry with a mock QueryExecutor that returns a value.
 	registry := connector.NewRegistry()
 	registry.Register(&previewMockQE{
@@ -826,7 +826,7 @@ func TestPreviewMonitorHandler_EnhancedResponse(t *testing.T) {
 	})
 
 	re := watcher.NewRuleEvaluator(registry, nil, nil)
-	handler := previewMonitorHandler(re)
+	handler := previewWatcherHandler(re)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"rule_config": `{"source":"query","query":"SELECT count(*) FROM pg_stat_activity","metric":"value","operator":"gt","threshold":100}`,
@@ -867,7 +867,7 @@ func TestPreviewMonitorHandler_EnhancedResponse(t *testing.T) {
 	}
 }
 
-func TestPreviewMonitorHandler_WouldAlert(t *testing.T) {
+func TestPreviewWatcherHandler_WouldAlert(t *testing.T) {
 	registry := connector.NewRegistry()
 	registry.Register(&previewMockQE{
 		mockDataSource: mockDataSource{connType: connector.ConnectorDatabase},
@@ -879,7 +879,7 @@ func TestPreviewMonitorHandler_WouldAlert(t *testing.T) {
 	})
 
 	re := watcher.NewRuleEvaluator(registry, nil, nil)
-	handler := previewMonitorHandler(re)
+	handler := previewWatcherHandler(re)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"rule_config": `{"source":"query","query":"SELECT count(*) FROM pg_stat_activity","metric":"value","operator":"gt","threshold":100}`,
@@ -1175,7 +1175,7 @@ func TestAddReadOnlyTools_RegistersExpectedTools(t *testing.T) {
 	addReadOnlyTools(s, deps, &CatalogBuilder{})
 
 	tools := s.ListTools()
-	expectedTools := []string{"list_connectors", "list_monitors", "list_alerts", "get_digest", "db_locks", "log_stats", "trace_lookup", "db_index_analysis", "compare_periods", "connection_pool_stats"}
+	expectedTools := []string{"list_connectors", "list_watchers", "list_alerts", "get_digest", "db_locks", "log_stats", "trace_lookup", "db_index_analysis", "compare_periods", "connection_pool_stats", "replication_status", "log_search"}
 	for _, name := range expectedTools {
 		if _, ok := tools[name]; !ok {
 			t.Errorf("expected read-only tool %q to be registered", name)
@@ -1183,8 +1183,8 @@ func TestAddReadOnlyTools_RegistersExpectedTools(t *testing.T) {
 	}
 
 	// Verify write tools are NOT registered by addReadOnlyTools.
-	if _, ok := tools["create_monitor"]; ok {
-		t.Error("create_monitor should not be registered by addReadOnlyTools")
+	if _, ok := tools["create_watcher"]; ok {
+		t.Error("create_watcher should not be registered by addReadOnlyTools")
 	}
 	if _, ok := tools["explain_query"]; ok {
 		t.Error("explain_query should not be registered by addReadOnlyTools")
@@ -1207,36 +1207,39 @@ func TestAddWriteTools_RegistersConnectorTools(t *testing.T) {
 	})
 
 	ws := &mockWatcherStore{}
+	as := &mockAlertStore{}
 	re := watcher.NewRuleEvaluator(registry, nil, nil)
 
 	s := server.NewMCPServer("opentrace-test", "0.1.0")
 	deps := Deps{
 		Registry:      registry,
 		WatcherStore:  ws,
+		AlertStore:    as,
 		RuleEvaluator: re,
 	}
 	addWriteTools(s, deps, &CatalogBuilder{})
 
 	tools := s.ListTools()
 
-	// Connector tool should be registered.
-	if _, ok := tools["run_query"]; !ok {
-		t.Error("expected connector tool 'run_query' to be registered by addWriteTools")
+	expectedWriteTools := []string{
+		"run_query",        // connector tool
+		"create_watcher",   // watcher lifecycle
+		"update_watcher",
+		"delete_watcher",
+		"pause_watcher",
+		"resume_watcher",
+		"preview_watcher",  // rule preview
+		"suggest_watchers", // suggestions
+		"kill_query",       // query management
+		"acknowledge_alert",     // alert management
+		"acknowledge_all_alerts",
+		"dismiss_alert",
+		"dismiss_all_alerts",
 	}
-
-	// create_monitor should be registered when WatcherStore is provided.
-	if _, ok := tools["create_monitor"]; !ok {
-		t.Error("expected 'create_monitor' to be registered by addWriteTools")
-	}
-
-	// preview_monitor should be registered when RuleEvaluator is provided.
-	if _, ok := tools["preview_monitor"]; !ok {
-		t.Error("expected 'preview_monitor' to be registered by addWriteTools")
-	}
-
-	// suggest_monitors should be registered when WatcherStore is provided.
-	if _, ok := tools["suggest_monitors"]; !ok {
-		t.Error("expected 'suggest_monitors' to be registered by addWriteTools")
+	for _, name := range expectedWriteTools {
+		if _, ok := tools[name]; !ok {
+			t.Errorf("expected write tool %q to be registered by addWriteTools", name)
+		}
 	}
 }
 
@@ -1280,15 +1283,15 @@ func TestGetDigestHandler_WithAlerts(t *testing.T) {
 
 	as := &mockAlertStore{
 		alerts: []store.Alert{
-			{ID: uuid.New(), WatcherID: &wID, WatcherTitle: "Connection Monitor", Title: "High connections",
+			{ID: uuid.New(), WatcherID: &wID, WatcherTitle: "Connection Watcher", Title: "High connections",
 				Summary: "92/100 connections", Severity: store.SeverityCritical, CreatedAt: now.Add(-2 * time.Hour)},
-			{ID: uuid.New(), WatcherID: &wID, WatcherTitle: "Connection Monitor", Title: "Warning level",
+			{ID: uuid.New(), WatcherID: &wID, WatcherTitle: "Connection Watcher", Title: "Warning level",
 				Summary: "75/100 connections", Severity: store.SeverityWarning, CreatedAt: now.Add(-4 * time.Hour)},
 		},
 	}
 	ws := &mockWatcherStore{
 		watchers: []store.Watcher{
-			{ID: wID, Title: "Connection Monitor", Status: store.WatcherActive},
+			{ID: wID, Title: "Connection Watcher", Status: store.WatcherActive},
 		},
 	}
 	rs := &mockWatcherRunStore{
@@ -1384,8 +1387,8 @@ func TestGetDigestHandler_EnvironmentFilter(t *testing.T) {
 	}
 	ws := &mockWatcherStore{
 		watchers: []store.Watcher{
-			{ID: w1, Title: "Prod Monitor", Environment: "production", Status: store.WatcherActive},
-			{ID: w2, Title: "Staging Monitor", Environment: "staging", Status: store.WatcherActive},
+			{ID: w1, Title: "Prod Watcher", Environment: "production", Status: store.WatcherActive},
+			{ID: w2, Title: "Staging Watcher", Environment: "staging", Status: store.WatcherActive},
 		},
 	}
 	rs := &mockWatcherRunStore{}

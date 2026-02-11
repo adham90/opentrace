@@ -76,7 +76,7 @@ func TestHandleGetLatestDigest_WithData(t *testing.T) {
 		AlertTotal:    5,
 		AlertCritical: 2,
 		AlertWarning:  3,
-		MonitorTotal:  10,
+		WatcherTotal:  10,
 		FailedRuns:    1,
 		Data:          `{}`,
 	})

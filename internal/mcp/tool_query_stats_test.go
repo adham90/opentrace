@@ -161,7 +161,7 @@ func TestQueryStatsHandler_NotQueryExecutor(t *testing.T) {
 	}
 }
 
-func TestQueryStatsHandler_WithExistingMonitors(t *testing.T) {
+func TestQueryStatsHandler_WithExistingWatchers(t *testing.T) {
 	registry := connector.NewRegistry()
 	registry.Register(&mockQueryExecutor{
 		mockDataSource: mockDataSource{connType: connector.ConnectorDatabase},
@@ -176,9 +176,9 @@ func TestQueryStatsHandler_WithExistingMonitors(t *testing.T) {
 
 	ws := &mockWatcherStore{
 		watchers: []store.Watcher{
-			{ID: uuid.New(), Title: "Slow query monitor", Status: store.WatcherActive, MonitorType: store.MonitorTypeRule,
+			{ID: uuid.New(), Title: "Slow query watcher", Status: store.WatcherActive, WatcherType: store.WatcherTypeRule,
 				RuleConfig: &store.RuleConfig{Source: store.RuleSourceQuery, Query: "SELECT count(*) FROM pg_stat_activity"}},
-			{ID: uuid.New(), Title: "Error log monitor", Status: store.WatcherActive, MonitorType: store.MonitorTypeAI},
+			{ID: uuid.New(), Title: "Error log watcher", Status: store.WatcherActive, WatcherType: store.WatcherTypeAI},
 		},
 	}
 
@@ -198,15 +198,15 @@ func TestQueryStatsHandler_WithExistingMonitors(t *testing.T) {
 		t.Fatalf("failed to parse JSON: %v", err)
 	}
 
-	monitors, ok := resp["existing_monitors"].([]any)
+	watchers, ok := resp["existing_watchers"].([]any)
 	if !ok {
-		t.Fatal("expected existing_monitors array in response")
+		t.Fatal("expected existing_watchers array in response")
 	}
-	if len(monitors) != 2 {
-		t.Errorf("len(existing_monitors) = %d, want 2", len(monitors))
+	if len(watchers) != 2 {
+		t.Errorf("len(existing_watchers) = %d, want 2", len(watchers))
 	}
 
-	if _, ok := resp["existing_monitors_hint"]; !ok {
-		t.Error("expected existing_monitors_hint in response")
+	if _, ok := resp["existing_watchers_hint"]; !ok {
+		t.Error("expected existing_watchers_hint in response")
 	}
 }

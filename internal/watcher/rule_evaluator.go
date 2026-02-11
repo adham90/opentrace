@@ -9,7 +9,7 @@ import (
 	"github.com/adham90/opentrace/internal/store"
 )
 
-// RuleEvaluator evaluates rule-based monitors (query, logs, health).
+// RuleEvaluator evaluates rule-based watchers (query, logs, health).
 type RuleEvaluator struct {
 	registry *connector.Registry
 	logStore store.LogStore
@@ -32,7 +32,7 @@ func NewRuleEvaluator(
 // Evaluate dispatches to the appropriate evaluation method based on rule source.
 func (re *RuleEvaluator) Evaluate(ctx context.Context, w store.Watcher) (*EvalResult, error) {
 	if w.RuleConfig == nil {
-		return nil, fmt.Errorf("rule monitor %s has no rule_config", w.ID)
+		return nil, fmt.Errorf("rule watcher %s has no rule_config", w.ID)
 	}
 
 	switch w.RuleConfig.Source {

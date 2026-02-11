@@ -6,7 +6,7 @@ func TestDeriveStatus(t *testing.T) {
 	tests := []struct {
 		name     string
 		alerts   AlertSummary
-		monitors MonitorSummary
+		watchers WatcherSummary
 		want     DigestStatus
 	}{
 		{
@@ -29,21 +29,21 @@ func TestDeriveStatus(t *testing.T) {
 			want:   StatusCritical,
 		},
 		{
-			name:     "degraded when monitors in error (overrides critical)",
+			name:     "degraded when watchers in error (overrides critical)",
 			alerts:   AlertSummary{Critical: 1},
-			monitors: MonitorSummary{InError: 1},
+			watchers: WatcherSummary{InError: 1},
 			want:     StatusDegraded,
 		},
 		{
-			name:     "degraded when monitors in error but no alerts",
-			monitors: MonitorSummary{InError: 2},
+			name:     "degraded when watchers in error but no alerts",
+			watchers: WatcherSummary{InError: 2},
 			want:     StatusDegraded,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := DeriveStatus(tt.alerts, tt.monitors)
+			got := DeriveStatus(tt.alerts, tt.watchers)
 			if got != tt.want {
 				t.Errorf("DeriveStatus() = %q, want %q", got, tt.want)
 			}

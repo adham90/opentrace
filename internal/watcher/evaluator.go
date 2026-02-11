@@ -14,7 +14,7 @@ type EvalResult struct {
 	Value    *float64 `json:"value,omitempty"`
 }
 
-// Evaluator evaluates a monitor and returns whether an alert should fire.
+// Evaluator evaluates a watcher and returns whether an alert should fire.
 type Evaluator interface {
 	Evaluate(ctx context.Context, w store.Watcher) (*EvalResult, error)
 }
