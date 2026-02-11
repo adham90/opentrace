@@ -3,7 +3,7 @@
   <div class="page-header">
     <h1><span class="prompt">$</span> connectors</h1>
     <div class="actions">
-      {{if .IsAdmin}}<button class="btn btn-primary" onclick="showCreateModal()">+ New Connector</button>{{end}}
+      {{if .IsAdmin}}<button class="btn btn-primary" onclick="showCreateModal()">+ Add Database</button>{{end}}
     </div>
   </div>
 
@@ -16,25 +16,17 @@
 <div id="connector-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="connector-modal-title" style="display:none" onclick="if(event.target===this)hideModal()">
   <div class="modal-content">
     <div class="modal-header">
-      <h3 id="connector-modal-title"><span class="prompt">$</span> new-connector</h3>
+      <h3 id="connector-modal-title"><span class="prompt">$</span> new-database-connector</h3>
       <button class="btn-close" onclick="hideModal()">&times;</button>
     </div>
     <form id="connector-form" onsubmit="saveConnector(event)">
       <div class="modal-body">
         <div class="modal-section">
-          <div class="modal-section-label">Type &amp; Name</div>
+          <div class="modal-section-label">Name</div>
           <div class="form-grid">
             <div class="form-group">
-              <label>Type</label>
-              <select id="conn-type" onchange="onTypeChange()" required>
-                <option value="logs">logs</option>
-                <option value="database">database</option>
-                <option value="codebase">codebase</option>
-              </select>
-            </div>
-            <div class="form-group">
               <label>Name</label>
-              <input type="text" id="conn-name" placeholder="e.g. Production Logs" required>
+              <input type="text" id="conn-name" placeholder="e.g. Production DB" required>
             </div>
             <div class="form-group">
               <label>Environment <small>(optional)</small></label>
@@ -44,22 +36,43 @@
         </div>
 
         <div class="modal-section">
-          <div class="modal-section-label">Configuration</div>
-          <div id="config-logs" class="config-section">
-            <p class="config-help">Uses the built-in log store. No additional configuration required.</p>
+          <div class="modal-section-label">Connection</div>
+          <div class="form-group">
+            <label>Connection String</label>
+            <input type="text" id="cfg-connection-string" placeholder="postgres://user:pass@host:5432/dbname">
           </div>
-          <div id="config-database" class="config-section" style="display:none">
-            <div class="form-group">
-              <label>Connection String</label>
-              <input type="text" id="cfg-connection-string" placeholder="postgres://user:pass@host:5432/dbname">
+          <details class="form-tips">
+            <summary>Setup guide: creating a read-only PostgreSQL user</summary>
+            <p style="margin:8px 0 6px;font-size:11px;color:var(--text-dim);line-height:1.5;">
+              OpenTrace enforces read-only mode automatically, but we recommend connecting with a dedicated user that has minimal privileges.
+            </p>
+            <div class="code-block">
+              <button type="button" class="copy-btn" onclick="copySetupSQL(this)">copy</button>
+              <pre><code>-- 1. Create a read-only user
+CREATE USER opentrace WITH PASSWORD 'your-secure-password';
+
+-- 2. Grant connect access
+GRANT CONNECT ON DATABASE your_database TO opentrace;
+
+-- 3. Grant schema usage and read access
+GRANT USAGE ON SCHEMA public TO opentrace;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO opentrace;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT ON TABLES TO opentrace;
+
+-- 4. Grant access to monitoring views
+--    (required for activity, locks, and connection tools)
+GRANT pg_monitor TO opentrace;
+
+-- 5. Optional: enable pg_stat_statements for query stats
+-- CREATE EXTENSION IF NOT EXISTS pg_stat_statements;</code></pre>
             </div>
-          </div>
-          <div id="config-codebase" class="config-section" style="display:none">
-            <div class="form-group">
-              <label>Repository Path</label>
-              <input type="text" id="cfg-repo-path" placeholder="/path/to/repository">
-            </div>
-          </div>
+            <ul>
+              <li><strong>SELECT ON ALL TABLES</strong> — needed by search &amp; schema tools</li>
+              <li><strong>pg_monitor</strong> — needed by activity, locks &amp; connection pool tools</li>
+              <li><strong>pg_stat_statements</strong> — optional, used by query stats tool</li>
+            </ul>
+          </details>
         </div>
       </div>
 
@@ -77,7 +90,7 @@ function loadConnectors() {
   fetch('/api/connectors' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r) { return r.json(); }).then(function(connectors) {
     var container = document.getElementById('connectors-list');
     if (!connectors || connectors.length === 0) {
-      container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No connectors yet</p><p class="empty-state-desc">Connectors link OpenTrace to your databases and log sources so monitors can query them.</p>' + (isAdmin ? '<button class="btn btn-primary" onclick="showCreateModal()">+ Add your first connector</button>' : '') + '</div>';
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No connectors yet</p><p class="empty-state-desc">Connect OpenTrace to your PostgreSQL databases so monitors can query them.</p>' + (isAdmin ? '<button class="btn btn-primary" onclick="showCreateModal()">+ Add your first database</button>' : '') + '</div>';
       return;
     }
 
@@ -115,7 +128,6 @@ function loadConnectors() {
 
 function showCreateModal() {
   document.getElementById('connector-form').reset();
-  onTypeChange();
   document.getElementById('connector-modal').style.display = 'flex';
 }
 
@@ -123,41 +135,33 @@ function hideModal() {
   document.getElementById('connector-modal').style.display = 'none';
 }
 
-function onTypeChange() {
-  var type = document.getElementById('conn-type').value;
-  document.getElementById('config-logs').style.display = type === 'logs' ? '' : 'none';
-  document.getElementById('config-database').style.display = type === 'database' ? '' : 'none';
-  document.getElementById('config-codebase').style.display = type === 'codebase' ? '' : 'none';
+function copySetupSQL(btn) {
+  var code = btn.parentElement.querySelector('code').textContent;
+  navigator.clipboard.writeText(code).then(function() {
+    btn.textContent = 'copied';
+    btn.classList.add('copied');
+    setTimeout(function() { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 2000);
+  });
 }
 
 function saveConnector(e) {
   e.preventDefault();
-  var type = document.getElementById('conn-type').value;
   var nameInput = document.getElementById('conn-name');
+  var csInput = document.getElementById('cfg-connection-string');
   var environment = document.getElementById('conn-env').value;
 
   // Validate
   var valid = true;
   if (!validateField(nameInput, [{required: true, message: 'Connector name is required'}])) valid = false;
-  if (type === 'database') {
-    var csInput = document.getElementById('cfg-connection-string');
-    if (!validateField(csInput, [{required: true, message: 'Connection string is required'}, {pattern: /^postgres(ql)?:\/\//, message: 'Must start with postgres:// or postgresql://'}])) valid = false;
-  }
+  if (!validateField(csInput, [{required: true, message: 'Connection string is required'}, {pattern: /^postgres(ql)?:\/\//, message: 'Must start with postgres:// or postgresql://'}])) valid = false;
   if (!valid) return;
 
-  var config = {};
-  if (type === 'database') {
-    var cs = document.getElementById('cfg-connection-string').value;
-    if (cs) config.connection_string = cs;
-  } else if (type === 'codebase') {
-    var rp = document.getElementById('cfg-repo-path').value;
-    if (rp) config.repo_path = rp;
-  }
+  var config = { connection_string: csInput.value };
 
   var submitBtn = e.target.querySelector('button[type="submit"]');
   setButtonLoading(submitBtn, true, 'creating...');
 
-  var body = {type: type, name: nameInput.value, config: config};
+  var body = {type: 'database', name: nameInput.value, config: config};
   if (environment) body.environment = environment;
 
   fetch('/api/connectors', {

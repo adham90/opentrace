@@ -2076,6 +2076,11 @@ select:focus { outline: none; border-color: var(--green); }
   font-size: 11px;
 }
 
+.form-tips ul li strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
 /* ===== Servers Page ===== */
 .server-list { display: flex; flex-direction: column; gap: 8px; }
 

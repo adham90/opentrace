@@ -138,7 +138,7 @@ LIMIT 20`
 		}
 
 		// 4. Max connections for utilization.
-		maxConnResult, err := qe.ExecuteReadQuery(ctx, "SHOW max_connections")
+		maxConnResult, err := qe.ExecuteReadQuery(ctx, "SELECT current_setting('max_connections')")
 		var maxConns int
 		var totalConns int
 		if err == nil && maxConnResult.RowCount > 0 && len(maxConnResult.Rows[0]) > 0 {

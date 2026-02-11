@@ -25,7 +25,7 @@ func connectionPoolStatsHandler(registry *connector.Registry) server.ToolHandler
 		}
 
 		// Get max connections setting.
-		maxConnResult, err := qe.ExecuteReadQuery(ctx, `SHOW max_connections`)
+		maxConnResult, err := qe.ExecuteReadQuery(ctx, `SELECT current_setting('max_connections')`)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to query max_connections: %v", err)), nil
 		}
