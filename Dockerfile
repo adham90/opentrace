@@ -8,7 +8,17 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=1 go build -o /opentrace ./cmd/opentrace
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG DATE=unknown
+
+RUN CGO_ENABLED=1 go build \
+    -ldflags "-s -w \
+      -X github.com/adham90/opentrace/internal/version.Version=${VERSION} \
+      -X github.com/adham90/opentrace/internal/version.Commit=${COMMIT} \
+      -X github.com/adham90/opentrace/internal/version.Date=${DATE}" \
+    -o /opentrace ./cmd/opentrace
 
 FROM alpine:3.21
 

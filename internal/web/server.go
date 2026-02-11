@@ -22,6 +22,7 @@ import (
 	"github.com/adham90/opentrace/internal/llm"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/version"
 	"github.com/adham90/opentrace/internal/watcher"
 )
 
@@ -123,6 +124,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Use(srv.SessionAuth)        // skips /static/ and /healthz paths internally
 
 	router.Get("/healthz", srv.handleHealthCheck)
+	router.Get("/api/version", srv.handleVersion)
 
 	// Static files
 	if cfg != nil && cfg.DevMode {
@@ -287,10 +289,18 @@ func (s *Server) getEffectiveAPIKey(ctx context.Context) string {
 }
 
 func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
-	resp := map[string]any{
-		"status": "ok",
-	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":  "ok",
+		"version": version.Version,
+	})
+}
+
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version": version.Version,
+		"commit":  version.Commit,
+		"date":    version.Date,
+	})
 }
 
 // handleDevHash returns a hash of UI file modification times for live-reload.

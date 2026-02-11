@@ -18,6 +18,7 @@ import (
 	"github.com/adham90/opentrace/internal/llm"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/version"
 	"github.com/adham90/opentrace/internal/vmagent"
 	"github.com/adham90/opentrace/internal/watcher"
 	"github.com/adham90/opentrace/internal/web"
@@ -49,6 +50,9 @@ func main() {
 			err = runAgent()
 		case "seed":
 			err = runSeed()
+		case "version":
+			fmt.Println("opentrace " + version.Full())
+			return
 		default:
 			err = run()
 		}
@@ -173,6 +177,8 @@ func runAgent() error {
 }
 
 func run() error {
+	log.Printf("opentrace %s", version.Full())
+
 	ctx, cancelCtx := context.WithCancel(context.Background())
 	defer cancelCtx()
 
