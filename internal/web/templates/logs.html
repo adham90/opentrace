@@ -125,8 +125,26 @@
     el.classList.add('filter-flash');
   }
 
+  function pushFilterURL() {
+    var params = new URLSearchParams();
+    var q = searchInput.value;
+    var svc = document.getElementById('f-service').value;
+    var lvl = document.getElementById('f-level').value;
+    var env = document.getElementById('f-env').value;
+    var tr  = document.getElementById('f-time-range').value;
+    if (q) params.set('query', q);
+    if (svc) params.set('service', svc);
+    if (lvl) params.set('level', lvl);
+    if (env) params.set('environment', env);
+    if (tr) params.set('time_range', tr);
+    var qs = params.toString();
+    var url = '/logs' + (qs ? '?' + qs : '');
+    history.pushState(null, '', url);
+  }
+
   function applyFilters() {
     pauseLiveOnFilter();
+    pushFilterURL();
     htmx.trigger(form, 'submit');
     updateSaveBtn();
   }
@@ -527,6 +545,30 @@
   };
 
   startPolling();
+
+  // ── Browser back/forward ─────────────────────────────────
+  window.addEventListener('popstate', function() {
+    var params = new URLSearchParams(window.location.search);
+    searchInput.value = params.get('query') || '';
+    var tr = params.get('time_range') || '';
+    currentTimeIdx = Math.max(0, TIME_OPTIONS.indexOf(tr));
+    document.getElementById('f-time-range').value = TIME_OPTIONS[currentTimeIdx];
+    updateTagDisplay('tag-time-val', TIME_LABELS[currentTimeIdx], currentTimeIdx !== 0);
+    var lvl = params.get('level') || '';
+    currentLevelIdx = Math.max(0, LEVEL_OPTIONS.indexOf(lvl));
+    document.getElementById('f-level').value = LEVEL_OPTIONS[currentLevelIdx];
+    updateTagDisplay('tag-level-val', LEVEL_LABELS[currentLevelIdx], currentLevelIdx !== 0);
+    var svc = params.get('service') || '';
+    currentServiceIdx = Math.max(0, serviceList.indexOf(svc));
+    document.getElementById('f-service').value = svc;
+    updateTagDisplay('tag-service-val', svc || 'all', currentServiceIdx !== 0);
+    var env = params.get('environment') || '';
+    currentEnvIdx = Math.max(0, envList.indexOf(env));
+    document.getElementById('f-env').value = env;
+    updateTagDisplay('tag-env-val', env || 'all', currentEnvIdx !== 0);
+    updateSaveBtn();
+    htmx.trigger(form, 'submit');
+  });
 
   window.loadPageData = function() {
     applyFilters();
