@@ -152,7 +152,7 @@ loadAPIKey();
 // Version check
 function loadVersion() {
   fetch('/api/version').then(function(r){return r.json()}).then(function(d){
-    document.getElementById('ver-current').textContent = 'v' + d.version;
+    document.getElementById('ver-current').textContent = d.version;
     document.getElementById('ver-commit').textContent = d.commit === 'unknown' ? '-' : d.commit.substring(0, 7);
     document.getElementById('ver-date').textContent = d.date === 'unknown' ? '-' : d.date;
   }).catch(function(){
