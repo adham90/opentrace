@@ -309,6 +309,21 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/profile?success=Password+changed", http.StatusFound)
 }
 
+// --- MCP Token (own) ---
+
+func (s *Server) handleGetOwnMCPToken(w http.ResponseWriter, r *http.Request) {
+	user := UserFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	if !user.MCPEnabled || user.MCPToken == nil {
+		writeError(w, http.StatusForbidden, "MCP access is not enabled for your account")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"mcp_token": *user.MCPToken})
+}
+
 // --- Admin User Management ---
 
 func (s *Server) handleUsersPage(w http.ResponseWriter, r *http.Request) {

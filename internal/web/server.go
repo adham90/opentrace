@@ -266,6 +266,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Group(func(r chi.Router) {
 			r.Use(srv.requireAuthOrOnboardingAPI)
 			r.Post("/profile/password", srv.handleChangePassword)
+			r.Get("/profile/mcp-token", srv.handleGetOwnMCPToken)
 		})
 
 		// Dev-mode live-reload endpoint

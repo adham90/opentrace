@@ -31,11 +31,33 @@
     <h3 style="margin: 0 0 1rem 0;">MCP Access Token</h3>
     <div id="mcp-section">
       {{if .User.MCPEnabled}}
-      <p class="text-dim" style="margin: 0 0 1rem 0;">Use this token as <code>OPENTRACE_MCP_TOKEN</code> in your MCP configuration.</p>
+      <p class="text-dim" style="margin: 0 0 1rem 0;">Your personal MCP token for connecting AI tools to OpenTrace.</p>
       <div class="code-block" style="position: relative;">
-        <button class="copy-btn" id="mcp-copy-btn" onclick="toggleAndCopyToken(this)">reveal</button>
+        <button class="copy-btn" id="mcp-reveal-btn" onclick="revealToken()">reveal</button>
         <pre><code id="mcp-token-display">mcp_****...****</code></pre>
       </div>
+
+      <h4 style="margin: 1.5rem 0 0.5rem 0;">Claude Code Configuration</h4>
+      <p class="text-dim" style="margin: 0 0 0.75rem 0;">
+        Copy this JSON into <code>~/.claude/settings.json</code> (global) or your project's <code>.mcp.json</code> file.
+      </p>
+      <div class="code-block" style="position: relative;">
+        <button class="copy-btn" id="mcp-config-copy-btn" onclick="copyMCPConfig(this)" disabled>copy</button>
+        <pre><code id="mcp-config-display">{
+  "mcpServers": {
+    "opentrace": {
+      "command": "opentrace",
+      "args": ["mcp"],
+      "env": {
+        "OPENTRACE_MCP_TOKEN": "••••••••"
+      }
+    }
+  }
+}</code></pre>
+      </div>
+      <p class="text-dim" style="margin: 0.5rem 0 0 0; font-size: 0.8rem;">
+        Click <strong>reveal</strong> above to load your token into the config, then copy.
+      </p>
       {{else}}
       <p class="text-dim">MCP access is disabled for your account. Contact an admin to enable it.</p>
       {{end}}
@@ -60,16 +82,59 @@
 </div>
 
 <script nonce="{{.CSPNonce}}">
-var tokenRevealed = false;
-function toggleAndCopyToken(btn) {
+var mcpToken = null;
+
+function revealToken() {
+  var btn = document.getElementById('mcp-reveal-btn');
   var display = document.getElementById('mcp-token-display');
-  if (!tokenRevealed) {
-    // For security, the actual token is not embedded in the HTML.
-    // The user should copy it from the admin panel or when first created.
-    btn.textContent = 'token is hidden for security';
-    setTimeout(function() { btn.textContent = 'reveal'; }, 2000);
+
+  if (mcpToken) {
+    // Already revealed — copy it
+    navigator.clipboard.writeText(mcpToken);
+    btn.textContent = 'copied!';
+    setTimeout(function() { btn.textContent = 'copy'; }, 1500);
     return;
   }
+
+  btn.textContent = 'loading...';
+  fetch('/api/profile/mcp-token').then(function(r) {
+    if (!r.ok) throw new Error('failed');
+    return r.json();
+  }).then(function(d) {
+    mcpToken = d.mcp_token;
+    display.textContent = mcpToken;
+    btn.textContent = 'copy';
+    updateConfigDisplay();
+  }).catch(function() {
+    btn.textContent = 'error';
+    setTimeout(function() { btn.textContent = 'reveal'; }, 2000);
+  });
+}
+
+function updateConfigDisplay() {
+  var el = document.getElementById('mcp-config-display');
+  var btn = document.getElementById('mcp-config-copy-btn');
+  if (!mcpToken || !el) return;
+  var config = {
+    mcpServers: {
+      opentrace: {
+        command: 'opentrace',
+        args: ['mcp'],
+        env: {
+          OPENTRACE_MCP_TOKEN: mcpToken
+        }
+      }
+    }
+  };
+  el.textContent = JSON.stringify(config, null, 2);
+  btn.disabled = false;
+}
+
+function copyMCPConfig(btn) {
+  var el = document.getElementById('mcp-config-display');
+  navigator.clipboard.writeText(el.textContent);
+  btn.textContent = 'copied!';
+  setTimeout(function() { btn.textContent = 'copy'; }, 1500);
 }
 </script>
 
