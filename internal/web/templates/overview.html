@@ -52,7 +52,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{.CSPNonce}}">
 (function(){
   function loadStats() {
     fetch('/api/overview' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r){ return r.json(); }).then(function(d){

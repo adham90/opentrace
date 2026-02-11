@@ -112,7 +112,7 @@
 }
 </style>
 
-<script>
+<script nonce="{{.CSPNonce}}">
 function copyToClipboard(id) {
   var el = document.getElementById(id);
   var text = el.textContent || el.innerText;

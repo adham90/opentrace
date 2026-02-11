@@ -71,7 +71,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{.CSPNonce}}">
 var isAdmin = {{.IsAdmin}};
 function loadConnectors() {
   fetch('/api/connectors' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r) { return r.json(); }).then(function(connectors) {

@@ -237,7 +237,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{.CSPNonce}}">
 var baseURL = window.location.protocol + '//' + window.location.host;
 var apiKey = {{.APIKey}};
 var installURL = baseURL + '/api/agent/install.sh' + (apiKey ? '?key=' + encodeURIComponent(apiKey) : '');

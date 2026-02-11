@@ -134,6 +134,7 @@ type pageData struct {
 	WatcherID      string
 	ServerID       string
 	DevMode        bool
+	CSPNonce       string
 	Connectors     interface{}
 	Logs           []store.LogEntry
 	LogFilters     LogFilters
@@ -162,12 +163,13 @@ func (s *Server) newPageData(r *http.Request, title, nav string) pageData {
 		apiKey = s.getEffectiveAPIKey(r.Context())
 	}
 	return pageData{
-		Title:   title,
-		Nav:     nav,
-		DevMode: s.isDevMode(),
-		User:    user,
-		IsAdmin: isAdmin,
-		APIKey:  apiKey,
+		Title:    title,
+		Nav:      nav,
+		DevMode:  s.isDevMode(),
+		CSPNonce: CSPNonce(r.Context()),
+		User:     user,
+		IsAdmin:  isAdmin,
+		APIKey:   apiKey,
 	}
 }
 

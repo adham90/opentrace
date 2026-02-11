@@ -60,7 +60,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{.CSPNonce}}">
 function apiCall(url, body) {
   return fetch(url, {
     method: 'POST',

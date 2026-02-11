@@ -40,7 +40,7 @@
   </form>
 </div>
 
-<script>
+<script nonce="{{.CSPNonce}}">
 function saveRetention(e) {
   e.preventDefault();
   var days = parseInt(document.getElementById('retention-days').value, 10);

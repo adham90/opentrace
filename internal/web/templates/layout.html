@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OpenTrace{{if .Title}} — {{.Title}}{{end}}</title>
-  <script>
+  <script nonce="{{.CSPNonce}}">
   (function(){
     var t = localStorage.getItem('opentrace-theme');
     if (t === 'dark' || t === 'light') {
@@ -14,7 +14,7 @@
   </script>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/htmx.min.js"></script>
-  <script>
+  <script nonce="{{.CSPNonce}}">
   // Global environment helpers — must be in <head> so content scripts can use them
   function getGlobalEnv() {
     return localStorage.getItem('opentrace-env') || '';
@@ -146,7 +146,7 @@
       {{template "content" .}}
     </div>
   </main>
-  <script>
+  <script nonce="{{.CSPNonce}}">
   var topbarEnvList = [''];
   var topbarEnvOpen = false;
 
@@ -393,6 +393,6 @@
     });
   })();
   </script>
-  {{if .DevMode}}<script>(function(){var h='';setInterval(function(){fetch('/api/dev/hash').then(function(r){return r.text()}).then(function(v){if(h&&v!==h)location.reload();h=v}).catch(function(){})},1000)})();</script>{{end}}
+  {{if .DevMode}}<script nonce="{{.CSPNonce}}">(function(){var h='';setInterval(function(){fetch('/api/dev/hash').then(function(r){return r.text()}).then(function(v){if(h&&v!==h)location.reload();h=v}).catch(function(){})},1000)})();</script>{{end}}
 </body>
 </html>{{end}}

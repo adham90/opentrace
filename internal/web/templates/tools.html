@@ -9,7 +9,7 @@
   <div id="tools-content" style="display:none"></div>
 </div>
 
-<script>
+<script nonce="{{.CSPNonce}}">
 (function() {
   function badge(access) {
     var cls = access === 'admin' ? 'badge-admin' : 'badge-read';

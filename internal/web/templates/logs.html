@@ -55,7 +55,7 @@
 {{template "logs-list" .}}
 </div>
 
-<script>
+<script nonce="{{.CSPNonce}}">
 (function(){
   // ── Filter state ──────────────────────────────────────────
   var TIME_OPTIONS = ['', '15m', '1h', '6h', '24h', '7d'];

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OpenTrace{{if .Title}} — {{.Title}}{{end}}</title>
-  <script>
+  <script nonce="{{.CSPNonce}}">
   (function(){
     var t = localStorage.getItem('opentrace-theme');
     if (t === 'dark' || t === 'light') {
@@ -20,7 +20,7 @@
       {{template "content" .}}
     </div>
   </main>
-  <script>
+  <script nonce="{{.CSPNonce}}">
   (function(){
     var themes = ['system', 'dark', 'light'];
     var icons = {'system': '\u25D4', 'dark': '\u25CF', 'light': '\u25CB'};
@@ -35,6 +35,6 @@
     applyTheme(getTheme());
   })();
   </script>
-  {{if .DevMode}}<script>(function(){var h='';setInterval(function(){fetch('/api/dev/hash').then(function(r){return r.text()}).then(function(v){if(h&&v!==h)location.reload();h=v}).catch(function(){})},1000)})();</script>{{end}}
+  {{if .DevMode}}<script nonce="{{.CSPNonce}}">(function(){var h='';setInterval(function(){fetch('/api/dev/hash').then(function(r){return r.text()}).then(function(v){if(h&&v!==h)location.reload();h=v}).catch(function(){})},1000)})();</script>{{end}}
 </body>
 </html>{{end}}

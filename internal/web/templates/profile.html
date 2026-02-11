@@ -59,7 +59,7 @@
   {{end}}
 </div>
 
-<script>
+<script nonce="{{.CSPNonce}}">
 var tokenRevealed = false;
 function toggleAndCopyToken(btn) {
   var display = document.getElementById('mcp-token-display');

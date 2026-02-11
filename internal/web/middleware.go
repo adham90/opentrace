@@ -2,6 +2,9 @@ package web
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -10,13 +13,40 @@ import (
 	"github.com/adham90/opentrace/internal/store"
 )
 
+// ctxKeyCSPNonce is the context key for the per-request CSP nonce.
+type cspNonceKeyType struct{}
+
+var ctxKeyCSPNonce = cspNonceKeyType{}
+
+// CSPNonce returns the CSP nonce stored in the request context.
+func CSPNonce(ctx context.Context) string {
+	if v, ok := ctx.Value(ctxKeyCSPNonce).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // SecurityHeaders adds standard security headers to all responses.
+// It generates a per-request cryptographic nonce for inline scripts/styles.
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Generate 16 random bytes, base64-encode for the nonce value.
+		var buf [16]byte
+		if _, err := rand.Read(buf[:]); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		nonce := base64.StdEncoding.EncodeToString(buf[:])
+
+		// Store nonce in context for templates.
+		ctx := context.WithValue(r.Context(), ctxKeyCSPNonce, nonce)
+		r = r.WithContext(ctx)
+
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'")
+		w.Header().Set("Content-Security-Policy",
+			fmt.Sprintf("default-src 'self'; script-src 'self' 'nonce-%s'; script-src-attr 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'", nonce))
 		w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		w.Header().Set("X-Permitted-Cross-Domain-Policies", "none")
