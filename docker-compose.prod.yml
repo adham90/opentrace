@@ -1,0 +1,24 @@
+services:
+  app:
+    image: ghcr.io/adham90/opentrace:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - opentrace-data:/data
+    env_file: .env
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  watchtower:
+    image: containrrr/watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=3600
+      - WATCHTOWER_LABEL_ENABLE=true
+    restart: unless-stopped
+
+volumes:
+  opentrace-data:
