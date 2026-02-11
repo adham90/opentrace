@@ -1,0 +1,32 @@
+name: opentrace
+services:
+  - name: opentrace
+    image:
+      registry_type: GHCR
+      registry: adham90
+      repository: opentrace
+      tag: latest
+    instance_size_slug: basic-xxs
+    instance_count: 1
+    http_port: 8080
+    envs:
+      - key: OPENTRACE_DATA_DIR
+        value: /data
+      - key: OPENTRACE_LISTEN_ADDR
+        value: ":8080"
+      - key: OPENTRACE_LLM_PROVIDER
+        scope: RUN_TIME
+        type: SECRET
+      - key: OPENTRACE_ANTHROPIC_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: OPENTRACE_OPENAI_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: OPENTRACE_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+    health_check:
+      http_path: /healthz
+      initial_delay_seconds: 10
+      period_seconds: 30
