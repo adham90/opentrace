@@ -335,12 +335,11 @@ else
 fi
 
 # Verify installation
-if ! "${INSTALL_DIR}/${BINARY_NAME}" --help &>/dev/null 2>&1; then
-  # Binary may not have --help but that's ok
-  true
+if "${INSTALL_DIR}/${BINARY_NAME}" version &>/dev/null 2>&1; then
+  echo "==> Binary installed at ${INSTALL_DIR}/${BINARY_NAME}"
+else
+  echo "==> Binary installed at ${INSTALL_DIR}/${BINARY_NAME} (could not verify version)"
 fi
-
-echo "==> Binary installed at ${INSTALL_DIR}/${BINARY_NAME}"
 
 # Create systemd service if available
 if command -v systemctl &>/dev/null; then

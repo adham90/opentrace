@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/adham90/opentrace/internal/connector"
@@ -207,6 +208,121 @@ func TestHandleAgentInstallScript(t *testing.T) {
 	}
 	if !bytes.Contains([]byte(body), []byte("#!/bin/bash")) {
 		t.Error("script does not start with shebang")
+	}
+}
+
+func TestAgentInstallScript_DownloadsCorrectArchive(t *testing.T) {
+	srv := newTestServerWithMetrics()
+
+	req := httptest.NewRequest("GET", "/api/agent/install.sh?key=abc", nil)
+	req.Host = "trace.example.com"
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	body := w.Body.String()
+
+	// Must use releases/latest/download with versioned tar.gz archive
+	if !strings.Contains(body, "releases/latest/download/${archive}") {
+		t.Error("script should download from releases/latest/download with archive variable")
+	}
+
+	// Archive name must include version, OS, arch, and .tar.gz extension
+	if !strings.Contains(body, `${BINARY_NAME}_${version}_${OS}_${ARCH}.tar.gz`) {
+		t.Error("archive name should be formatted as name_version_os_arch.tar.gz")
+	}
+
+	// Must extract the binary from tar.gz
+	if !strings.Contains(body, "tar -xzf") {
+		t.Error("script should extract binary from tar.gz archive")
+	}
+}
+
+func TestAgentInstallScript_NoHangingCommands(t *testing.T) {
+	srv := newTestServerWithMetrics()
+
+	req := httptest.NewRequest("GET", "/api/agent/install.sh?key=abc", nil)
+	req.Host = "trace.example.com"
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	body := w.Body.String()
+
+	// Must NOT call the binary with --help (starts the server and hangs)
+	if strings.Contains(body, `--help`) {
+		t.Error("script must not use --help flag (it starts the web server and hangs)")
+	}
+
+	// Verification should use 'version' subcommand instead
+	if !strings.Contains(body, `version`) {
+		t.Error("script should verify installation using the 'version' subcommand")
+	}
+}
+
+func TestAgentInstallScript_FetchesVersionTag(t *testing.T) {
+	srv := newTestServerWithMetrics()
+
+	req := httptest.NewRequest("GET", "/api/agent/install.sh?key=abc", nil)
+	req.Host = "trace.example.com"
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	body := w.Body.String()
+
+	// Must resolve the latest version from GitHub before downloading
+	if !strings.Contains(body, "releases/latest") {
+		t.Error("script should fetch latest version tag from GitHub releases")
+	}
+
+	// Must strip the 'v' prefix from the version for the archive name
+	if !strings.Contains(body, "sed 's/^v//'") {
+		t.Error("script should strip the 'v' prefix from the version tag")
+	}
+}
+
+func TestAgentInstallScript_CleansUpArchive(t *testing.T) {
+	srv := newTestServerWithMetrics()
+
+	req := httptest.NewRequest("GET", "/api/agent/install.sh?key=abc", nil)
+	req.Host = "trace.example.com"
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	body := w.Body.String()
+
+	// Must clean up the downloaded archive after extraction
+	if !strings.Contains(body, `rm -f "/tmp/${archive}"`) {
+		t.Error("script should clean up the tar.gz archive after extraction")
+	}
+}
+
+func TestAgentInstallScript_HTTPS(t *testing.T) {
+	srv := newTestServerWithMetrics()
+
+	req := httptest.NewRequest("GET", "/api/agent/install.sh?key=abc", nil)
+	req.Host = "trace.example.com"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	body := w.Body.String()
+
+	if !strings.Contains(body, `OPENTRACE_SERVER_URL="https://trace.example.com"`) {
+		t.Error("script should use https when X-Forwarded-Proto is set")
+	}
+}
+
+func TestAgentInstallScript_EmptyAPIKey(t *testing.T) {
+	srv := newTestServerWithMetrics()
+
+	req := httptest.NewRequest("GET", "/api/agent/install.sh", nil)
+	req.Host = "trace.example.com"
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	body := w.Body.String()
+
+	if !strings.Contains(body, `OPENTRACE_API_KEY=""`) {
+		t.Error("script should have empty API key when none provided")
 	}
 }
 

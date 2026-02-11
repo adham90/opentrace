@@ -53,6 +53,16 @@ func main() {
 		case "version":
 			fmt.Println("opentrace " + version.Full())
 			return
+		case "help", "--help", "-h":
+			fmt.Println("Usage: opentrace [command]")
+			fmt.Println()
+			fmt.Println("Commands:")
+			fmt.Println("  (none)    Start the web server")
+			fmt.Println("  agent     Run the metrics collection agent")
+			fmt.Println("  mcp       Start the MCP stdio server")
+			fmt.Println("  seed      Initialize sample data")
+			fmt.Println("  version   Print version information")
+			return
 		default:
 			err = run()
 		}
