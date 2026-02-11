@@ -2,6 +2,31 @@
 <h2>Settings</h2>
 
 <div class="card" style="max-width:600px;margin-bottom:1.5rem">
+  <h3>Version & Updates</h3>
+  <div id="version-info" style="font-size:0.9rem">
+    <div style="display:flex;gap:2rem;margin-bottom:0.75rem">
+      <div><span class="text-dim">Current:</span> <strong id="ver-current">loading...</strong></div>
+      <div><span class="text-dim">Commit:</span> <code id="ver-commit">...</code></div>
+      <div><span class="text-dim">Built:</span> <span id="ver-date">...</span></div>
+    </div>
+    <div id="ver-status" style="margin-bottom:0.75rem"></div>
+    <div id="ver-instructions" style="display:none">
+      <p class="help-text" style="margin-bottom:0.5rem"><strong>How to update:</strong></p>
+      <div style="background:var(--bg-secondary,#1a1a2e);border:1px solid var(--border,#333);border-radius:4px;padding:0.75rem;font-size:0.85rem">
+        <div style="margin-bottom:0.5rem"><strong>Docker Compose:</strong></div>
+        <code>docker compose pull && docker compose up -d</code>
+        <div style="margin-top:0.75rem;margin-bottom:0.5rem"><strong>Docker Compose (auto-update):</strong></div>
+        <code>docker compose -f docker-compose.prod.yml up -d</code>
+        <div style="margin-top:0.75rem;margin-bottom:0.5rem"><strong>Binary:</strong></div>
+        <span>Download from <a id="ver-release-link" href="#" target="_blank" rel="noopener">GitHub Releases</a> and restart the service.</span>
+      </div>
+    </div>
+    <button class="btn" onclick="checkForUpdates()" id="ver-check-btn" style="margin-top:0.75rem">Check for updates</button>
+    <span id="ver-check-status" style="margin-left:1em;font-size:0.9rem"></span>
+  </div>
+</div>
+
+<div class="card" style="max-width:600px;margin-bottom:1.5rem">
   <h3>API Key</h3>
   <p class="help-text">
     This key is used to authenticate agents sending logs and metrics.
@@ -123,5 +148,49 @@ function confirmRegenerate() {
 }
 
 loadAPIKey();
+
+// Version check
+function loadVersion() {
+  fetch('/api/version').then(function(r){return r.json()}).then(function(d){
+    document.getElementById('ver-current').textContent = 'v' + d.version;
+    document.getElementById('ver-commit').textContent = d.commit === 'unknown' ? '-' : d.commit.substring(0, 7);
+    document.getElementById('ver-date').textContent = d.date === 'unknown' ? '-' : d.date;
+  }).catch(function(){
+    document.getElementById('ver-current').textContent = 'error';
+  });
+}
+
+function checkForUpdates() {
+  var btn = document.getElementById('ver-check-btn');
+  var status = document.getElementById('ver-check-status');
+  btn.disabled = true;
+  status.textContent = 'Checking...';
+  fetch('/api/version/check').then(function(r){return r.json()}).then(function(d){
+    btn.disabled = false;
+    status.textContent = '';
+    var el = document.getElementById('ver-status');
+    var instructions = document.getElementById('ver-instructions');
+    if (d.error) {
+      el.innerHTML = '<span style="color:var(--yellow)">Could not check: ' + d.error + '</span>';
+      instructions.style.display = 'none';
+    } else if (d.current_version === 'dev') {
+      el.innerHTML = '<span style="color:var(--text-dim)">Running a dev build — update checks are skipped.</span>';
+      instructions.style.display = 'none';
+    } else if (d.update_available) {
+      el.innerHTML = '<span style="color:var(--green)">&#10003; Update available: <strong>v' + d.latest_version + '</strong></span>';
+      instructions.style.display = 'block';
+      var link = document.getElementById('ver-release-link');
+      if (d.release_url) link.href = d.release_url;
+    } else {
+      el.innerHTML = '<span style="color:var(--green)">&#10003; You are running the latest version.</span>';
+      instructions.style.display = 'none';
+    }
+  }).catch(function(err){
+    btn.disabled = false;
+    status.textContent = 'Error: ' + err.message;
+  });
+}
+
+loadVersion();
 </script>
 {{end}}
