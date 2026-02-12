@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -106,7 +106,7 @@ func (s *Server) ensureLogsConnector(ctx context.Context) {
 	// Check if a logs data source row already exists in the DB
 	sources, err := s.dsStore.List(ctx, store.ListDataSourceParams{Type: store.ConnectorLogs})
 	if err != nil {
-		log.Printf("WARN: ensureLogsConnector: failed to list data sources: %v", err)
+		slog.Warn("ensureLogsConnector: failed to list data sources", "error", err)
 		return
 	}
 	var dsID *store.DataSource
@@ -122,7 +122,7 @@ func (s *Server) ensureLogsConnector(ctx context.Context) {
 			Config: map[string]any{},
 		})
 		if err != nil {
-			log.Printf("WARN: ensureLogsConnector: failed to create data source: %v", err)
+			slog.Warn("ensureLogsConnector: failed to create data source", "error", err)
 			return
 		}
 		dsID = created
@@ -137,8 +137,8 @@ func (s *Server) ensureLogsConnector(ctx context.Context) {
 	if _, err := s.dsStore.Update(ctx, dsID.ID, store.UpdateDataSourceParams{
 		Status: &connected,
 	}); err != nil {
-		log.Printf("WARN: ensureLogsConnector: failed to update status: %v", err)
+		slog.Warn("ensureLogsConnector: failed to update status", "error", err)
 	}
 
-	log.Printf("INFO: auto-registered logs connector (data source %s)", dsID.ID)
+	slog.Info("auto-registered logs connector", "data_source_id", dsID.ID)
 }

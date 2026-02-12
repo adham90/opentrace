@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -35,13 +35,13 @@ func New(cfg *Config) *Agent {
 // Run starts the agent loop: register, then collect+push on interval.
 // Blocks until ctx is cancelled.
 func (a *Agent) Run(ctx context.Context) error {
-	log.Printf("agent starting, server=%s interval=%s", a.cfg.ServerURL, a.cfg.Interval)
+	slog.Info("agent starting", "server", a.cfg.ServerURL, "interval", a.cfg.Interval)
 
 	// Register with server
 	if err := a.register(ctx); err != nil {
 		return fmt.Errorf("registration failed: %w", err)
 	}
-	log.Printf("registered as server_id=%s", a.serverID)
+	slog.Info("registered", "server_id", a.serverID)
 
 	// Collect + push loop
 	ticker := time.NewTicker(a.cfg.Interval)
@@ -53,7 +53,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("agent shutting down")
+			slog.Info("agent shutting down")
 			return nil
 		case <-ticker.C:
 			a.collectAndPush(ctx)
@@ -122,7 +122,7 @@ type metricPushBody struct {
 func (a *Agent) collectAndPush(ctx context.Context) {
 	samples, err := a.collector.Collect(ctx)
 	if err != nil {
-		log.Printf("WARN: collection error: %v", err)
+		slog.Warn("collection error", "error", err)
 		return
 	}
 
@@ -137,14 +137,14 @@ func (a *Agent) collectAndPush(ctx context.Context) {
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("WARN: marshal error: %v", err)
+		slog.Warn("marshal error", "error", err)
 		return
 	}
 
 	url := strings.TrimRight(a.cfg.ServerURL, "/") + "/api/servers/" + a.serverID + "/metrics"
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
-		log.Printf("WARN: request error: %v", err)
+		slog.Warn("request error", "error", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -154,15 +154,15 @@ func (a *Agent) collectAndPush(ctx context.Context) {
 
 	resp, err := a.client.Do(req)
 	if err != nil {
-		log.Printf("WARN: push error: %v", err)
+		slog.Warn("push error", "error", err)
 		return
 	}
 	resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		log.Printf("WARN: push returned status %d", resp.StatusCode)
+		slog.Warn("push returned unexpected status", "status", resp.StatusCode)
 		return
 	}
 
-	log.Printf("pushed %d metrics", len(samples))
+	slog.Debug("pushed metrics", "count", len(samples))
 }

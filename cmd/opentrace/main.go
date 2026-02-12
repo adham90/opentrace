@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -103,7 +103,7 @@ func initApp(ctx context.Context) (*appDeps, error) {
 		db.Close()
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
-	log.Println("database ready")
+	slog.Info("database ready")
 
 	// Initialize stores
 	dsStore := store.NewDataSourceStore(db)
@@ -143,7 +143,7 @@ func initApp(ctx context.Context) (*appDeps, error) {
 // runMCP starts the MCP stdio server. All log output goes to stderr to keep
 // stdout clean for the JSON-RPC stream.
 func runMCP() error {
-	log.SetOutput(os.Stderr)
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
 	ctx := context.Background()
 	deps, err := initApp(ctx)
@@ -216,7 +216,7 @@ func runAgent() error {
 }
 
 func run() error {
-	log.Printf("opentrace %s", version.Full())
+	slog.Info("starting", "version", version.Full())
 
 	ctx, cancelCtx := context.WithCancel(context.Background())
 	defer cancelCtx()
@@ -230,7 +230,7 @@ func run() error {
 	// Create LLM provider cache for per-watcher model selection
 	defaultLLM, err := llm.NewLLMProvider(deps.cfg)
 	if err != nil {
-		log.Printf("warning: default LLM provider unavailable: %v", err)
+		slog.Warn("default LLM provider unavailable", "error", err)
 	}
 	providerCache := llm.NewProviderCache(deps.cfg, defaultLLM)
 	modelRegistry := llm.NewModelRegistry(deps.cfg)
@@ -238,9 +238,9 @@ func run() error {
 	// Create watcher run store and clean up stale runs from previous crashes
 	runStore := store.NewWatcherRunStore(deps.db)
 	if n, err := runStore.FailStaleRuns(ctx, 10*time.Minute); err != nil {
-		log.Printf("warning: failed to clean stale runs: %v", err)
+		slog.Warn("failed to clean stale runs", "error", err)
 	} else if n > 0 {
-		log.Printf("cleaned up %d stale watcher run(s)", n)
+		slog.Info("cleaned up stale watcher runs", "count", n)
 	}
 
 	eventHub := watcher.NewEventHub()
@@ -338,9 +338,9 @@ func run() error {
 				return
 			case <-ticker.C:
 				if n, err := deps.sessionStore.DeleteExpired(ctx); err != nil {
-					log.Printf("WARN: session cleanup: %v", err)
+					slog.Warn("session cleanup failed", "error", err)
 				} else if n > 0 {
-					log.Printf("cleaned %d expired session(s)", n)
+					slog.Info("cleaned expired sessions", "count", n)
 				}
 			}
 		}
@@ -356,9 +356,9 @@ func run() error {
 				return
 			case <-ticker.C:
 				if n, err := deps.serverStore.MarkStaleOffline(ctx, 2*time.Minute); err != nil {
-					log.Printf("WARN: MarkStaleOffline: %v", err)
+					slog.Warn("MarkStaleOffline failed", "error", err)
 				} else if n > 0 {
-					log.Printf("marked %d stale server(s) offline", n)
+					slog.Info("marked stale servers offline", "count", n)
 				}
 			}
 		}
@@ -387,7 +387,7 @@ func run() error {
 			// Read global retention setting from DB each tick
 			settings, err := deps.settingsStore.GetRetention(ctx)
 			if err != nil {
-				log.Printf("WARN: reading retention settings: %v", err)
+				slog.Warn("reading retention settings failed", "error", err)
 				continue
 			}
 
@@ -397,24 +397,24 @@ func run() error {
 			if globalDays > 0 {
 				retention := time.Duration(globalDays) * 24 * time.Hour
 				if n, err := deps.logStore.Prune(ctx, retention); err != nil {
-					log.Printf("WARN: log prune: %v", err)
+					slog.Warn("log prune failed", "error", err)
 				} else if n > 0 {
-					log.Printf("pruned %d old log(s)", n)
+					slog.Info("pruned old logs", "count", n)
 				}
 				if n, err := runStore.Prune(ctx, retention); err != nil {
-					log.Printf("WARN: watcher run prune: %v", err)
+					slog.Warn("watcher run prune failed", "error", err)
 				} else if n > 0 {
-					log.Printf("pruned %d old watcher run(s)", n)
+					slog.Info("pruned old watcher runs", "count", n)
 				}
 				if n, err := deps.alertStore.Prune(ctx, retention); err != nil {
-					log.Printf("WARN: alert prune: %v", err)
+					slog.Warn("alert prune failed", "error", err)
 				} else if n > 0 {
-					log.Printf("pruned %d old alert(s)", n)
+					slog.Info("pruned old alerts", "count", n)
 				}
 				if n, err := deps.mcpActivityStore.Prune(ctx, retention); err != nil {
-					log.Printf("WARN: mcp activity prune: %v", err)
+					slog.Warn("mcp activity prune failed", "error", err)
 				} else if n > 0 {
-					log.Printf("pruned %d old mcp activity record(s)", n)
+					slog.Info("pruned old mcp activity records", "count", n)
 				}
 			}
 
@@ -426,9 +426,9 @@ func run() error {
 			if metricDays > 0 {
 				retention := time.Duration(metricDays) * 24 * time.Hour
 				if n, err := deps.metricStore.Prune(ctx, retention); err != nil {
-					log.Printf("WARN: metric prune: %v", err)
+					slog.Warn("metric prune failed", "error", err)
 				} else if n > 0 {
-					log.Printf("pruned %d old metric(s)", n)
+					slog.Info("pruned old metrics", "count", n)
 				}
 			}
 		}
@@ -456,10 +456,10 @@ func run() error {
 				updater := web.NewSelfUpdater("adham90", "opentrace")
 				result, err := updater.Update(ctx)
 				if err != nil {
-					log.Printf("auto-update: %v", err)
+					slog.Warn("auto-update failed", "error", err)
 					continue
 				}
-				log.Printf("auto-update: updated %s → %s, restarting...", result.OldVersion, result.NewVersion)
+				slog.Info("auto-update succeeded, restarting", "old_version", result.OldVersion, "new_version", result.NewVersion)
 				// Trigger restart via the server's restart channel
 				select {
 				case <-srv.RestartCh():
@@ -475,9 +475,10 @@ func run() error {
 	}()
 
 	go func() {
-		log.Printf("listening on %s", deps.cfg.ListenAddr)
+		slog.Info("listening", "addr", deps.cfg.ListenAddr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen error: %v", err)
+			slog.Error("listen error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -485,9 +486,9 @@ func run() error {
 	shouldRestart := false
 	select {
 	case <-done:
-		log.Println("shutting down...")
+		slog.Info("shutting down")
 	case <-srv.RestartCh():
-		log.Println("restarting after self-update...")
+		slog.Info("restarting after self-update")
 		shouldRestart = true
 	}
 
@@ -502,11 +503,11 @@ func run() error {
 
 	// Shutdown SSE sessions before the HTTP server.
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("SSE shutdown error: %v", err)
+		slog.Error("SSE shutdown error", "error", err)
 	}
 
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		log.Printf("HTTP shutdown error: %v", err)
+		slog.Error("HTTP shutdown error", "error", err)
 	}
 
 	if shouldRestart {
@@ -514,7 +515,7 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("restart: cannot find executable: %w", err)
 		}
-		log.Printf("exec %s %v", execPath, os.Args)
+		slog.Info("restarting process", "path", execPath)
 		return syscall.Exec(execPath, os.Args, os.Environ())
 	}
 
@@ -530,7 +531,7 @@ func isDockerEnv() bool {
 func reconnectConnectors(ctx context.Context, dsStore store.DataSourceStore, logStore store.LogStore, registry *connector.Registry, cfg *config.Config) {
 	dataSources, err := dsStore.List(ctx, store.ListDataSourceParams{})
 	if err != nil {
-		log.Printf("warning: failed to list connectors for reconnect: %v", err)
+		slog.Warn("failed to list connectors for reconnect", "error", err)
 		return
 	}
 
@@ -541,7 +542,7 @@ func reconnectConnectors(ctx context.Context, dsStore store.DataSourceStore, log
 
 		c, err := connector.CreateConnector(ctx, ds, logStore, cfg)
 		if err != nil {
-			log.Printf("warning: failed to recreate connector %q (%s): %v", ds.Name, ds.Type, err)
+			slog.Warn("failed to recreate connector", "connector", ds.Name, "type", string(ds.Type), "error", err)
 			status := store.StatusError
 			msg := fmt.Sprintf("failed to reconnect on startup: %v", err)
 			dsStore.Update(ctx, ds.ID, store.UpdateDataSourceParams{
@@ -552,7 +553,7 @@ func reconnectConnectors(ctx context.Context, dsStore store.DataSourceStore, log
 
 		if err := c.TestConnection(ctx); err != nil {
 			c.Close()
-			log.Printf("warning: connector %q (%s) failed reconnect test: %v", ds.Name, ds.Type, err)
+			slog.Warn("connector failed reconnect test", "connector", ds.Name, "type", string(ds.Type), "error", err)
 			status := store.StatusError
 			msg := fmt.Sprintf("failed to reconnect on startup: %v", err)
 			dsStore.Update(ctx, ds.ID, store.UpdateDataSourceParams{
@@ -562,6 +563,6 @@ func reconnectConnectors(ctx context.Context, dsStore store.DataSourceStore, log
 		}
 
 		registry.Register(c)
-		log.Printf("reconnected connector %q (%s)", ds.Name, ds.Type)
+		slog.Info("reconnected connector", "connector", ds.Name, "type", string(ds.Type))
 	}
 }

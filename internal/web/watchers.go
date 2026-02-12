@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -267,7 +268,14 @@ func (s *Server) handleRunWatcherNow(w http.ResponseWriter, r *http.Request) {
 	// Trigger immediate execution in background.
 	// Use context.Background() — r.Context() is cancelled when the HTTP response is sent.
 	if s.executor != nil {
-		go s.executor.Execute(context.Background(), *mon)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("panic in watcher run-now", "watcher_id", mon.ID, "error", r)
+				}
+			}()
+			s.executor.Execute(context.Background(), *mon)
+		}()
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "triggered"})

@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -132,7 +132,7 @@ func SendAll(ctx context.Context, notifiers []Notifier, alert store.Alert) {
 			sendCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if err := n.Send(sendCtx, alert); err != nil {
-				log.Printf("watcher: notification error: %v", err)
+				slog.Warn("notification error", "error", err)
 			}
 		}(n)
 	}

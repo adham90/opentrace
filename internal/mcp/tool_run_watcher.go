@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -35,7 +36,14 @@ func runWatcherNowHandler(ws store.WatcherStore, executor *watcher.Executor) ser
 		}
 
 		// Execute asynchronously — return immediately.
-		go executor.Execute(context.Background(), *w)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("panic in watcher MCP run", "watcher_id", w.ID, "error", r)
+				}
+			}()
+			executor.Execute(context.Background(), *w)
+		}()
 
 		return mcp.NewToolResultText(fmt.Sprintf("Watcher %q (%s) triggered for immediate execution.", w.Title, w.ID)), nil
 	}

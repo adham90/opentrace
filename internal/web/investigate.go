@@ -1,9 +1,11 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -78,7 +80,14 @@ func (s *Server) handleInvestigateAlert(w http.ResponseWriter, r *http.Request) 
 	s.watcherStore.UpdateStatus(r.Context(), w2.ID, store.WatcherPaused)
 
 	// Execute immediately in background
-	go s.executor.Execute(r.Context(), *w2)
+	go func() {
+		defer func() {
+			if rv := recover(); rv != nil {
+				slog.Error("panic in investigation watcher", "watcher_id", w2.ID, "error", rv)
+			}
+		}()
+		s.executor.Execute(context.Background(), *w2)
+	}()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":     "triggered",

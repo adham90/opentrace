@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -138,7 +138,7 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 	if ruleConfigStr.Valid {
 		var rc RuleConfig
 		if err := json.Unmarshal([]byte(ruleConfigStr.String), &rc); err != nil {
-			log.Printf("WARN: scanWatcher: invalid rule_config JSON for %s: %v", w.ID, err)
+			slog.Warn("invalid rule_config JSON", "watcher_id", w.ID, "error", err)
 		} else {
 			w.RuleConfig = &rc
 		}
@@ -157,7 +157,7 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 	if adaptiveConfigStr.Valid {
 		var ac AdaptiveConfig
 		if err := json.Unmarshal([]byte(adaptiveConfigStr.String), &ac); err != nil {
-			log.Printf("WARN: scanWatcher: invalid adaptive_config JSON for %s: %v", w.ID, err)
+			slog.Warn("invalid adaptive_config JSON", "watcher_id", w.ID, "error", err)
 		} else {
 			w.AdaptiveConfig = &ac
 		}
@@ -172,7 +172,7 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 	if humanSummaryStr.Valid {
 		var hs WatcherHumanSummary
 		if err := json.Unmarshal([]byte(humanSummaryStr.String), &hs); err != nil {
-			log.Printf("WARN: scanWatcher: invalid human_summary JSON for %s: %v", w.ID, err)
+			slog.Warn("invalid human_summary JSON", "watcher_id", w.ID, "error", err)
 		} else {
 			w.HumanSummary = &hs
 		}

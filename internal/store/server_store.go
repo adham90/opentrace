@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -121,7 +121,7 @@ func (s *serverStore) GetByID(ctx context.Context, id uuid.UUID) (*Server, error
 
 	if labelsStr != "" {
 		if err := json.Unmarshal([]byte(labelsStr), &srv.Labels); err != nil {
-			log.Printf("WARN: server %s: invalid labels JSON: %v", srv.ID, err)
+			slog.Warn("invalid labels JSON", "server_id", srv.ID, "error", err)
 		}
 	}
 	srv.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
@@ -161,7 +161,7 @@ func (s *serverStore) List(ctx context.Context) ([]Server, error) {
 
 		if labelsStr != "" {
 			if err := json.Unmarshal([]byte(labelsStr), &srv.Labels); err != nil {
-				log.Printf("WARN: server %s: invalid labels JSON: %v", srv.ID, err)
+				slog.Warn("invalid labels JSON", "server_id", srv.ID, "error", err)
 			}
 		}
 		srv.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)

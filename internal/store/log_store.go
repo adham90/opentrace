@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -163,7 +163,7 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 		entry.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
 		if metaJSON.Valid && metaJSON.String != "" {
 			if err := json.Unmarshal([]byte(metaJSON.String), &entry.Metadata); err != nil {
-				log.Printf("WARN: log entry %d: invalid metadata JSON: %v", entry.ID, err)
+				slog.Warn("invalid metadata JSON in log entry", "entry_id", entry.ID, "error", err)
 			}
 		}
 		result = append(result, entry)
@@ -339,7 +339,7 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*LogEntry, error) {
 	entry.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
 	if metaJSON.Valid && metaJSON.String != "" {
 		if err := json.Unmarshal([]byte(metaJSON.String), &entry.Metadata); err != nil {
-			log.Printf("WARN: log entry %d: invalid metadata JSON: %v", entry.ID, err)
+			slog.Warn("invalid metadata JSON in log entry", "entry_id", entry.ID, "error", err)
 		}
 	}
 	return &entry, nil

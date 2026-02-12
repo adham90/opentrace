@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -181,7 +181,7 @@ func (s *Server) ensureMetricsConnector(ctx context.Context) {
 	// Create DB row if it doesn't exist
 	sources, err := s.dsStore.List(ctx, store.ListDataSourceParams{Type: store.ConnectorServerMetrics})
 	if err != nil {
-		log.Printf("WARN: ensureMetricsConnector: failed to list data sources: %v", err)
+		slog.Warn("ensureMetricsConnector: failed to list data sources", "error", err)
 		return
 	}
 	var dsID *store.DataSource
@@ -195,7 +195,7 @@ func (s *Server) ensureMetricsConnector(ctx context.Context) {
 			Config: map[string]any{},
 		})
 		if err != nil {
-			log.Printf("WARN: ensureMetricsConnector: failed to create data source: %v", err)
+			slog.Warn("ensureMetricsConnector: failed to create data source", "error", err)
 			return
 		}
 		dsID = created
@@ -208,10 +208,10 @@ func (s *Server) ensureMetricsConnector(ctx context.Context) {
 	if _, err := s.dsStore.Update(ctx, dsID.ID, store.UpdateDataSourceParams{
 		Status: &connected,
 	}); err != nil {
-		log.Printf("WARN: ensureMetricsConnector: failed to update status: %v", err)
+		slog.Warn("ensureMetricsConnector: failed to update status", "error", err)
 	}
 
-	log.Printf("INFO: auto-registered server metrics connector (data source %s)", dsID.ID)
+	slog.Info("auto-registered server metrics connector", "data_source_id", dsID.ID)
 }
 
 // handleAgentInstallScript serves GET /api/agent/install.sh — a generated shell

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -118,19 +118,19 @@ func (mr *ModelRegistry) fetchOllamaModels(ctx context.Context) []ProviderInfo {
 	reqURL := mr.cfg.OllamaURL + "/api/tags"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		log.Printf("model-registry: ollama request error: %v", err)
+		slog.Warn("ollama request error", "error", err)
 		return nil
 	}
 
 	resp, err := mr.client.Do(req)
 	if err != nil {
-		log.Printf("model-registry: ollama unreachable: %v", err)
+		slog.Warn("ollama unreachable", "error", err)
 		return nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("model-registry: ollama /api/tags returned %d", resp.StatusCode)
+		slog.Warn("ollama unexpected status", "status", resp.StatusCode)
 		return nil
 	}
 
@@ -140,7 +140,7 @@ func (mr *ModelRegistry) fetchOllamaModels(ctx context.Context) []ProviderInfo {
 		} `json:"models"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		log.Printf("model-registry: ollama decode error: %v", err)
+		slog.Warn("ollama decode error", "error", err)
 		return nil
 	}
 
@@ -166,21 +166,21 @@ func (mr *ModelRegistry) fetchOpenAIModels(ctx context.Context) []ProviderInfo {
 	reqURL := mr.cfg.OpenAIURL + "/v1/models"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		log.Printf("model-registry: openai request error: %v", err)
+		slog.Warn("openai request error", "error", err)
 		return nil
 	}
 	req.Header.Set("Authorization", "Bearer "+mr.cfg.OpenAIAPIKey)
 
 	resp, err := mr.client.Do(req)
 	if err != nil {
-		log.Printf("model-registry: openai unreachable: %v", err)
+		slog.Warn("openai unreachable", "error", err)
 		return nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		log.Printf("model-registry: openai /v1/models returned %d: %s", resp.StatusCode, string(body))
+		slog.Warn("openai unexpected status", "status", resp.StatusCode, "body", string(body))
 		return nil
 	}
 
@@ -190,7 +190,7 @@ func (mr *ModelRegistry) fetchOpenAIModels(ctx context.Context) []ProviderInfo {
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		log.Printf("model-registry: openai decode error: %v", err)
+		slog.Warn("openai decode error", "error", err)
 		return nil
 	}
 
@@ -222,20 +222,20 @@ func (mr *ModelRegistry) fetchGeminiModels(ctx context.Context) []ProviderInfo {
 	reqURL := fmt.Sprintf("%s/v1beta/models?key=%s", mr.cfg.GeminiURL, url.QueryEscape(mr.cfg.GeminiAPIKey))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		log.Printf("model-registry: gemini request error: %v", err)
+		slog.Warn("gemini request error", "error", err)
 		return nil
 	}
 
 	resp, err := mr.client.Do(req)
 	if err != nil {
-		log.Printf("model-registry: gemini unreachable: %v", err)
+		slog.Warn("gemini unreachable", "error", err)
 		return nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		log.Printf("model-registry: gemini list models returned %d: %s", resp.StatusCode, string(body))
+		slog.Warn("gemini unexpected status", "status", resp.StatusCode, "body", string(body))
 		return nil
 	}
 
@@ -247,7 +247,7 @@ func (mr *ModelRegistry) fetchGeminiModels(ctx context.Context) []ProviderInfo {
 		} `json:"models"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		log.Printf("model-registry: gemini decode error: %v", err)
+		slog.Warn("gemini decode error", "error", err)
 		return nil
 	}
 

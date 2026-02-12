@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"math/rand"
 	"time"
 
@@ -21,7 +21,7 @@ func runSeed() error {
 	}
 	defer deps.db.Close()
 
-	log.Println("seeding database...")
+	slog.Info("seeding database")
 
 	// --- Servers ---
 	servers := []store.RegisterServerParams{
@@ -40,7 +40,7 @@ func runSeed() error {
 			return fmt.Errorf("registering server %s: %w", p.Hostname, err)
 		}
 		serverIDs = append(serverIDs, s.ID)
-		log.Printf("  server: %s (%s)", p.Hostname, s.ID)
+		slog.Info("seeded server", "hostname", p.Hostname, "id", s.ID)
 	}
 
 	// --- Metrics for each server ---
@@ -60,7 +60,7 @@ func runSeed() error {
 			metricStore.BatchInsert(ctx, sid, ts, samples)
 		}
 	}
-	log.Printf("  metrics: %d servers x 30 snapshots", len(serverIDs))
+	slog.Info("seeded metrics", "servers", len(serverIDs), "snapshots", 30)
 
 	// --- Logs ---
 	services := []string{"payment-api", "user-service", "gateway", "notification-service", "order-service"}
@@ -133,7 +133,7 @@ func runSeed() error {
 	if err != nil {
 		return fmt.Errorf("inserting logs: %w", err)
 	}
-	log.Printf("  logs: %d entries", n)
+	slog.Info("seeded logs", "count", n)
 
 	// --- Watchers ---
 	watcherDefs := []store.CreateWatcherParams{
@@ -420,7 +420,7 @@ func runSeed() error {
 			return fmt.Errorf("creating watcher %q: %w", p.Title, err)
 		}
 		watcherIDs = append(watcherIDs, w.ID)
-		log.Printf("  watcher: %s", p.Title)
+		slog.Info("seeded watcher", "title", p.Title)
 	}
 
 	// Pause one watcher for variety
@@ -475,7 +475,7 @@ func runSeed() error {
 		BaseTimeRange:        "5m",
 	})
 
-	log.Println("  adaptive states: escalated, relaxed, error, sustained, backing_off")
+	slog.Info("seeded adaptive states")
 
 	// --- Watcher Runs ---
 	runStore := store.NewWatcherRunStore(deps.db)
@@ -650,7 +650,7 @@ func runSeed() error {
 		}
 	}
 
-	log.Println("  watcher runs: created (including adaptive-state and rule-watcher scenarios)")
+	slog.Info("seeded watcher runs")
 
 	// --- Alerts ---
 	alertStore := store.NewAlertStore(deps.db)
@@ -740,7 +740,7 @@ func runSeed() error {
 		if err != nil {
 			return fmt.Errorf("creating alert %q: %w", p.Title, err)
 		}
-		log.Printf("  alert: %s", p.Title)
+		slog.Info("seeded alert", "title", p.Title)
 		// Mark some as read for variety
 		if rand.Float32() < 0.3 {
 			alertStore.MarkRead(ctx, a.ID)
@@ -761,9 +761,9 @@ func runSeed() error {
 		// Mark as connected
 		status := store.StatusConnected
 		dsStore.Update(ctx, ds.ID, store.UpdateDataSourceParams{Status: &status})
-		log.Printf("  connector: %s", p.Name)
+		slog.Info("seeded connector", "name", p.Name)
 	}
 
-	log.Println("seed complete!")
+	slog.Info("seed complete")
 	return nil
 }

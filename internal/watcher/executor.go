@@ -3,7 +3,7 @@ package watcher
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -59,7 +59,7 @@ func (e *Executor) Execute(ctx context.Context, w store.Watcher) {
 	// 1. Create a run record
 	run, err := e.runStore.Create(ctx, w.ID)
 	if err != nil {
-		log.Printf("watcher %s: failed to create run: %v", w.ID, err)
+		slog.Error("failed to create run", "watcher_id", w.ID, "error", err)
 		return
 	}
 
@@ -85,7 +85,7 @@ func (e *Executor) Execute(ctx context.Context, w store.Watcher) {
 func (e *Executor) executeRule(ctx context.Context, w store.Watcher, run *store.WatcherRun) {
 	if e.ruleEvaluator == nil {
 		errMsg := "rule evaluator not configured"
-		log.Printf("watcher %s (%s): %s", w.ID, w.Title, errMsg)
+		slog.Error(errMsg, "watcher_id", w.ID, "watcher_title", w.Title)
 		e.runStore.Fail(ctx, run.ID, errMsg)
 		e.finalizeRun(ctx, &w, RunOutcome{Errored: true})
 		return
@@ -94,7 +94,7 @@ func (e *Executor) executeRule(ctx context.Context, w store.Watcher, run *store.
 	result, err := e.ruleEvaluator.Evaluate(ctx, w)
 	if err != nil {
 		errMsg := fmt.Sprintf("rule evaluation error: %v", err)
-		log.Printf("watcher %s (%s): %s", w.ID, w.Title, errMsg)
+		slog.Error("rule evaluation error", "watcher_id", w.ID, "watcher_title", w.Title, "error", err)
 		e.runStore.Fail(ctx, run.ID, errMsg)
 		e.finalizeRun(ctx, &w, RunOutcome{Errored: true})
 		return
@@ -111,7 +111,7 @@ func (e *Executor) executeRule(ctx context.Context, w store.Watcher, run *store.
 
 	// Complete the run
 	if err := e.runStore.Complete(ctx, run.ID, result.Summary, result.Details, result.HasAlert); err != nil {
-		log.Printf("watcher %s: failed to complete run: %v", w.ID, err)
+		slog.Error("failed to complete run", "watcher_id", w.ID, "error", err)
 	}
 
 	// Create alert and notify if needed
@@ -125,7 +125,7 @@ func (e *Executor) executeRule(ctx context.Context, w store.Watcher, run *store.
 			Severity:    w.Severity,
 		})
 		if err != nil {
-			log.Printf("watcher %s: failed to create alert: %v", w.ID, err)
+			slog.Error("failed to create alert", "watcher_id", w.ID, "error", err)
 		} else {
 			notifiers := ParseNotifiers(w.Notify)
 			SendAll(ctx, notifiers, *alert)
@@ -160,7 +160,7 @@ func (e *Executor) executeAI(ctx context.Context, w store.Watcher, run *store.Wa
 	provider, err := e.providerCache.Get(w.Model)
 	if err != nil {
 		errMsg := fmt.Sprintf("model resolution error: %v", err)
-		log.Printf("watcher %s (%s): %s", w.ID, w.Title, errMsg)
+		slog.Error("model resolution error", "watcher_id", w.ID, "watcher_title", w.Title, "error", err)
 		e.runStore.Fail(ctx, run.ID, errMsg)
 		e.finalizeRun(ctx, &w, RunOutcome{Errored: true})
 		return
@@ -199,7 +199,7 @@ func (e *Executor) executeAI(ctx context.Context, w store.Watcher, run *store.Wa
 	answer, err := ag.RunWithCallback(execCtx, query, tools, callback, nil)
 	if err != nil {
 		errMsg := fmt.Sprintf("agent error: %v", err)
-		log.Printf("watcher %s (%s): %s", w.ID, w.Title, errMsg)
+		slog.Error("agent error", "watcher_id", w.ID, "watcher_title", w.Title, "error", err)
 		e.runStore.Fail(ctx, run.ID, errMsg)
 		e.finalizeRun(ctx, &w, RunOutcome{Errored: true})
 		return
@@ -216,7 +216,7 @@ func (e *Executor) executeAI(ctx context.Context, w store.Watcher, run *store.Wa
 	}
 	mu.Unlock()
 	if err := e.runStore.Complete(ctx, run.ID, answer, details, hasAlert); err != nil {
-		log.Printf("watcher %s: failed to complete run: %v", w.ID, err)
+		slog.Error("failed to complete run", "watcher_id", w.ID, "error", err)
 	}
 
 	// 9. Create alert and notify if needed
@@ -230,7 +230,7 @@ func (e *Executor) executeAI(ctx context.Context, w store.Watcher, run *store.Wa
 			Severity:    w.Severity,
 		})
 		if err != nil {
-			log.Printf("watcher %s: failed to create alert: %v", w.ID, err)
+			slog.Error("failed to create alert", "watcher_id", w.ID, "error", err)
 		} else {
 			notifiers := ParseNotifiers(w.Notify)
 			SendAll(ctx, notifiers, *alert)
@@ -257,17 +257,17 @@ func (e *Executor) finalizeRun(ctx context.Context, w *store.Watcher, outcome Ru
 			TimeRange:            tr.NewTimeRange,
 			BaseTimeRange:        tr.BaseTimeRange,
 		}); err != nil {
-			log.Printf("watcher %s: failed to update adaptive state: %v", w.ID, err)
+			slog.Error("failed to update adaptive state", "watcher_id", w.ID, "error", err)
 		}
 
 		if tr.ShouldPause {
 			if _, err := e.watcherStore.UpdateStatus(ctx, w.ID, store.WatcherError); err != nil {
-				log.Printf("watcher %s: failed to pause watcher: %v", w.ID, err)
+				slog.Error("failed to pause watcher", "watcher_id", w.ID, "error", err)
 			}
 		}
 
 		if tr.LogMessage != "" {
-			log.Printf("watcher %s (%s): adaptive: %s", w.ID, w.Title, tr.LogMessage)
+			slog.Info("adaptive scheduling", "watcher_id", w.ID, "watcher_title", w.Title, "message", tr.LogMessage)
 		}
 
 		// Use adaptive interval for next_run_at if provided
@@ -276,7 +276,7 @@ func (e *Executor) finalizeRun(ctx context.Context, w *store.Watcher, outcome Ru
 			if err == nil {
 				next := sched.Next(now)
 				if err := e.watcherStore.UpdateRunTime(ctx, w.ID, now, next); err != nil {
-					log.Printf("watcher %s: failed to update run time: %v", w.ID, err)
+					slog.Error("failed to update run time", "watcher_id", w.ID, "error", err)
 				}
 				return
 			}
@@ -291,15 +291,15 @@ func (e *Executor) finalizeRun(ctx context.Context, w *store.Watcher, outcome Ru
 
 	sched, err := ParseSchedule(schedExpr)
 	if err != nil {
-		log.Printf("watcher %s: invalid schedule %q, using 15m fallback: %v", w.ID, schedExpr, err)
+		slog.Warn("invalid schedule, using 15m fallback", "watcher_id", w.ID, "schedule", schedExpr, "error", err)
 		if err := e.watcherStore.UpdateRunTime(ctx, w.ID, now, now.Add(15*time.Minute)); err != nil {
-			log.Printf("watcher %s: failed to update run time: %v", w.ID, err)
+			slog.Error("failed to update run time", "watcher_id", w.ID, "error", err)
 		}
 		return
 	}
 
 	next := sched.Next(now)
 	if err := e.watcherStore.UpdateRunTime(ctx, w.ID, now, next); err != nil {
-		log.Printf("watcher %s: failed to update run time: %v", w.ID, err)
+		slog.Error("failed to update run time", "watcher_id", w.ID, "error", err)
 	}
 }

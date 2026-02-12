@@ -2,7 +2,7 @@ package watcher
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -73,7 +73,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 
 	go func() {
 		defer s.wg.Done()
-		log.Printf("watcher: scheduler started (poll=%s, max_concurrent=%d)", s.poll, s.maxConc)
+		slog.Info("scheduler started", "poll_interval", s.poll, "max_concurrent", s.maxConc)
 
 		ticker := time.NewTicker(s.poll)
 		defer ticker.Stop()
@@ -84,7 +84,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Println("watcher: scheduler stopped")
+				slog.Info("scheduler stopped")
 				return
 			case <-ticker.C:
 				s.pollAndExecute(ctx)
@@ -104,7 +104,7 @@ func (s *Scheduler) Stop() {
 func (s *Scheduler) pollAndExecute(ctx context.Context) {
 	watchers, err := s.watcherStore.GetDueWatchers(ctx)
 	if err != nil {
-		log.Printf("watcher: poll error: %v", err)
+		slog.Error("poll error", "error", err)
 		return
 	}
 
@@ -112,7 +112,7 @@ func (s *Scheduler) pollAndExecute(ctx context.Context) {
 		return
 	}
 
-	log.Printf("watcher: found %d due watcher(s)", len(watchers))
+	slog.Info("found due watchers", "count", len(watchers))
 
 	for _, w := range watchers {
 		if ctx.Err() != nil {
@@ -125,10 +125,15 @@ func (s *Scheduler) pollAndExecute(ctx context.Context) {
 		go func(w store.Watcher) {
 			defer s.wg.Done()
 			defer func() { <-s.sem }() // release
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("panic executing watcher", "watcher_id", w.ID, "watcher_title", w.Title, "panic", r)
+				}
+			}()
 
-			log.Printf("watcher: executing %q (%s)", w.Title, w.ID)
+			slog.Info("executing watcher", "watcher_id", w.ID, "watcher_title", w.Title)
 			s.executor.Execute(ctx, w)
-			log.Printf("watcher: finished %q (%s)", w.Title, w.ID)
+			slog.Info("finished watcher", "watcher_id", w.ID, "watcher_title", w.Title)
 		}(w)
 	}
 }
