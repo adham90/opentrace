@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -434,4 +435,29 @@ func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintf(w, "event: done\ndata: {}\n\n")
 	flusher.Flush()
+}
+
+func (s *Server) handleWatcherEffectiveness(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid watcher ID")
+		return
+	}
+
+	since := time.Now().UTC().Add(-7 * 24 * time.Hour) // default 7d
+	if p := r.URL.Query().Get("period"); p != "" {
+		switch p {
+		case "24h":
+			since = time.Now().UTC().Add(-24 * time.Hour)
+		case "30d":
+			since = time.Now().UTC().Add(-30 * 24 * time.Hour)
+		}
+	}
+
+	stats, err := s.alertStore.WatcherAlertStats(r.Context(), id, since)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get effectiveness stats")
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
 }

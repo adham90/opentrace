@@ -2613,3 +2613,92 @@ th.sortable.sort-desc::after { content: '\25BC'; opacity: 0.8; }
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* ===== Dismiss Reason Dropdown ===== */
+.dismiss-reason-select {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 24px 3px 8px;
+  background: var(--bg);
+  border: 1px solid var(--red-dim);
+  color: var(--red);
+  border-radius: 4px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: var(--select-arrow);
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  width: auto;
+}
+.dismiss-reason-select:hover {
+  background: var(--red-dim);
+  border-color: var(--red);
+}
+.dismiss-reason-select:focus {
+  outline: none;
+  border-color: var(--red);
+}
+
+/* ===== Snooze Button ===== */
+.snooze-btn {
+  color: var(--yellow);
+  border-color: var(--yellow-dim);
+}
+.snooze-btn:hover {
+  background: var(--yellow-dim);
+  border-color: var(--yellow);
+}
+
+/* ===== Snooze Badge ===== */
+.badge-snooze {
+  background: var(--yellow-dim);
+  color: var(--yellow);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+/* ===== Watcher Effectiveness Badge ===== */
+.effectiveness-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+.effectiveness-badge.signal-high {
+  background: var(--green-dim);
+  color: var(--green);
+}
+.effectiveness-badge.signal-medium {
+  background: var(--yellow-dim);
+  color: var(--yellow);
+}
+.effectiveness-badge.signal-low {
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+/* ===== Watcher Human Summary ===== */
+.watcher-human-summary {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.4;
+  margin-bottom: 8px;
+  padding-left: 2px;
+}
+
+/* ===== Claude Managed Badge ===== */
+.claude-managed {
+  background: var(--blue-dim);
+  color: var(--blue);
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}

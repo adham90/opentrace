@@ -270,6 +270,10 @@ func run() error {
 		LogStore:        deps.logStore,
 		ServerStore:     deps.serverStore,
 		MetricStore:     deps.metricStore,
+		DataSourceStore: deps.dsStore,
+		SettingsStore:   deps.settingsStore,
+		RuleEvaluator:   ruleEvaluator,
+		Config:          deps.cfg,
 	})
 
 	// Create server

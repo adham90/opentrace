@@ -56,6 +56,15 @@ func (m *mockDataSourceStore) Update(_ context.Context, id uuid.UUID, params sto
 			if params.Status != nil {
 				m.dataSources[i].Status = *params.Status
 			}
+			if params.Name != nil {
+				m.dataSources[i].Name = *params.Name
+			}
+			if params.Environment != nil {
+				m.dataSources[i].Environment = *params.Environment
+			}
+			if params.Config != nil {
+				m.dataSources[i].Config = params.Config
+			}
 			return &m.dataSources[i], nil
 		}
 	}
@@ -227,6 +236,179 @@ func TestDeleteConnectorHandler_MissingID(t *testing.T) {
 	handler := deleteConnectorHandler(ds, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for missing connector_id")
+	}
+}
+
+// --- get_connector tests ---
+
+func TestGetConnectorHandler_Success(t *testing.T) {
+	id := uuid.New()
+	ds := &mockDataSourceStore{
+		dataSources: []store.DataSource{
+			{ID: id, Name: "Prod DB", Type: store.ConnectorDatabase, Status: store.StatusConnected},
+		},
+	}
+	handler := getConnectorHandler(ds)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"connector_id": id.String(),
+	}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+
+	text := resultText(t, result)
+	if !contains(text, "Prod DB") {
+		t.Errorf("expected connector name in response, got: %s", text)
+	}
+	if !contains(text, "connected") {
+		t.Errorf("expected status in response, got: %s", text)
+	}
+}
+
+func TestGetConnectorHandler_NotFound(t *testing.T) {
+	ds := &mockDataSourceStore{}
+	handler := getConnectorHandler(ds)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"connector_id": uuid.New().String(),
+	}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for non-existent connector")
+	}
+	text := resultText(t, result)
+	if !contains(text, "not found") {
+		t.Errorf("expected 'not found' in error, got: %s", text)
+	}
+}
+
+func TestGetConnectorHandler_MissingID(t *testing.T) {
+	ds := &mockDataSourceStore{}
+	handler := getConnectorHandler(ds)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for missing connector_id")
+	}
+}
+
+func TestGetConnectorHandler_InvalidID(t *testing.T) {
+	ds := &mockDataSourceStore{}
+	handler := getConnectorHandler(ds)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"connector_id": "not-a-uuid",
+	}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for invalid connector_id")
+	}
+}
+
+// --- update_connector tests ---
+
+func TestUpdateConnectorHandler_Success(t *testing.T) {
+	id := uuid.New()
+	ds := &mockDataSourceStore{
+		dataSources: []store.DataSource{
+			{ID: id, Name: "Old Name", Type: store.ConnectorDatabase, Status: store.StatusConnected},
+		},
+	}
+	handler := updateConnectorHandler(ds, nil)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"connector_id": id.String(),
+		"name":         "New Name",
+	}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+
+	text := resultText(t, result)
+	if !contains(text, "New Name") {
+		t.Errorf("expected updated name in response, got: %s", text)
+	}
+	if !contains(text, "updated") {
+		t.Errorf("expected 'updated' in response, got: %s", text)
+	}
+}
+
+func TestUpdateConnectorHandler_ConfigChange(t *testing.T) {
+	id := uuid.New()
+	ds := &mockDataSourceStore{
+		dataSources: []store.DataSource{
+			{ID: id, Name: "Prod DB", Type: store.ConnectorDatabase, Status: store.StatusConnected},
+		},
+	}
+	handler := updateConnectorHandler(ds, nil)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"connector_id":      id.String(),
+		"connection_string": "postgres://new-host/db",
+	}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+
+	text := resultText(t, result)
+	if !contains(text, "test_connector") {
+		t.Errorf("expected hint to re-test in response, got: %s", text)
+	}
+}
+
+func TestUpdateConnectorHandler_NotFound(t *testing.T) {
+	ds := &mockDataSourceStore{}
+	handler := updateConnectorHandler(ds, nil)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"connector_id": uuid.New().String(),
+		"name":         "New Name",
+	}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for non-existent connector")
+	}
+}
+
+func TestUpdateConnectorHandler_MissingID(t *testing.T) {
+	ds := &mockDataSourceStore{}
+	handler := updateConnectorHandler(ds, nil)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"name": "New Name",
+	}))
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

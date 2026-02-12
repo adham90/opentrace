@@ -129,10 +129,14 @@ func watcherRunHistoryHandler(ws store.WatcherStore, rs store.WatcherRunStore) s
 			watcherInfo["time_range"] = w.TimeRange
 		}
 
+		// Compute trend analysis from fetched runs.
+		trendAnalysis := computeRunTrend(runs)
+
 		resp := map[string]any{
-			"watcher": watcherInfo,
-			"runs":    entries,
-			"stats":   stats,
+			"watcher":        watcherInfo,
+			"runs":           entries,
+			"stats":          stats,
+			"trend_analysis": trendAnalysis,
 		}
 
 		data, err := json.MarshalIndent(resp, "", "  ")
@@ -140,5 +144,97 @@ func watcherRunHistoryHandler(ws store.WatcherStore, rs store.WatcherRunStore) s
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 		}
 		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// computeRunTrend analyzes fetched runs and returns trend statistics.
+func computeRunTrend(runs []store.WatcherRun) map[string]any {
+	if len(runs) == 0 {
+		return map[string]any{
+			"trend":            "no_data",
+			"success_rate_pct": 0.0,
+			"alert_rate_pct":   0.0,
+		}
+	}
+
+	var completed, alerted, errors, consecutiveClean, consecutiveErrors int
+	var totalDurationMS int64
+	var durationCount int
+
+	for _, r := range runs {
+		if r.Status == "completed" {
+			completed++
+			if r.HasAlert {
+				alerted++
+			}
+		}
+		if r.Status == "error" || r.Status == "failed" {
+			errors++
+		}
+		if r.FinishedAt != nil {
+			totalDurationMS += r.FinishedAt.Sub(r.StartedAt).Milliseconds()
+			durationCount++
+		}
+	}
+
+	// Count consecutive clean/error from most recent.
+	for _, r := range runs {
+		if r.Status == "completed" && !r.HasAlert {
+			consecutiveClean++
+		} else {
+			break
+		}
+	}
+	for _, r := range runs {
+		if r.Status == "error" || r.Status == "failed" {
+			consecutiveErrors++
+		} else {
+			break
+		}
+	}
+
+	var successRate, alertRate float64
+	if len(runs) > 0 {
+		successRate = float64(completed) / float64(len(runs)) * 100
+	}
+	if completed > 0 {
+		alertRate = float64(alerted) / float64(completed) * 100
+	}
+
+	var avgDurationMS int64
+	if durationCount > 0 {
+		avgDurationMS = totalDurationMS / int64(durationCount)
+	}
+
+	// Determine trend: compare first-half vs second-half alert rates.
+	trend := "stable"
+	if len(runs) >= 4 {
+		mid := len(runs) / 2
+		var firstHalfAlerts, secondHalfAlerts int
+		for _, r := range runs[:mid] {
+			if r.HasAlert {
+				firstHalfAlerts++
+			}
+		}
+		for _, r := range runs[mid:] {
+			if r.HasAlert {
+				secondHalfAlerts++
+			}
+		}
+		// runs[0] is most recent, so first half = recent
+		if firstHalfAlerts > secondHalfAlerts*2 && secondHalfAlerts > 0 {
+			trend = "degrading"
+		} else if secondHalfAlerts > firstHalfAlerts*2 && firstHalfAlerts > 0 {
+			trend = "improving"
+		}
+	}
+
+	return map[string]any{
+		"success_rate_pct":  successRate,
+		"alert_rate_pct":    alertRate,
+		"avg_duration_ms":   avgDurationMS,
+		"trend":             trend,
+		"consecutive_clean": consecutiveClean,
+		"consecutive_errors": consecutiveErrors,
 	}
 }

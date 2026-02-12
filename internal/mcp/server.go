@@ -187,24 +187,38 @@ func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler ser
 // addReadOnlyTools registers read-only tools available to all users.
 // When s is nil (catalog-only mode), tools are only cataloged via b.
 func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
-	// Meta-tool for listing available connectors.
+	// Meta-tool for listing connectors.
 	maybeAddTool(s,
 		mcp.NewTool("list_connectors",
-			mcp.WithDescription("List all active OpenTrace connectors and their tools"),
+			mcp.WithDescription("List all OpenTrace connectors with their status, config, and available tools. When a DataSourceStore is available, returns full connector details from the database; otherwise lists active registry tools."),
+			mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production, staging)")),
+			mcp.WithString("type", mcp.Description("Filter by connector type: database, logs, monitoring, server_metrics")),
 		),
-		listConnectorsHandler(deps.Registry),
+		listConnectorsHandler(deps.Registry, deps.DataSourceStore),
 	)
-	b.Add("list_connectors", "List all active OpenTrace connectors and their tools", "Connectors", "read", "")
+	b.Add("list_connectors", "List all OpenTrace connectors with status, config, and tools", "Connectors", "read", "")
+
+	// Get single connector details (read-only).
+	if deps.DataSourceStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("get_connector",
+				mcp.WithDescription("Get full details for a specific connector: type, status, config, environment, and last test time. Use to inspect a connector's configuration or diagnose connection issues."),
+				mcp.WithString("connector_id", mcp.Required(), mcp.Description("Connector UUID (from list_connectors)")),
+			),
+			getConnectorHandler(deps.DataSourceStore),
+		)
+		b.Add("get_connector", "Get full details for a specific connector", "Connectors", "read", "")
+	}
 
 	// Watcher list.
 	if deps.WatcherStore != nil {
 		maybeAddTool(s,
 			mcp.NewTool("list_watchers",
-				mcp.WithDescription("List all configured watchers with their status"),
+				mcp.WithDescription("List all configured watchers with their status, recent run stats, and human summaries"),
 				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production, staging)")),
 				mcp.WithString("watcher_type", mcp.Description("Filter by watcher type: ai or rule")),
 			),
-			listWatchersHandler(deps.WatcherStore),
+			listWatchersHandler(deps.WatcherStore, deps.WatcherRunStore, deps.AlertStore),
 		)
 		b.Add("list_watchers", "List all configured watchers with their status", "Watchers", "read", "")
 	}
@@ -573,6 +587,30 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 		b.Add("long_transactions", "Find long-running and idle-in-transaction sessions with their locks", "Database Introspection", "read", "database connector")
 	}
 
+	// Run details — full execution trace for a watcher run.
+	if deps.WatcherRunStore != nil {
+		maybeAddTool(s, runDetailsTool(), runDetailsHandler(deps.WatcherStore, deps.WatcherRunStore))
+		b.Add("get_run_details", "Get the full execution trace for a watcher run", "Watchers", "read", "")
+	}
+
+	// Watcher effectiveness — assess signal-to-noise ratio.
+	if deps.WatcherStore != nil && deps.AlertStore != nil && deps.WatcherRunStore != nil {
+		maybeAddTool(s, watcherEffectivenessTool(), watcherEffectivenessHandler(deps.WatcherStore, deps.AlertStore, deps.WatcherRunStore))
+		b.Add("watcher_effectiveness", "Assess a watcher's signal-to-noise ratio and effectiveness", "Watchers", "read", "")
+	}
+
+	// Watcher health — fleet-wide overview.
+	if deps.WatcherStore != nil && deps.AlertStore != nil && deps.WatcherRunStore != nil {
+		maybeAddTool(s, watcherHealthTool(), watcherHealthHandler(deps.WatcherStore, deps.AlertStore, deps.WatcherRunStore))
+		b.Add("watcher_health_summary", "Fleet-wide watcher overview with stale, noisy, and failing watchers", "Watchers", "read", "")
+	}
+
+	// Compare watcher runs — diff two runs side-by-side.
+	if deps.WatcherStore != nil && deps.WatcherRunStore != nil {
+		maybeAddTool(s, compareRunsTool(), compareRunsHandler(deps.WatcherStore, deps.WatcherRunStore))
+		b.Add("compare_watcher_runs", "Compare two watcher runs side-by-side", "Watchers", "read", "")
+	}
+
 	// Composite investigation runbooks.
 	if deps.Registry != nil {
 		maybeAddTool(s,
@@ -651,6 +689,7 @@ Use db_query_stats, db_activity, and db_table_stats to discover what to monitor,
 				mcp.WithString("model", mcp.Description("LLM model name (ai watchers only)")),
 				mcp.WithString("effort", mcp.Description("Analysis effort: low, medium (default), or high (ai watchers only)")),
 				mcp.WithString("watcher_environment", mcp.Description("Environment to assign to the watcher (e.g. production, staging)")),
+			mcp.WithString("human_summary", mcp.Description(`JSON: {"what_it_monitors":"...","why_it_matters":"...","what_to_do":"..."}. Always provide this for dashboard display.`)),
 			),
 			createWatcherHandler(deps.WatcherStore),
 		)
@@ -707,8 +746,9 @@ Tip: Use db_query_stats, db_activity, or db_table_stats first to understand the 
 
 		maybeAddTool(s,
 			mcp.NewTool("dismiss_alert",
-				mcp.WithDescription("Dismiss a specific alert (hides it from the default view). Use for false positives or resolved issues."),
+				mcp.WithDescription("Dismiss a specific alert (hides it from the default view). Use for false positives or resolved issues. Provide a reason to help with effectiveness tracking."),
 				mcp.WithString("alert_id", mcp.Required(), mcp.Description("Alert UUID (from list_alerts)")),
+				mcp.WithString("reason", mcp.Description("Why: false_positive, not_actionable, resolved, duplicate, expected (optional)")),
 			),
 			dismissAlertHandler(deps.AlertStore),
 		)
@@ -738,6 +778,7 @@ Tip: Use db_query_stats, db_activity, or db_table_stats first to understand the 
 				mcp.WithString("schedule", mcp.Description("New schedule: cron expression, interval, or @hourly/@daily")),
 				mcp.WithString("effort", mcp.Description("New analysis effort: low, medium, high (AI watchers only)")),
 				mcp.WithString("rule_config", mcp.Description("New rule configuration JSON (rule watchers only)")),
+				mcp.WithString("human_summary", mcp.Description(`JSON: {"what_it_monitors":"...","why_it_matters":"...","what_to_do":"..."}. Update the plain-English explanation.`)),
 			),
 			updateWatcherHandler(deps.WatcherStore),
 		)
@@ -769,6 +810,36 @@ Tip: Use db_query_stats, db_activity, or db_table_stats first to understand the 
 			resumeWatcherHandler(deps.WatcherStore),
 		)
 		b.Add("resume_watcher", "Resume a paused watcher", "Watchers", "admin", "")
+	}
+
+	// Clone watcher (admin).
+	if deps.WatcherStore != nil {
+		maybeAddTool(s, cloneWatcherTool(), cloneWatcherHandler(deps.WatcherStore))
+		b.Add("clone_watcher", "Duplicate a watcher with optional overrides", "Watchers", "admin", "")
+	}
+
+	// Snooze alert (admin).
+	if deps.AlertStore != nil {
+		maybeAddTool(s, snoozeAlertTool(), snoozeAlertHandler(deps.AlertStore))
+		b.Add("snooze_alert", "Temporarily suppress an alert", "Alerts", "admin", "")
+	}
+
+	// Bulk watcher update (admin).
+	if deps.WatcherStore != nil {
+		maybeAddTool(s, bulkWatcherTool(), bulkWatcherHandler(deps.WatcherStore))
+		b.Add("bulk_watcher_update", "Update multiple watchers at once", "Watchers", "admin", "")
+	}
+
+	// Promote investigation to watcher (admin).
+	if deps.WatcherStore != nil {
+		maybeAddTool(s, promoteInvestigationTool(), promoteInvestigationHandler(deps.WatcherStore, deps.AlertStore, deps.WatcherRunStore))
+		b.Add("promote_investigation", "Create a recurring watcher from an investigation", "Watchers", "admin", "")
+	}
+
+	// Disable stale watchers (admin).
+	if deps.WatcherStore != nil && deps.AlertStore != nil {
+		maybeAddTool(s, disableStaleWatchersTool(), disableStaleWatchersHandler(deps.WatcherStore, deps.AlertStore))
+		b.Add("disable_stale_watchers", "Find and pause watchers with no recent alerts", "Watchers", "admin", "")
 	}
 
 	// Suggest watchers (admin — suggests creating watchers with ready-to-use configs).
@@ -836,6 +907,18 @@ Each suggestion includes a watcher_config that can be passed directly to create_
 				deleteConnectorHandler(deps.DataSourceStore, deps.Registry),
 			)
 			b.Add("delete_connector", "Delete and disconnect a connector", "Connectors", "admin", "")
+
+			maybeAddTool(s,
+				mcp.NewTool("update_connector",
+					mcp.WithDescription("Update a connector's name, environment, or connection config. When the connection string changes, the connector is unregistered — use test_connector afterwards to re-establish the connection."),
+					mcp.WithString("connector_id", mcp.Required(), mcp.Description("Connector UUID (from list_connectors)")),
+					mcp.WithString("name", mcp.Description("New display name")),
+					mcp.WithString("environment", mcp.Description("New environment label (e.g. production, staging)")),
+					mcp.WithString("connection_string", mcp.Description("New PostgreSQL connection string (triggers re-registration)")),
+				),
+				updateConnectorHandler(deps.DataSourceStore, deps.Registry),
+			)
+			b.Add("update_connector", "Update a connector's name, environment, or connection config", "Connectors", "admin", "")
 		}
 	}
 
@@ -898,10 +981,80 @@ func bridgeHandler(t agent.Tool) server.ToolHandlerFunc {
 	}
 }
 
-// listConnectorsHandler returns a handler that lists all active connectors
-// and their tools.
-func listConnectorsHandler(registry *connector.Registry) server.ToolHandlerFunc {
+// listConnectorsHandler returns a handler that lists connectors.
+// When a DataSourceStore is available, returns full connector details from the
+// database with optional environment/type filters. Falls back to listing
+// active registry tools when no store is provided.
+func listConnectorsHandler(registry *connector.Registry, dsStore store.DataSourceStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := request.GetArguments()
+
+		// When we have a store, return rich connector info.
+		if dsStore != nil {
+			var params store.ListDataSourceParams
+			if v, ok := args["environment"].(string); ok && v != "" {
+				params.Environment = v
+			}
+			if v, ok := args["type"].(string); ok && v != "" {
+				params.Type = store.ConnectorType(v)
+			}
+
+			connectors, err := dsStore.List(ctx, params)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("failed to list connectors: %v", err)), nil
+			}
+			if len(connectors) == 0 {
+				return mcp.NewToolResultText("No connectors found."), nil
+			}
+
+			// Build response with connector details + active tools.
+			type connectorEntry struct {
+				ID            string   `json:"id"`
+				Name          string   `json:"name"`
+				Type          string   `json:"type"`
+				Environment   string   `json:"environment,omitempty"`
+				Status        string   `json:"status"`
+				StatusMessage string   `json:"status_message,omitempty"`
+				LastTestedAt  string   `json:"last_tested_at,omitempty"`
+				ActiveTools   []string `json:"active_tools,omitempty"`
+			}
+
+			// Collect active tool names for reference.
+			activeToolNames := make([]string, 0)
+			for _, t := range registry.AllTools() {
+				activeToolNames = append(activeToolNames, t.Name)
+			}
+
+			entries := make([]connectorEntry, 0, len(connectors))
+			for _, c := range connectors {
+				e := connectorEntry{
+					ID:          c.ID.String(),
+					Name:        c.Name,
+					Type:        string(c.Type),
+					Environment: c.Environment,
+					Status:      string(c.Status),
+				}
+				if c.StatusMessage != nil {
+					e.StatusMessage = *c.StatusMessage
+				}
+				if c.LastTestedAt != nil {
+					e.LastTestedAt = c.LastTestedAt.Format(time.RFC3339)
+				}
+				// Include active tools if this connector is connected.
+				if c.Status == store.StatusConnected {
+					e.ActiveTools = activeToolNames
+				}
+				entries = append(entries, e)
+			}
+
+			data, err := json.MarshalIndent(entries, "", "  ")
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("failed to marshal connectors: %v", err)), nil
+			}
+			return mcp.NewToolResultText(string(data)), nil
+		}
+
+		// Fallback: no store, just list active registry tools.
 		tools := registry.AllTools()
 		if len(tools) == 0 {
 			return mcp.NewToolResultText("No connectors are currently active."), nil
@@ -919,24 +1072,28 @@ func listConnectorsHandler(registry *connector.Registry) server.ToolHandlerFunc 
 
 // watcherListEntry is a compact representation of a watcher for the list_watchers MCP tool.
 type watcherListEntry struct {
-	ID                   string `json:"id"`
-	Title                string `json:"title"`
-	Status               string `json:"status"`
-	WatcherType          string `json:"watcher_type"`
-	Environment          string `json:"environment,omitempty"`
-	Severity             string `json:"severity"`
-	TimeRange            string `json:"time_range"`
-	Schedule             string `json:"schedule,omitempty"`
+	ID                   string     `json:"id"`
+	Title                string     `json:"title"`
+	Status               string     `json:"status"`
+	WatcherType          string     `json:"watcher_type"`
+	Environment          string     `json:"environment,omitempty"`
+	Severity             string     `json:"severity"`
+	TimeRange            string     `json:"time_range"`
+	Schedule             string     `json:"schedule,omitempty"`
 	NextRunAt            *time.Time `json:"next_run_at,omitempty"`
 	LastRunAt            *time.Time `json:"last_run_at,omitempty"`
-	AdaptiveState        string `json:"adaptive_state,omitempty"`
-	EffectiveInterval    string `json:"effective_interval,omitempty"`
-	ConsecutiveCleanRuns int    `json:"consecutive_clean_runs,omitempty"`
-	ConsecutiveErrors    int    `json:"consecutive_errors,omitempty"`
+	AdaptiveState        string     `json:"adaptive_state,omitempty"`
+	EffectiveInterval    string     `json:"effective_interval,omitempty"`
+	ConsecutiveCleanRuns int        `json:"consecutive_clean_runs,omitempty"`
+	ConsecutiveErrors    int        `json:"consecutive_errors,omitempty"`
+	LastRunStatus        string     `json:"last_run_status,omitempty"`
+	AlertCount24h        int        `json:"alert_count_24h,omitempty"`
+	ErrorCount24h        int        `json:"error_count_24h,omitempty"`
+	HumanSummary         string     `json:"human_summary,omitempty"`
 }
 
 // listWatchersHandler returns a handler that lists all watchers.
-func listWatchersHandler(ws store.WatcherStore) server.ToolHandlerFunc {
+func listWatchersHandler(ws store.WatcherStore, rs store.WatcherRunStore, as store.AlertStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 		var params store.ListWatcherParams
@@ -976,6 +1133,29 @@ func listWatchersHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 				e.ConsecutiveCleanRuns = w.ConsecutiveCleanRuns
 				e.ConsecutiveErrors = w.ConsecutiveErrors
 				e.EffectiveInterval = effectiveInterval(w)
+			}
+
+			// Include human summary if available.
+			if w.HumanSummary != nil && w.HumanSummary.WhatItMonitors != "" {
+				e.HumanSummary = w.HumanSummary.WhatItMonitors
+			}
+
+			// Include inline run stats (last run status, 24h alert/error counts).
+			now := time.Now().UTC()
+			since24h := now.Add(-24 * time.Hour)
+			if rs != nil {
+				runs, err := rs.List(ctx, w.ID, 1)
+				if err == nil && len(runs) > 0 {
+					e.LastRunStatus = runs[0].Status
+				}
+				errCount, _ := rs.CountRuns(ctx, store.CountRunParams{Since: since24h, Until: now, WatcherID: &w.ID, Status: "error"})
+				e.ErrorCount24h = errCount
+			}
+			if as != nil {
+				stats, err := as.WatcherAlertStats(ctx, w.ID, since24h)
+				if err == nil && stats != nil {
+					e.AlertCount24h = stats.TotalAlerts
+				}
 			}
 
 			entries = append(entries, e)
@@ -1110,6 +1290,15 @@ func createWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 
 		if v, ok := args["data_source_id"].(string); ok && v != "" {
 			params.DataSourceID = &v
+		}
+
+		// Parse human_summary JSON string.
+		if hsStr, ok := args["human_summary"].(string); ok && hsStr != "" {
+			var hs store.WatcherHumanSummary
+			if err := json.Unmarshal([]byte(hsStr), &hs); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("invalid human_summary JSON: %v", err)), nil
+			}
+			params.HumanSummary = &hs
 		}
 
 		w, err := ws.Create(ctx, params)

@@ -256,7 +256,7 @@ func (m *mockDataSource) Close() error                                      { re
 
 func TestListConnectorsHandler_Empty(t *testing.T) {
 	registry := connector.NewRegistry()
-	handler := listConnectorsHandler(registry)
+	handler := listConnectorsHandler(registry, nil)
 
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {
@@ -284,7 +284,7 @@ func TestListConnectorsHandler_WithTools(t *testing.T) {
 		},
 	})
 
-	handler := listConnectorsHandler(registry)
+	handler := listConnectorsHandler(registry, nil)
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -429,8 +429,13 @@ func (m *mockAlertStore) CountTotal(ctx context.Context, environment string) (in
 }
 func (m *mockAlertStore) MarkRead(ctx context.Context, id uuid.UUID) error    { return nil }
 func (m *mockAlertStore) MarkAllRead(ctx context.Context, environment string) error { return nil }
-func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error     { return nil }
-func (m *mockAlertStore) DismissAll(ctx context.Context, environment string) error { return nil }
+func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID, reason string) error { return nil }
+func (m *mockAlertStore) DismissAll(ctx context.Context, environment string) error       { return nil }
+func (m *mockAlertStore) Snooze(ctx context.Context, id uuid.UUID, until time.Time) error { return nil }
+func (m *mockAlertStore) Unsnooze(ctx context.Context, id uuid.UUID) error                { return nil }
+func (m *mockAlertStore) WatcherAlertStats(ctx context.Context, watcherID uuid.UUID, since time.Time) (*store.WatcherEffectiveness, error) {
+	return &store.WatcherEffectiveness{WatcherID: watcherID.String()}, nil
+}
 func (m *mockAlertStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	return 0, nil
 }
@@ -557,7 +562,7 @@ func (m *mockWatcherRunStore) CountRuns(_ context.Context, params store.CountRun
 
 func TestListWatchersHandler_Empty(t *testing.T) {
 	ws := &mockWatcherStore{}
-	handler := listWatchersHandler(ws)
+	handler := listWatchersHandler(ws, nil, nil)
 
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {
@@ -577,7 +582,7 @@ func TestListWatchersHandler_WithWatchers(t *testing.T) {
 			{ID: uuid.New(), Title: "Connection Check", Status: store.WatcherActive, WatcherType: store.WatcherTypeRule},
 		},
 	}
-	handler := listWatchersHandler(ws)
+	handler := listWatchersHandler(ws, nil, nil)
 
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {
@@ -604,7 +609,7 @@ func TestListWatchersHandler_FilterByType(t *testing.T) {
 		},
 	}
 	// Override List to check the filter is passed.
-	handler := listWatchersHandler(ws)
+	handler := listWatchersHandler(ws, nil, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"watcher_type": "rule",
@@ -621,7 +626,7 @@ func TestListWatchersHandler_FilterByType(t *testing.T) {
 
 func TestListWatchersHandler_Error(t *testing.T) {
 	ws := &mockWatcherStore{err: errors.New("db error")}
-	handler := listWatchersHandler(ws)
+	handler := listWatchersHandler(ws, nil, nil)
 
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {

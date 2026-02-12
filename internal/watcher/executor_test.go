@@ -441,8 +441,13 @@ func (m *mockAlertStore) CountTotal(ctx context.Context, environment string) (in
 
 func (m *mockAlertStore) MarkRead(ctx context.Context, id uuid.UUID) error      { return nil }
 func (m *mockAlertStore) MarkAllRead(ctx context.Context, environment string) error { return nil }
-func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error          { return nil }
-func (m *mockAlertStore) DismissAll(ctx context.Context, environment string) error { return nil }
+func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID, reason string) error { return nil }
+func (m *mockAlertStore) DismissAll(ctx context.Context, environment string) error       { return nil }
+func (m *mockAlertStore) Snooze(ctx context.Context, id uuid.UUID, until time.Time) error { return nil }
+func (m *mockAlertStore) Unsnooze(ctx context.Context, id uuid.UUID) error                { return nil }
+func (m *mockAlertStore) WatcherAlertStats(ctx context.Context, watcherID uuid.UUID, since time.Time) (*store.WatcherEffectiveness, error) {
+	return &store.WatcherEffectiveness{WatcherID: watcherID.String()}, nil
+}
 func (m *mockAlertStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	return 0, nil
 }

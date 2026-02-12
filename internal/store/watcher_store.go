@@ -69,15 +69,25 @@ func (s *watcherStore) Create(ctx context.Context, params CreateWatcherParams) (
 		adaptiveConfigStr = &s
 	}
 
+	var humanSummaryStr *string
+	if params.HumanSummary != nil {
+		b, err := json.Marshal(params.HumanSummary)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling human_summary: %w", err)
+		}
+		s := string(b)
+		humanSummaryStr = &s
+	}
+
 	id := uuid.New()
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO watchers (id, title, description, environment, severity, filters, time_range, schedule, model, effort, notify, watcher_type, rule_config, data_source_id, adaptive_config, next_run_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO watchers (id, title, description, environment, severity, filters, time_range, schedule, model, effort, notify, watcher_type, rule_config, data_source_id, adaptive_config, human_summary, next_run_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id.String(), params.Title, params.Description, params.Environment, string(severity),
 		string(filters), timeRange, params.Schedule, params.Model, string(effort), string(notify),
-		string(watcherType), ruleConfigStr, params.DataSourceID, adaptiveConfigStr,
+		string(watcherType), ruleConfigStr, params.DataSourceID, adaptiveConfigStr, humanSummaryStr,
 		now, now, now,
 	)
 	if err != nil {
@@ -91,7 +101,8 @@ func (s *watcherStore) Create(ctx context.Context, params CreateWatcherParams) (
 const watcherColumns = `id, title, description, environment, severity, filters, time_range, schedule, model, effort, status, notify,
 	watcher_type, rule_config, data_source_id,
 	last_run_at, next_run_at, last_error, created_at, updated_at,
-	adaptive_config, adaptive_state, consecutive_clean_runs, consecutive_errors, escalated_at, base_time_range`
+	adaptive_config, adaptive_state, consecutive_clean_runs, consecutive_errors, escalated_at, base_time_range,
+	human_summary`
 
 // scanWatcher scans a watcher row into a Watcher struct.
 func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
@@ -102,6 +113,7 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 	var watcherTypeStr string
 	var ruleConfigStr, dataSourceID sql.NullString
 	var adaptiveConfigStr, escalatedAt, baseTimeRange sql.NullString
+	var humanSummaryStr sql.NullString
 
 	err := sc.Scan(
 		&w.ID, &w.Title, &w.Description, &w.Environment, &w.Severity, &filtersStr,
@@ -111,6 +123,7 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 		&createdAt, &updatedAt,
 		&adaptiveConfigStr, &w.AdaptiveState, &w.ConsecutiveCleanRuns, &w.ConsecutiveErrors,
 		&escalatedAt, &baseTimeRange,
+		&humanSummaryStr,
 	)
 	if err != nil {
 		return nil, err
@@ -155,6 +168,14 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 	}
 	if baseTimeRange.Valid {
 		w.BaseTimeRange = baseTimeRange.String
+	}
+	if humanSummaryStr.Valid {
+		var hs WatcherHumanSummary
+		if err := json.Unmarshal([]byte(humanSummaryStr.String), &hs); err != nil {
+			log.Printf("WARN: scanWatcher: invalid human_summary JSON for %s: %v", w.ID, err)
+		} else {
+			w.HumanSummary = &hs
+		}
 	}
 
 	return w, nil
@@ -276,6 +297,16 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 		adaptiveConfigStr = &s
 	}
 
+	var humanSummaryStr *string
+	if params.HumanSummary != nil {
+		b, err := json.Marshal(params.HumanSummary)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling human_summary: %w", err)
+		}
+		s := string(b)
+		humanSummaryStr = &s
+	}
+
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE watchers
 		 SET title            = COALESCE(?, title),
@@ -292,10 +323,11 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 		     rule_config      = COALESCE(?, rule_config),
 		     data_source_id   = COALESCE(?, data_source_id),
 		     adaptive_config  = COALESCE(?, adaptive_config),
+		     human_summary    = COALESCE(?, human_summary),
 		     updated_at       = ?
 		 WHERE id = ?`,
 		titleStr, descStr, envStr, sevStr, filtersStr, timeRangeStr, scheduleStr, modelStr, effortStr, notifyStr,
-		watcherTypeStr, ruleConfigStr, dataSourceIDStr, adaptiveConfigStr,
+		watcherTypeStr, ruleConfigStr, dataSourceIDStr, adaptiveConfigStr, humanSummaryStr,
 		now, id.String(),
 	)
 	if err != nil {

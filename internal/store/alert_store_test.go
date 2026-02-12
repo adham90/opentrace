@@ -87,7 +87,7 @@ func TestAlertStore_CRUD(t *testing.T) {
 	}
 
 	// Dismiss
-	err = as.Dismiss(ctx, a2.ID)
+	err = as.Dismiss(ctx, a2.ID, "")
 	if err != nil {
 		t.Fatalf("Dismiss: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestAlertStore_CRUD(t *testing.T) {
 	}
 
 	// Dismiss not found
-	err = as.Dismiss(ctx, uuid.New())
+	err = as.Dismiss(ctx, uuid.New(), "")
 	if err != ErrNotFound {
 		t.Errorf("Dismiss unknown = %v, want ErrNotFound", err)
 	}

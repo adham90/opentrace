@@ -88,8 +88,11 @@ type AlertStore interface {
 	CountBySeverity(ctx context.Context, since, until time.Time, environment string) (map[string]int, error)
 	MarkRead(ctx context.Context, id uuid.UUID) error
 	MarkAllRead(ctx context.Context, environment string) error
-	Dismiss(ctx context.Context, id uuid.UUID) error
+	Dismiss(ctx context.Context, id uuid.UUID, reason string) error
 	DismissAll(ctx context.Context, environment string) error
+	Snooze(ctx context.Context, id uuid.UUID, until time.Time) error
+	Unsnooze(ctx context.Context, id uuid.UUID) error
+	WatcherAlertStats(ctx context.Context, watcherID uuid.UUID, since time.Time) (*WatcherEffectiveness, error)
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
 }
 

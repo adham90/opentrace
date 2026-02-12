@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -145,5 +146,99 @@ func deleteConnectorHandler(dsStore store.DataSourceStore, registry *connector.R
 		}
 
 		return mcp.NewToolResultText(fmt.Sprintf("Connector %q (%s) deleted and disconnected.", ds.Name, ds.Type)), nil
+	}
+}
+
+// getConnectorHandler returns a handler that retrieves a single connector by ID.
+func getConnectorHandler(dsStore store.DataSourceStore) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := request.GetArguments()
+
+		idStr, _ := args["connector_id"].(string)
+		if idStr == "" {
+			return mcp.NewToolResultError("connector_id is required"), nil
+		}
+
+		id, err := uuid.Parse(idStr)
+		if err != nil {
+			return mcp.NewToolResultError("invalid connector_id format"), nil
+		}
+
+		ds, err := dsStore.GetByID(ctx, id)
+		if err != nil {
+			if err == store.ErrNotFound {
+				return mcp.NewToolResultError(fmt.Sprintf("connector %s not found", idStr)), nil
+			}
+			return mcp.NewToolResultError(fmt.Sprintf("failed to fetch connector: %v", err)), nil
+		}
+
+		data, err := json.MarshalIndent(ds, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal connector: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// updateConnectorHandler returns a handler that updates an existing connector.
+func updateConnectorHandler(dsStore store.DataSourceStore, registry *connector.Registry) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := request.GetArguments()
+
+		idStr, _ := args["connector_id"].(string)
+		if idStr == "" {
+			return mcp.NewToolResultError("connector_id is required"), nil
+		}
+
+		id, err := uuid.Parse(idStr)
+		if err != nil {
+			return mcp.NewToolResultError("invalid connector_id format"), nil
+		}
+
+		// Check the connector exists.
+		ds, err := dsStore.GetByID(ctx, id)
+		if err != nil {
+			if err == store.ErrNotFound {
+				return mcp.NewToolResultError(fmt.Sprintf("connector %s not found", idStr)), nil
+			}
+			return mcp.NewToolResultError(fmt.Sprintf("failed to fetch connector: %v", err)), nil
+		}
+
+		var params store.UpdateDataSourceParams
+
+		if v, ok := args["name"].(string); ok && v != "" {
+			params.Name = &v
+		}
+		if v, ok := args["environment"].(string); ok {
+			params.Environment = &v
+		}
+
+		// Build config from connection_string if provided.
+		configChanged := false
+		if connStr, ok := args["connection_string"].(string); ok && connStr != "" {
+			params.Config = map[string]any{"connection_string": connStr}
+			configChanged = true
+		}
+
+		// Unregister old connector from registry when config changes.
+		if configChanged && registry != nil {
+			registry.Unregister(connector.ConnectorType(string(ds.Type)))
+		}
+
+		updated, err := dsStore.Update(ctx, id, params)
+		if err != nil {
+			if err == store.ErrNotFound {
+				return mcp.NewToolResultError(fmt.Sprintf("connector %s not found", idStr)), nil
+			}
+			return mcp.NewToolResultError(fmt.Sprintf("failed to update connector: %v", err)), nil
+		}
+
+		msg := fmt.Sprintf("Connector %q updated successfully.", updated.Name)
+		if configChanged {
+			msg += " Connection config changed — use test_connector to re-establish the connection."
+		}
+
+		return mcp.NewToolResultText(msg), nil
 	}
 }

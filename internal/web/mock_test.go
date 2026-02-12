@@ -479,7 +479,7 @@ func (m *mockAlertStore) MarkRead(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error {
+func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID, reason string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a, ok := m.alerts[id]
@@ -487,7 +487,36 @@ func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID) error {
 		return store.ErrNotFound
 	}
 	a.Dismissed = true
+	a.DismissReason = reason
+	now := time.Now()
+	a.DismissedAt = &now
 	return nil
+}
+
+func (m *mockAlertStore) Snooze(ctx context.Context, id uuid.UUID, until time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.alerts[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	a.SnoozedUntil = &until
+	return nil
+}
+
+func (m *mockAlertStore) Unsnooze(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.alerts[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	a.SnoozedUntil = nil
+	return nil
+}
+
+func (m *mockAlertStore) WatcherAlertStats(ctx context.Context, watcherID uuid.UUID, since time.Time) (*store.WatcherEffectiveness, error) {
+	return &store.WatcherEffectiveness{WatcherID: watcherID.String()}, nil
 }
 
 func (m *mockAlertStore) DismissAll(ctx context.Context, environment string) error {

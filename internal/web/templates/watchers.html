@@ -3,7 +3,7 @@
   <div class="page-header">
     <h1><span class="prompt">$</span> watchers</h1>
     <div class="actions">
-      {{if .IsAdmin}}<button class="btn btn-primary" onclick="showNewWatcherModal()">+ New Watcher</button>{{end}}
+      <span class="dim" style="font-size:11px">managed by Claude</span>
     </div>
   </div>
 
@@ -36,518 +36,64 @@
   </div>
 </div>
 
-<!-- New Watcher Type Selection Modal -->
-<div id="new-watcher-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="new-watcher-title" style="display:none" onclick="if(event.target===this)hideNewWatcherModal()">
+<!-- Simplified Edit Modal (review/tune only — creation is via Claude MCP) -->
+<div id="edit-modal" class="modal" role="dialog" aria-modal="true" style="display:none" onclick="if(event.target===this)hideEditModal()">
   <div class="modal-content">
     <div class="modal-header">
-      <h3 id="new-watcher-title"><span class="prompt">$</span> new-watcher</h3>
-      <button class="btn-close" onclick="hideNewWatcherModal()">&times;</button>
+      <h3><span class="prompt">$</span> <span id="edit-modal-title">edit-watcher</span></h3>
+      <button class="btn-close" onclick="hideEditModal()">&times;</button>
     </div>
-    <div class="modal-body">
-      <p style="margin-bottom:16px;color:var(--text-dim)">What would you like to watch?</p>
-      <div class="watcher-type-grid">
-        <button class="watcher-type-card" onclick="showRuleModal('query')">
-          <div class="watcher-type-icon">&#8689;</div>
-          <div class="watcher-type-name">Query</div>
-          <div class="watcher-type-desc">Run SQL against your DB</div>
-        </button>
-        <button class="watcher-type-card" onclick="showRuleModal('logs')">
-          <div class="watcher-type-icon">&#9776;</div>
-          <div class="watcher-type-name">Logs</div>
-          <div class="watcher-type-desc">Watch log patterns &amp; volume</div>
-        </button>
-        <button class="watcher-type-card" onclick="showRuleModal('health')">
-          <div class="watcher-type-icon">&#9829;</div>
-          <div class="watcher-type-name">Health</div>
-          <div class="watcher-type-desc">Check if databases are alive</div>
-        </button>
-        <button class="watcher-type-card" onclick="hideNewWatcherModal();showCreateModal()">
-          <div class="watcher-type-icon">&#10023;</div>
-          <div class="watcher-type-name">AI</div>
-          <div class="watcher-type-desc">Let AI analyze your data</div>
-        </button>
-      </div>
-
-      <div id="templates-section" style="margin-top:24px">
-        <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:12px;color:var(--text-dim)">Or start from a template</div>
-        <div id="templates-list" class="templates-grid"></div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Rule Watcher Wizard (query/logs/health) -->
-<div id="rule-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="rule-modal-title" style="display:none" onclick="if(event.target===this)hideRuleModal()">
-  <div class="modal-content">
-    <div class="modal-header">
-      <h3><span class="prompt">$</span> <span id="rule-modal-title">new-query-watcher</span></h3>
-      <button class="btn-close" onclick="hideRuleModal()">&times;</button>
-    </div>
-
-    <!-- Wizard Progress Bar -->
-    <div class="wizard-progress" id="rule-wizard-progress">
-      <span class="wizard-step-indicator active" data-step="1" onclick="wizardGoTo(1)"><span class="wizard-step-num">1</span> Name</span>
-      <span class="wizard-step-connector"></span>
-      <span class="wizard-step-indicator" data-step="2" onclick="wizardGoTo(2)"><span class="wizard-step-num">2</span> Source</span>
-      <span class="wizard-step-connector"></span>
-      <span class="wizard-step-indicator" data-step="3" onclick="wizardGoTo(3)"><span class="wizard-step-num">3</span> <span id="wizard-step3-label">Alert</span></span>
-      <span class="wizard-step-connector"></span>
-      <span class="wizard-step-indicator" data-step="4" onclick="wizardGoTo(4)"><span class="wizard-step-num">4</span> Schedule</span>
-      <span class="wizard-step-connector"></span>
-      <span class="wizard-step-indicator" data-step="5" onclick="wizardGoTo(5)"><span class="wizard-step-num">5</span> Review</span>
-    </div>
-
-    <form id="rule-form" onsubmit="saveRuleWatcher(event)">
-      <input type="hidden" id="rule-source" value="query">
-      <input type="hidden" id="rule-watcher-id" value="">
-
-      <!-- Step 1: Name & Environment -->
-      <div class="wizard-step-content active" data-step="1">
-        <div class="modal-body">
-          <div class="modal-section modal-section-primary">
-            <div class="modal-section-label"><span class="section-number">01</span> Watcher</div>
-            <div class="form-group">
-              <label>Name</label>
-              <input type="text" id="rule-title" required placeholder="e.g. Stuck transactions on production">
-            </div>
-            <div class="form-group">
-              <label>Environment <small>(optional)</small></label>
-              <input type="text" id="rule-env" placeholder="e.g. production">
-            </div>
+    <form id="edit-form" onsubmit="saveEditWatcher(event)">
+      <div class="modal-body">
+        <input type="hidden" id="edit-watcher-id" value="">
+        <div class="modal-section">
+          <div class="form-group">
+            <label>Title</label>
+            <input type="text" id="edit-title" required>
           </div>
-        </div>
-      </div>
-
-      <!-- Step 2: Source Configuration -->
-      <div class="wizard-step-content" data-step="2">
-        <div class="modal-body">
-          <!-- Query source fields -->
-          <div id="rule-query-section" class="modal-section">
-            <div class="modal-section-label"><span class="section-number">02</span> Query</div>
-            <div class="form-group">
-              <label>Data Source</label>
-              <select id="rule-datasource"><option value="">Select data source...</option></select>
-            </div>
-            <div class="form-group">
-              <label>SQL Query</label>
-              <textarea id="rule-query" rows="4" placeholder="SELECT count(*) FROM pg_stat_activity WHERE state = 'idle in transaction'"></textarea>
-            </div>
-            <div id="rule-preview-result" style="display:none;padding:8px 12px;margin-bottom:12px;border:1px solid var(--border);border-radius:4px;font-size:13px"></div>
-            <button type="button" class="btn btn-sm" onclick="runPreview()" id="rule-preview-btn">Run Preview</button>
+          <div class="form-group">
+            <label>Description</label>
+            <textarea id="edit-description" rows="2"></textarea>
           </div>
-
-          <!-- Log source fields -->
-          <div id="rule-logs-section" class="modal-section" style="display:none">
-            <div class="modal-section-label"><span class="section-number">02</span> Log Filter</div>
-            <div class="form-grid">
-              <div class="form-group">
-                <label>Service</label>
-                <input type="text" id="rule-log-service" placeholder="e.g. payments-service">
-              </div>
-              <div class="form-group">
-                <label>Level</label>
-                <select id="rule-log-level">
-                  <option value="">Any</option>
-                  <option value="ERROR">ERROR</option>
-                  <option value="WARN">WARN</option>
-                  <option value="INFO">INFO</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Message Contains</label>
-                <input type="text" id="rule-log-query" placeholder="e.g. connection refused">
-              </div>
-              <div class="form-group">
-                <label>Environment</label>
-                <input type="text" id="rule-log-env" placeholder="e.g. production">
-              </div>
-            </div>
+          <div class="form-grid">
             <div class="form-group">
-              <label>Time Window</label>
-              <select id="rule-log-window">
-                <option value="5m">Last 5 min</option>
-                <option value="15m">Last 15 min</option>
-                <option value="30m">Last 30 min</option>
-                <option value="1h">Last 1 hour</option>
-              </select>
+              <label>Environment</label>
+              <input type="text" id="edit-env" placeholder="e.g. production">
             </div>
-          </div>
-
-          <!-- Health source fields -->
-          <div id="rule-health-section" class="modal-section" style="display:none">
-            <div class="modal-section-label"><span class="section-number">02</span> Health Checks</div>
-            <div class="form-group">
-              <label>Data Source</label>
-              <select id="rule-health-datasource"><option value="">Select data source...</option></select>
-            </div>
-            <div class="form-group">
-              <label>Checks</label>
-              <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="rule-check-connection" checked> Connection reachable</label>
-              <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="rule-check-latency"> Ping latency threshold</label>
-            </div>
-            <div class="form-group" id="rule-latency-group" style="display:none">
-              <label>Max Latency (ms)</label>
-              <input type="number" id="rule-latency-threshold" value="2000" min="100">
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Step 3: Alert Condition -->
-      <div class="wizard-step-content" data-step="3">
-        <div class="modal-body">
-          <div id="rule-condition-section" class="modal-section">
-            <div class="modal-section-label"><span class="section-number">03</span> Alert When</div>
-            <div class="form-grid" style="grid-template-columns: 1fr 1fr 1fr">
-              <div class="form-group">
-                <label>Metric</label>
-                <select id="rule-metric">
-                  <option value="value">Value (first row)</option>
-                  <option value="row_count">Row count</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Operator</label>
-                <select id="rule-operator">
-                  <option value="gt">is greater than</option>
-                  <option value="gte">is greater than or equal</option>
-                  <option value="lt">is less than</option>
-                  <option value="lte">is less than or equal</option>
-                  <option value="eq">equals</option>
-                  <option value="neq">does not equal</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Threshold</label>
-                <input type="number" id="rule-threshold" value="0" step="any">
-              </div>
-            </div>
-          </div>
-          <div class="modal-section">
             <div class="form-group">
               <label>Severity</label>
-              <select id="rule-severity">
+              <select id="edit-severity">
                 <option value="info">Info</option>
-                <option value="warning" selected>Warning</option>
+                <option value="warning">Warning</option>
                 <option value="critical">Critical</option>
               </select>
             </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Step 4: Schedule -->
-      <div class="wizard-step-content" data-step="4">
-        <div class="modal-body">
-          <div class="modal-section">
-            <div class="modal-section-label"><span class="section-number">04</span> Schedule</div>
             <div class="form-group">
-              <label>How often to check</label>
-              <select id="rule-timerange" onchange="onRuleTimerangeChange()">
+              <label>Schedule</label>
+              <select id="edit-timerange">
                 <option value="1m">Every 1 min</option>
-                <option value="5m" selected>Every 5 min</option>
+                <option value="5m">Every 5 min</option>
                 <option value="15m">Every 15 min</option>
                 <option value="30m">Every 30 min</option>
                 <option value="1h">Every 1 hour</option>
-              </select>
-              <div class="form-hint">Sets both the run interval and the lookback window</div>
-            </div>
-            <div class="form-group" style="margin-top:8px">
-              <label style="cursor:pointer;font-size:12px;text-transform:none;letter-spacing:0;color:var(--text-dim)" onclick="toggleRuleAdvancedSchedule()">
-                <span id="rule-adv-toggle-icon">&#9654;</span> Custom schedule (cron expression)
-              </label>
-              <div id="rule-advanced-schedule" style="display:none;margin-top:8px">
-                <input type="text" id="rule-schedule" placeholder="e.g. 0 9 * * 1-5 (weekdays at 9am)" style="font-family:monospace">
-                <div class="form-hint">Standard 5-field cron: min hour dom month dow. Or use @hourly, @daily, @weekly.</div>
-                <div id="rule-schedule-preview" style="margin-top:4px;font-size:12px;color:var(--text-dim)"></div>
-                <div class="schedule-help">Check interval = how often the watcher runs. The dropdown above becomes the lookback window when a cron schedule is set.</div>
-              </div>
-            </div>
-          </div>
-          <!-- Adaptive Scheduling (collapsible) -->
-          <div class="modal-section">
-            <div class="modal-section-label" style="cursor:pointer" onclick="toggleAdaptiveSection('rule')">
-              <span id="rule-adaptive-toggle-icon">&#9654;</span> Adaptive Scheduling <span style="font-size:10px;color:var(--text-dim);font-weight:400">(optional)</span>
-            </div>
-            <div id="rule-adaptive-section" style="display:none">
-              <div class="form-group">
-                <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="rule-adaptive-enabled"> Enable adaptive scheduling</label>
-                <div class="form-hint">Automatically adjust polling frequency based on alert state</div>
-              </div>
-              <div id="rule-adaptive-fields" style="display:none">
-                <div class="form-grid">
-                  <div class="form-group">
-                    <label>Escalated Interval</label>
-                    <input type="text" id="rule-adaptive-escalated" placeholder="e.g. 1m (default: 1/4 of normal)">
-                    <div class="form-hint">How often to check when alerting</div>
-                  </div>
-                  <div class="form-group">
-                    <label>Escalation Duration</label>
-                    <input type="text" id="rule-adaptive-duration" placeholder="e.g. 30m (default)">
-                    <div class="form-hint">Max time in escalated state</div>
-                  </div>
-                  <div class="form-group">
-                    <label>Cooldown Runs</label>
-                    <input type="number" id="rule-adaptive-cooldown" placeholder="3" min="1">
-                    <div class="form-hint">Clean runs before returning to normal</div>
-                  </div>
-                  <div class="form-group">
-                    <label>Max Consecutive Errors</label>
-                    <input type="number" id="rule-adaptive-max-errors" placeholder="5" min="1">
-                    <div class="form-hint">Errors before pausing watcher</div>
-                  </div>
-                </div>
-                <div class="form-group" style="margin-top:8px">
-                  <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="rule-adaptive-relax"> Enable relaxation (reduce frequency when quiet)</label>
-                </div>
-                <div id="rule-relax-fields" style="display:none">
-                  <div class="form-grid">
-                    <div class="form-group">
-                      <label>Relaxed Interval</label>
-                      <input type="text" id="rule-adaptive-relaxed" placeholder="e.g. 2h">
-                    </div>
-                    <div class="form-group">
-                      <label>Relax After Runs</label>
-                      <input type="number" id="rule-adaptive-relax-after" placeholder="20" min="1">
-                      <div class="form-hint">Clean runs before relaxing</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Step 5: Review & Create -->
-      <div class="wizard-step-content" data-step="5">
-        <div class="modal-body">
-          <div class="modal-section">
-            <div class="modal-section-label">Review Configuration</div>
-            <div id="rule-wizard-summary" class="wizard-summary"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Wizard Footer -->
-      <div class="wizard-footer">
-        <div class="wizard-footer-left">
-          <button type="button" class="btn" onclick="hideRuleModal()">Cancel</button>
-        </div>
-        <div class="wizard-footer-right">
-          <button type="button" class="btn" id="rule-wizard-back" onclick="wizardBack()" style="display:none">Back</button>
-          <button type="button" class="btn btn-primary" id="rule-wizard-next" onclick="wizardNext()">Next</button>
-          <button type="submit" class="btn btn-primary" id="rule-save-btn" style="display:none">Create Watcher</button>
-        </div>
-      </div>
-    </form>
-  </div>
-</div>
-
-<!-- AI Create/Edit Modal (existing) -->
-<div id="watcher-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="ai-modal-title" style="display:none" onclick="if(event.target===this)hideModal()">
-  <div class="modal-content">
-    <div class="modal-header">
-      <h3><span class="prompt">$</span> <span id="ai-modal-title">new-ai-watcher</span></h3>
-      <button class="btn-close" onclick="hideModal()">&times;</button>
-    </div>
-    <form id="watcher-form" onsubmit="saveWatcher(event)">
-      <div class="modal-body">
-        <input type="hidden" id="watcher-id" value="">
-
-        <!-- 01 What to Watch -->
-        <div class="modal-section modal-section-primary">
-          <div class="modal-section-label"><span class="section-number">01</span> What to Watch</div>
-          <div class="form-group">
-            <label>Watcher Name</label>
-            <input type="text" id="watcher-title" required placeholder="e.g. Payment failures spike">
-          </div>
-          <div class="form-group">
-            <label>Analysis Instructions</label>
-            <textarea id="watcher-description" rows="3" required placeholder="Check if payment gateway errors exceed normal rate. Look for patterns in failing merchant IDs."></textarea>
-            <details class="form-tips">
-              <summary>$ tips</summary>
-              <ul>
-                <li><span class="text-green">--</span> Good: "Alert if error count > 50 in the time window"</li>
-                <li><span class="text-green">--</span> Good: "Look for repeated 503s from the same upstream"</li>
-                <li><span class="text-red">--</span> Bad: "Check for errors" (too vague for the AI)</li>
-              </ul>
-            </details>
-          </div>
-
-          <div class="form-group">
-            <label>Environment <small>(watcher scope)</small></label>
-            <input type="text" id="watcher-env" placeholder="e.g. production, staging">
-          </div>
-
-          <div class="form-subsection">
-            <div class="form-subsection-label">Log Scope</div>
-            <div class="form-grid">
-              <div class="form-group">
-                <label>Service</label>
-                <input type="text" id="filter-service" placeholder="e.g. payment-api">
-              </div>
-              <div class="form-group">
-                <label>Log Level</label>
-                <select id="filter-level">
-                  <option value="">Any</option>
-                  <option value="error">error</option>
-                  <option value="warn">warn</option>
-                  <option value="info">info</option>
-                  <option value="debug">debug</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Environment</label>
-                <input type="text" id="filter-env" placeholder="e.g. production">
-              </div>
-              <div class="form-group">
-                <label>Search Query</label>
-                <input type="text" id="filter-query" placeholder="e.g. timeout OR refused">
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 02 Schedule -->
-        <div class="modal-section">
-          <div class="modal-section-label"><span class="section-number">02</span> Schedule</div>
-          <div class="form-group">
-            <label>How often to check</label>
-            <select id="watcher-timerange">
-              <option value="5m">Every 5 min</option>
-              <option value="15m" selected>Every 15 min</option>
-              <option value="30m">Every 30 min</option>
-              <option value="1h">Every 1 hour</option>
-              <option value="6h">Every 6 hours</option>
-              <option value="24h">Every 24 hours</option>
-            </select>
-            <div class="form-hint">Sets both the run interval and the log lookback window the AI analyzes</div>
-          </div>
-          <div class="form-group" style="margin-top:8px">
-            <label style="cursor:pointer;font-size:12px;text-transform:none;letter-spacing:0;color:var(--text-dim)" onclick="toggleAiAdvancedSchedule()">
-              <span id="ai-adv-toggle-icon">&#9654;</span> Custom schedule (cron expression)
-            </label>
-            <div id="ai-advanced-schedule" style="display:none;margin-top:8px">
-              <input type="text" id="watcher-schedule" placeholder="e.g. 0 9 * * * (daily at 9am)" style="font-family:monospace">
-              <div class="form-hint">Standard 5-field cron: min hour dom month dow. Or use @hourly, @daily, @weekly.</div>
-              <div id="ai-schedule-preview" style="margin-top:4px;font-size:12px;color:var(--text-dim)"></div>
-              <div class="schedule-help">When a cron schedule is set, it controls when the watcher runs. The dropdown above becomes just the log lookback window (how far back the AI looks).</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 03 Alert Behavior -->
-        <div class="modal-section">
-          <div class="modal-section-label"><span class="section-number">03</span> Alert Behavior</div>
-          <div class="form-grid">
-            <div class="form-group">
-              <label>Alert Severity</label>
-              <select id="watcher-severity">
-                <option value="info">Info</option>
-                <option value="warning" selected>Warning</option>
-                <option value="critical">Critical</option>
+                <option value="6h">Every 6 hours</option>
+                <option value="24h">Every 24 hours</option>
               </select>
             </div>
             <div class="form-group">
-              <label>AI Model</label>
-              <select id="watcher-model">
-                <option value="">Default (global)</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Analysis Effort</label>
-              <select id="watcher-effort">
-                <option value="low">Low — quick check</option>
-                <option value="medium" selected>Medium — balanced</option>
-                <option value="high">High — deep analysis</option>
+              <label>Effort</label>
+              <select id="edit-effort">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
               </select>
             </div>
           </div>
         </div>
-
-        <!-- 04 Adaptive Scheduling (collapsible) -->
-        <div class="modal-section">
-          <div class="modal-section-label" style="cursor:pointer" onclick="toggleAdaptiveSection('ai')">
-            <span id="ai-adaptive-toggle-icon">&#9654;</span> Adaptive Scheduling
-          </div>
-          <div id="ai-adaptive-section" style="display:none">
-            <div class="form-group">
-              <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="ai-adaptive-enabled"> Enable adaptive scheduling</label>
-              <div class="form-hint">Automatically adjust polling frequency based on alert state</div>
-            </div>
-            <div id="ai-adaptive-fields" style="display:none">
-              <div class="form-grid">
-                <div class="form-group">
-                  <label>Escalated Interval</label>
-                  <input type="text" id="ai-adaptive-escalated" placeholder="e.g. 1m (default: 1/4 of normal)">
-                  <div class="form-hint">How often to check when alerting</div>
-                </div>
-                <div class="form-group">
-                  <label>Escalation Duration</label>
-                  <input type="text" id="ai-adaptive-duration" placeholder="e.g. 30m (default)">
-                  <div class="form-hint">Max time in escalated state</div>
-                </div>
-                <div class="form-group">
-                  <label>Cooldown Runs</label>
-                  <input type="number" id="ai-adaptive-cooldown" placeholder="3" min="1">
-                  <div class="form-hint">Clean runs before returning to normal</div>
-                </div>
-                <div class="form-group">
-                  <label>Max Consecutive Errors</label>
-                  <input type="number" id="ai-adaptive-max-errors" placeholder="5" min="1">
-                  <div class="form-hint">Errors before pausing watcher</div>
-                </div>
-              </div>
-              <div class="form-group" style="margin-top:8px">
-                <label style="font-size:13px;text-transform:none;letter-spacing:0"><input type="checkbox" id="ai-adaptive-relax"> Enable relaxation (reduce frequency when quiet)</label>
-              </div>
-              <div id="ai-relax-fields" style="display:none">
-                <div class="form-grid">
-                  <div class="form-group">
-                    <label>Relaxed Interval</label>
-                    <input type="text" id="ai-adaptive-relaxed" placeholder="e.g. 2h">
-                  </div>
-                  <div class="form-group">
-                    <label>Relax After Runs</label>
-                    <input type="number" id="ai-adaptive-relax-after" placeholder="20" min="1">
-                    <div class="form-hint">Clean runs before relaxing</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 05 Notifications -->
-        <div class="modal-section">
-          <div class="modal-section-label"><span class="section-number">05</span> Notifications</div>
-          <div class="notify-channels">
-            <div class="notify-channel">
-              <span class="notify-channel-icon">&#9632;</span>
-              <span class="notify-channel-name">Dashboard</span>
-              <span class="notify-channel-status always-on">always on</span>
-            </div>
-            <div>
-              <div class="notify-channel">
-                <span class="notify-channel-icon">&#9993;</span>
-                <span class="notify-channel-name">Webhook</span>
-                <input type="checkbox" class="notify-toggle" id="notify-webhook" onchange="toggleWebhook()">
-              </div>
-              <div class="notify-channel-detail" id="webhook-url-group">
-                <div class="form-group" style="margin-bottom:0">
-                  <label>Webhook URL</label>
-                  <input type="url" id="webhook-url" placeholder="https://hooks.slack.com/...">
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
-
       <div class="modal-footer">
-        <button type="button" class="btn" onclick="hideModal()">Cancel</button>
-        <button type="submit" class="btn btn-primary" id="modal-save-btn">Create Watcher</button>
+        <button type="button" class="btn" onclick="hideEditModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="edit-save-btn">Save Changes</button>
       </div>
     </form>
   </div>
@@ -743,64 +289,6 @@ document.addEventListener('keydown', function(e){
   }
 });
 
-function loadModels() {
-  fetch('/api/models').then(function(r) { return r.json(); }).then(function(models) {
-    var sel = document.getElementById('watcher-model');
-    while (sel.options.length > 1) sel.remove(1);
-    if (models && models.length) {
-      models.forEach(function(m) {
-        var opt = document.createElement('option');
-        opt.value = m.name;
-        opt.textContent = m.model + ' (' + m.name + ')';
-        sel.appendChild(opt);
-      });
-    }
-  });
-}
-
-function loadDataSources() {
-  fetch('/api/connectors').then(function(r) { return r.json(); }).then(function(list) {
-    if (!list) return;
-    var selectors = [document.getElementById('rule-datasource'), document.getElementById('rule-health-datasource')];
-    selectors.forEach(function(sel) {
-      if (!sel) return;
-      while (sel.options.length > 1) sel.remove(1);
-      list.forEach(function(ds) {
-        if (ds.type === 'database') {
-          var opt = document.createElement('option');
-          opt.value = ds.id;
-          opt.textContent = ds.name + (ds.environment ? ' (' + ds.environment + ')' : '');
-          sel.appendChild(opt);
-        }
-      });
-    });
-  });
-}
-
-function loadTemplates() {
-  fetch('/api/watchers/templates').then(function(r) { return r.json(); }).then(function(templates) {
-    var container = document.getElementById('templates-list');
-    if (!templates || !templates.length) { container.innerHTML = ''; return; }
-    var byCategory = {};
-    templates.forEach(function(t) {
-      if (!byCategory[t.category]) byCategory[t.category] = [];
-      byCategory[t.category].push(t);
-    });
-    var html = '';
-    Object.keys(byCategory).forEach(function(cat) {
-      html += '<div class="template-category"><div class="template-category-label">' + escapeHtml(cat) + '</div><div class="template-row">';
-      byCategory[cat].forEach(function(t) {
-        html += '<button class="template-card" onclick=\'applyTemplate(' + JSON.stringify(t).replace(/'/g, "&#39;") + ')\'>';
-        html += '<div class="template-name">' + escapeHtml(t.name) + '</div>';
-        html += '<div class="template-desc">' + escapeHtml(t.description) + '</div>';
-        html += '</button>';
-      });
-      html += '</div></div>';
-    });
-    container.innerHTML = html;
-  });
-}
-
 function getWatcherTypeBadge(w) {
   if (w.watcher_type === 'rule' && w.rule_config) {
     var src = w.rule_config.source;
@@ -827,7 +315,7 @@ function getAdaptiveBadge(w) {
 function renderWatchers(watchers) {
   var container = document.getElementById('watchers-list');
   if (!allWatchers || allWatchers.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No watchers yet</p><p class="empty-state-desc">Watchers watch your databases and logs for problems, then alert you when something needs attention.</p>' + (isAdmin ? '<button class="btn btn-primary" onclick="showNewWatcherModal()">+ Create your first watcher</button>' : '') + '</div>';
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">No watchers yet</p><p class="empty-state-desc">Watchers are created by Claude via MCP. Ask Claude to set up monitoring for your databases and logs.</p></div>';
     return;
   }
   if (!watchers || watchers.length === 0) {
@@ -857,14 +345,16 @@ function renderWatchers(watchers) {
     html += '    <span>Last run: ' + lastRun + '</span>';
     html += '    <span class="severity-badge severity-' + w.severity + '">' + w.severity + '</span>';
     html += (w.environment ? '    <span class="badge badge-env">' + escapeHtml(w.environment) + '</span>' : '');
+    if (w.human_summary && w.human_summary.what_it_monitors) {
+        html += '    <span class="badge claude-managed" title="Created and managed by Claude">claude</span>';
+    }
     html += '  </div>';
+    if (w.human_summary && w.human_summary.what_it_monitors) {
+        html += '  <div class="watcher-human-summary">' + escapeHtml(w.human_summary.what_it_monitors) + '</div>';
+    }
     html += '  <div class="watcher-actions">';
     if (isAdmin) {
-      if (w.watcher_type === 'rule') {
-        html += '    <button class="btn btn-sm" onclick="editRuleWatcher(\'' + w.id + '\')">Edit</button>';
-      } else {
-        html += '    <button class="btn btn-sm" onclick="editWatcher(\'' + w.id + '\')">Edit</button>';
-      }
+      html += '    <button class="btn btn-sm" onclick="openEditModal(\'' + w.id + '\')">Edit</button>';
       if (w.status === 'active') {
         html += '    <button class="btn btn-sm" onclick="pauseWatcher(\'' + w.id + '\')">Pause</button>';
       } else if (w.adaptive_state === 'error') {
@@ -893,566 +383,56 @@ function loadWatchers() {
   });
 }
 
-// New watcher modal
-function showNewWatcherModal() {
-  loadDataSources();
-  loadTemplates();
-  document.getElementById('new-watcher-modal').style.display = 'flex';
-}
-function hideNewWatcherModal() {
-  document.getElementById('new-watcher-modal').style.display = 'none';
-}
-
-// Wizard state
-var wizardCurrentStep = 1;
-var wizardTotalSteps = 5;
-var wizardIsEditing = false;
-
-// Rule watcher modal
-function showRuleModal(source) {
-  hideNewWatcherModal();
-  document.getElementById('rule-source').value = source;
-  document.getElementById('rule-watcher-id').value = '';
-  document.getElementById('rule-form').reset();
-  document.getElementById('rule-source').value = source;
-  document.getElementById('rule-preview-result').style.display = 'none';
-  document.getElementById('rule-save-btn').textContent = 'Create Watcher';
-  wizardIsEditing = false;
-
-  var titles = {query: 'new-query-watcher', logs: 'new-log-watcher', health: 'new-health-watcher'};
-  document.getElementById('rule-modal-title').textContent = titles[source] || 'new-watcher';
-
-  // Show/hide source-specific sections
-  document.getElementById('rule-query-section').style.display = source === 'query' ? '' : 'none';
-  document.getElementById('rule-logs-section').style.display = source === 'logs' ? '' : 'none';
-  document.getElementById('rule-health-section').style.display = source === 'health' ? '' : 'none';
-  document.getElementById('rule-condition-section').style.display = source !== 'health' ? '' : 'none';
-
-  // For health watchers, skip alert condition step (step 3 becomes severity only)
-  var step3Label = document.getElementById('wizard-step3-label');
-  if (source === 'health') {
-    step3Label.textContent = 'Severity';
-  } else {
-    step3Label.textContent = 'Alert';
-  }
-
-  if (source === 'logs') {
-    document.getElementById('rule-metric').innerHTML = '<option value="count">Count</option>';
-  } else {
-    document.getElementById('rule-metric').innerHTML = '<option value="value">Value (first row)</option><option value="row_count">Row count</option>';
-  }
-
-  loadDataSources();
-  wizardGoTo(1);
-  document.getElementById('rule-modal').style.display = 'flex';
-}
-function hideRuleModal() {
-  document.getElementById('rule-modal').style.display = 'none';
-}
-
-// Wizard navigation
-function wizardGoTo(step) {
-  // In edit mode, allow jumping to any step. In create mode, only allow completed or current+1
-  if (!wizardIsEditing && step > wizardCurrentStep + 1) return;
-
-  wizardCurrentStep = step;
-  var steps = document.querySelectorAll('.wizard-step-content');
-  steps.forEach(function(el) {
-    el.classList.toggle('active', parseInt(el.getAttribute('data-step')) === step);
-  });
-
-  // Update progress indicators
-  var indicators = document.querySelectorAll('#rule-wizard-progress .wizard-step-indicator');
-  var connectors = document.querySelectorAll('#rule-wizard-progress .wizard-step-connector');
-  indicators.forEach(function(ind) {
-    var s = parseInt(ind.getAttribute('data-step'));
-    ind.classList.toggle('active', s === step);
-    ind.classList.toggle('completed', s < step);
-  });
-  connectors.forEach(function(conn, i) {
-    conn.classList.toggle('completed', i < step - 1);
-  });
-
-  // Show/hide footer buttons
-  var backBtn = document.getElementById('rule-wizard-back');
-  var nextBtn = document.getElementById('rule-wizard-next');
-  var saveBtn = document.getElementById('rule-save-btn');
-
-  backBtn.style.display = step > 1 ? '' : 'none';
-  nextBtn.style.display = step < wizardTotalSteps ? '' : 'none';
-  saveBtn.style.display = step === wizardTotalSteps ? '' : 'none';
-
-  // Populate summary on step 5
-  if (step === wizardTotalSteps) {
-    renderWizardSummary();
-  }
-}
-
-function wizardNext() {
-  // Validate current step before advancing
-  if (!validateWizardStep(wizardCurrentStep)) return;
-  if (wizardCurrentStep < wizardTotalSteps) {
-    wizardGoTo(wizardCurrentStep + 1);
-  }
-}
-
-function wizardBack() {
-  if (wizardCurrentStep > 1) {
-    wizardGoTo(wizardCurrentStep - 1);
-  }
-}
-
-function validateWizardStep(step) {
-  var source = document.getElementById('rule-source').value;
-  if (step === 1) {
-    var titleInput = document.getElementById('rule-title');
-    return validateField(titleInput, [{required: true, message: 'Watcher name is required'}, {minLength: 3, message: 'Name must be at least 3 characters'}]);
-  }
-  if (step === 2) {
-    if (source === 'query') {
-      var dsOk = true;
-      if (!document.getElementById('rule-datasource').value) {
-        showToast('Please select a data source', 'warning');
-        dsOk = false;
-      }
-      var qOk = validateField(document.getElementById('rule-query'), [{required: true, message: 'SQL query is required'}]);
-      return dsOk && qOk;
-    }
-    if (source === 'health') {
-      if (!document.getElementById('rule-health-datasource').value) {
-        showToast('Please select a data source', 'warning');
-        return false;
-      }
-    }
-    return true;
-  }
-  return true;
-}
-
-function renderWizardSummary() {
-  var source = document.getElementById('rule-source').value;
-  var html = '';
-
-  // Name & Env
-  html += '<div class="summary-section">';
-  html += '<div class="summary-section-label">Watcher</div>';
-  html += '<div class="summary-row"><span class="summary-key">Name</span><span class="summary-val">' + escapeHtml(document.getElementById('rule-title').value) + '</span></div>';
-  html += '<div class="summary-row"><span class="summary-key">Type</span><span class="summary-val">' + source + '</span></div>';
-  var env = document.getElementById('rule-env').value;
-  if (env) html += '<div class="summary-row"><span class="summary-key">Environment</span><span class="summary-val">' + escapeHtml(env) + '</span></div>';
-  html += '</div>';
-
-  // Source config
-  html += '<div class="summary-section">';
-  html += '<div class="summary-section-label">Source</div>';
-  if (source === 'query') {
-    var dsSel = document.getElementById('rule-datasource');
-    var dsName = dsSel.options[dsSel.selectedIndex] ? dsSel.options[dsSel.selectedIndex].textContent : '—';
-    html += '<div class="summary-row"><span class="summary-key">Data Source</span><span class="summary-val">' + escapeHtml(dsName) + '</span></div>';
-    html += '<div class="summary-row"><span class="summary-key">Query</span><span class="summary-val" style="font-size:11px;white-space:pre-wrap">' + escapeHtml(document.getElementById('rule-query').value) + '</span></div>';
-  } else if (source === 'logs') {
-    var logSvc = document.getElementById('rule-log-service').value;
-    var logLvl = document.getElementById('rule-log-level').value;
-    var logQ = document.getElementById('rule-log-query').value;
-    if (logSvc) html += '<div class="summary-row"><span class="summary-key">Service</span><span class="summary-val">' + escapeHtml(logSvc) + '</span></div>';
-    if (logLvl) html += '<div class="summary-row"><span class="summary-key">Level</span><span class="summary-val">' + escapeHtml(logLvl) + '</span></div>';
-    if (logQ) html += '<div class="summary-row"><span class="summary-key">Contains</span><span class="summary-val">' + escapeHtml(logQ) + '</span></div>';
-    html += '<div class="summary-row"><span class="summary-key">Window</span><span class="summary-val">' + document.getElementById('rule-log-window').value + '</span></div>';
-  } else if (source === 'health') {
-    var hdsSel = document.getElementById('rule-health-datasource');
-    var hdsName = hdsSel.options[hdsSel.selectedIndex] ? hdsSel.options[hdsSel.selectedIndex].textContent : '—';
-    html += '<div class="summary-row"><span class="summary-key">Data Source</span><span class="summary-val">' + escapeHtml(hdsName) + '</span></div>';
-    var checks = [];
-    if (document.getElementById('rule-check-connection').checked) checks.push('connection');
-    if (document.getElementById('rule-check-latency').checked) checks.push('latency');
-    html += '<div class="summary-row"><span class="summary-key">Checks</span><span class="summary-val">' + checks.join(', ') + '</span></div>';
-  }
-  html += '</div>';
-
-  // Alert condition (non-health)
-  if (source !== 'health') {
-    var opSel = document.getElementById('rule-operator');
-    var opText = opSel.options[opSel.selectedIndex] ? opSel.options[opSel.selectedIndex].textContent : '';
-    html += '<div class="summary-section">';
-    html += '<div class="summary-section-label">Alert Condition</div>';
-    html += '<div class="summary-row"><span class="summary-key">Condition</span><span class="summary-val">' + document.getElementById('rule-metric').value + ' ' + opText + ' ' + document.getElementById('rule-threshold').value + '</span></div>';
-    html += '<div class="summary-row"><span class="summary-key">Severity</span><span class="summary-val">' + document.getElementById('rule-severity').value + '</span></div>';
-    html += '</div>';
-  } else {
-    html += '<div class="summary-section">';
-    html += '<div class="summary-section-label">Severity</div>';
-    html += '<div class="summary-row"><span class="summary-key">Severity</span><span class="summary-val">' + document.getElementById('rule-severity').value + '</span></div>';
-    html += '</div>';
-  }
-
-  // Schedule
-  html += '<div class="summary-section">';
-  html += '<div class="summary-section-label">Schedule</div>';
-  var cronVal = (document.getElementById('rule-schedule') || {}).value;
-  if (cronVal) {
-    html += '<div class="summary-row"><span class="summary-key">Schedule</span><span class="summary-val">' + escapeHtml(describeSchedule(cronVal)) + '</span></div>';
-    html += '<div class="summary-row"><span class="summary-key">Lookback</span><span class="summary-val">' + document.getElementById('rule-timerange').value + '</span></div>';
-  } else {
-    html += '<div class="summary-row"><span class="summary-key">Interval</span><span class="summary-val">' + document.getElementById('rule-timerange').value + '</span></div>';
-  }
-  var adaptiveEnabled = document.getElementById('rule-adaptive-enabled');
-  if (adaptiveEnabled && adaptiveEnabled.checked) {
-    html += '<div class="summary-row"><span class="summary-key">Adaptive</span><span class="summary-val" style="color:var(--green)">enabled</span></div>';
-  }
-  html += '</div>';
-
-  document.getElementById('rule-wizard-summary').innerHTML = html;
-}
-
-function applyTemplate(t) {
-  hideNewWatcherModal();
-  var rc = t.rule_config;
-  showRuleModal(rc.source);
-  wizardIsEditing = true; // Allow jumping to any step
-  document.getElementById('rule-title').value = t.name;
-  document.getElementById('rule-severity').value = t.severity || 'warning';
-  document.getElementById('rule-timerange').value = t.time_range || '5m';
-
-  if (rc.source === 'query') {
-    document.getElementById('rule-query').value = rc.query || '';
-    document.getElementById('rule-metric').value = rc.metric || 'value';
-    document.getElementById('rule-operator').value = rc.operator || 'gt';
-    document.getElementById('rule-threshold').value = rc.threshold || 0;
-  } else if (rc.source === 'logs') {
-    if (rc.filter) {
-      document.getElementById('rule-log-service').value = rc.filter.service || '';
-      document.getElementById('rule-log-level').value = rc.filter.level || '';
-      document.getElementById('rule-log-query').value = rc.filter.query || '';
-      document.getElementById('rule-log-env').value = rc.filter.environment || '';
-    }
-    document.getElementById('rule-log-window').value = rc.time_window || '5m';
-    document.getElementById('rule-operator').value = rc.operator || 'gt';
-    document.getElementById('rule-threshold').value = rc.threshold || 0;
-  } else if (rc.source === 'health') {
-    if (rc.checks) {
-      document.getElementById('rule-check-connection').checked = rc.checks.indexOf('connection') >= 0;
-      document.getElementById('rule-check-latency').checked = rc.checks.indexOf('latency') >= 0;
-    }
-    if (rc.latency_threshold_ms) {
-      document.getElementById('rule-latency-threshold').value = rc.latency_threshold_ms;
-    }
-    toggleLatency();
-  }
-  // Jump to summary step so user can review and modify
-  wizardGoTo(wizardTotalSteps);
-}
-
-function toggleLatency() {
-  var show = document.getElementById('rule-check-latency').checked;
-  document.getElementById('rule-latency-group').style.display = show ? '' : 'none';
-}
-document.getElementById('rule-check-latency').addEventListener('change', toggleLatency);
-
-function buildRuleConfig() {
-  var source = document.getElementById('rule-source').value;
-  var cfg = {source: source};
-
-  if (source === 'query') {
-    cfg.query = document.getElementById('rule-query').value;
-    cfg.metric = document.getElementById('rule-metric').value;
-    cfg.operator = document.getElementById('rule-operator').value;
-    cfg.threshold = parseFloat(document.getElementById('rule-threshold').value) || 0;
-  } else if (source === 'logs') {
-    cfg.metric = 'count';
-    cfg.operator = document.getElementById('rule-operator').value;
-    cfg.threshold = parseFloat(document.getElementById('rule-threshold').value) || 0;
-    cfg.time_window = document.getElementById('rule-log-window').value;
-    var filter = {};
-    var s = document.getElementById('rule-log-service').value; if (s) filter.service = s;
-    var l = document.getElementById('rule-log-level').value; if (l) filter.level = l;
-    var q = document.getElementById('rule-log-query').value; if (q) filter.query = q;
-    var e = document.getElementById('rule-log-env').value; if (e) filter.environment = e;
-    if (Object.keys(filter).length) cfg.filter = filter;
-  } else if (source === 'health') {
-    var checks = [];
-    if (document.getElementById('rule-check-connection').checked) checks.push('connection');
-    if (document.getElementById('rule-check-latency').checked) checks.push('latency');
-    cfg.checks = checks;
-    if (document.getElementById('rule-check-latency').checked) {
-      cfg.latency_threshold_ms = parseInt(document.getElementById('rule-latency-threshold').value) || 2000;
-    }
-  }
-  return cfg;
-}
-
-function runPreview() {
-  var btn = document.getElementById('rule-preview-btn');
-  var result = document.getElementById('rule-preview-result');
-  btn.disabled = true; btn.textContent = 'Running...';
-  result.style.display = 'none';
-
-  var body = {
-    watcher_type: 'rule',
-    rule_config: buildRuleConfig(),
-    data_source_id: document.getElementById('rule-datasource').value || undefined
-  };
-
-  fetch('/api/watchers/preview', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body)
-  }).then(function(r) { return r.json(); }).then(function(data) {
-    btn.disabled = false; btn.textContent = 'Run Preview';
-    var color = data.would_alert ? 'var(--red)' : 'var(--green)';
-    var icon = data.would_alert ? '!' : '&#10003;';
-    result.innerHTML = '<span style="color:' + color + '">' + icon + '</span> ' + escapeHtml(data.summary) + ' <span style="color:var(--text-dim)">(' + data.query_time_ms + 'ms)</span>';
-    result.style.display = '';
-  }).catch(function() {
-    btn.disabled = false; btn.textContent = 'Run Preview';
-    result.innerHTML = '<span style="color:var(--red)">Preview failed</span>';
-    result.style.display = '';
-    showToast('Preview failed — check your query and data source', 'error');
+// --- Simplified Edit Modal ---
+function openEditModal(id) {
+  fetch('/api/watchers/' + id).then(function(r) { return r.json(); }).then(function(w) {
+    document.getElementById('edit-watcher-id').value = w.id;
+    document.getElementById('edit-title').value = w.title;
+    document.getElementById('edit-description').value = w.description || '';
+    document.getElementById('edit-env').value = w.environment || '';
+    document.getElementById('edit-severity').value = w.severity || 'warning';
+    document.getElementById('edit-timerange').value = w.time_range || '15m';
+    document.getElementById('edit-effort').value = w.effort || 'medium';
+    document.getElementById('edit-modal').style.display = 'flex';
   });
 }
 
-function saveRuleWatcher(e) {
+function hideEditModal() {
+  document.getElementById('edit-modal').style.display = 'none';
+}
+
+function saveEditWatcher(e) {
   e.preventDefault();
-  var titleInput = document.getElementById('rule-title');
-  var source = document.getElementById('rule-source').value;
+  var id = document.getElementById('edit-watcher-id').value;
+  var btn = document.getElementById('edit-save-btn');
+  btn.disabled = true; btn.textContent = 'saving...';
 
-  // Validate required fields
-  var valid = true;
-  if (!validateField(titleInput, [{required: true, message: 'Watcher name is required'}, {minLength: 3, message: 'Name must be at least 3 characters'}])) valid = false;
-
-  if (source === 'query') {
-    var dsInput = document.getElementById('rule-datasource');
-    var queryInput = document.getElementById('rule-query');
-    if (!dsInput.value) { showToast('Please select a data source', 'error'); valid = false; }
-    if (!validateField(queryInput, [{required: true, message: 'SQL query is required'}])) valid = false;
-  } else if (source === 'health') {
-    var hdsInput = document.getElementById('rule-health-datasource');
-    if (!hdsInput.value) { showToast('Please select a data source', 'error'); valid = false; }
-  }
-  if (!valid) return;
-
-  var id = document.getElementById('rule-watcher-id').value;
-  var dsId = source === 'health' ? document.getElementById('rule-health-datasource').value : document.getElementById('rule-datasource').value;
-  var btn = document.getElementById('rule-save-btn');
-  setButtonLoading(btn, true, 'saving...');
-
-  var schedule = (document.getElementById('rule-schedule') || {}).value || '';
   var body = {
-    title: document.getElementById('rule-title').value,
-    watcher_type: 'rule',
-    rule_config: buildRuleConfig(),
-    severity: document.getElementById('rule-severity').value,
-    time_range: document.getElementById('rule-timerange').value,
-    environment: document.getElementById('rule-env').value
+    title: document.getElementById('edit-title').value,
+    description: document.getElementById('edit-description').value,
+    environment: document.getElementById('edit-env').value,
+    severity: document.getElementById('edit-severity').value,
+    time_range: document.getElementById('edit-timerange').value,
+    effort: document.getElementById('edit-effort').value
   };
-  if (schedule) body.schedule = schedule;
-  if (dsId) body.data_source_id = dsId;
-  var adaptiveCfg = buildAdaptiveConfig('rule');
-  if (adaptiveCfg) body.adaptive_config = adaptiveCfg;
 
-  var method = id ? 'PUT' : 'POST';
-  var url = id ? '/api/watchers/' + id : '/api/watchers';
-
-  fetch(url, {
-    method: method,
+  fetch('/api/watchers/' + id, {
+    method: 'PUT',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body)
   }).then(function(resp) {
-    if (!resp.ok) return resp.json().then(function(d) { setButtonLoading(btn, false); showToast(d.error || 'Error saving watcher', 'error'); });
-    setButtonLoading(btn, false);
-    showToast(id ? 'Watcher updated' : 'Watcher created', 'success');
-    hideRuleModal();
+    btn.disabled = false; btn.textContent = 'Save Changes';
+    if (!resp.ok) return resp.json().then(function(d) { showToast(d.error || 'Error saving watcher', 'error'); });
+    showToast('Watcher updated', 'success');
+    hideEditModal();
     loadWatchers();
   }).catch(function() {
-    setButtonLoading(btn, false);
-    showToast('Network error — could not save watcher', 'error');
+    btn.disabled = false; btn.textContent = 'Save Changes';
+    showToast('Network error', 'error');
   });
 }
 
-function editRuleWatcher(id) {
-  fetch('/api/watchers/' + id).then(function(r) { return r.json(); }).then(function(w) {
-    var rc = w.rule_config || {};
-    showRuleModal(rc.source || 'query');
-    wizardIsEditing = true;
-    document.getElementById('rule-watcher-id').value = w.id;
-    document.getElementById('rule-title').value = w.title;
-    document.getElementById('rule-env').value = w.environment || '';
-    document.getElementById('rule-severity').value = w.severity || 'warning';
-    document.getElementById('rule-timerange').value = w.time_range || '5m';
-    document.getElementById('rule-save-btn').textContent = 'Save Changes';
-    document.getElementById('rule-modal-title').textContent = 'edit-watcher';
-
-    // Populate schedule if set
-    if (w.schedule) {
-      document.getElementById('rule-schedule').value = w.schedule;
-      document.getElementById('rule-advanced-schedule').style.display = '';
-      document.getElementById('rule-adv-toggle-icon').innerHTML = '&#9660;';
-      document.getElementById('rule-schedule-preview').textContent = '→ ' + describeSchedule(w.schedule);
-    }
-
-    if (rc.source === 'query') {
-      document.getElementById('rule-query').value = rc.query || '';
-      document.getElementById('rule-metric').value = rc.metric || 'value';
-      document.getElementById('rule-operator').value = rc.operator || 'gt';
-      document.getElementById('rule-threshold').value = rc.threshold || 0;
-      if (w.data_source_id) document.getElementById('rule-datasource').value = w.data_source_id;
-    } else if (rc.source === 'logs') {
-      if (rc.filter) {
-        document.getElementById('rule-log-service').value = rc.filter.service || '';
-        document.getElementById('rule-log-level').value = rc.filter.level || '';
-        document.getElementById('rule-log-query').value = rc.filter.query || '';
-        document.getElementById('rule-log-env').value = rc.filter.environment || '';
-      }
-      document.getElementById('rule-log-window').value = rc.time_window || '5m';
-      document.getElementById('rule-operator').value = rc.operator || 'gt';
-      document.getElementById('rule-threshold').value = rc.threshold || 0;
-    } else if (rc.source === 'health') {
-      if (rc.checks) {
-        document.getElementById('rule-check-connection').checked = rc.checks.indexOf('connection') >= 0;
-        document.getElementById('rule-check-latency').checked = rc.checks.indexOf('latency') >= 0;
-      }
-      if (rc.latency_threshold_ms) document.getElementById('rule-latency-threshold').value = rc.latency_threshold_ms;
-      if (w.data_source_id) document.getElementById('rule-health-datasource').value = w.data_source_id;
-      toggleLatency();
-    }
-    populateAdaptiveConfig('rule', w.adaptive_config);
-  });
-}
-
-// AI watcher modal (existing)
-function showCreateModal() {
-  document.getElementById('ai-modal-title').textContent = 'new-ai-watcher';
-  document.getElementById('modal-save-btn').textContent = 'Create Watcher';
-  document.getElementById('watcher-id').value = '';
-  document.getElementById('watcher-form').reset();
-  document.getElementById('webhook-url-group').classList.remove('show');
-  document.getElementById('watcher-modal').style.display = 'flex';
-}
-
-function hideModal() {
-  document.getElementById('watcher-modal').style.display = 'none';
-}
-
-function toggleWebhook() {
-  var show = document.getElementById('notify-webhook').checked;
-  var el = document.getElementById('webhook-url-group');
-  if (show) { el.classList.add('show'); } else { el.classList.remove('show'); }
-}
-
-function saveWatcher(e) {
-  e.preventDefault();
-  var titleInput = document.getElementById('watcher-title');
-  var descInput = document.getElementById('watcher-description');
-
-  // Validate required fields
-  var valid = true;
-  if (!validateField(titleInput, [{required: true, message: 'Watcher name is required'}, {minLength: 3, message: 'Name must be at least 3 characters'}])) valid = false;
-  if (!validateField(descInput, [{required: true, message: 'Analysis instructions are required'}, {minLength: 10, message: 'Please provide more detailed instructions'}])) valid = false;
-  if (!valid) return;
-
-  var id = document.getElementById('watcher-id').value;
-  var btn = document.getElementById('modal-save-btn');
-  setButtonLoading(btn, true, 'saving...');
-
-  var filters = {};
-  var svc = document.getElementById('filter-service').value;
-  var lvl = document.getElementById('filter-level').value;
-  var env = document.getElementById('filter-env').value;
-  var q = document.getElementById('filter-query').value;
-  if (svc) filters.service = svc;
-  if (lvl) filters.level = lvl;
-  if (env) filters.environment = env;
-  if (q) filters.query = q;
-
-  var notify = ['dashboard'];
-  if (document.getElementById('notify-webhook').checked) {
-    var url = document.getElementById('webhook-url').value;
-    if (url) notify.push({type: 'webhook', url: url});
-  }
-
-  var aiSchedule = (document.getElementById('watcher-schedule') || {}).value || '';
-  var body = {
-    title: document.getElementById('watcher-title').value,
-    description: document.getElementById('watcher-description').value,
-    watcher_type: 'ai',
-    severity: document.getElementById('watcher-severity').value,
-    time_range: document.getElementById('watcher-timerange').value,
-    model: document.getElementById('watcher-model').value,
-    effort: document.getElementById('watcher-effort').value,
-    environment: document.getElementById('watcher-env').value,
-    filters: filters,
-    notify: notify
-  };
-  if (aiSchedule) body.schedule = aiSchedule;
-  var adaptiveCfg = buildAdaptiveConfig('ai');
-  if (adaptiveCfg) body.adaptive_config = adaptiveCfg;
-
-  var method = id ? 'PUT' : 'POST';
-  var url = id ? '/api/watchers/' + id : '/api/watchers';
-
-  fetch(url, {
-    method: method,
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body)
-  }).then(function(resp) {
-    if (!resp.ok) return resp.json().then(function(d) { setButtonLoading(btn, false); showToast(d.error || 'Error saving watcher', 'error'); });
-    setButtonLoading(btn, false);
-    showToast(id ? 'Watcher updated' : 'Watcher created', 'success');
-    hideModal();
-    loadWatchers();
-  }).catch(function() {
-    setButtonLoading(btn, false);
-    showToast('Network error — could not save watcher', 'error');
-  });
-}
-
-function editWatcher(id) {
-  fetch('/api/watchers/' + id).then(function(r) { return r.json(); }).then(function(w) {
-    document.getElementById('ai-modal-title').textContent = 'edit-ai-watcher';
-    document.getElementById('modal-save-btn').textContent = 'Save Changes';
-    document.getElementById('watcher-id').value = w.id;
-    document.getElementById('watcher-title').value = w.title;
-    document.getElementById('watcher-description').value = w.description;
-    document.getElementById('watcher-severity').value = w.severity;
-    document.getElementById('watcher-timerange').value = w.time_range || '15m';
-    document.getElementById('watcher-model').value = w.model || '';
-    document.getElementById('watcher-effort').value = w.effort || 'medium';
-    document.getElementById('watcher-env').value = w.environment || '';
-
-    // Populate schedule if set
-    if (w.schedule) {
-      document.getElementById('watcher-schedule').value = w.schedule;
-      document.getElementById('ai-advanced-schedule').style.display = '';
-      document.getElementById('ai-adv-toggle-icon').innerHTML = '&#9660;';
-      document.getElementById('ai-schedule-preview').textContent = '→ ' + describeSchedule(w.schedule);
-    } else {
-      document.getElementById('watcher-schedule').value = '';
-      document.getElementById('ai-advanced-schedule').style.display = 'none';
-      document.getElementById('ai-adv-toggle-icon').innerHTML = '&#9654;';
-      document.getElementById('ai-schedule-preview').textContent = '';
-    }
-
-    var f = w.filters || {};
-    document.getElementById('filter-service').value = f.service || '';
-    document.getElementById('filter-level').value = f.level || '';
-    document.getElementById('filter-env').value = f.environment || '';
-    document.getElementById('filter-query').value = f.query || '';
-
-    var notify = w.notify || [];
-    var hasWebhook = false;
-    var webhookUrl = '';
-    for (var i = 0; i < notify.length; i++) {
-      if (notify[i] && notify[i].type === 'webhook') { hasWebhook = true; webhookUrl = notify[i].url || ''; }
-    }
-    document.getElementById('notify-webhook').checked = hasWebhook;
-    document.getElementById('webhook-url').value = webhookUrl;
-    var wg = document.getElementById('webhook-url-group');
-    if (hasWebhook) { wg.classList.add('show'); } else { wg.classList.remove('show'); }
-
-    populateAdaptiveConfig('ai', w.adaptive_config);
-    document.getElementById('watcher-modal').style.display = 'flex';
-  });
-}
-
+// --- Watcher lifecycle ---
 function pauseWatcher(id) {
   fetch('/api/watchers/' + id + '/pause', { method: 'POST' }).then(function(r) {
     if (r.ok) showToast('Watcher paused', 'info');
@@ -1486,6 +466,7 @@ function deleteWatcher(id) {
   }).catch(function() { showToast('Network error', 'error'); });
 }
 
+// --- Utilities ---
 function getTimeAgo(dateStr) {
   if (!dateStr) return 'never';
   var now = new Date();
@@ -1501,25 +482,6 @@ function escapeHtml(str) {
   var div = document.createElement('div');
   div.textContent = str || '';
   return div.innerHTML;
-}
-
-// --- Advanced Schedule ---
-function toggleRuleAdvancedSchedule() {
-  var el = document.getElementById('rule-advanced-schedule');
-  var icon = document.getElementById('rule-adv-toggle-icon');
-  if (el.style.display === 'none') { el.style.display = ''; icon.innerHTML = '&#9660;'; } else { el.style.display = 'none'; icon.innerHTML = '&#9654;'; }
-}
-function toggleAiAdvancedSchedule() {
-  var el = document.getElementById('ai-advanced-schedule');
-  var icon = document.getElementById('ai-adv-toggle-icon');
-  if (el.style.display === 'none') { el.style.display = ''; icon.innerHTML = '&#9660;'; } else { el.style.display = 'none'; icon.innerHTML = '&#9654;'; }
-}
-function onRuleTimerangeChange() {
-  // Clear cron if user picks from dropdown
-  var cronInput = document.getElementById('rule-schedule');
-  if (cronInput) cronInput.value = '';
-  var preview = document.getElementById('rule-schedule-preview');
-  if (preview) preview.textContent = '';
 }
 
 // Schedule preview (client-side description)
@@ -1552,83 +514,8 @@ function describeSchedule(expr) {
   return 'Custom cron schedule';
 }
 
-// Live preview for cron inputs
-document.getElementById('rule-schedule').addEventListener('input', function() {
-  var desc = describeSchedule(this.value);
-  document.getElementById('rule-schedule-preview').textContent = desc ? '→ ' + desc : '';
-});
-document.getElementById('watcher-schedule').addEventListener('input', function() {
-  var desc = describeSchedule(this.value);
-  document.getElementById('ai-schedule-preview').textContent = desc ? '→ ' + desc : '';
-});
-
-// --- Adaptive Scheduling UI ---
-function toggleAdaptiveSection(prefix) {
-  var el = document.getElementById(prefix + '-adaptive-section');
-  var icon = document.getElementById(prefix + '-adaptive-toggle-icon');
-  if (el.style.display === 'none') { el.style.display = ''; icon.innerHTML = '&#9660;'; }
-  else { el.style.display = 'none'; icon.innerHTML = '&#9654;'; }
-}
-
-['rule', 'ai'].forEach(function(prefix) {
-  var cb = document.getElementById(prefix + '-adaptive-enabled');
-  if (cb) cb.addEventListener('change', function() {
-    document.getElementById(prefix + '-adaptive-fields').style.display = this.checked ? '' : 'none';
-  });
-  var relaxCb = document.getElementById(prefix + '-adaptive-relax');
-  if (relaxCb) relaxCb.addEventListener('change', function() {
-    document.getElementById(prefix + '-relax-fields').style.display = this.checked ? '' : 'none';
-  });
-});
-
-function buildAdaptiveConfig(prefix) {
-  var enabled = document.getElementById(prefix + '-adaptive-enabled');
-  if (!enabled || !enabled.checked) return null;
-  var cfg = {enabled: true};
-  var v;
-  v = document.getElementById(prefix + '-adaptive-escalated').value; if (v) cfg.escalated_interval = v;
-  v = document.getElementById(prefix + '-adaptive-duration').value; if (v) cfg.escalation_duration = v;
-  v = document.getElementById(prefix + '-adaptive-cooldown').value; if (v) cfg.cooldown_runs = parseInt(v);
-  v = document.getElementById(prefix + '-adaptive-max-errors').value; if (v) cfg.max_consecutive_errors = parseInt(v);
-  var relaxCb = document.getElementById(prefix + '-adaptive-relax');
-  if (relaxCb && relaxCb.checked) {
-    cfg.relax_enabled = true;
-    v = document.getElementById(prefix + '-adaptive-relaxed').value; if (v) cfg.relaxed_interval = v;
-    v = document.getElementById(prefix + '-adaptive-relax-after').value; if (v) cfg.relax_after_runs = parseInt(v);
-  }
-  return cfg;
-}
-
-function populateAdaptiveConfig(prefix, cfg) {
-  var enabled = document.getElementById(prefix + '-adaptive-enabled');
-  if (!cfg || !cfg.enabled) {
-    if (enabled) enabled.checked = false;
-    document.getElementById(prefix + '-adaptive-fields').style.display = 'none';
-    return;
-  }
-  enabled.checked = true;
-  document.getElementById(prefix + '-adaptive-fields').style.display = '';
-  document.getElementById(prefix + '-adaptive-section').style.display = '';
-  document.getElementById(prefix + '-adaptive-toggle-icon').innerHTML = '&#9660;';
-  document.getElementById(prefix + '-adaptive-escalated').value = cfg.escalated_interval || '';
-  document.getElementById(prefix + '-adaptive-duration').value = cfg.escalation_duration || '';
-  document.getElementById(prefix + '-adaptive-cooldown').value = cfg.cooldown_runs || '';
-  document.getElementById(prefix + '-adaptive-max-errors').value = cfg.max_consecutive_errors || '';
-  var relaxCb = document.getElementById(prefix + '-adaptive-relax');
-  if (cfg.relax_enabled) {
-    relaxCb.checked = true;
-    document.getElementById(prefix + '-relax-fields').style.display = '';
-    document.getElementById(prefix + '-adaptive-relaxed').value = cfg.relaxed_interval || '';
-    document.getElementById(prefix + '-adaptive-relax-after').value = cfg.relax_after_runs || '';
-  } else {
-    relaxCb.checked = false;
-    document.getElementById(prefix + '-relax-fields').style.display = 'none';
-  }
-}
-
 initFromUrl();
 loadWatchers();
-loadModels();
 window.loadPageData = loadWatchers;
 </script>
 {{end}}

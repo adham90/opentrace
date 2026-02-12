@@ -228,6 +228,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Get("/watchers/{id}/runs", srv.handleListWatcherRuns)
 			r.Get("/watchers/{id}/runs/{runId}", srv.handleGetWatcherRun)
 			r.Get("/watchers/{id}/runs/{runId}/events", srv.handleRunEvents)
+			r.Get("/watchers/{id}/effectiveness", srv.handleWatcherEffectiveness)
 			r.Get("/watchers/templates", srv.handleWatcherTemplates)
 			r.Get("/alerts", srv.handleListAlerts)
 			r.Get("/alerts/count", srv.handleAlertCount)
@@ -275,6 +276,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Post("/alerts/dismiss-all", srv.handleDismissAllAlerts)
 			r.Post("/alerts/{id}/read", srv.handleMarkAlertRead)
 			r.Post("/alerts/{id}/dismiss", srv.handleDismissAlert)
+			r.Post("/alerts/{id}/snooze", srv.handleSnoozeAlert)
+			r.Delete("/alerts/{id}/snooze", srv.handleUnsnoozeAlert)
 			r.Post("/alerts/{id}/investigate", srv.handleInvestigateAlert)
 
 			// Alert groups (incidents) — write operations

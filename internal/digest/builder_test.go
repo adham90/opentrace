@@ -104,9 +104,14 @@ func (m *mockAlertStore) GetByID(_ context.Context, id uuid.UUID) (*store.Alert,
 }
 func (m *mockAlertStore) MarkRead(_ context.Context, _ uuid.UUID) error                { return nil }
 func (m *mockAlertStore) MarkAllRead(_ context.Context, _ string) error                 { return nil }
-func (m *mockAlertStore) Dismiss(_ context.Context, _ uuid.UUID) error                  { return nil }
-func (m *mockAlertStore) DismissAll(_ context.Context, _ string) error                  { return nil }
-func (m *mockAlertStore) Prune(_ context.Context, _ time.Duration) (int64, error)       { return 0, nil }
+func (m *mockAlertStore) Dismiss(_ context.Context, _ uuid.UUID, _ string) error  { return nil }
+func (m *mockAlertStore) DismissAll(_ context.Context, _ string) error            { return nil }
+func (m *mockAlertStore) Snooze(_ context.Context, _ uuid.UUID, _ time.Time) error { return nil }
+func (m *mockAlertStore) Unsnooze(_ context.Context, _ uuid.UUID) error            { return nil }
+func (m *mockAlertStore) WatcherAlertStats(_ context.Context, id uuid.UUID, _ time.Time) (*store.WatcherEffectiveness, error) {
+	return &store.WatcherEffectiveness{WatcherID: id.String()}, nil
+}
+func (m *mockAlertStore) Prune(_ context.Context, _ time.Duration) (int64, error) { return 0, nil }
 
 type mockWatcherStore struct {
 	watchers []store.Watcher

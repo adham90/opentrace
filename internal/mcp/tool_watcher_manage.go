@@ -84,8 +84,18 @@ func updateWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 			changed = true
 		}
 
+		// Parse human_summary JSON string.
+		if hsStr, ok := args["human_summary"].(string); ok && hsStr != "" {
+			var hs store.WatcherHumanSummary
+			if err := json.Unmarshal([]byte(hsStr), &hs); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("invalid human_summary JSON: %v", err)), nil
+			}
+			params.HumanSummary = &hs
+			changed = true
+		}
+
 		if !changed {
-			return mcp.NewToolResultError("no fields to update. Provide at least one of: title, description, environment, severity, time_range, schedule, effort, rule_config."), nil
+			return mcp.NewToolResultError("no fields to update. Provide at least one of: title, description, environment, severity, time_range, schedule, effort, rule_config, human_summary."), nil
 		}
 
 		updated, err := ws.Update(ctx, watcherID, params)

@@ -85,7 +85,9 @@ func dismissAlertHandler(as store.AlertStore) server.ToolHandlerFunc {
 			return mcp.NewToolResultText(fmt.Sprintf("Alert '%s' is already dismissed.", alert.Title)), nil
 		}
 
-		if err := as.Dismiss(ctx, alertID); err != nil {
+		reason, _ := args["reason"].(string)
+
+		if err := as.Dismiss(ctx, alertID, reason); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to dismiss alert: %v", err)), nil
 		}
 

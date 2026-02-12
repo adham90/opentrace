@@ -422,6 +422,9 @@ function renderFlat(alerts, expandedIDs, status) {
       html += '    <span class="alert-env" onclick="toggleAlert(this)">' + escapeHtml(a.watcher_title) + '</span>';
     }
     html += '    <span class="alert-time-ago" onclick="toggleAlert(this)">' + timeAgo + '</span>';
+    if (a.snoozed_until && new Date(a.snoozed_until) > new Date()) {
+      html += '    <span class="badge badge-snooze" onclick="toggleAlert(this)">snoozed</span>';
+    }
     html += '  </div>';
     html += '  <div class="alert-detail">';
     html += '    <div class="alert-detail-summary">' + escapeHtml(a.summary) + '</div>';
@@ -439,6 +442,18 @@ function renderFlat(alerts, expandedIDs, status) {
     }
     if (a.dismissed) {
       html += '      <div class="alert-detail-row"><span class="alert-detail-key">status</span><span class="alert-detail-val dim">dismissed</span></div>';
+      if (a.dismiss_reason) {
+        html += '      <div class="alert-detail-row"><span class="alert-detail-key">reason</span><span class="alert-detail-val dim">' + escapeHtml(a.dismiss_reason) + '</span></div>';
+      }
+      if (a.dismissed_at) {
+        html += '      <div class="alert-detail-row"><span class="alert-detail-key">dismissed at</span><span class="alert-detail-val dim">' + new Date(a.dismissed_at).toLocaleString() + '</span></div>';
+      }
+    }
+    if (a.snoozed_until) {
+      var snoozeDate = new Date(a.snoozed_until);
+      var now = new Date();
+      var snoozedLabel = snoozeDate > now ? 'snoozed until ' + snoozeDate.toLocaleString() : 'snooze expired';
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key">snooze</span><span class="alert-detail-val dim">' + snoozedLabel + '</span></div>';
     }
     html += '    </div>';
     // Trace + investigate buttons
@@ -451,7 +466,16 @@ function renderFlat(alerts, expandedIDs, status) {
       if (!a.read) {
         html += '      <button class="btn btn-sm" onclick="event.stopPropagation();markRead(\'' + a.id + '\')">mark read</button>';
       }
-      html += '      <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();dismissAlert(\'' + a.id + '\')">dismiss</button>';
+      html += '      <select class="dismiss-reason-select" onchange="event.stopPropagation();dismissWithReason(\'' + a.id + '\', this.value); this.value=\'\';" onclick="event.stopPropagation()">';
+      html += '        <option value="">dismiss...</option>';
+      html += '        <option value="false_positive">false positive</option>';
+      html += '        <option value="not_actionable">not actionable</option>';
+      html += '        <option value="resolved">already resolved</option>';
+      html += '        <option value="duplicate">duplicate</option>';
+      html += '        <option value="expected">expected behavior</option>';
+      html += '      </select>';
+      html += '      <button class="btn btn-sm snooze-btn" onclick="event.stopPropagation();snoozeAlert(\'' + a.id + '\', \'1h\')">snooze 1h</button>';
+      html += '      <button class="btn btn-sm snooze-btn" onclick="event.stopPropagation();snoozeAlert(\'' + a.id + '\', \'4h\')">snooze 4h</button>';
     }
     html += '    </div>';
     // Trace container (hidden by default)
@@ -661,6 +685,32 @@ function investigateAlert(alertId) {
   });
 }
 window.investigateAlert = investigateAlert;
+
+function dismissWithReason(id, reason) {
+  if (!reason) return;
+  fetch('/api/alerts/' + id + '/dismiss', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({reason: reason})
+  }).then(function(r) {
+    if (r.ok) showToast('Alert dismissed: ' + reason.replace(/_/g, ' '), 'info');
+    loadAlerts();
+  }).catch(function() { showToast('Failed to dismiss alert', 'error'); });
+}
+window.dismissWithReason = dismissWithReason;
+
+function snoozeAlert(id, duration) {
+  fetch('/api/alerts/' + id + '/snooze', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({duration: duration})
+  }).then(function(r) {
+    if (r.ok) showToast('Alert snoozed for ' + duration, 'info');
+    else showToast('Failed to snooze alert', 'error');
+    loadAlerts();
+  }).catch(function() { showToast('Failed to snooze alert', 'error'); });
+}
+window.snoozeAlert = snoozeAlert;
 
 window.loadPageData = loadAlerts;
 document.addEventListener('DOMContentLoaded', function() {
