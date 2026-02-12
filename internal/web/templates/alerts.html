@@ -441,14 +441,21 @@ function renderFlat(alerts, expandedIDs, status) {
       html += '      <div class="alert-detail-row"><span class="alert-detail-key">status</span><span class="alert-detail-val dim">dismissed</span></div>';
     }
     html += '    </div>';
+    // Trace + investigate buttons
+    html += '    <div class="alert-detail-actions">';
+    if (a.run_id) {
+      html += '      <button class="btn btn-sm" onclick="event.stopPropagation();toggleTrace(\'' + a.id + '\')">show investigation trace</button>';
+    }
     if (isAdmin && !isDismissedTab) {
-      html += '    <div class="alert-detail-actions">';
+      html += '      <button class="btn btn-sm btn-primary investigate-btn" id="investigate-' + a.id + '" onclick="event.stopPropagation();investigateAlert(\'' + a.id + '\')">investigate further</button>';
       if (!a.read) {
         html += '      <button class="btn btn-sm" onclick="event.stopPropagation();markRead(\'' + a.id + '\')">mark read</button>';
       }
       html += '      <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();dismissAlert(\'' + a.id + '\')">dismiss</button>';
-      html += '    </div>';
     }
+    html += '    </div>';
+    // Trace container (hidden by default)
+    html += '    <div class="trace-container" id="trace-' + a.id + '" style="display:none"></div>';
     html += '  </div>';
     html += '</div>';
   });
@@ -576,6 +583,84 @@ function escapeHtml(str) {
   div.textContent = str || '';
   return div.innerHTML;
 }
+
+// ── Trace viewer (Phase 2) ────────────────────────────────
+function toggleTrace(alertId) {
+  var el = document.getElementById('trace-' + alertId);
+  if (!el) return;
+  if (el.style.display !== 'none') {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'block';
+  el.innerHTML = '<div class="loading-state">loading trace...</div>';
+  fetch('/api/alerts/' + alertId + '/trace').then(function(r){ return r.json(); }).then(function(data){
+    if (!data.run || !data.run.details) {
+      el.innerHTML = '<div class="trace-empty">No trace data available for this run.</div>';
+      return;
+    }
+    var run = data.run;
+    var html = '<div class="trace-header">investigation trace <span class="trace-duration">run duration: ' + formatDuration(run.started_at, run.finished_at) + '</span></div>';
+    var details = run.details;
+    if (details.trace && Array.isArray(details.trace)) {
+      details.trace.forEach(function(ev){
+        html += renderTraceEvent(ev);
+      });
+    } else if (details.steps && Array.isArray(details.steps)) {
+      details.steps.forEach(function(step){
+        html += renderTraceEvent(step);
+      });
+    } else {
+      html += '<div class="trace-event"><span class="trace-event-type">[result]</span> <span class="trace-event-text">' + escapeHtml(run.summary || JSON.stringify(details)) + '</span></div>';
+    }
+    el.innerHTML = html;
+  }).catch(function(){
+    el.innerHTML = '<div class="trace-empty">Failed to load trace.</div>';
+  });
+}
+window.toggleTrace = toggleTrace;
+
+function renderTraceEvent(ev) {
+  var type = ev.type || ev.role || 'info';
+  var icon = type === 'thinking' ? '[thinking]' : type === 'tool_call' || type === 'tool' ? '[tool]' : type === 'tool_result' || type === 'result' ? '[result]' : type === 'alert' ? '[>>]' : '[' + type + ']';
+  var cls = type === 'alert' ? ' trace-event-alert' : type === 'thinking' ? ' trace-event-thinking' : '';
+  var text = ev.content || ev.text || ev.name || '';
+  if (ev.name && ev.content) text = ev.name + ': ' + ev.content;
+  if (text.length > 500) text = text.substring(0, 500) + '...';
+  return '<div class="trace-event' + cls + '"><span class="trace-event-type">' + icon + '</span> <span class="trace-event-text">' + escapeHtml(text) + '</span></div>';
+}
+
+function formatDuration(start, end) {
+  if (!start || !end) return '—';
+  var ms = new Date(end) - new Date(start);
+  if (ms < 1000) return ms + 'ms';
+  return (ms / 1000).toFixed(1) + 's';
+}
+
+// ── Investigate (Phase 4) ─────────────────────────────────
+function investigateAlert(alertId) {
+  var btn = document.getElementById('investigate-' + alertId);
+  if (!btn) return;
+  btn.textContent = 'investigation running...';
+  btn.disabled = true;
+  fetch('/api/alerts/' + alertId + '/investigate', { method: 'POST' }).then(function(r){ return r.json(); }).then(function(data){
+    if (data.watcher_id) {
+      btn.textContent = 'view investigation';
+      btn.disabled = false;
+      btn.onclick = function(e) { e.stopPropagation(); window.location.href = '/watchers/' + data.watcher_id + '/runs'; };
+      showToast('Investigation started', 'success');
+    } else {
+      btn.textContent = 'investigate further';
+      btn.disabled = false;
+      showToast(data.error || 'Failed to start investigation', 'error');
+    }
+  }).catch(function(){
+    btn.textContent = 'investigate further';
+    btn.disabled = false;
+    showToast('Failed to start investigation', 'error');
+  });
+}
+window.investigateAlert = investigateAlert;
 
 window.loadPageData = loadAlerts;
 document.addEventListener('DOMContentLoaded', function() {

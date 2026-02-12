@@ -34,9 +34,11 @@ type appDeps struct {
 	metricStore   store.MetricStore
 	userStore     store.UserStore
 	sessionStore  store.SessionStore
-	settingsStore store.SettingsStore
-	registry      *connector.Registry
-	cfg           *config.Config
+	settingsStore    store.SettingsStore
+	mcpActivityStore store.MCPActivityStore
+	alertGroupStore  store.AlertGroupStore
+	registry         *connector.Registry
+	cfg              *config.Config
 }
 
 func main() {
@@ -113,24 +115,28 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	userStore := store.NewUserStore(db)
 	sessionStore := store.NewSessionStore(db)
 	settingsStore := store.NewSettingsStore(db)
+	mcpActivityStore := store.NewMCPActivityStore(db)
+	alertGroupStore := store.NewAlertGroupStore(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
 	reconnectConnectors(ctx, dsStore, logStore, registry, cfg)
 
 	return &appDeps{
-		db:            db,
-		dsStore:       dsStore,
-		logStore:      logStore,
-		watcherStore:  watcherStore,
-		alertStore:    alertStore,
-		serverStore:   serverStore,
-		metricStore:   metricStore,
-		userStore:     userStore,
-		sessionStore:  sessionStore,
-		settingsStore: settingsStore,
-		registry:      registry,
-		cfg:           cfg,
+		db:               db,
+		dsStore:          dsStore,
+		logStore:         logStore,
+		watcherStore:     watcherStore,
+		alertStore:       alertStore,
+		serverStore:      serverStore,
+		metricStore:      metricStore,
+		userStore:        userStore,
+		sessionStore:     sessionStore,
+		settingsStore:    settingsStore,
+		mcpActivityStore: mcpActivityStore,
+		alertGroupStore:  alertGroupStore,
+		registry:         registry,
+		cfg:              cfg,
 	}, nil
 }
 
@@ -167,20 +173,21 @@ func runMCP() error {
 	)
 
 	return mcpserver.Serve(mcpserver.Deps{
-		Registry:        deps.registry,
-		WatcherStore:    deps.watcherStore,
-		AlertStore:      deps.alertStore,
-		WatcherRunStore: runStore,
-		LogStore:        deps.logStore,
-		ServerStore:     deps.serverStore,
-		MetricStore:     deps.metricStore,
-		UserStore:       deps.userStore,
-		MCPToken:        os.Getenv("OPENTRACE_MCP_TOKEN"),
-		ServerName:      os.Getenv("OPENTRACE_MCP_NAME"),
-		DataSourceStore: deps.dsStore,
-		SettingsStore:   deps.settingsStore,
-		Executor:        executor,
-		Config:          deps.cfg,
+		Registry:         deps.registry,
+		WatcherStore:     deps.watcherStore,
+		AlertStore:       deps.alertStore,
+		WatcherRunStore:  runStore,
+		LogStore:         deps.logStore,
+		ServerStore:      deps.serverStore,
+		MetricStore:      deps.metricStore,
+		UserStore:        deps.userStore,
+		MCPToken:         os.Getenv("OPENTRACE_MCP_TOKEN"),
+		ServerName:       os.Getenv("OPENTRACE_MCP_NAME"),
+		DataSourceStore:  deps.dsStore,
+		SettingsStore:    deps.settingsStore,
+		Executor:         executor,
+		Config:           deps.cfg,
+		MCPActivityStore: deps.mcpActivityStore,
 	})
 }
 
@@ -251,6 +258,9 @@ func run() error {
 		eventHub,
 	)
 
+	// Create rule evaluator for watcher preview and MCP SSE.
+	ruleEvaluator := watcher.NewRuleEvaluator(deps.registry, deps.logStore, deps.dsStore)
+
 	// Build MCP tool catalog for the /tools page (auto-detected from MCP registrations).
 	toolCatalog := mcpserver.BuildCatalog(mcpserver.Deps{
 		Registry:        deps.registry,
@@ -264,23 +274,26 @@ func run() error {
 
 	// Create server
 	srv := web.NewServerWithDeps(web.ServerDeps{
-		DB:            deps.db,
-		DSStore:       deps.dsStore,
-		LogStore:      deps.logStore,
-		WatcherStore:  deps.watcherStore,
-		RunStore:      runStore,
-		AlertStore:    deps.alertStore,
-		ServerStore:   deps.serverStore,
-		MetricStore:   deps.metricStore,
-		UserStore:     deps.userStore,
-		SessionStore:  deps.sessionStore,
-		SettingsStore: deps.settingsStore,
-		Registry:      deps.registry,
-		ToolCatalog:   toolCatalog,
-		Cfg:           deps.cfg,
-		Executor:      executor,
-		EventHub:      eventHub,
-		ModelRegistry: modelRegistry,
+		DB:               deps.db,
+		DSStore:          deps.dsStore,
+		LogStore:         deps.logStore,
+		WatcherStore:     deps.watcherStore,
+		RunStore:         runStore,
+		AlertStore:       deps.alertStore,
+		ServerStore:      deps.serverStore,
+		MetricStore:      deps.metricStore,
+		UserStore:        deps.userStore,
+		SessionStore:     deps.sessionStore,
+		SettingsStore:    deps.settingsStore,
+		Registry:         deps.registry,
+		ToolCatalog:      toolCatalog,
+		Cfg:              deps.cfg,
+		Executor:         executor,
+		EventHub:         eventHub,
+		ModelRegistry:    modelRegistry,
+		RuleEvaluator:    ruleEvaluator,
+		MCPActivityStore: deps.mcpActivityStore,
+		AlertGroupStore:  deps.alertGroupStore,
 	})
 
 	httpServer := &http.Server{
@@ -393,6 +406,11 @@ func run() error {
 					log.Printf("WARN: alert prune: %v", err)
 				} else if n > 0 {
 					log.Printf("pruned %d old alert(s)", n)
+				}
+				if n, err := deps.mcpActivityStore.Prune(ctx, retention); err != nil {
+					log.Printf("WARN: mcp activity prune: %v", err)
+				} else if n > 0 {
+					log.Printf("pruned %d old mcp activity record(s)", n)
 				}
 			}
 

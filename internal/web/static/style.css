@@ -2448,3 +2448,168 @@ th.sortable.sort-desc::after { content: '\25BC'; opacity: 0.8; }
 .update-banner-dismiss:hover {
   opacity: 1;
 }
+
+/* ===== Triage Inbox (Phase 3) ===== */
+.triage-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  cursor: default;
+}
+.triage-item:last-child { border-bottom: none; }
+.triage-type-badge {
+  font-weight: bold;
+  font-size: 10px;
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.triage-item.severity-critical .triage-type-badge { color: var(--red); }
+.triage-item.severity-warning .triage-type-badge { color: var(--yellow); }
+.triage-item.severity-info .triage-type-badge { color: var(--blue); }
+.triage-type {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--text-dim);
+  width: 48px;
+  flex-shrink: 0;
+}
+.triage-title {
+  color: var(--text-bright);
+  flex: 1;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.triage-detail {
+  color: var(--text-dim);
+  font-size: 11px;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.triage-time {
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ===== MCP Activity Panel (Phase 1) ===== */
+.mcp-stats {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.mcp-stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+  font-size: 12px;
+}
+.mcp-stat-key {
+  color: var(--text-dim);
+}
+.mcp-stat-val {
+  color: var(--text-bright);
+  font-weight: 500;
+}
+.mcp-recent-header {
+  padding: 8px 16px 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+}
+.mcp-event {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px;
+  font-size: 12px;
+}
+.mcp-event-error { color: var(--red); }
+.mcp-event-tool {
+  color: var(--cyan);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mcp-event-time {
+  color: var(--text-dim);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.mcp-event-dur {
+  color: var(--text-dim);
+  font-size: 10px;
+  flex-shrink: 0;
+  min-width: 40px;
+  text-align: right;
+}
+
+/* ===== Alert Trace Viewer (Phase 2) ===== */
+.trace-container {
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+.trace-header {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  padding: 4px 0 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.trace-duration {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.trace-event {
+  font-size: 12px;
+  padding: 3px 0;
+  line-height: 1.5;
+}
+.trace-event-type {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-right: 4px;
+}
+.trace-event-text {
+  color: var(--text);
+  word-break: break-word;
+}
+.trace-event-thinking .trace-event-text { color: var(--text-dim); font-style: italic; }
+.trace-event-alert .trace-event-type { color: var(--red); font-weight: bold; }
+.trace-event-alert .trace-event-text { color: var(--red); }
+.trace-empty {
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 8px 0;
+}
+
+/* ===== Investigate Button (Phase 4) ===== */
+.investigate-btn {
+  background: var(--blue-dim);
+  color: var(--blue);
+  border-color: var(--blue);
+}
+.investigate-btn:hover {
+  background: var(--blue);
+  color: #fff;
+}
+.investigate-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

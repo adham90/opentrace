@@ -32,13 +32,24 @@
 </div>
 
 <div class="overview-panels">
+  <!-- Left: Triage inbox -->
   <div class="overview-panel">
     <div class="overview-panel-header">
-      <span>recent alerts</span>
+      <span>needs attention</span>
       <a href="/alerts" class="panel-link">view all &rarr;</a>
     </div>
-    <div class="overview-panel-body" id="recent-alerts">
-      <div class="loading-state">loading alerts</div>
+    <div class="overview-panel-body" id="triage-items">
+      <div class="loading-state">loading</div>
+    </div>
+  </div>
+
+  <!-- Right: MCP activity -->
+  <div class="overview-panel">
+    <div class="overview-panel-header">
+      <span>mcp activity</span>
+    </div>
+    <div class="overview-panel-body" id="mcp-activity">
+      <div class="loading-state">loading</div>
     </div>
   </div>
 </div>
@@ -95,30 +106,70 @@
     }).catch(function(){});
   }
 
-  function loadRecentAlerts() {
-    fetch('/api/alerts?limit=5' + (getGlobalEnv() ? '&env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r){ return r.json(); }).then(function(alerts){
-      var container = document.getElementById('recent-alerts');
-      if (!alerts || alerts.length === 0) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">no recent alerts</p><p class="empty-state-desc">Alerts from your watchers will appear here when issues are detected.</p></div>';
+  function loadTriage() {
+    var url = '/api/overview/triage';
+    if (getGlobalEnv()) url += '?env=' + encodeURIComponent(getGlobalEnv());
+    fetch(url).then(function(r){ return r.json(); }).then(function(data){
+      var container = document.getElementById('triage-items');
+      var items = data.needs_attention || [];
+      if (items.length === 0) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">all clear</p><p class="empty-state-desc">No issues need your attention right now.</p></div>';
         return;
       }
       var html = '';
-      alerts.forEach(function(a){
-        var sevIcon = a.severity === 'critical' ? '!!' : a.severity === 'warning' ? '!' : 'i';
-        var timeAgo = getTimeAgo(a.created_at);
-        html += '<div class="overview-alert severity-' + a.severity + '">';
-        html += '  <span class="severity-badge severity-' + a.severity + '">' + sevIcon + '</span>';
-        html += '  <span class="overview-alert-title">' + escapeHtml(a.title) + '</span>';
-        html += '  <span class="overview-alert-time">' + timeAgo + '</span>';
+      items.forEach(function(item){
+        var icon = item.type === 'alert' ? (item.severity === 'critical' ? '!!' : '!') : item.type === 'run' ? '!' : item.type === 'connector' ? '!' : 'i';
+        var sevClass = item.severity === 'critical' ? 'severity-critical' : item.severity === 'warning' ? 'severity-warning' : 'severity-info';
+        html += '<div class="triage-item ' + sevClass + '">';
+        html += '  <span class="triage-type-badge">' + escapeHtml(icon) + '</span>';
+        html += '  <span class="triage-type">' + escapeHtml(item.type) + '</span>';
+        html += '  <span class="triage-title">' + escapeHtml(item.title) + '</span>';
+        html += '  <span class="triage-detail">' + escapeHtml(item.detail || '') + '</span>';
+        html += '  <span class="triage-time">' + getTimeAgo(item.time) + '</span>';
         html += '</div>';
       });
       container.innerHTML = html;
     }).catch(function(){
-      document.getElementById('recent-alerts').innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">could not load alerts</p><p class="empty-state-desc">Check your connection and try refreshing.</p></div>';
+      document.getElementById('triage-items').innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">could not load triage</p></div>';
+    });
+  }
+
+  function loadMCPActivity() {
+    var container = document.getElementById('mcp-activity');
+    // Load stats first
+    fetch('/api/mcp/activity/stats').then(function(r){ return r.json(); }).then(function(stats){
+      var html = '<div class="mcp-stats">';
+      html += '<div class="mcp-stat-row"><span class="mcp-stat-key">connections</span><span class="mcp-stat-val">' + (stats.active_sessions || 0) + ' active</span></div>';
+      html += '<div class="mcp-stat-row"><span class="mcp-stat-key">calls / 1h</span><span class="mcp-stat-val">' + (stats.calls_last_hour || 0);
+      if (stats.errors_last_hour > 0) html += ' <span class="status-error">(' + stats.errors_last_hour + ' errors)</span>';
+      html += '</span></div>';
+      html += '<div class="mcp-stat-row"><span class="mcp-stat-key">last</span><span class="mcp-stat-val">' + (stats.last_activity ? getTimeAgo(stats.last_activity) : 'never') + '</span></div>';
+      html += '</div>';
+
+      // Load recent calls
+      fetch('/api/mcp/activity?limit=8').then(function(r2){ return r2.json(); }).then(function(events){
+        if (events && events.length > 0) {
+          html += '<div class="mcp-recent-header">recent calls</div>';
+          events.forEach(function(ev){
+            var cls = ev.is_error ? ' mcp-event-error' : '';
+            html += '<div class="mcp-event' + cls + '">';
+            html += '  <span class="mcp-event-tool">' + escapeHtml(ev.tool_name) + '</span>';
+            html += '  <span class="mcp-event-time">' + getTimeAgo(ev.created_at) + '</span>';
+            if (ev.duration_ms) html += '  <span class="mcp-event-dur">' + ev.duration_ms + 'ms</span>';
+            html += '</div>';
+          });
+        }
+        container.innerHTML = html;
+      }).catch(function(){
+        container.innerHTML = html;
+      });
+    }).catch(function(){
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">--</div><p class="empty-state-title">no mcp data</p><p class="empty-state-desc">MCP activity will appear here when Claude Code connects.</p></div>';
     });
   }
 
   function getTimeAgo(dateStr) {
+    if (!dateStr) return 'never';
     var now = new Date();
     var date = new Date(dateStr);
     var diff = Math.floor((now - date) / 1000);
@@ -135,10 +186,11 @@
   }
 
   loadStats();
-  loadRecentAlerts();
-  setInterval(function(){ loadStats(); loadRecentAlerts(); }, 30000);
+  loadTriage();
+  loadMCPActivity();
+  setInterval(function(){ loadStats(); loadTriage(); loadMCPActivity(); }, 30000);
 
-  window.loadPageData = function() { loadStats(); loadRecentAlerts(); };
+  window.loadPageData = function() { loadStats(); loadTriage(); loadMCPActivity(); };
 })();
 </script>
 {{end}}

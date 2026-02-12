@@ -46,9 +46,11 @@ type Server struct {
 	executor      *watcher.Executor
 	eventHub      *watcher.EventHub
 	modelRegistry *llm.ModelRegistry
-	ruleEvaluator  *watcher.RuleEvaluator
-	toolCatalog    *mcpserver.ToolCatalog
-	versionChecker *versionChecker
+	ruleEvaluator    *watcher.RuleEvaluator
+	toolCatalog      *mcpserver.ToolCatalog
+	mcpActivityStore store.MCPActivityStore
+	alertGroupStore  store.AlertGroupStore
+	versionChecker   *versionChecker
 	selfUpdater    *selfUpdater
 	sseServer      *mcpgoserver.SSEServer
 	restartCh      chan struct{} // closed when a self-update wants to restart
@@ -77,7 +79,9 @@ type ServerDeps struct {
 	Executor      *watcher.Executor
 	EventHub      *watcher.EventHub
 	ModelRegistry *llm.ModelRegistry
-	RuleEvaluator *watcher.RuleEvaluator
+	RuleEvaluator    *watcher.RuleEvaluator
+	MCPActivityStore store.MCPActivityStore
+	AlertGroupStore  store.AlertGroupStore
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
@@ -110,8 +114,10 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		executor:      deps.Executor,
 		eventHub:       deps.EventHub,
 		modelRegistry:  deps.ModelRegistry,
-		ruleEvaluator:  deps.RuleEvaluator,
-		versionChecker: newVersionChecker("adham90", "opentrace"),
+		ruleEvaluator:    deps.RuleEvaluator,
+		mcpActivityStore: deps.MCPActivityStore,
+		alertGroupStore:  deps.AlertGroupStore,
+		versionChecker:   newVersionChecker("adham90", "opentrace"),
 		selfUpdater:    newSelfUpdater("adham90", "opentrace"),
 		restartCh:      make(chan struct{}),
 	}
@@ -225,9 +231,23 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Get("/watchers/templates", srv.handleWatcherTemplates)
 			r.Get("/alerts", srv.handleListAlerts)
 			r.Get("/alerts/count", srv.handleAlertCount)
+			r.Get("/alerts/{id}/trace", srv.handleAlertTrace)
 			r.Get("/overview", srv.handleOverviewAPI)
+			r.Get("/overview/triage", srv.handleTriageAPI)
 			r.Get("/tools", srv.handleToolsAPI)
 			r.Get("/logs/poll", srv.handleLogsPoll)
+
+			// MCP activity
+			if srv.mcpActivityStore != nil {
+				r.Get("/mcp/activity/stats", srv.handleMCPActivityStats)
+				r.Get("/mcp/activity", srv.handleMCPActivity)
+			}
+
+			// Alert groups (incidents)
+			if srv.alertGroupStore != nil {
+				r.Get("/alert-groups", srv.handleListAlertGroups)
+				r.Get("/alert-groups/{id}", srv.handleGetAlertGroup)
+			}
 
 			if srv.serverStore != nil && srv.metricStore != nil {
 				r.Get("/servers", srv.handleListServers)
@@ -255,6 +275,16 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Post("/alerts/dismiss-all", srv.handleDismissAllAlerts)
 			r.Post("/alerts/{id}/read", srv.handleMarkAlertRead)
 			r.Post("/alerts/{id}/dismiss", srv.handleDismissAlert)
+			r.Post("/alerts/{id}/investigate", srv.handleInvestigateAlert)
+
+			// Alert groups (incidents) — write operations
+			if srv.alertGroupStore != nil {
+				r.Post("/alert-groups", srv.handleCreateAlertGroup)
+				r.Put("/alert-groups/{id}", srv.handleUpdateAlertGroup)
+				r.Post("/alert-groups/{id}/alerts", srv.handleAddAlertsToGroup)
+				r.Delete("/alert-groups/{id}", srv.handleDeleteAlertGroup)
+				r.Post("/alert-groups/auto-correlate", srv.handleAutoCorrelate)
+			}
 
 			if srv.serverStore != nil && srv.metricStore != nil {
 				r.Delete("/servers/{id}", srv.handleDeleteServer)
