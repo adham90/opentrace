@@ -35,8 +35,9 @@ type Deps struct {
 	// New deps for additional MCP tools.
 	DataSourceStore store.DataSourceStore       // connector CRUD
 	SettingsStore   store.SettingsStore          // retention/auto-update settings
-	Executor        *watcher.Executor            // on-demand watcher execution
-	Config          *config.Config               // needed by connector.CreateConnector
+	Executor         *watcher.Executor            // on-demand watcher execution
+	Config           *config.Config               // needed by connector.CreateConnector
+	MCPActivityStore store.MCPActivityStore       // MCP activity tracking
 }
 
 // NewConfiguredServer creates an MCPServer and registers tools based on the
@@ -50,6 +51,9 @@ func NewConfiguredServer(deps Deps, isAdmin bool) *server.MCPServer {
 		name = "opentrace"
 	}
 
+	// Set the package-level activity store for tool logging.
+	activityStoreForLogging = deps.MCPActivityStore
+
 	s := server.NewMCPServer(
 		name,
 		"0.1.0",
@@ -62,6 +66,9 @@ func NewConfiguredServer(deps Deps, isAdmin bool) *server.MCPServer {
 	if isAdmin {
 		addWriteTools(s, deps, b)
 	}
+
+	// Clear the package-level store after registration.
+	activityStoreForLogging = nil
 
 	return s
 }
@@ -106,11 +113,74 @@ func Serve(deps Deps) error {
 	return server.ServeStdio(s)
 }
 
+// activityStore is set by NewConfiguredServer when an MCPActivityStore is
+// available. It is used by maybeAddTool to wrap handlers with activity logging.
+// This is package-level to avoid threading it through every addXxxTools call.
+var activityStoreForLogging store.MCPActivityStore
+
 // maybeAddTool registers a tool on the MCP server if s is non-nil.
 // When s is nil (catalog-only mode), this is a no-op.
+// If activity logging is enabled, wraps the handler to record tool calls.
 func maybeAddTool(s *server.MCPServer, tool mcp.Tool, handler server.ToolHandlerFunc) {
 	if s != nil {
+		if activityStoreForLogging != nil {
+			handler = wrapWithActivityLog(activityStoreForLogging, tool.Name, handler)
+		}
 		s.AddTool(tool, handler)
+	}
+}
+
+// wrapWithActivityLog wraps a tool handler to log its execution to the activity store.
+func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		start := time.Now()
+		result, err := handler(ctx, request)
+		elapsed := time.Since(start).Milliseconds()
+
+		// Build a brief preview of args
+		argsPreview := ""
+		if args := request.GetArguments(); len(args) > 0 {
+			data, _ := json.Marshal(args)
+			argsPreview = string(data)
+			if len(argsPreview) > 500 {
+				argsPreview = argsPreview[:500]
+			}
+		}
+
+		// Build result preview
+		isError := err != nil
+		resultPreview := ""
+		if result != nil && len(result.Content) > 0 {
+			if txt, ok := result.Content[0].(mcp.TextContent); ok {
+				resultPreview = txt.Text
+				if len(resultPreview) > 500 {
+					resultPreview = resultPreview[:500]
+				}
+			}
+			isError = isError || result.IsError
+		}
+
+		// Determine session ID — use a hash of the context pointer as a rough identifier.
+		sessionID := "mcp"
+		userID := ""
+
+		// Log asynchronously to avoid blocking
+		go func() {
+			logCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = as.Log(logCtx, store.LogMCPActivityParams{
+				SessionID:     sessionID,
+				UserID:        userID,
+				ToolName:      toolName,
+				Arguments:     argsPreview,
+				ResultPreview: resultPreview,
+				IsError:       isError,
+				DurationMs:    &elapsed,
+				EventType:     "tool_call",
+			})
+		}()
+
+		return result, err
 	}
 }
 
@@ -344,19 +414,48 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 	if deps.LogStore != nil {
 		maybeAddTool(s,
 			mcp.NewTool("log_search",
-				mcp.WithDescription("Search log entries with full-text search and filters. Returns individual log entries (unlike log_stats which returns aggregated counts). Use when you need to find specific log messages, investigate errors, or look up events by trace ID."),
-				mcp.WithString("query", mcp.Description("Full-text search query (searches message content)")),
+				mcp.WithDescription("Search log entries with full-text search and filters. Returns individual log entries (unlike log_stats which returns aggregated counts). Use when you need to find specific log messages, investigate errors, or look up events by trace ID. If FTS query returns nothing, automatically falls back to matching against service/environment names."),
+				mcp.WithString("query", mcp.Description("Full-text search query (searches message content). Also tries matching service/environment names if no FTS results found.")),
 				mcp.WithString("service", mcp.Description("Filter by service name")),
-				mcp.WithString("level", mcp.Description("Filter by log level: debug, info, warn, error, fatal")),
+				mcp.WithString("level", mcp.Description("Filter by log level: debug, info, warn, error, fatal (comma-separated for multiple)")),
 				mcp.WithString("trace_id", mcp.Description("Filter by trace/correlation ID")),
 				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production, staging)")),
 				mcp.WithString("time_range", mcp.Description("Lookback window: '15m', '1h' (default: all), '6h', '24h', '7d'")),
 				mcp.WithNumber("limit", mcp.Description("Maximum entries to return (default: 50, max: 200)")),
 				mcp.WithNumber("offset", mcp.Description("Skip this many entries for pagination (default: 0)")),
+				mcp.WithString("sort", mcp.Description("Sort order: 'desc' (default, newest first) or 'asc' (oldest first, useful for following causal chains)")),
+				mcp.WithString("fields", mcp.Description("Comma-separated list of fields to include (e.g. 'timestamp,level,message'). Omit for all fields. Saves context window on high-volume results.")),
+				mcp.WithObject("metadata_filter", mcp.Description("Key-value filter on metadata fields (e.g. {\"host\": \"server-01\", \"status_code\": \"500\"}). Use list_log_attributes with field=metadata_key to discover available keys.")),
 			),
 			logSearchHandler(deps.LogStore),
 		)
-		b.Add("log_search", "Search log entries with full-text search and filters", "Log Intelligence", "read", "")
+		b.Add("log_search", "Search log entries with full-text search, metadata filters, field projection, and time histogram", "Log Intelligence", "read", "")
+
+		// Log attribute discovery.
+		maybeAddTool(s,
+			mcp.NewTool("list_log_attributes",
+				mcp.WithDescription("Discover distinct values for log fields. Call this first to learn what services, levels, environments, and metadata keys exist before filtering with log_search. Essential bootstrapping tool for effective log investigation."),
+				mcp.WithString("field", mcp.Required(), mcp.Description("Field to list values for: 'service', 'level', 'environment', or 'metadata_key'")),
+				mcp.WithString("time_range", mcp.Description("Lookback window: '15m', '1h', '6h', '24h' (default), '7d'")),
+				mcp.WithString("service", mcp.Description("Narrow metadata_key discovery to a specific service")),
+				mcp.WithString("environment", mcp.Description("Narrow discovery to a specific environment")),
+			),
+			listLogAttributesHandler(deps.LogStore),
+		)
+		b.Add("list_log_attributes", "Discover distinct values for log fields (services, levels, environments, metadata keys)", "Log Intelligence", "read", "")
+
+		// Log context (surrounding entries).
+		maybeAddTool(s,
+			mcp.NewTool("log_context",
+				mcp.WithDescription("Get surrounding log entries around a specific log ID. The 'zoom in' tool — after log_search finds something interesting, use this to see what happened before and after. Optionally filter to the same service for focused investigation."),
+				mcp.WithNumber("log_id", mcp.Required(), mcp.Description("Log entry ID (from log_search results)")),
+				mcp.WithNumber("before", mcp.Description("Number of entries before the anchor (default: 10, max: 50)")),
+				mcp.WithNumber("after", mcp.Description("Number of entries after the anchor (default: 10, max: 50)")),
+				mcp.WithBoolean("same_service", mcp.Description("Only show entries from the same service as the anchor (default: false)")),
+			),
+			logContextHandler(deps.LogStore),
+		)
+		b.Add("log_context", "Get surrounding log entries around a specific log ID for focused investigation", "Log Intelligence", "read", "")
 	}
 
 	// Run ad-hoc read-only SQL queries.

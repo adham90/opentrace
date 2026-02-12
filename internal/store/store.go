@@ -27,6 +27,9 @@ type LogStore interface {
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
 	CountByLevel(ctx context.Context, params LogCountParams) (map[string]int, error)
 	CountByService(ctx context.Context, params LogCountParams) ([]ServiceLogCount, error)
+	DistinctValues(ctx context.Context, field string, params LogCountParams) ([]string, error)
+	MetadataKeys(ctx context.Context, params LogCountParams) ([]string, error)
+	GetByID(ctx context.Context, id int64) (*LogEntry, error)
 }
 
 // UpdateAdaptiveParams defines the input for updating adaptive scheduling state.
@@ -69,6 +72,7 @@ type WatcherRunStore interface {
 	FailStaleRuns(ctx context.Context, olderThan time.Duration) (int, error)
 	List(ctx context.Context, watcherID uuid.UUID, limit int) ([]WatcherRun, error)
 	ListWithFilter(ctx context.Context, watcherID uuid.UUID, limit int, status string) ([]WatcherRun, error)
+	ListRecentFailed(ctx context.Context, limit int) ([]WatcherRun, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*WatcherRun, error)
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
 	CountRuns(ctx context.Context, params CountRunParams) (int, error)
@@ -149,4 +153,25 @@ type SettingsStore interface {
 	SetAPIKey(ctx context.Context, key string) error
 	GetAutoUpdate(ctx context.Context) (bool, error)
 	SetAutoUpdate(ctx context.Context, enabled bool) error
+}
+
+// MCPActivityStore tracks MCP tool calls and connection events.
+type MCPActivityStore interface {
+	Log(ctx context.Context, params LogMCPActivityParams) error
+	Stats(ctx context.Context) (*MCPActivityStats, error)
+	Recent(ctx context.Context, limit int) ([]MCPActivityEvent, error)
+	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
+}
+
+// AlertGroupStore manages alert groups (incidents).
+type AlertGroupStore interface {
+	Create(ctx context.Context, params CreateAlertGroupParams) (*AlertGroup, error)
+	GetByID(ctx context.Context, id string) (*AlertGroup, error)
+	List(ctx context.Context, status string, environment string) ([]AlertGroup, error)
+	Update(ctx context.Context, id string, params UpdateAlertGroupParams) error
+	AddAlerts(ctx context.Context, groupID string, alertIDs []string) error
+	RemoveAlert(ctx context.Context, groupID string, alertID string) error
+	GetGroupForAlert(ctx context.Context, alertID string) (*AlertGroup, error)
+	Delete(ctx context.Context, id string) error
+	AutoCorrelate(ctx context.Context, windowMinutes int) ([]AlertGroup, error)
 }

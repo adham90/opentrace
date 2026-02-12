@@ -119,7 +119,17 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	query += " ORDER BY l.timestamp DESC"
+	// Metadata key-value filters using json_extract.
+	for k, v := range params.MetadataFilter {
+		conditions = append(conditions, "json_extract(l.metadata, ?) = ?")
+		args = append(args, "$."+k, v)
+	}
+
+	if params.SortAsc {
+		query += " ORDER BY l.timestamp ASC"
+	} else {
+		query += " ORDER BY l.timestamp DESC"
+	}
 
 	limit := params.Limit
 	if limit <= 0 {
@@ -234,6 +244,105 @@ func (s *logStore) CountByService(ctx context.Context, params LogCountParams) ([
 		result = append(result, sc)
 	}
 	return result, rows.Err()
+}
+
+func (s *logStore) DistinctValues(ctx context.Context, field string, params LogCountParams) ([]string, error) {
+	// Whitelist allowed field names to prevent SQL injection.
+	var col string
+	switch field {
+	case "service":
+		col = "service"
+	case "level":
+		col = "level"
+	case "environment":
+		col = "environment"
+	default:
+		return nil, fmt.Errorf("unsupported field %q (use service, level, or environment)", field)
+	}
+
+	query := fmt.Sprintf(`SELECT DISTINCT %s FROM logs WHERE %s != '' AND timestamp >= ? AND timestamp < ?`, col, col)
+	args := []any{params.Since.UTC().Format(time.RFC3339Nano), params.Until.UTC().Format(time.RFC3339Nano)}
+
+	if params.Service != "" {
+		query += ` AND service = ? COLLATE NOCASE`
+		args = append(args, params.Service)
+	}
+	if params.Environment != "" {
+		query += ` AND environment = ?`
+		args = append(args, params.Environment)
+	}
+	query += fmt.Sprintf(` ORDER BY %s`, col)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("distinct values: %w", err)
+	}
+	defer rows.Close()
+
+	var result []string
+	for rows.Next() {
+		var val string
+		if err := rows.Scan(&val); err != nil {
+			return nil, fmt.Errorf("scanning distinct value: %w", err)
+		}
+		result = append(result, val)
+	}
+	return result, rows.Err()
+}
+
+func (s *logStore) MetadataKeys(ctx context.Context, params LogCountParams) ([]string, error) {
+	query := `SELECT DISTINCT jk.key FROM logs, json_each(logs.metadata) AS jk
+	          WHERE logs.timestamp >= ? AND logs.timestamp < ? AND logs.metadata != '{}' AND logs.metadata != 'null'`
+	args := []any{params.Since.UTC().Format(time.RFC3339Nano), params.Until.UTC().Format(time.RFC3339Nano)}
+
+	if params.Service != "" {
+		query += ` AND logs.service = ? COLLATE NOCASE`
+		args = append(args, params.Service)
+	}
+	if params.Environment != "" {
+		query += ` AND logs.environment = ?`
+		args = append(args, params.Environment)
+	}
+	query += ` ORDER BY jk.key`
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("metadata keys: %w", err)
+	}
+	defer rows.Close()
+
+	var result []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, fmt.Errorf("scanning metadata key: %w", err)
+		}
+		result = append(result, key)
+	}
+	return result, rows.Err()
+}
+
+func (s *logStore) GetByID(ctx context.Context, id int64) (*LogEntry, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, timestamp, level, service, trace_id, message, environment, metadata FROM logs WHERE id = ?`, id)
+
+	var entry LogEntry
+	var tsStr string
+	var metaJSON sql.NullString
+	if err := row.Scan(&entry.ID, &tsStr, &entry.Level, &entry.Service,
+		&entry.TraceID, &entry.Message, &entry.Environment, &metaJSON); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("getting log by id: %w", err)
+	}
+	entry.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
+	if metaJSON.Valid && metaJSON.String != "" {
+		if err := json.Unmarshal([]byte(metaJSON.String), &entry.Metadata); err != nil {
+			log.Printf("WARN: log entry %d: invalid metadata JSON: %v", entry.ID, err)
+		}
+	}
+	return &entry, nil
 }
 
 func (s *logStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {

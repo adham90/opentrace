@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -38,14 +39,40 @@ func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
 			offset = int(v)
 		}
 
+		// Sort order (default: desc = newest first).
+		sortAsc := false
+		if v, ok := args["sort"].(string); ok && v == "asc" {
+			sortAsc = true
+		}
+
+		// Fields projection.
+		var fields map[string]bool
+		if v, ok := args["fields"].(string); ok && v != "" {
+			fields = make(map[string]bool)
+			for _, f := range strings.Split(v, ",") {
+				fields[strings.TrimSpace(f)] = true
+			}
+		}
+
+		// Metadata filter.
+		var metadataFilter map[string]string
+		if v, ok := args["metadata_filter"].(map[string]any); ok && len(v) > 0 {
+			metadataFilter = make(map[string]string, len(v))
+			for k, val := range v {
+				metadataFilter[k] = fmt.Sprintf("%v", val)
+			}
+		}
+
 		params := store.LogSearchParams{
-			Query:       query,
-			Service:     service,
-			Level:       level,
-			TraceID:     traceID,
-			Environment: environment,
-			Limit:       limit,
-			Offset:      offset,
+			Query:          query,
+			Service:        service,
+			Level:          level,
+			TraceID:        traceID,
+			Environment:    environment,
+			Limit:          limit,
+			Offset:         offset,
+			SortAsc:        sortAsc,
+			MetadataFilter: metadataFilter,
 		}
 
 		// Parse time range.
@@ -65,6 +92,23 @@ func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to search logs: %v. Verify your query syntax and filters.", err)), nil
 		}
 
+		// If FTS query returned nothing, try a fallback LIKE search against
+		// service and environment fields (expanded search scope — improvement D).
+		if len(entries) == 0 && query != "" && service == "" && environment == "" {
+			// Try matching as a service name.
+			fallbackParams := params
+			fallbackParams.Query = ""
+			fallbackParams.Service = query
+			entries, _ = ls.Search(ctx, fallbackParams)
+
+			if len(entries) == 0 {
+				// Try matching as an environment.
+				fallbackParams.Service = ""
+				fallbackParams.Environment = query
+				entries, _ = ls.Search(ctx, fallbackParams)
+			}
+		}
+
 		if len(entries) == 0 {
 			hint := "No log entries found matching your criteria."
 			if query != "" {
@@ -76,34 +120,40 @@ func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
 			return mcp.NewToolResultText(hint), nil
 		}
 
-		// Build compact response entries.
-		type logResult struct {
-			ID          int64          `json:"id"`
-			Timestamp   string         `json:"timestamp"`
-			Level       string         `json:"level"`
-			Service     string         `json:"service,omitempty"`
-			TraceID     string         `json:"trace_id,omitempty"`
-			Message     string         `json:"message"`
-			Environment string         `json:"environment,omitempty"`
-			Metadata    map[string]any `json:"metadata,omitempty"`
-		}
-
-		results := make([]logResult, 0, len(entries))
+		// Build response entries with optional field projection.
+		results := make([]map[string]any, 0, len(entries))
 		for _, e := range entries {
 			msg := e.Message
 			if len(msg) > 500 {
 				msg = msg[:500] + "..."
 			}
-			results = append(results, logResult{
-				ID:          e.ID,
-				Timestamp:   e.Timestamp.Format(time.RFC3339Nano),
-				Level:       e.Level,
-				Service:     e.Service,
-				TraceID:     e.TraceID,
-				Message:     msg,
-				Environment: e.Environment,
-				Metadata:    e.Metadata,
-			})
+
+			entry := make(map[string]any)
+			if fields == nil || fields["id"] {
+				entry["id"] = e.ID
+			}
+			if fields == nil || fields["timestamp"] {
+				entry["timestamp"] = e.Timestamp.Format(time.RFC3339Nano)
+			}
+			if fields == nil || fields["level"] {
+				entry["level"] = e.Level
+			}
+			if (fields == nil || fields["service"]) && e.Service != "" {
+				entry["service"] = e.Service
+			}
+			if (fields == nil || fields["trace_id"]) && e.TraceID != "" {
+				entry["trace_id"] = e.TraceID
+			}
+			if fields == nil || fields["message"] {
+				entry["message"] = msg
+			}
+			if (fields == nil || fields["environment"]) && e.Environment != "" {
+				entry["environment"] = e.Environment
+			}
+			if (fields == nil || fields["metadata"]) && len(e.Metadata) > 0 {
+				entry["metadata"] = e.Metadata
+			}
+			results = append(results, entry)
 		}
 
 		resp := map[string]any{
@@ -133,10 +183,74 @@ func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
 			}
 		}
 
+		// Time histogram (improvement G): bucket results by time to show distribution.
+		if len(entries) > 1 {
+			resp["time_distribution"] = buildTimeHistogram(entries)
+		}
+
 		data, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil
 		}
 		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// buildTimeHistogram creates a compact time distribution of log entries.
+// Auto-selects bucket size based on the time span of the results.
+func buildTimeHistogram(entries []store.LogEntry) map[string]any {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	// Find time range.
+	earliest := entries[0].Timestamp
+	latest := entries[0].Timestamp
+	for _, e := range entries[1:] {
+		if e.Timestamp.Before(earliest) {
+			earliest = e.Timestamp
+		}
+		if e.Timestamp.After(latest) {
+			latest = e.Timestamp
+		}
+	}
+
+	span := latest.Sub(earliest)
+	if span <= 0 {
+		return nil
+	}
+
+	// Auto-select bucket size.
+	var bucketSize time.Duration
+	var bucketLabel string
+	switch {
+	case span <= 5*time.Minute:
+		bucketSize = 30 * time.Second
+		bucketLabel = "30s"
+	case span <= 30*time.Minute:
+		bucketSize = time.Minute
+		bucketLabel = "1m"
+	case span <= 2*time.Hour:
+		bucketSize = 5 * time.Minute
+		bucketLabel = "5m"
+	case span <= 12*time.Hour:
+		bucketSize = 30 * time.Minute
+		bucketLabel = "30m"
+	default:
+		bucketSize = time.Hour
+		bucketLabel = "1h"
+	}
+
+	// Build buckets.
+	buckets := make(map[string]int)
+	for _, e := range entries {
+		bucketStart := e.Timestamp.Truncate(bucketSize)
+		key := bucketStart.Format(time.RFC3339)
+		buckets[key]++
+	}
+
+	return map[string]any{
+		"bucket_size": bucketLabel,
+		"buckets":     buckets,
 	}
 }

@@ -344,6 +344,10 @@ func (m *mockRunStore) CountRuns(ctx context.Context, params store.CountRunParam
 	return 0, nil
 }
 
+func (m *mockRunStore) ListRecentFailed(_ context.Context, limit int) ([]store.WatcherRun, error) {
+	return nil, nil
+}
+
 func (m *mockRunStore) List(ctx context.Context, watcherID uuid.UUID, limit int) ([]store.WatcherRun, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

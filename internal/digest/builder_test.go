@@ -211,6 +211,10 @@ func (m *mockRunStore) ListWithFilter(_ context.Context, watcherID uuid.UUID, li
 	return m.List(context.Background(), watcherID, limit)
 }
 
+func (m *mockRunStore) ListRecentFailed(_ context.Context, limit int) ([]store.WatcherRun, error) {
+	return nil, nil
+}
+
 func (m *mockRunStore) CountRuns(_ context.Context, params store.CountRunParams) (int, error) {
 	count := 0
 	for _, r := range m.runs {

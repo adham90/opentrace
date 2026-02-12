@@ -148,6 +148,18 @@ func (m *mockLogStore) CountByService(_ context.Context, _ store.LogCountParams)
 	return nil, nil
 }
 
+func (m *mockLogStore) DistinctValues(_ context.Context, _ string, _ store.LogCountParams) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockLogStore) MetadataKeys(_ context.Context, _ store.LogCountParams) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockLogStore) GetByID(_ context.Context, _ int64) (*store.LogEntry, error) {
+	return nil, store.ErrNotFound
+}
+
 // mockWatcherStore implements store.WatcherStore for testing.
 type mockWatcherStore struct {
 	mu       sync.Mutex
@@ -370,6 +382,10 @@ func (m *mockWatcherRunStore) Prune(ctx context.Context, olderThan time.Duration
 
 func (m *mockWatcherRunStore) CountRuns(ctx context.Context, params store.CountRunParams) (int, error) {
 	return 0, nil
+}
+
+func (m *mockWatcherRunStore) ListRecentFailed(ctx context.Context, limit int) ([]store.WatcherRun, error) {
+	return nil, nil
 }
 
 func (m *mockWatcherRunStore) List(ctx context.Context, watcherID uuid.UUID, limit int) ([]store.WatcherRun, error) {
@@ -962,4 +978,137 @@ func (m *mockSettingsStore) SetAutoUpdate(ctx context.Context, enabled bool) err
 	defer m.mu.Unlock()
 	m.autoUpdate = enabled
 	return nil
+}
+
+// mockMCPActivityStore implements store.MCPActivityStore for testing.
+type mockMCPActivityStore struct {
+	mu     sync.Mutex
+	events []store.MCPActivityEvent
+}
+
+func newMockMCPActivityStore() *mockMCPActivityStore {
+	return &mockMCPActivityStore{}
+}
+
+func (m *mockMCPActivityStore) Log(_ context.Context, params store.LogMCPActivityParams) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = append(m.events, store.MCPActivityEvent{
+		SessionID: params.SessionID,
+		UserID:    params.UserID,
+		ToolName:  params.ToolName,
+		IsError:   params.IsError,
+		EventType: params.EventType,
+		CreatedAt: time.Now(),
+	})
+	return nil
+}
+
+func (m *mockMCPActivityStore) Stats(_ context.Context) (*store.MCPActivityStats, error) {
+	return &store.MCPActivityStats{}, nil
+}
+
+func (m *mockMCPActivityStore) Recent(_ context.Context, limit int) ([]store.MCPActivityEvent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if limit > len(m.events) {
+		limit = len(m.events)
+	}
+	return m.events[:limit], nil
+}
+
+func (m *mockMCPActivityStore) Prune(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+
+// mockAlertGroupStore implements store.AlertGroupStore for testing.
+type mockAlertGroupStore struct {
+	mu     sync.Mutex
+	groups map[string]*store.AlertGroup
+}
+
+func newMockAlertGroupStore() *mockAlertGroupStore {
+	return &mockAlertGroupStore{groups: make(map[string]*store.AlertGroup)}
+}
+
+func (m *mockAlertGroupStore) Create(_ context.Context, params store.CreateAlertGroupParams) (*store.AlertGroup, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id := uuid.New().String()
+	g := &store.AlertGroup{
+		ID: id, Title: params.Title, Status: "open",
+		Severity: params.Severity, Environment: params.Environment,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		AlertCount: len(params.AlertIDs),
+	}
+	m.groups[id] = g
+	return g, nil
+}
+
+func (m *mockAlertGroupStore) GetByID(_ context.Context, id string) (*store.AlertGroup, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	g, ok := m.groups[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return g, nil
+}
+
+func (m *mockAlertGroupStore) List(_ context.Context, status string, environment string) ([]store.AlertGroup, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []store.AlertGroup
+	for _, g := range m.groups {
+		if status != "" && g.Status != status {
+			continue
+		}
+		if environment != "" && g.Environment != environment {
+			continue
+		}
+		result = append(result, *g)
+	}
+	return result, nil
+}
+
+func (m *mockAlertGroupStore) Update(_ context.Context, id string, params store.UpdateAlertGroupParams) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	g, ok := m.groups[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	if params.Title != nil {
+		g.Title = *params.Title
+	}
+	if params.Status != nil {
+		g.Status = *params.Status
+	}
+	return nil
+}
+
+func (m *mockAlertGroupStore) AddAlerts(_ context.Context, _ string, _ []string) error {
+	return nil
+}
+
+func (m *mockAlertGroupStore) RemoveAlert(_ context.Context, _ string, _ string) error {
+	return nil
+}
+
+func (m *mockAlertGroupStore) GetGroupForAlert(_ context.Context, _ string) (*store.AlertGroup, error) {
+	return nil, store.ErrNotFound
+}
+
+func (m *mockAlertGroupStore) Delete(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.groups[id]; !ok {
+		return store.ErrNotFound
+	}
+	delete(m.groups, id)
+	return nil
+}
+
+func (m *mockAlertGroupStore) AutoCorrelate(_ context.Context, _ int) ([]store.AlertGroup, error) {
+	return nil, nil
 }

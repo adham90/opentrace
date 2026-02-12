@@ -36,6 +36,18 @@ func (m *mockLogStore) CountByService(_ context.Context, _ store.LogCountParams)
 	return nil, nil
 }
 
+func (m *mockLogStore) DistinctValues(_ context.Context, _ string, _ store.LogCountParams) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockLogStore) MetadataKeys(_ context.Context, _ store.LogCountParams) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockLogStore) GetByID(_ context.Context, _ int64) (*store.LogEntry, error) {
+	return nil, store.ErrNotFound
+}
+
 func TestLogsConnector_Type(t *testing.T) {
 	c := NewLogsConnector(&mockLogStore{})
 	if c.Type() != ConnectorLogs {

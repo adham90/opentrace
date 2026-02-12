@@ -523,6 +523,19 @@ func (m *mockWatcherRunStore) ListWithFilter(_ context.Context, watcherID uuid.U
 	return result, nil
 }
 
+func (m *mockWatcherRunStore) ListRecentFailed(_ context.Context, limit int) ([]store.WatcherRun, error) {
+	var result []store.WatcherRun
+	for _, r := range m.runs {
+		if r.Status == "failed" || r.Status == "error" {
+			result = append(result, r)
+		}
+	}
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
 func (m *mockWatcherRunStore) CountRuns(_ context.Context, params store.CountRunParams) (int, error) {
 	count := 0
 	for _, r := range m.runs {

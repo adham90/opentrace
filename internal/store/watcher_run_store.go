@@ -112,7 +112,7 @@ func (s *watcherRunStore) List(ctx context.Context, watcherID uuid.UUID, limit i
 	}
 
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, watcher_id, started_at, finished_at, status, summary, details, has_alert, error_message, created_at
+		`SELECT id, watcher_id, started_at, finished_at, status, summary, details, has_alert, error_message, parent_alert_id, run_type, created_at
 		 FROM watcher_runs
 		 WHERE watcher_id = ?
 		 ORDER BY created_at DESC
@@ -141,7 +141,7 @@ func (s *watcherRunStore) ListWithFilter(ctx context.Context, watcherID uuid.UUI
 		limit = 20
 	}
 
-	query := `SELECT id, watcher_id, started_at, finished_at, status, summary, details, has_alert, error_message, created_at
+	query := `SELECT id, watcher_id, started_at, finished_at, status, summary, details, has_alert, error_message, parent_alert_id, run_type, created_at
 		 FROM watcher_runs
 		 WHERE watcher_id = ?`
 	args := []any{watcherID.String()}
@@ -176,9 +176,39 @@ func (s *watcherRunStore) ListWithFilter(ctx context.Context, watcherID uuid.UUI
 	return result, rows.Err()
 }
 
+func (s *watcherRunStore) ListRecentFailed(ctx context.Context, limit int) ([]WatcherRun, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, watcher_id, started_at, finished_at, status, summary, details, has_alert, error_message, parent_alert_id, run_type, created_at
+		 FROM watcher_runs
+		 WHERE status IN ('error', 'failed')
+		 ORDER BY created_at DESC
+		 LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing recent failed runs: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]WatcherRun, 0)
+	for rows.Next() {
+		r, err := scanWatcherRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *r)
+	}
+
+	return result, rows.Err()
+}
+
 func (s *watcherRunStore) GetByID(ctx context.Context, id uuid.UUID) (*WatcherRun, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, watcher_id, started_at, finished_at, status, summary, details, has_alert, error_message, created_at
+		`SELECT id, watcher_id, started_at, finished_at, status, summary, details, has_alert, error_message, parent_alert_id, run_type, created_at
 		 FROM watcher_runs WHERE id = ?`, id.String(),
 	)
 
@@ -187,10 +217,13 @@ func (s *watcherRunStore) GetByID(ctx context.Context, id uuid.UUID) (*WatcherRu
 	var finishedAt sql.NullString
 	var detailsStr sql.NullString
 	var hasAlertInt int
+	var parentAlertID sql.NullString
+	var runType sql.NullString
 
 	err := row.Scan(
 		&r.ID, &r.WatcherID, &startedAt, &finishedAt,
-		&r.Status, &r.Summary, &detailsStr, &hasAlertInt, &r.Error, &createdAt,
+		&r.Status, &r.Summary, &detailsStr, &hasAlertInt, &r.Error,
+		&parentAlertID, &runType, &createdAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -208,6 +241,14 @@ func (s *watcherRunStore) GetByID(ctx context.Context, id uuid.UUID) (*WatcherRu
 	}
 	if detailsStr.Valid && detailsStr.String != "" {
 		r.Details = json.RawMessage(detailsStr.String)
+	}
+	if parentAlertID.Valid {
+		r.ParentAlertID = &parentAlertID.String
+	}
+	if runType.Valid {
+		r.RunType = runType.String
+	} else {
+		r.RunType = RunTypeScheduled
 	}
 
 	return r, nil
@@ -253,10 +294,13 @@ func scanWatcherRun(rows *sql.Rows) (*WatcherRun, error) {
 	var finishedAt sql.NullString
 	var detailsStr sql.NullString
 	var hasAlertInt int
+	var parentAlertID sql.NullString
+	var runType sql.NullString
 
 	if err := rows.Scan(
 		&r.ID, &r.WatcherID, &startedAt, &finishedAt,
-		&r.Status, &r.Summary, &detailsStr, &hasAlertInt, &r.Error, &createdAt,
+		&r.Status, &r.Summary, &detailsStr, &hasAlertInt, &r.Error,
+		&parentAlertID, &runType, &createdAt,
 	); err != nil {
 		return nil, fmt.Errorf("scanning watcher run: %w", err)
 	}
@@ -270,6 +314,14 @@ func scanWatcherRun(rows *sql.Rows) (*WatcherRun, error) {
 	}
 	if detailsStr.Valid && detailsStr.String != "" {
 		r.Details = json.RawMessage(detailsStr.String)
+	}
+	if parentAlertID.Valid {
+		r.ParentAlertID = &parentAlertID.String
+	}
+	if runType.Valid {
+		r.RunType = runType.String
+	} else {
+		r.RunType = RunTypeScheduled
 	}
 
 	return r, nil

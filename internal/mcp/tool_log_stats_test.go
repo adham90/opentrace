@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,9 @@ func (m *mockLogStore) BatchInsert(_ context.Context, entries []store.LogEntry) 
 func (m *mockLogStore) Search(_ context.Context, params store.LogSearchParams) ([]store.LogEntry, error) {
 	var result []store.LogEntry
 	for _, e := range m.entries {
+		if params.Query != "" && !strings.Contains(strings.ToLower(e.Message), strings.ToLower(params.Query)) {
+			continue
+		}
 		if params.Level != "" && e.Level != params.Level {
 			continue
 		}
@@ -67,6 +71,55 @@ func (m *mockLogStore) CountByLevel(_ context.Context, params store.LogCountPara
 		counts[e.Level]++
 	}
 	return counts, nil
+}
+
+func (m *mockLogStore) DistinctValues(_ context.Context, field string, params store.LogCountParams) ([]string, error) {
+	seen := make(map[string]bool)
+	for _, e := range m.entries {
+		if e.Timestamp.Before(params.Since) || !e.Timestamp.Before(params.Until) {
+			continue
+		}
+		var val string
+		switch field {
+		case "service":
+			val = e.Service
+		case "level":
+			val = e.Level
+		case "environment":
+			val = e.Environment
+		}
+		if val != "" {
+			seen[val] = true
+		}
+	}
+	var result []string
+	for v := range seen {
+		result = append(result, v)
+	}
+	return result, nil
+}
+
+func (m *mockLogStore) MetadataKeys(_ context.Context, _ store.LogCountParams) ([]string, error) {
+	seen := make(map[string]bool)
+	for _, e := range m.entries {
+		for k := range e.Metadata {
+			seen[k] = true
+		}
+	}
+	var result []string
+	for k := range seen {
+		result = append(result, k)
+	}
+	return result, nil
+}
+
+func (m *mockLogStore) GetByID(_ context.Context, id int64) (*store.LogEntry, error) {
+	for i := range m.entries {
+		if m.entries[i].ID == id {
+			return &m.entries[i], nil
+		}
+	}
+	return nil, store.ErrNotFound
 }
 
 func (m *mockLogStore) CountByService(_ context.Context, params store.LogCountParams) ([]store.ServiceLogCount, error) {
