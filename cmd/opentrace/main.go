@@ -14,7 +14,6 @@ import (
 	"github.com/adham90/opentrace/internal/agent"
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
-	"github.com/adham90/opentrace/internal/digest"
 	"github.com/adham90/opentrace/internal/llm"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/store"
@@ -252,9 +251,6 @@ func run() error {
 		eventHub,
 	)
 
-	// Create digest store (used by both server and scheduler)
-	digestStore := store.NewDigestStore(deps.db)
-
 	// Build MCP tool catalog for the /tools page (auto-detected from MCP registrations).
 	toolCatalog := mcpserver.BuildCatalog(mcpserver.Deps{
 		Registry:        deps.registry,
@@ -279,7 +275,6 @@ func run() error {
 		UserStore:     deps.userStore,
 		SessionStore:  deps.sessionStore,
 		SettingsStore: deps.settingsStore,
-		DigestStore:   digestStore,
 		Registry:      deps.registry,
 		ToolCatalog:   toolCatalog,
 		Cfg:           deps.cfg,
@@ -315,15 +310,6 @@ func run() error {
 		EventHub: eventHub,
 	})
 	sched.Start(ctx)
-
-	// Start digest scheduler for daily health summaries
-	digestBuilder := digest.NewBuilder(deps.alertStore, deps.watcherStore, runStore)
-	digestSched := digest.NewScheduler(digest.SchedulerOpts{
-		Builder:       digestBuilder,
-		DigestStore:   digestStore,
-		RetentionDays: deps.cfg.DigestRetentionDays,
-	})
-	digestSched.Start(ctx)
 
 	// Background: clean expired sessions every 15 minutes
 	go func() {
@@ -487,7 +473,6 @@ func run() error {
 	cancelCtx()
 
 	sched.Stop()
-	digestSched.Stop()
 	deps.registry.CloseAll()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)

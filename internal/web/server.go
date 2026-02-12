@@ -41,7 +41,6 @@ type Server struct {
 	userStore     store.UserStore
 	sessionStore  store.SessionStore
 	settingsStore store.SettingsStore
-	digestStore   store.DigestStore
 	registry      *connector.Registry
 	cfg           *config.Config
 	executor      *watcher.Executor
@@ -72,7 +71,6 @@ type ServerDeps struct {
 	UserStore     store.UserStore
 	SessionStore  store.SessionStore
 	SettingsStore store.SettingsStore
-	DigestStore   store.DigestStore
 	Registry      *connector.Registry
 	ToolCatalog   *mcpserver.ToolCatalog
 	Cfg           *config.Config
@@ -106,7 +104,6 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		userStore:     deps.UserStore,
 		sessionStore:  deps.SessionStore,
 		settingsStore: deps.SettingsStore,
-		digestStore:   deps.DigestStore,
 		registry:      deps.Registry,
 		toolCatalog:   deps.ToolCatalog,
 		cfg:           deps.Cfg,
@@ -231,8 +228,6 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Get("/overview", srv.handleOverviewAPI)
 			r.Get("/tools", srv.handleToolsAPI)
 			r.Get("/logs/poll", srv.handleLogsPoll)
-			r.Get("/digests/latest", srv.handleGetLatestDigest)
-			r.Get("/digests", srv.handleListDigests)
 
 			if srv.serverStore != nil && srv.metricStore != nil {
 				r.Get("/servers", srv.handleListServers)

@@ -764,52 +764,6 @@ func runSeed() error {
 		log.Printf("  connector: %s", p.Name)
 	}
 
-	// --- Digests (historical health summaries) ---
-	digestStore := store.NewDigestStore(deps.db)
-	type digestSeed struct {
-		daysAgo       int
-		status        string
-		alertTotal    int
-		alertCritical int
-		alertWarning  int
-		watcherTotal  int
-		watcherErr    int
-		failedRuns    int
-	}
-	digestSeeds := []digestSeed{
-		{daysAgo: 6, status: "healthy", alertTotal: 1, alertCritical: 0, alertWarning: 1, watcherTotal: 4, watcherErr: 0, failedRuns: 0},
-		{daysAgo: 5, status: "healthy", alertTotal: 0, alertCritical: 0, alertWarning: 0, watcherTotal: 4, watcherErr: 0, failedRuns: 0},
-		{daysAgo: 4, status: "needs_attention", alertTotal: 3, alertCritical: 0, alertWarning: 3, watcherTotal: 4, watcherErr: 0, failedRuns: 1},
-		{daysAgo: 3, status: "critical", alertTotal: 7, alertCritical: 3, alertWarning: 4, watcherTotal: 4, watcherErr: 1, failedRuns: 2},
-		{daysAgo: 2, status: "needs_attention", alertTotal: 4, alertCritical: 1, alertWarning: 3, watcherTotal: 4, watcherErr: 1, failedRuns: 1},
-		{daysAgo: 1, status: "healthy", alertTotal: 2, alertCritical: 0, alertWarning: 2, watcherTotal: 4, watcherErr: 0, failedRuns: 0},
-		{daysAgo: 0, status: "critical", alertTotal: 5, alertCritical: 2, alertWarning: 3, watcherTotal: 4, watcherErr: 0, failedRuns: 1},
-	}
-
-	for _, ds := range digestSeeds {
-		periodEnd := now.AddDate(0, 0, -ds.daysAgo)
-		periodStart := periodEnd.Add(-24 * time.Hour)
-		data := fmt.Sprintf(`{"status":"%s","alert_summary":{"total":%d,"critical":%d,"warning":%d},"watcher_summary":{"total":%d,"in_error":%d,"failed_runs":%d}}`,
-			ds.status, ds.alertTotal, ds.alertCritical, ds.alertWarning, ds.watcherTotal, ds.watcherErr, ds.failedRuns)
-		if err := digestStore.Save(ctx, store.SaveDigestParams{
-			ID:             uuid.New().String(),
-			Environment:    "",
-			Status:         ds.status,
-			PeriodStart:    periodStart,
-			PeriodEnd:      periodEnd,
-			AlertTotal:     ds.alertTotal,
-			AlertCritical:  ds.alertCritical,
-			AlertWarning:   ds.alertWarning,
-			WatcherTotal:   ds.watcherTotal,
-			WatcherErrored: ds.watcherErr,
-			FailedRuns:     ds.failedRuns,
-			Data:           data,
-		}); err != nil {
-			return fmt.Errorf("creating digest: %w", err)
-		}
-	}
-	log.Printf("  digests: %d daily summaries", len(digestSeeds))
-
 	log.Println("seed complete!")
 	return nil
 }
