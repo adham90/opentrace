@@ -221,6 +221,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 
 	// API
 	router.Route("/api", func(r chi.Router) {
+		r.Use(DecompressRequest(10 << 20)) // 10MB decompressed limit (zip bomb protection)
+
 		// Agent install script (no auth — the script is self-contained)
 		r.Get("/agent/install.sh", srv.handleAgentInstallScript)
 

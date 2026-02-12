@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -368,6 +369,59 @@ func TestIngestLogs_AutoCreate_AlreadyExists(t *testing.T) {
 		if ds.Type == store.ConnectorLogs {
 			t.Fatal("expected no new data source row when connector already registered")
 		}
+	}
+}
+
+func TestIngestLogs_GzipCompressed(t *testing.T) {
+	srv, ls := setupTestServerWithLogStore()
+
+	body := `[
+		{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","service":"api","message":"gzip test 1"},
+		{"timestamp":"2024-01-01T00:00:01Z","level":"WARN","service":"api","message":"gzip test 2"}
+	]`
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	gz.Write([]byte(body))
+	gz.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/logs", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var resp map[string]int
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["count"] != 2 {
+		t.Fatalf("count = %d, want 2", resp["count"])
+	}
+
+	if len(ls.entries) != 2 {
+		t.Fatalf("stored entries = %d, want 2", len(ls.entries))
+	}
+	if ls.entries[0].Message != "gzip test 1" {
+		t.Fatalf("message = %q, want %q", ls.entries[0].Message, "gzip test 1")
+	}
+}
+
+func TestIngestLogs_InvalidGzip(t *testing.T) {
+	srv, _ := setupTestServerWithLogStore()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString("not gzip data"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusBadRequest, w.Body.String())
 	}
 }
 

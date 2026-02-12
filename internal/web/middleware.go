@@ -1,10 +1,12 @@
 package web
 
 import (
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -59,6 +61,30 @@ func MaxBodySize(maxBytes int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// DecompressRequest transparently decompresses gzip-encoded request bodies.
+// It limits the decompressed output to maxDecompressedBytes to prevent zip bombs.
+func DecompressRequest(maxDecompressedBytes int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Content-Encoding") != "gzip" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			gz, err := gzip.NewReader(r.Body)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid gzip body")
+				return
+			}
+
+			r.Body = http.MaxBytesReader(w, io.NopCloser(gz), maxDecompressedBytes)
+			r.Header.Del("Content-Encoding")
+			r.ContentLength = -1
 			next.ServeHTTP(w, r)
 		})
 	}
