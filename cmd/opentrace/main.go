@@ -148,17 +148,40 @@ func runMCP() error {
 	defer deps.db.Close()
 	defer deps.registry.CloseAll()
 
+	// Create LLM provider + executor for on-demand watcher execution.
+	defaultLLM, _ := llm.NewLLMProvider(deps.cfg)
+	providerCache := llm.NewProviderCache(deps.cfg, defaultLLM)
+	runStore := store.NewWatcherRunStore(deps.db)
+	eventHub := watcher.NewEventHub()
+	executor := watcher.NewExecutor(
+		deps.watcherStore,
+		runStore,
+		deps.alertStore,
+		deps.registry,
+		providerCache,
+		agent.RunConfig{
+			MaxSteps:            deps.cfg.MaxAgentSteps,
+			MaxToolCalls:        deps.cfg.MaxToolCalls,
+			MaxObservationBytes: deps.cfg.MaxObservationBytes,
+		},
+		eventHub,
+	)
+
 	return mcpserver.Serve(mcpserver.Deps{
 		Registry:        deps.registry,
 		WatcherStore:    deps.watcherStore,
 		AlertStore:      deps.alertStore,
-		WatcherRunStore: store.NewWatcherRunStore(deps.db),
+		WatcherRunStore: runStore,
 		LogStore:        deps.logStore,
 		ServerStore:     deps.serverStore,
 		MetricStore:     deps.metricStore,
 		UserStore:       deps.userStore,
 		MCPToken:        os.Getenv("OPENTRACE_MCP_TOKEN"),
 		ServerName:      os.Getenv("OPENTRACE_MCP_NAME"),
+		DataSourceStore: deps.dsStore,
+		SettingsStore:   deps.settingsStore,
+		Executor:        executor,
+		Config:          deps.cfg,
 	})
 }
 

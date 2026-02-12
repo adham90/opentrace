@@ -11,6 +11,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/adham90/opentrace/internal/agent"
+	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/digest"
 	"github.com/adham90/opentrace/internal/store"
@@ -30,6 +31,12 @@ type Deps struct {
 	RuleEvaluator   *watcher.RuleEvaluator
 	MCPToken        string // OPENTRACE_MCP_TOKEN from environment
 	ServerName      string // OPENTRACE_MCP_NAME — custom server name (default: "opentrace")
+
+	// New deps for additional MCP tools.
+	DataSourceStore store.DataSourceStore       // connector CRUD
+	SettingsStore   store.SettingsStore          // retention/auto-update settings
+	Executor        *watcher.Executor            // on-demand watcher execution
+	Config          *config.Config               // needed by connector.CreateConnector
 }
 
 // NewConfiguredServer creates an MCPServer and registers tools based on the
@@ -350,6 +357,65 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 		)
 		b.Add("log_search", "Search log entries with full-text search and filters", "Log Intelligence", "read", "")
 	}
+
+	// Run ad-hoc read-only SQL queries.
+	if deps.Registry != nil {
+		maybeAddTool(s,
+			mcp.NewTool("run_query",
+				mcp.WithDescription("Execute a read-only SQL query against the active database connector. The query must be a SELECT statement (enforced by the read-only guardrail). Use for ad-hoc investigation, data exploration, or verifying hypotheses about the database."),
+				mcp.WithString("query", mcp.Required(), mcp.Description("SQL SELECT query to execute")),
+			),
+			runQueryHandler(deps.Registry),
+		)
+		b.Add("run_query", "Execute a read-only SQL query against the active database connector", "Database Introspection", "read", "database connector")
+	}
+
+	// Settings (read-only).
+	if deps.SettingsStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("get_settings",
+				mcp.WithDescription("Get current OpenTrace settings: data retention period and auto-update flag. Does not expose API keys for security."),
+			),
+			getSettingsHandler(deps.SettingsStore),
+		)
+		b.Add("get_settings", "Get current OpenTrace settings (retention, auto-update)", "Settings", "read", "")
+	}
+
+	// Incident timeline.
+	if deps.AlertStore != nil && deps.LogStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("incident_timeline",
+				mcp.WithDescription("Build a chronological incident timeline for a time window, merging alerts and error logs. Use when investigating 'what happened between X and Y?', post-incident reviews, or understanding the sequence of events during an outage."),
+				mcp.WithString("start", mcp.Required(), mcp.Description("Start time in ISO 8601 format (e.g. 2024-01-15T10:00:00Z)")),
+				mcp.WithString("end", mcp.Required(), mcp.Description("End time in ISO 8601 format")),
+				mcp.WithString("environment", mcp.Description("Filter to a specific environment (e.g. production)")),
+			),
+			incidentTimelineHandler(deps.AlertStore, deps.LogStore),
+		)
+		b.Add("incident_timeline", "Build a chronological incident timeline merging alerts and error logs", "Incidents", "read", "")
+	}
+
+	// Vacuum/maintenance report.
+	if deps.Registry != nil {
+		maybeAddTool(s,
+			mcp.NewTool("vacuum_report",
+				mcp.WithDescription("Generate a PostgreSQL vacuum and maintenance report: dead tuples, last vacuum timestamps, table sizes, and bloat. Flags tables needing VACUUM ANALYZE with recommendations."),
+			),
+			vacuumReportHandler(deps.Registry),
+		)
+		b.Add("vacuum_report", "Generate a vacuum/maintenance report with dead tuple stats and recommendations", "Database Introspection", "read", "database connector")
+
+		// Schema overview.
+		maybeAddTool(s,
+			mcp.NewTool("schema_overview",
+				mcp.WithDescription("Get a compact overview of the database schema: tables, columns, types, indexes, and foreign keys. Use to understand the data model before writing queries or creating watchers."),
+				mcp.WithString("schema", mcp.Description("Schema name (default: public)")),
+				mcp.WithString("table", mcp.Description("Get detailed info for a specific table (columns, indexes, foreign keys). Omit for an overview of all tables.")),
+			),
+			schemaOverviewHandler(deps.Registry),
+		)
+		b.Add("schema_overview", "Get database schema overview: tables, columns, indexes, and foreign keys", "Database Introspection", "read", "database connector")
+	}
 }
 
 // addWriteTools registers write/admin tools (connector tools, create_watcher, preview_watcher).
@@ -539,6 +605,67 @@ Each suggestion includes a watcher_config that can be passed directly to create_
 			suggestWatchersHandler(deps.WatcherStore, deps.LogStore),
 		)
 		b.Add("suggest_watchers", "Analyze system state and suggest watchers to create, with ready-to-use configs", "Watchers", "admin", "")
+	}
+
+	// Run watcher now (admin — triggers immediate watcher execution).
+	if deps.WatcherStore != nil && deps.Executor != nil {
+		maybeAddTool(s,
+			mcp.NewTool("run_watcher_now",
+				mcp.WithDescription("Trigger an immediate execution of a watcher, bypassing its schedule. The watcher runs asynchronously — this returns immediately with a confirmation. Use when you want to test a watcher or need fresh results now."),
+				mcp.WithString("watcher_id", mcp.Required(), mcp.Description("Watcher UUID (from list_watchers)")),
+			),
+			runWatcherNowHandler(deps.WatcherStore, deps.Executor),
+		)
+		b.Add("run_watcher_now", "Trigger immediate execution of a watcher", "Watchers", "admin", "")
+	}
+
+	// Connector management (admin).
+	if deps.DataSourceStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("create_connector",
+				mcp.WithDescription("Create a new database or log connector. After creating, use test_connector to verify the connection and activate it."),
+				mcp.WithString("name", mcp.Required(), mcp.Description("Display name for the connector")),
+				mcp.WithString("type", mcp.Required(), mcp.Description("Connector type: 'database' or 'logs'")),
+				mcp.WithString("connection_string", mcp.Description("PostgreSQL connection string (required for database type)")),
+				mcp.WithString("environment", mcp.Description("Environment label (e.g. production, staging)")),
+			),
+			createConnectorHandler(deps.DataSourceStore),
+		)
+		b.Add("create_connector", "Create a new database or log connector", "Connectors", "admin", "")
+
+		if deps.Registry != nil && deps.Config != nil {
+			maybeAddTool(s,
+				mcp.NewTool("test_connector",
+					mcp.WithDescription("Test and activate a connector. Creates the connection, verifies connectivity, and registers it for use by all tools. Use after create_connector or to re-test an existing connector."),
+					mcp.WithString("connector_id", mcp.Required(), mcp.Description("Connector UUID (from create_connector or list_connectors)")),
+				),
+				testConnectorHandler(deps.DataSourceStore, deps.Registry, deps.LogStore, deps.Config),
+			)
+			b.Add("test_connector", "Test and activate a connector", "Connectors", "admin", "")
+		}
+
+		if deps.Registry != nil {
+			maybeAddTool(s,
+				mcp.NewTool("delete_connector",
+					mcp.WithDescription("Delete a connector and disconnect it. This removes the connector from the database and unregisters it from the active registry."),
+					mcp.WithString("connector_id", mcp.Required(), mcp.Description("Connector UUID")),
+				),
+				deleteConnectorHandler(deps.DataSourceStore, deps.Registry),
+			)
+			b.Add("delete_connector", "Delete and disconnect a connector", "Connectors", "admin", "")
+		}
+	}
+
+	// Update retention settings (admin).
+	if deps.SettingsStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("update_retention",
+				mcp.WithDescription("Update the data retention period. Logs, alerts, and watcher runs older than the specified number of days will be pruned automatically."),
+				mcp.WithNumber("retention_days", mcp.Required(), mcp.Description("Number of days to retain data (1-365)")),
+			),
+			updateRetentionHandler(deps.SettingsStore),
+		)
+		b.Add("update_retention", "Update data retention period", "Settings", "admin", "")
 	}
 }
 
