@@ -11,21 +11,42 @@ import (
 
 func TestVacuumReportHandler_Success(t *testing.T) {
 	registry := connector.NewRegistry()
-	registry.Register(&mockQueryExecutor{
+
+	callCount := 0
+	registry.Register(&multiQueryMockQE{
 		mockDataSource: mockDataSource{connType: connector.ConnectorDatabase},
-		result: &connector.QueryResult{
-			Columns: []string{"schemaname", "relname", "n_live_tup", "n_dead_tup", "dead_tuple_pct",
-				"last_vacuum", "last_autovacuum", "last_analyze", "last_autoanalyze",
-				"vacuum_count", "autovacuum_count", "total_size"},
-			Rows: [][]any{
-				{"public", "users", int64(10000), int64(500), 4.76,
-					nil, "2024-01-15 10:00:00", nil, "2024-01-15 10:00:00",
-					int64(0), int64(5), "2 MB"},
-				{"public", "orders", int64(50000), int64(15000), 23.08,
-					nil, nil, nil, nil,
-					int64(0), int64(0), "10 MB"},
-			},
-			RowCount: 2,
+		handler: func(query string) (*connector.QueryResult, error) {
+			callCount++
+			if callCount == 1 {
+				// Main vacuum report query (15 columns).
+				return &connector.QueryResult{
+					Columns: []string{"schemaname", "relname", "n_live_tup", "n_dead_tup", "dead_tuple_pct",
+						"last_vacuum", "last_autovacuum", "last_analyze", "last_autoanalyze",
+						"vacuum_count", "autovacuum_count", "total_size",
+						"n_tup_ins", "n_tup_upd", "n_tup_del"},
+					Rows: [][]any{
+						{"public", "users", int64(10000), int64(500), 4.76,
+							nil, "2024-01-15 10:00:00", nil, "2024-01-15 10:00:00",
+							int64(0), int64(5), "2 MB",
+							int64(10000), int64(5000), int64(200)},
+						{"public", "orders", int64(50000), int64(15000), 23.08,
+							nil, nil, nil, nil,
+							int64(0), int64(0), "10 MB",
+							int64(50000), int64(20000), int64(5000)},
+					},
+					RowCount: 2,
+				}, nil
+			}
+			// Autovacuum settings query.
+			return &connector.QueryResult{
+				Columns: []string{"name", "setting"},
+				Rows: [][]any{
+					{"autovacuum", "on"},
+					{"autovacuum_vacuum_threshold", "50"},
+					{"autovacuum_vacuum_scale_factor", "0.2"},
+				},
+				RowCount: 3,
+			}, nil
 		},
 	})
 
@@ -62,6 +83,15 @@ func TestVacuumReportHandler_Success(t *testing.T) {
 	}
 	if !foundOrders {
 		t.Error("expected recommendation for orders table (23% dead tuples)")
+	}
+
+	// Check autovacuum settings are included.
+	avSettings, ok := resp["autovacuum_settings"].(map[string]any)
+	if !ok {
+		t.Fatal("expected autovacuum_settings map")
+	}
+	if avSettings["autovacuum"] != "on" {
+		t.Errorf("autovacuum = %v, want on", avSettings["autovacuum"])
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -141,10 +142,17 @@ func alertDetailsHandler(as store.AlertStore, ws store.WatcherStore, rs store.Wa
 					count24h++
 				}
 			}
-			resp["context"] = map[string]any{
+			ctxInfo := map[string]any{
 				"same_watcher_alerts_24h": count24h,
 			}
+			if count24h > 5 {
+				ctxInfo["frequency_note"] = "This watcher has fired frequently in the last 24h — consider adjusting its threshold or schedule."
+			}
+			resp["context"] = ctxInfo
 		}
+
+		// Suggested remediation steps based on alert metadata.
+		resp["suggested_actions"] = suggestRemediation(alert)
 
 		data, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {
@@ -152,4 +160,62 @@ func alertDetailsHandler(as store.AlertStore, ws store.WatcherStore, rs store.Wa
 		}
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+// suggestRemediation generates suggested investigation steps based on the alert.
+func suggestRemediation(alert *store.Alert) []string {
+	steps := []string{
+		"Review the alert summary and triggering conditions",
+	}
+
+	title := strings.ToLower(alert.Title)
+	summary := strings.ToLower(alert.Summary)
+	combined := title + " " + summary
+
+	if strings.Contains(combined, "connection") || strings.Contains(combined, "pool") {
+		steps = append(steps,
+			"Run 'connection_pool_stats' to check current connection utilization",
+			"Run 'db_activity' to identify idle-in-transaction sessions",
+			"Run 'runbook' with playbook 'connection_exhaustion' for comprehensive analysis",
+			"Consider using 'kill_query' to terminate stuck sessions if needed",
+		)
+	} else if strings.Contains(combined, "slow") || strings.Contains(combined, "latency") || strings.Contains(combined, "performance") {
+		steps = append(steps,
+			"Run 'db_query_stats' to identify the slowest queries",
+			"Run 'db_locks' to check for lock contention",
+			"Run 'runbook' with playbook 'slow_database' for comprehensive analysis",
+			"Consider 'explain_query' on suspected slow queries",
+		)
+	} else if strings.Contains(combined, "disk") || strings.Contains(combined, "storage") || strings.Contains(combined, "bloat") {
+		steps = append(steps,
+			"Run 'disk_usage' for per-table size breakdown",
+			"Run 'bloat_estimate' to find reclaimable space",
+			"Run 'vacuum_report' to check maintenance status",
+			"Run 'runbook' with playbook 'disk_pressure' for comprehensive analysis",
+		)
+	} else if strings.Contains(combined, "replication") || strings.Contains(combined, "replica") || strings.Contains(combined, "lag") {
+		steps = append(steps,
+			"Run 'replication_status' to check replica lag and slot status",
+			"Run 'runbook' with playbook 'replication_lag' for comprehensive analysis",
+		)
+	} else if strings.Contains(combined, "error") || strings.Contains(combined, "exception") || strings.Contains(combined, "fatal") {
+		steps = append(steps,
+			"Run 'log_search' with level='error' to find recent error messages",
+			"Run 'log_stats' to see error rate trends",
+			"Run 'compare_periods' with metric='errors' to see if errors are increasing",
+			"Run 'runbook' with playbook 'error_spike' for comprehensive analysis",
+		)
+	} else {
+		steps = append(steps,
+			"Run 'get_digest' for an overall health summary",
+			"Run 'log_search' to look for related log entries",
+			"Run 'db_activity' to check current database state",
+		)
+	}
+
+	if alert.Severity == store.SeverityCritical {
+		steps = append(steps, "This is a CRITICAL alert — consider immediate action")
+	}
+
+	return steps
 }

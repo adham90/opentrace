@@ -10,12 +10,25 @@ import (
 
 func TestSchemaOverviewHandler_AllTables(t *testing.T) {
 	registry := connector.NewRegistry()
-	registry.Register(&mockQueryExecutor{
+
+	callCount := 0
+	registry.Register(&multiQueryMockQE{
 		mockDataSource: mockDataSource{connType: connector.ConnectorDatabase},
-		result: &connector.QueryResult{
-			Columns:  []string{"table_name", "column_count", "size", "comment"},
-			Rows:     [][]any{{"users", int64(5), "2 MB", nil}, {"orders", int64(8), "10 MB", "order data"}},
-			RowCount: 2,
+		handler: func(query string) (*connector.QueryResult, error) {
+			callCount++
+			if callCount == 1 {
+				return &connector.QueryResult{
+					Columns:  []string{"table_name", "column_count", "size", "comment", "estimated_rows"},
+					Rows:     [][]any{{"users", int64(5), "2 MB", nil, int64(10000)}, {"orders", int64(8), "10 MB", "order data", int64(50000)}},
+					RowCount: 2,
+				}, nil
+			}
+			// Dependencies query.
+			return &connector.QueryResult{
+				Columns:  []string{"from_table", "to_table", "from_column", "to_column"},
+				Rows:     [][]any{{"orders", "users", "user_id", "id"}},
+				RowCount: 1,
+			}, nil
 		},
 	})
 
@@ -41,16 +54,33 @@ func TestSchemaOverviewHandler_AllTables(t *testing.T) {
 	if resp["schema"] != "public" {
 		t.Errorf("schema = %v, want public", resp["schema"])
 	}
+
+	// Check dependencies are included.
+	deps, ok := resp["dependencies"].([]any)
+	if !ok {
+		t.Fatal("expected dependencies array")
+	}
+	if len(deps) != 1 {
+		t.Errorf("expected 1 dependency, got %d", len(deps))
+	}
 }
 
 func TestSchemaOverviewHandler_CustomSchema(t *testing.T) {
 	registry := connector.NewRegistry()
-	registry.Register(&mockQueryExecutor{
+
+	callCount := 0
+	registry.Register(&multiQueryMockQE{
 		mockDataSource: mockDataSource{connType: connector.ConnectorDatabase},
-		result: &connector.QueryResult{
-			Columns:  []string{"table_name", "column_count", "size", "comment"},
-			Rows:     [][]any{{"events", int64(3), "500 kB", nil}},
-			RowCount: 1,
+		handler: func(query string) (*connector.QueryResult, error) {
+			callCount++
+			if callCount == 1 {
+				return &connector.QueryResult{
+					Columns:  []string{"table_name", "column_count", "size", "comment", "estimated_rows"},
+					Rows:     [][]any{{"events", int64(3), "500 kB", nil, int64(100)}},
+					RowCount: 1,
+				}, nil
+			}
+			return &connector.QueryResult{Columns: []string{"x"}, Rows: [][]any{}, RowCount: 0}, nil
 		},
 	})
 
@@ -93,7 +123,7 @@ func TestSchemaOverviewHandler_Empty(t *testing.T) {
 	registry.Register(&mockQueryExecutor{
 		mockDataSource: mockDataSource{connType: connector.ConnectorDatabase},
 		result: &connector.QueryResult{
-			Columns:  []string{"table_name", "column_count", "size", "comment"},
+			Columns:  []string{"table_name", "column_count", "size", "comment", "estimated_rows"},
 			Rows:     [][]any{},
 			RowCount: 0,
 		},

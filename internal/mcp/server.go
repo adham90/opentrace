@@ -172,6 +172,7 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			mcp.WithDescription("Show top SQL queries from pg_stat_statements — useful for identifying slow or frequent queries to monitor"),
 			mcp.WithString("order_by", mcp.Description("Sort by: calls, total_exec_time (default), mean_exec_time, rows, shared_blks_hit, shared_blks_read")),
 			mcp.WithNumber("limit", mcp.Description("Number of queries to return (default: 20, max: 100)")),
+			mcp.WithString("filter", mcp.Description("Filter queries by pattern (case-insensitive substring match on query text)")),
 		),
 		queryStatsHandler(deps.Registry, deps.WatcherStore),
 	)
@@ -364,6 +365,7 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			mcp.NewTool("run_query",
 				mcp.WithDescription("Execute a read-only SQL query against the active database connector. The query must be a SELECT statement (enforced by the read-only guardrail). Use for ad-hoc investigation, data exploration, or verifying hypotheses about the database."),
 				mcp.WithString("query", mcp.Required(), mcp.Description("SQL SELECT query to execute")),
+				mcp.WithString("format", mcp.Description("Output format: 'table' (default), 'json' (structured), or 'csv'")),
 			),
 			runQueryHandler(deps.Registry),
 		)
@@ -415,6 +417,88 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			schemaOverviewHandler(deps.Registry),
 		)
 		b.Add("schema_overview", "Get database schema overview: tables, columns, indexes, and foreign keys", "Database Introspection", "read", "database connector")
+
+		// PostgreSQL configuration audit.
+		maybeAddTool(s,
+			mcp.NewTool("pg_config_check",
+				mcp.WithDescription("Audit PostgreSQL configuration: key settings (shared_buffers, work_mem, autovacuum, etc.), server info, and warnings for common misconfigurations. Use when diagnosing performance issues or setting up a new database."),
+			),
+			pgConfigCheckHandler(deps.Registry),
+		)
+		b.Add("pg_config_check", "Audit PostgreSQL configuration with warnings for common misconfigurations", "Database Introspection", "read", "database connector")
+
+		// Disk usage breakdown.
+		maybeAddTool(s,
+			mcp.NewTool("disk_usage",
+				mcp.WithDescription("Show detailed disk usage breakdown: database total size, per-table sizes (table, index, TOAST). Use when investigating disk pressure or planning capacity."),
+			),
+			diskUsageHandler(deps.Registry),
+		)
+		b.Add("disk_usage", "Show detailed disk usage breakdown by table, index, and TOAST", "Database Introspection", "read", "database connector")
+
+		// WAL/checkpoint health.
+		maybeAddTool(s,
+			mcp.NewTool("checkpoint_stats",
+				mcp.WithDescription("Show WAL and checkpoint health: checkpoint frequency, buffer writes, WAL generation rate. Use when diagnosing write performance issues or WAL bloat."),
+			),
+			checkpointStatsHandler(deps.Registry),
+		)
+		b.Add("checkpoint_stats", "Show WAL and checkpoint health with performance warnings", "Database Introspection", "read", "database connector")
+
+		// Sequence exhaustion risk.
+		maybeAddTool(s,
+			mcp.NewTool("sequence_health",
+				mcp.WithDescription("Check sequence exhaustion risk: current usage percentage, data type, and capacity warnings. Use to prevent integer overflow errors on primary key sequences."),
+			),
+			sequenceHealthHandler(deps.Registry),
+		)
+		b.Add("sequence_health", "Check sequence exhaustion risk and capacity warnings", "Database Introspection", "read", "database connector")
+
+		// Table bloat estimation.
+		maybeAddTool(s,
+			mcp.NewTool("bloat_estimate",
+				mcp.WithDescription("Estimate table bloat using dead tuple ratios: reclaimable space per table, VACUUM recommendations. More detailed than vacuum_report for bloat-specific analysis."),
+			),
+			bloatEstimateHandler(deps.Registry),
+		)
+		b.Add("bloat_estimate", "Estimate table bloat and reclaimable space with VACUUM recommendations", "Database Introspection", "read", "database connector")
+
+		// Long-running transactions.
+		maybeAddTool(s,
+			mcp.NewTool("long_transactions",
+				mcp.WithDescription("Find long-running and idle-in-transaction sessions with their held locks. Use when db_activity shows stuck queries or when vacuum can't clean dead tuples."),
+				mcp.WithNumber("min_duration_seconds", mcp.Description("Minimum transaction duration in seconds (default: 30)")),
+			),
+			longTransactionsHandler(deps.Registry),
+		)
+		b.Add("long_transactions", "Find long-running and idle-in-transaction sessions with their locks", "Database Introspection", "read", "database connector")
+	}
+
+	// Composite investigation runbooks.
+	if deps.Registry != nil {
+		maybeAddTool(s,
+			mcp.NewTool("runbook",
+				mcp.WithDescription("Run a composite investigation playbook that executes multiple diagnostic queries at once. Available playbooks: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike. Use when you need a comprehensive investigation rather than individual tool calls."),
+				mcp.WithString("playbook", mcp.Required(), mcp.Description("Playbook to run: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike")),
+			),
+			runbookHandler(deps.Registry, deps.AlertStore, deps.LogStore),
+		)
+		b.Add("runbook", "Run a composite investigation playbook (slow_database, connection_exhaustion, etc.)", "Database Introspection", "read", "database connector")
+	}
+
+	// Anomaly detection (statistical baseline comparison).
+	if deps.LogStore != nil || deps.AlertStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("anomaly_detect",
+				mcp.WithDescription("Detect statistical anomalies by comparing a metric's current value against a baseline of 7 previous periods. Uses z-score analysis to flag deviations. Use when you need to know 'is this normal?' for error rates, log volumes, or alert counts."),
+				mcp.WithString("metric", mcp.Required(), mcp.Description("Metric to analyze: error_rate, log_volume, alert_count")),
+				mcp.WithString("window", mcp.Description("Time window per sample: '15m', '1h' (default), '6h', '24h'")),
+				mcp.WithString("environment", mcp.Description("Filter by environment")),
+				mcp.WithString("service", mcp.Description("Filter by service (for error_rate and log_volume)")),
+			),
+			anomalyDetectHandler(deps.LogStore, deps.AlertStore),
+		)
+		b.Add("anomaly_detect", "Detect statistical anomalies in error rates, log volumes, or alert counts", "Log Intelligence", "read", "")
 	}
 }
 
@@ -1289,5 +1373,48 @@ func buildDigestResponse(d *digest.Digest) map[string]any {
 		}
 	}
 
+	// Top recommended actions based on digest findings.
+	actions := digestRecommendedActions(d)
+	if len(actions) > 0 {
+		resp["recommended_actions"] = actions
+	}
+
 	return resp
+}
+
+// digestRecommendedActions generates prioritized action items based on digest data.
+func digestRecommendedActions(d *digest.Digest) []string {
+	var actions []string
+
+	if d.AlertSummary.Critical > 0 {
+		actions = append(actions, fmt.Sprintf("Investigate %d critical alert(s) immediately — run 'alert_details' on each", d.AlertSummary.Critical))
+	}
+
+	if d.WatcherSummary.FailedRuns > 0 {
+		actions = append(actions, fmt.Sprintf("Fix %d failed watcher run(s) — run 'watcher_run_history' to see errors", d.WatcherSummary.FailedRuns))
+	}
+
+	if d.WatcherSummary.InError > 0 {
+		actions = append(actions, fmt.Sprintf("%d watcher(s) in error state — check their configuration and run 'list_watchers'", d.WatcherSummary.InError))
+	}
+
+	if d.AlertSummary.Unread > 10 {
+		actions = append(actions, fmt.Sprintf("%d unread alerts — review and acknowledge or dismiss as appropriate", d.AlertSummary.Unread))
+	}
+
+	if d.Trends != nil && d.Trends.AlertsChangePercent() > 50 {
+		actions = append(actions, "Alert volume is trending up — run 'compare_periods' with metric='alerts' for details")
+	}
+
+	for _, m := range d.WatcherHealth {
+		if m.AlertCount > 5 {
+			actions = append(actions, fmt.Sprintf("Watcher '%s' fired %d times — may need threshold adjustment", m.Title, m.AlertCount))
+		}
+	}
+
+	if len(actions) == 0 {
+		actions = append(actions, "No urgent actions needed — system looks healthy")
+	}
+
+	return actions
 }

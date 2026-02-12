@@ -106,12 +106,38 @@ func incidentTimelineHandler(as store.AlertStore, ls store.LogStore) server.Tool
 		// Build summary stats.
 		alertCount := 0
 		logLevels := make(map[string]int)
+		affectedServices := make(map[string]bool)
+		severityCounts := make(map[string]int)
 		for _, e := range events {
 			if e.Type == "alert" {
 				alertCount++
+				severityCounts[e.Severity]++
 			}
 			if e.Type == "log" {
 				logLevels[e.Severity]++
+			}
+			if e.Source != "" {
+				affectedServices[e.Source] = true
+			}
+		}
+
+		// Blast radius: how many services/watchers are affected.
+		serviceList := make([]string, 0, len(affectedServices))
+		for svc := range affectedServices {
+			serviceList = append(serviceList, svc)
+		}
+
+		// Probable root cause: first event in the timeline.
+		var rootCause map[string]any
+		if len(events) > 0 {
+			first := events[0]
+			rootCause = map[string]any{
+				"time":     first.Time,
+				"type":     first.Type,
+				"severity": first.Severity,
+				"summary":  first.Summary,
+				"source":   first.Source,
+				"note":     "This is the earliest event in the window — may be the root cause or the first symptom.",
 			}
 		}
 
@@ -120,10 +146,19 @@ func incidentTimelineHandler(as store.AlertStore, ls store.LogStore) server.Tool
 				"start": start.Format(time.RFC3339),
 				"end":   end.Format(time.RFC3339),
 			},
-			"total_events": len(events),
-			"alert_count":  alertCount,
-			"log_levels":   logLevels,
-			"timeline":     events,
+			"total_events":      len(events),
+			"alert_count":       alertCount,
+			"alert_by_severity": severityCounts,
+			"log_levels":        logLevels,
+			"blast_radius": map[string]any{
+				"affected_services": serviceList,
+				"service_count":     len(serviceList),
+			},
+			"timeline": events,
+		}
+
+		if rootCause != nil {
+			resp["probable_root_cause"] = rootCause
 		}
 
 		data, err := json.MarshalIndent(resp, "", "  ")

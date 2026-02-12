@@ -38,7 +38,10 @@ func vacuumReportHandler(registry *connector.Registry) server.ToolHandlerFunc {
 			last_autoanalyze,
 			vacuum_count,
 			autovacuum_count,
-			pg_size_pretty(pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(relname))) AS total_size
+			pg_size_pretty(pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(relname))) AS total_size,
+			n_tup_ins,
+			n_tup_upd,
+			n_tup_del
 		FROM pg_stat_user_tables
 		ORDER BY n_dead_tup DESC
 		LIMIT 50`
@@ -57,7 +60,7 @@ func vacuumReportHandler(registry *connector.Registry) server.ToolHandlerFunc {
 		var recommendations []string
 
 		for _, row := range result.Rows {
-			if len(row) < 12 {
+			if len(row) < 15 {
 				continue
 			}
 			table := map[string]any{
@@ -73,6 +76,9 @@ func vacuumReportHandler(registry *connector.Registry) server.ToolHandlerFunc {
 				"vacuum_count":     row[9],
 				"autovacuum_count": row[10],
 				"total_size":       row[11],
+				"inserts":          row[12],
+				"updates":          row[13],
+				"deletes":          row[14],
 			}
 			tables = append(tables, table)
 
@@ -84,12 +90,35 @@ func vacuumReportHandler(registry *connector.Registry) server.ToolHandlerFunc {
 			if row[5] == nil && row[6] == nil {
 				recommendations = append(recommendations, fmt.Sprintf("VACUUM %s — never vacuumed", tableName))
 			}
+
+			// Warn about high-write tables not being vacuumed recently.
+			updates, _ := toFloat64(row[13])
+			deletes, _ := toFloat64(row[14])
+			if updates+deletes > 100000 && row[5] == nil && row[6] == nil {
+				recommendations = append(recommendations, fmt.Sprintf("%s has %.0f updates + %.0f deletes but was never vacuumed", tableName, updates, deletes))
+			}
+		}
+
+		// Fetch autovacuum settings for context.
+		avQuery := `SELECT name, setting FROM pg_settings
+			WHERE name IN ('autovacuum', 'autovacuum_vacuum_threshold', 'autovacuum_vacuum_scale_factor',
+				'autovacuum_analyze_threshold', 'autovacuum_analyze_scale_factor', 'autovacuum_naptime',
+				'autovacuum_max_workers')`
+		avSettings := make(map[string]string)
+		avResult, err := qe.ExecuteReadQuery(ctx, avQuery)
+		if err == nil {
+			for _, row := range avResult.Rows {
+				if len(row) >= 2 {
+					avSettings[fmt.Sprintf("%v", row[0])] = fmt.Sprintf("%v", row[1])
+				}
+			}
 		}
 
 		resp := map[string]any{
-			"tables":          tables,
-			"total_tables":    len(tables),
-			"recommendations": recommendations,
+			"tables":              tables,
+			"total_tables":        len(tables),
+			"recommendations":     recommendations,
+			"autovacuum_settings": avSettings,
 		}
 
 		data, err := json.MarshalIndent(resp, "", "  ")

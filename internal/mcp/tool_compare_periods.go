@@ -255,6 +255,19 @@ func compareAlerts(ctx context.Context, as store.AlertStore, curStart, curEnd, b
 		warnings = append(warnings, fmt.Sprintf("Alert count increased %.0f%% compared to the baseline period", changePct))
 	}
 
+	// Generate recommendation based on comparison.
+	var recommendation string
+	switch {
+	case direction == "increase" && changePct > 100:
+		recommendation = "Significant alert increase detected. Run 'runbook' with playbook 'error_spike' and check 'list_alerts' for details."
+	case direction == "increase" && changePct > 25:
+		recommendation = "Alert volume is trending upward. Review recent alerts with 'list_alerts' and check if thresholds need adjustment."
+	case direction == "decrease" && math.Abs(changePct) > 50:
+		recommendation = "Alert volume has dropped significantly — the situation appears to be improving."
+	default:
+		recommendation = "Alert volume is stable relative to the baseline period."
+	}
+
 	resp := map[string]any{
 		"metric": "alerts",
 		"current": map[string]any{
@@ -271,6 +284,7 @@ func compareAlerts(ctx context.Context, as store.AlertStore, curStart, curEnd, b
 			"total_change_pct": changePct,
 			"direction":        direction,
 		},
+		"recommendation": recommendation,
 	}
 	if len(warnings) > 0 {
 		resp["warnings"] = warnings

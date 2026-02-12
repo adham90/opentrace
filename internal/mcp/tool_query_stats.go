@@ -48,6 +48,15 @@ func queryStatsHandler(registry *connector.Registry, ws store.WatcherStore) serv
 			}
 		}
 
+		filter, _ := args["filter"].(string)
+
+		whereClause := ""
+		if filter != "" {
+			// Escape single quotes in the filter string.
+			escaped := strings.ReplaceAll(filter, "'", "''")
+			whereClause = fmt.Sprintf("WHERE query ILIKE '%%%s%%'", escaped)
+		}
+
 		query := fmt.Sprintf(`SELECT
   queryid,
   LEFT(query, 200) AS query_preview,
@@ -58,8 +67,9 @@ func queryStatsHandler(registry *connector.Registry, ws store.WatcherStore) serv
   shared_blks_hit,
   shared_blks_read
 FROM pg_stat_statements
+%s
 ORDER BY %s DESC
-LIMIT %d`, orderBy, limit)
+LIMIT %d`, whereClause, orderBy, limit)
 
 		result, err := qe.ExecuteReadQuery(ctx, query)
 		if err != nil {

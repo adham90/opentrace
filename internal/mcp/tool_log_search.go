@@ -117,6 +117,22 @@ func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
 			resp["hint"] = "More results may be available. Use the 'offset' parameter to paginate."
 		}
 
+		// Summary: distribution of returned entries by level and service.
+		levelDist := make(map[string]int)
+		serviceDist := make(map[string]int)
+		for _, e := range entries {
+			levelDist[e.Level]++
+			if e.Service != "" {
+				serviceDist[e.Service]++
+			}
+		}
+		if len(entries) > 1 {
+			resp["summary"] = map[string]any{
+				"by_level":   levelDist,
+				"by_service": serviceDist,
+			}
+		}
+
 		data, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil
