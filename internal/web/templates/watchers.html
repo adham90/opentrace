@@ -58,7 +58,9 @@
           <div class="form-grid">
             <div class="form-group">
               <label>Environment</label>
-              <input type="text" id="edit-env" placeholder="e.g. production">
+              <select id="edit-env">
+                <option value="">None</option>
+              </select>
             </div>
             <div class="form-group">
               <label>Severity</label>
@@ -86,6 +88,12 @@
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
+              </select>
+            </div>
+            <div class="form-group" id="edit-model-group" style="display:none">
+              <label>AI Model</label>
+              <select id="edit-model">
+                <option value="">Default (global)</option>
               </select>
             </div>
           </div>
@@ -329,8 +337,8 @@ function renderWatchers(watchers) {
     var statusIcon = w.status === 'active' ? '&#9679;' : w.status === 'paused' ? '&#9208;' : '&#9888;';
     var lastRun = w.last_run_at ? getTimeAgo(w.last_run_at) : 'never';
 
-    html += '<div class="watcher-card">';
-    html += '  <div class="watcher-header">';
+    html += '<div class="watcher-card" data-id="' + w.id + '">';
+    html += '  <div class="watcher-header" onclick="toggleWatcherDetail(\'' + w.id + '\')" style="cursor:pointer">';
     html += '    ' + getWatcherTypeBadge(w);
     html += '    <span class="watcher-title">' + escapeHtml(w.title) + '</span>';
     var schedLabel = w.schedule ? describeSchedule(w.schedule) : ('every ' + (w.time_range || '15m'));
@@ -340,18 +348,61 @@ function renderWatchers(watchers) {
     }
     html += '    <span class="watcher-status ' + statusClass + '">' + statusIcon + ' ' + w.status + '</span>';
     html += getAdaptiveBadge(w);
+    if (w.human_summary && w.human_summary.what_it_monitors) {
+        html += '    <span class="badge claude-managed" title="Created and managed by Claude">claude</span>';
+    }
     html += '  </div>';
     html += '  <div class="watcher-info">';
     html += '    <span>Last run: ' + lastRun + '</span>';
     html += '    <span class="severity-badge severity-' + w.severity + '">' + w.severity + '</span>';
     html += (w.environment ? '    <span class="badge badge-env">' + escapeHtml(w.environment) + '</span>' : '');
-    if (w.human_summary && w.human_summary.what_it_monitors) {
-        html += '    <span class="badge claude-managed" title="Created and managed by Claude">claude</span>';
-    }
     html += '  </div>';
     if (w.human_summary && w.human_summary.what_it_monitors) {
         html += '  <div class="watcher-human-summary">' + escapeHtml(w.human_summary.what_it_monitors) + '</div>';
     }
+
+    // Expandable detail section
+    html += '  <div class="watcher-detail" id="watcher-detail-' + w.id + '" style="display:none">';
+    html += '    <div class="watcher-detail-meta">';
+    html += '      <div class="alert-detail-row"><span class="alert-detail-key">id</span><span class="alert-detail-val dim" style="font-size:10px">' + w.id + '</span></div>';
+    html += '      <div class="alert-detail-row"><span class="alert-detail-key">type</span><span class="alert-detail-val">' + (w.watcher_type || 'ai') + '</span></div>';
+    if (w.description) {
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key">description</span><span class="alert-detail-val">' + escapeHtml(w.description) + '</span></div>';
+    }
+    if (w.watcher_type !== 'rule' && w.model) {
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key">model</span><span class="alert-detail-val">' + escapeHtml(w.model) + '</span></div>';
+    }
+    if (w.watcher_type !== 'rule') {
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key">effort</span><span class="alert-detail-val">' + (w.effort || 'medium') + '</span></div>';
+    }
+    html += '      <div class="alert-detail-row"><span class="alert-detail-key">schedule</span><span class="alert-detail-val">' + escapeHtml(schedLabel) + '</span></div>';
+    if (w.time_range) {
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key">lookback</span><span class="alert-detail-val">' + escapeHtml(w.time_range) + '</span></div>';
+    }
+    if (w.created_at) {
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key">created</span><span class="alert-detail-val">' + new Date(w.created_at).toLocaleString() + '</span></div>';
+    }
+    if (w.human_summary) {
+      if (w.human_summary.why_it_matters) {
+        html += '      <div class="alert-detail-row"><span class="alert-detail-key">why</span><span class="alert-detail-val">' + escapeHtml(w.human_summary.why_it_matters) + '</span></div>';
+      }
+      if (w.human_summary.what_to_do) {
+        html += '      <div class="alert-detail-row"><span class="alert-detail-key">action</span><span class="alert-detail-val">' + escapeHtml(w.human_summary.what_to_do) + '</span></div>';
+      }
+    }
+    if (w.rule_config) {
+      if (w.rule_config.source === 'query' && w.rule_config.query) {
+        html += '      <div class="alert-detail-row"><span class="alert-detail-key">query</span><span class="alert-detail-val" style="font-size:11px;white-space:pre-wrap">' + escapeHtml(w.rule_config.query) + '</span></div>';
+      }
+      if (w.rule_config.operator) {
+        html += '      <div class="alert-detail-row"><span class="alert-detail-key">condition</span><span class="alert-detail-val">' + (w.rule_config.metric || 'value') + ' ' + w.rule_config.operator + ' ' + (w.rule_config.threshold || 0) + '</span></div>';
+      }
+    }
+    // Effectiveness placeholder — loaded on demand
+    html += '      <div id="watcher-eff-' + w.id + '"></div>';
+    html += '    </div>';
+    html += '  </div>';
+
     html += '  <div class="watcher-actions">';
     if (isAdmin) {
       html += '    <button class="btn btn-sm" onclick="openEditModal(\'' + w.id + '\')">Edit</button>';
@@ -393,7 +444,64 @@ function openEditModal(id) {
     document.getElementById('edit-severity').value = w.severity || 'warning';
     document.getElementById('edit-timerange').value = w.time_range || '15m';
     document.getElementById('edit-effort').value = w.effort || 'medium';
+
+    // Load environments dropdown
+    loadEnvironmentsForEdit(w.environment || '');
+
+    // Show model selector only for AI watchers
+    var modelGroup = document.getElementById('edit-model-group');
+    if (w.watcher_type !== 'rule') {
+      modelGroup.style.display = '';
+      loadModelsForEdit(w.model || '');
+    } else {
+      modelGroup.style.display = 'none';
+    }
+
     document.getElementById('edit-modal').style.display = 'flex';
+  });
+}
+
+function loadEnvironmentsForEdit(currentEnv) {
+  var sel = document.getElementById('edit-env');
+  while (sel.options.length > 1) sel.remove(1);
+  sel.value = '';
+
+  fetch('/api/environments').then(function(r) { return r.json(); }).then(function(envs) {
+    if (envs && envs.length) {
+      envs.forEach(function(e) {
+        var opt = document.createElement('option');
+        opt.value = e;
+        opt.textContent = e;
+        sel.appendChild(opt);
+      });
+    }
+    // If current env isn't in the list, add it
+    if (currentEnv && !Array.from(sel.options).some(function(o) { return o.value === currentEnv; })) {
+      var opt = document.createElement('option');
+      opt.value = currentEnv;
+      opt.textContent = currentEnv;
+      sel.appendChild(opt);
+    }
+    sel.value = currentEnv;
+  });
+}
+
+function loadModelsForEdit(currentModel) {
+  var sel = document.getElementById('edit-model');
+  // Reset to just the default option
+  while (sel.options.length > 1) sel.remove(1);
+  sel.value = '';
+
+  fetch('/api/models').then(function(r) { return r.json(); }).then(function(models) {
+    if (models && models.length) {
+      models.forEach(function(m) {
+        var opt = document.createElement('option');
+        opt.value = m.name;
+        opt.textContent = m.model + ' (' + m.name + ')';
+        sel.appendChild(opt);
+      });
+    }
+    sel.value = currentModel;
   });
 }
 
@@ -415,6 +523,10 @@ function saveEditWatcher(e) {
     time_range: document.getElementById('edit-timerange').value,
     effort: document.getElementById('edit-effort').value
   };
+  // Include model if the model selector is visible (AI watchers only)
+  if (document.getElementById('edit-model-group').style.display !== 'none') {
+    body.model = document.getElementById('edit-model').value;
+  }
 
   fetch('/api/watchers/' + id, {
     method: 'PUT',
@@ -431,6 +543,40 @@ function saveEditWatcher(e) {
     showToast('Network error', 'error');
   });
 }
+
+// --- Toggle watcher detail ---
+function toggleWatcherDetail(id) {
+  var el = document.getElementById('watcher-detail-' + id);
+  if (!el) return;
+  if (el.style.display !== 'none') {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'block';
+  // Load effectiveness on first expand
+  var effEl = document.getElementById('watcher-eff-' + id);
+  if (effEl && !effEl.dataset.loaded) {
+    effEl.dataset.loaded = '1';
+    effEl.innerHTML = '<span class="dim" style="font-size:11px">loading effectiveness...</span>';
+    fetch('/api/watchers/' + id + '/effectiveness?period=7d').then(function(r) { return r.json(); }).then(function(stats) {
+      var html = '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">';
+      html += '<div class="alert-detail-row"><span class="alert-detail-key">signal ratio</span><span class="alert-detail-val">' + (stats.signal_ratio * 100).toFixed(0) + '%</span></div>';
+      html += '<div class="alert-detail-row"><span class="alert-detail-key">alerts (7d)</span><span class="alert-detail-val">' + stats.total_alerts + ' total, ' + stats.dismissed_alerts + ' dismissed</span></div>';
+      if (stats.false_positives > 0) {
+        html += '<div class="alert-detail-row"><span class="alert-detail-key">false pos</span><span class="alert-detail-val" style="color:var(--red)">' + stats.false_positives + ' (' + stats.false_positive_rate.toFixed(0) + '%)</span></div>';
+      }
+      if (stats.trend && stats.trend !== 'stable') {
+        var trendColor = stats.trend === 'improving' ? 'var(--green)' : 'var(--red)';
+        html += '<div class="alert-detail-row"><span class="alert-detail-key">trend</span><span class="alert-detail-val" style="color:' + trendColor + '">' + stats.trend + '</span></div>';
+      }
+      html += '</div>';
+      effEl.innerHTML = html;
+    }).catch(function() {
+      effEl.innerHTML = '';
+    });
+  }
+}
+window.toggleWatcherDetail = toggleWatcherDetail;
 
 // --- Watcher lifecycle ---
 function pauseWatcher(id) {
