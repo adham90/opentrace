@@ -43,6 +43,9 @@ func (m *mockLogStoreForTrend) CountByService(_ context.Context, _ store.LogCoun
 func (m *mockLogStoreForTrend) DistinctValues(_ context.Context, _ string, _ store.LogCountParams) ([]string, error) { return nil, nil }
 func (m *mockLogStoreForTrend) MetadataKeys(_ context.Context, _ store.LogCountParams) ([]string, error) { return nil, nil }
 func (m *mockLogStoreForTrend) GetByID(_ context.Context, _ int64) (*store.LogEntry, error) { return nil, store.ErrNotFound }
+func (m *mockLogStoreForTrend) RecordBatch(_ context.Context, _ string, _ int) error { return nil }
+func (m *mockLogStoreForTrend) GetBatch(_ context.Context, _ string) (*store.BatchRecord, error) { return nil, nil }
+func (m *mockLogStoreForTrend) PruneBatches(_ context.Context, _ time.Duration) (int64, error) { return 0, nil }
 
 func makeTrendRuns(values ...float64) []store.WatcherRun {
 	var runs []store.WatcherRun

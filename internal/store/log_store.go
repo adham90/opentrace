@@ -361,3 +361,39 @@ func (s *logStore) Prune(ctx context.Context, olderThan time.Duration) (int64, e
 	}
 	return result.RowsAffected()
 }
+
+func (s *logStore) RecordBatch(ctx context.Context, batchID string, logCount int) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO ingest_batches (batch_id, log_count) VALUES (?, ?)`,
+		batchID, logCount,
+	)
+	return err
+}
+
+func (s *logStore) GetBatch(ctx context.Context, batchID string) (*BatchRecord, error) {
+	var rec BatchRecord
+	var tsStr string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT batch_id, log_count, received_at FROM ingest_batches WHERE batch_id = ?`,
+		batchID,
+	).Scan(&rec.BatchID, &rec.LogCount, &tsStr)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	rec.ReceivedAt, _ = time.Parse(time.RFC3339Nano, tsStr)
+	return &rec, nil
+}
+
+func (s *logStore) PruneBatches(ctx context.Context, olderThan time.Duration) (int64, error) {
+	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
+	result, err := s.db.ExecContext(ctx,
+		`DELETE FROM ingest_batches WHERE received_at < ?`, cutoff,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("pruning batches: %w", err)
+	}
+	return result.RowsAffected()
+}

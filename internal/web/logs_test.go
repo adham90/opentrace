@@ -372,6 +372,70 @@ func TestIngestLogs_AutoCreate_AlreadyExists(t *testing.T) {
 	}
 }
 
+func TestIngestLogs_BatchDedup(t *testing.T) {
+	srv, ls := setupTestServerWithLogStore()
+
+	body := `[{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","service":"api","message":"dedup test"}]`
+
+	// First request with X-Batch-ID — should insert
+	req1 := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
+	req1.Header.Set("Content-Type", "application/json")
+	req1.Header.Set("X-Batch-ID", "batch-uuid-123")
+	w1 := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w1, req1)
+
+	if w1.Code != http.StatusCreated {
+		t.Fatalf("first request: status = %d, want %d. Body: %s", w1.Code, http.StatusCreated, w1.Body.String())
+	}
+	if len(ls.entries) != 1 {
+		t.Fatalf("first request: stored entries = %d, want 1", len(ls.entries))
+	}
+
+	// Second request with same X-Batch-ID — should be deduplicated
+	req2 := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("X-Batch-ID", "batch-uuid-123")
+	w2 := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("second request: status = %d, want %d. Body: %s", w2.Code, http.StatusOK, w2.Body.String())
+	}
+
+	var resp map[string]any
+	json.NewDecoder(w2.Body).Decode(&resp)
+	if resp["deduplicated"] != true {
+		t.Fatalf("expected deduplicated=true, got %v", resp["deduplicated"])
+	}
+
+	// Should still have only 1 entry (not duplicated)
+	if len(ls.entries) != 1 {
+		t.Fatalf("after dedup: stored entries = %d, want 1", len(ls.entries))
+	}
+}
+
+func TestIngestLogs_NoBatchID(t *testing.T) {
+	srv, ls := setupTestServerWithLogStore()
+
+	body := `[{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","service":"api","message":"no batch id"}]`
+
+	// Two requests without X-Batch-ID — both should insert (no dedup)
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		srv.Router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("request %d: status = %d, want %d", i+1, w.Code, http.StatusCreated)
+		}
+	}
+
+	if len(ls.entries) != 2 {
+		t.Fatalf("stored entries = %d, want 2", len(ls.entries))
+	}
+}
+
 func TestIngestLogs_GzipCompressed(t *testing.T) {
 	srv, ls := setupTestServerWithLogStore()
 

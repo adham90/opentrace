@@ -104,14 +104,15 @@ func (m *mockDataSourceStore) Delete(ctx context.Context, id uuid.UUID) error {
 
 // mockLogStore implements store.LogStore for testing.
 type mockLogStore struct {
-	mu           sync.Mutex
-	entries      []store.LogEntry
-	err          error
+	mu               sync.Mutex
+	entries          []store.LogEntry
+	err              error
 	lastSearchParams store.LogSearchParams
+	batches          map[string]*store.BatchRecord
 }
 
 func newMockLogStore() *mockLogStore {
-	return &mockLogStore{}
+	return &mockLogStore{batches: make(map[string]*store.BatchRecord)}
 }
 
 func (m *mockLogStore) BatchInsert(ctx context.Context, entries []store.LogEntry) (int, error) {
@@ -159,6 +160,25 @@ func (m *mockLogStore) MetadataKeys(_ context.Context, _ store.LogCountParams) (
 func (m *mockLogStore) GetByID(_ context.Context, _ int64) (*store.LogEntry, error) {
 	return nil, store.ErrNotFound
 }
+
+func (m *mockLogStore) RecordBatch(_ context.Context, batchID string, logCount int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.batches[batchID] = &store.BatchRecord{BatchID: batchID, LogCount: logCount, ReceivedAt: time.Now()}
+	return nil
+}
+
+func (m *mockLogStore) GetBatch(_ context.Context, batchID string) (*store.BatchRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rec, ok := m.batches[batchID]
+	if !ok {
+		return nil, nil
+	}
+	return rec, nil
+}
+
+func (m *mockLogStore) PruneBatches(_ context.Context, _ time.Duration) (int64, error) { return 0, nil }
 
 // mockWatcherStore implements store.WatcherStore for testing.
 type mockWatcherStore struct {

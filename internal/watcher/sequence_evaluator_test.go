@@ -41,6 +41,9 @@ func (m *mockLogStoreForSequence) CountByService(_ context.Context, _ store.LogC
 func (m *mockLogStoreForSequence) DistinctValues(_ context.Context, _ string, _ store.LogCountParams) ([]string, error) { return nil, nil }
 func (m *mockLogStoreForSequence) MetadataKeys(_ context.Context, _ store.LogCountParams) ([]string, error) { return nil, nil }
 func (m *mockLogStoreForSequence) GetByID(_ context.Context, _ int64) (*store.LogEntry, error) { return nil, store.ErrNotFound }
+func (m *mockLogStoreForSequence) RecordBatch(_ context.Context, _ string, _ int) error { return nil }
+func (m *mockLogStoreForSequence) GetBatch(_ context.Context, _ string) (*store.BatchRecord, error) { return nil, nil }
+func (m *mockLogStoreForSequence) PruneBatches(_ context.Context, _ time.Duration) (int64, error) { return 0, nil }
 
 type mockAlertStoreForSequence struct {
 	alerts []store.Alert

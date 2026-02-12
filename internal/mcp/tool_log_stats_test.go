@@ -127,6 +127,10 @@ func (m *mockLogStore) GetByID(_ context.Context, id int64) (*store.LogEntry, er
 	return nil, store.ErrNotFound
 }
 
+func (m *mockLogStore) RecordBatch(_ context.Context, _ string, _ int) error { return nil }
+func (m *mockLogStore) GetBatch(_ context.Context, _ string) (*store.BatchRecord, error) { return nil, nil }
+func (m *mockLogStore) PruneBatches(_ context.Context, _ time.Duration) (int64, error) { return 0, nil }
+
 func (m *mockLogStore) CountByService(_ context.Context, params store.LogCountParams) ([]store.ServiceLogCount, error) {
 	svcMap := make(map[string]*store.ServiceLogCount)
 	for _, e := range m.entries {

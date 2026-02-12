@@ -56,6 +56,19 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Check for duplicate batch
+	batchID := r.Header.Get("X-Batch-ID")
+	if batchID != "" {
+		existing, err := s.logStore.GetBatch(r.Context(), batchID)
+		if err == nil && existing != nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"count":        existing.LogCount,
+				"deduplicated": true,
+			})
+			return
+		}
+	}
+
 	logEntries := make([]store.LogEntry, len(entries))
 	for i, e := range entries {
 		logEntries[i] = store.LogEntry{
@@ -74,6 +87,11 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to insert logs")
 		return
+	}
+
+	// Record batch ID after successful insert
+	if batchID != "" {
+		_ = s.logStore.RecordBatch(r.Context(), batchID, count)
 	}
 
 	if count > 0 {

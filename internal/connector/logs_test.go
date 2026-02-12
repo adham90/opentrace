@@ -48,6 +48,10 @@ func (m *mockLogStore) GetByID(_ context.Context, _ int64) (*store.LogEntry, err
 	return nil, store.ErrNotFound
 }
 
+func (m *mockLogStore) RecordBatch(_ context.Context, _ string, _ int) error { return nil }
+func (m *mockLogStore) GetBatch(_ context.Context, _ string) (*store.BatchRecord, error) { return nil, nil }
+func (m *mockLogStore) PruneBatches(_ context.Context, _ time.Duration) (int64, error) { return 0, nil }
+
 func TestLogsConnector_Type(t *testing.T) {
 	c := NewLogsConnector(&mockLogStore{})
 	if c.Type() != ConnectorLogs {
