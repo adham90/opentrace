@@ -2695,6 +2695,14 @@ th.sortable.sort-desc::after { content: '\25BC'; opacity: 0.8; }
   margin-bottom: 8px;
   padding-left: 2px;
 }
+.watcher-typed-summary {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.4;
+  margin-bottom: 8px;
+  padding-left: 2px;
+  font-style: italic;
+}
 
 /* ===== Claude Managed Badge ===== */
 .claude-managed {

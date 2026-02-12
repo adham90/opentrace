@@ -327,6 +327,120 @@ function getAdaptiveBadge(w) {
   return '';
 }
 
+function getTypedWatcherSummary(w) {
+  if (!w.type_config) return '';
+  var cfg = w.type_config;
+  if (w.watcher_type === 'deadman') {
+    var filter = cfg.filter || {};
+    var parts = [];
+    if (filter.service) parts.push(filter.service);
+    if (filter.level) parts.push(filter.level);
+    if (filter.query) parts.push('"' + filter.query + '"');
+    var src = cfg.source === 'query' ? 'query results' : (parts.length ? parts.join(' ') + ' logs' : 'events');
+    return 'Alert if fewer than ' + (cfg.min_count || 0) + ' ' + src + ' in ' + (cfg.window || '?');
+  }
+  if (w.watcher_type === 'diff') {
+    var mode = cfg.compare_mode || 'hash';
+    var modeLabel = mode === 'hash' ? 'hash comparison' : mode === 'row_count' ? 'row count change' : 'exact comparison';
+    return 'Detect changes via ' + modeLabel + (cfg.change_threshold ? ' (>' + cfg.change_threshold + '%)' : '');
+  }
+  if (w.watcher_type === 'composite') {
+    var logic = cfg.logic || 'all_of';
+    var logicLabel = logic === 'all_of' ? 'ALL of' : logic === 'any_of' ? 'ANY of' : 'NONE of';
+    var n = (cfg.conditions || []).length;
+    var labels = (cfg.conditions || []).map(function(c){ return c.label || 'condition'; });
+    return logicLabel + ' ' + n + ' conditions: ' + labels.join(', ');
+  }
+  if (w.watcher_type === 'trend') {
+    var dir = cfg.direction === 'increase' ? 'increases' : cfg.direction === 'decrease' ? 'decreases' : 'changes';
+    var filter = cfg.filter || {};
+    var src = cfg.source === 'query' ? 'query value' : (filter.level ? filter.level + ' log count' : 'log count');
+    if (filter.service) src = filter.service + ' ' + src;
+    return 'Alert when ' + src + ' ' + dir + ' >' + (cfg.change_percent || 0) + '% vs ' + (cfg.baseline_runs || 0) + '-run baseline';
+  }
+  if (w.watcher_type === 'sequence') {
+    var steps = cfg.steps || [];
+    var labels = steps.map(function(s){ return s.label || s.source; });
+    return steps.length + '-step pattern in ' + (cfg.window || '?') + ': ' + labels.join(' \u2192 ');
+  }
+  return '';
+}
+
+function renderTypedConfigDetail(w) {
+  if (!w.type_config) return '';
+  var cfg = w.type_config;
+  var html = '';
+
+  if (w.watcher_type === 'deadman') {
+    html += '<div class="alert-detail-row"><span class="alert-detail-key">source</span><span class="alert-detail-val">' + (cfg.source || '?') + '</span></div>';
+    html += '<div class="alert-detail-row"><span class="alert-detail-key">min count</span><span class="alert-detail-val">' + (cfg.min_count || 0) + ' events</span></div>';
+    html += '<div class="alert-detail-row"><span class="alert-detail-key">window</span><span class="alert-detail-val">' + (cfg.window || '?') + '</span></div>';
+    if (cfg.filter) {
+      var f = cfg.filter;
+      if (f.service) html += '<div class="alert-detail-row"><span class="alert-detail-key">service</span><span class="alert-detail-val">' + escapeHtml(f.service) + '</span></div>';
+      if (f.level) html += '<div class="alert-detail-row"><span class="alert-detail-key">level</span><span class="alert-detail-val">' + escapeHtml(f.level) + '</span></div>';
+      if (f.query) html += '<div class="alert-detail-row"><span class="alert-detail-key">query</span><span class="alert-detail-val">' + escapeHtml(f.query) + '</span></div>';
+    }
+    if (cfg.source === 'query' && cfg.query) {
+      html += '<div class="alert-detail-row"><span class="alert-detail-key">SQL</span><span class="alert-detail-val" style="font-size:11px;white-space:pre-wrap">' + escapeHtml(cfg.query) + '</span></div>';
+    }
+  }
+
+  if (w.watcher_type === 'diff') {
+    html += '<div class="alert-detail-row"><span class="alert-detail-key">compare</span><span class="alert-detail-val">' + (cfg.compare_mode || 'hash') + '</span></div>';
+    if (cfg.change_threshold) html += '<div class="alert-detail-row"><span class="alert-detail-key">threshold</span><span class="alert-detail-val">' + cfg.change_threshold + '%</span></div>';
+    if (cfg.ignore_columns && cfg.ignore_columns.length) html += '<div class="alert-detail-row"><span class="alert-detail-key">ignore cols</span><span class="alert-detail-val">' + escapeHtml(cfg.ignore_columns.join(', ')) + '</span></div>';
+    if (cfg.query) html += '<div class="alert-detail-row"><span class="alert-detail-key">SQL</span><span class="alert-detail-val" style="font-size:11px;white-space:pre-wrap">' + escapeHtml(cfg.query) + '</span></div>';
+  }
+
+  if (w.watcher_type === 'composite') {
+    html += '<div class="alert-detail-row"><span class="alert-detail-key">logic</span><span class="alert-detail-val">' + (cfg.logic || 'all_of') + '</span></div>';
+    (cfg.conditions || []).forEach(function(c, i) {
+      var label = c.label || ('condition ' + (i+1));
+      var detail = c.watcher_id ? 'watcher: ' + c.watcher_id : 'inline rule';
+      html += '<div class="alert-detail-row"><span class="alert-detail-key">#' + (i+1) + '</span><span class="alert-detail-val">' + escapeHtml(label) + ' <span class="dim">(' + detail + ')</span></span></div>';
+    });
+  }
+
+  if (w.watcher_type === 'trend') {
+    html += '<div class="alert-detail-row"><span class="alert-detail-key">source</span><span class="alert-detail-val">' + (cfg.source || '?') + '</span></div>';
+    html += '<div class="alert-detail-row"><span class="alert-detail-key">direction</span><span class="alert-detail-val">' + (cfg.direction || 'both') + '</span></div>';
+    html += '<div class="alert-detail-row"><span class="alert-detail-key">threshold</span><span class="alert-detail-val">' + (cfg.change_percent || 0) + '% change</span></div>';
+    html += '<div class="alert-detail-row"><span class="alert-detail-key">baseline</span><span class="alert-detail-val">' + (cfg.baseline_runs || 0) + ' runs</span></div>';
+    if (cfg.filter) {
+      var f = cfg.filter;
+      var parts = [];
+      if (f.service) parts.push('service=' + f.service);
+      if (f.level) parts.push('level=' + f.level);
+      if (f.query) parts.push('query="' + f.query + '"');
+      if (parts.length) html += '<div class="alert-detail-row"><span class="alert-detail-key">filter</span><span class="alert-detail-val">' + escapeHtml(parts.join(', ')) + '</span></div>';
+    }
+    if (cfg.source === 'query' && cfg.query) {
+      html += '<div class="alert-detail-row"><span class="alert-detail-key">SQL</span><span class="alert-detail-val" style="font-size:11px;white-space:pre-wrap">' + escapeHtml(cfg.query) + '</span></div>';
+    }
+  }
+
+  if (w.watcher_type === 'sequence') {
+    html += '<div class="alert-detail-row"><span class="alert-detail-key">window</span><span class="alert-detail-val">' + (cfg.window || '?') + '</span></div>';
+    (cfg.steps || []).forEach(function(s, i) {
+      var label = s.label || ('step ' + (i+1));
+      var detail = s.source;
+      if (s.source === 'logs' && s.filter) {
+        var parts = [];
+        if (s.filter.service) parts.push(s.filter.service);
+        if (s.filter.level) parts.push(s.filter.level);
+        if (s.filter.query) parts.push('"' + s.filter.query + '"');
+        if (parts.length) detail = parts.join(' ');
+      } else if (s.source === 'alert') {
+        detail = 'alert from watcher';
+      }
+      html += '<div class="alert-detail-row"><span class="alert-detail-key">' + (i+1) + '.</span><span class="alert-detail-val">' + escapeHtml(label) + ' <span class="dim">(' + escapeHtml(detail) + ')</span></span></div>';
+    });
+  }
+
+  return html;
+}
+
 function renderWatchers(watchers) {
   var container = document.getElementById('watchers-list');
   if (!allWatchers || allWatchers.length === 0) {
@@ -364,7 +478,10 @@ function renderWatchers(watchers) {
     html += '    <span class="severity-badge severity-' + w.severity + '">' + w.severity + '</span>';
     html += (w.environment ? '    <span class="badge badge-env">' + escapeHtml(w.environment) + '</span>' : '');
     html += '  </div>';
-    if (w.human_summary && w.human_summary.what_it_monitors) {
+    var typedSummary = getTypedWatcherSummary(w);
+    if (typedSummary) {
+        html += '  <div class="watcher-typed-summary">' + escapeHtml(typedSummary) + '</div>';
+    } else if (w.human_summary && w.human_summary.what_it_monitors) {
         html += '  <div class="watcher-human-summary">' + escapeHtml(w.human_summary.what_it_monitors) + '</div>';
     }
 
@@ -404,6 +521,13 @@ function renderWatchers(watchers) {
       if (w.rule_config.operator) {
         html += '      <div class="alert-detail-row"><span class="alert-detail-key">condition</span><span class="alert-detail-val">' + (w.rule_config.metric || 'value') + ' ' + w.rule_config.operator + ' ' + (w.rule_config.threshold || 0) + '</span></div>';
       }
+    }
+    var typedDetail = renderTypedConfigDetail(w);
+    if (typedDetail) {
+      html += '      <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">';
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key" style="font-weight:600">config</span><span class="alert-detail-val dim" style="font-size:10px">' + w.watcher_type + '</span></div>';
+      html += typedDetail;
+      html += '      </div>';
     }
     // Effectiveness placeholder — loaded on demand
     html += '      <div id="watcher-eff-' + w.id + '"></div>';
