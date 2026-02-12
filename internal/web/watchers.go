@@ -30,6 +30,7 @@ type createWatcherRequest struct {
 	WatcherType    store.WatcherType     `json:"watcher_type"`
 	RuleConfig     *store.RuleConfig     `json:"rule_config,omitempty"`
 	DataSourceID   *string               `json:"data_source_id,omitempty"`
+	TypeConfig     json.RawMessage       `json:"type_config,omitempty"`
 	AdaptiveConfig *store.AdaptiveConfig `json:"adaptive_config,omitempty"`
 }
 
@@ -47,6 +48,7 @@ type updateWatcherRequest struct {
 	WatcherType    *store.WatcherType     `json:"watcher_type,omitempty"`
 	RuleConfig     *store.RuleConfig      `json:"rule_config,omitempty"`
 	DataSourceID   *string                `json:"data_source_id,omitempty"`
+	TypeConfig     json.RawMessage        `json:"type_config,omitempty"`
 	AdaptiveConfig *store.AdaptiveConfig  `json:"adaptive_config,omitempty"`
 }
 
@@ -60,8 +62,8 @@ func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "title is required")
 		return
 	}
-	// AI watchers require a description; rule watchers don't
-	if req.WatcherType != store.WatcherTypeRule && req.Description == "" {
+	// AI watchers require a description; rule and typed watchers don't
+	if req.WatcherType == store.WatcherTypeAI && req.Description == "" {
 		writeError(w, http.StatusBadRequest, "description is required for AI watchers")
 		return
 	}
@@ -85,6 +87,7 @@ func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
 		WatcherType:    req.WatcherType,
 		RuleConfig:     req.RuleConfig,
 		DataSourceID:   req.DataSourceID,
+		TypeConfig:     req.TypeConfig,
 		AdaptiveConfig: req.AdaptiveConfig,
 	})
 	if err != nil {
@@ -157,6 +160,7 @@ func (s *Server) handleUpdateWatcher(w http.ResponseWriter, r *http.Request) {
 		WatcherType:    req.WatcherType,
 		RuleConfig:     req.RuleConfig,
 		DataSourceID:   req.DataSourceID,
+		TypeConfig:     req.TypeConfig,
 		AdaptiveConfig: req.AdaptiveConfig,
 	})
 	if err != nil {

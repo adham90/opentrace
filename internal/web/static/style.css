@@ -1278,6 +1278,11 @@ select:focus { outline: none; border-color: var(--green); }
 .badge-logs { color: var(--purple); }
 .badge-health { color: var(--green); }
 .badge-ai { color: var(--cyan); }
+.badge-deadman { color: var(--red); }
+.badge-diff { color: var(--yellow); }
+.badge-composite { color: var(--purple); }
+.badge-trend { color: var(--blue); }
+.badge-sequence { color: var(--green); }
 
 /* Adaptive scheduling state badges */
 .badge-adaptive {

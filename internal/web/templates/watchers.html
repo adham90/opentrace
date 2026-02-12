@@ -113,8 +113,8 @@ var isAdmin = {{.IsAdmin}};
 // --- Filter state ---
 var STATUS_OPTIONS = ['', 'active', 'paused'];
 var STATUS_LABELS  = ['all', 'active', 'paused'];
-var TYPE_OPTIONS = ['', 'query', 'logs', 'health', 'ai'];
-var TYPE_LABELS  = ['all', 'query', 'logs', 'health', 'ai'];
+var TYPE_OPTIONS = ['', 'query', 'logs', 'health', 'ai', 'deadman', 'diff', 'composite', 'trend', 'sequence'];
+var TYPE_LABELS  = ['all', 'query', 'logs', 'health', 'ai', 'deadman', 'diff', 'composite', 'trend', 'sequence'];
 var SEV_OPTIONS = ['', 'critical', 'warning', 'info'];
 var SEV_LABELS  = ['all', 'crit', 'warn', 'info'];
 var currentStatusIdx = 0;
@@ -125,6 +125,8 @@ var openDrop = null;
 
 function getWatcherType(w) {
   if (w.watcher_type === 'rule' && w.rule_config) return w.rule_config.source || 'query';
+  var typed = ['deadman', 'diff', 'composite', 'trend', 'sequence'];
+  if (typed.indexOf(w.watcher_type) >= 0) return w.watcher_type;
   return 'ai';
 }
 
@@ -305,6 +307,11 @@ function getWatcherTypeBadge(w) {
     if (src === 'health') return '<span class="badge badge-type badge-health">health</span>';
     return '<span class="badge badge-type">rule</span>';
   }
+  if (w.watcher_type === 'deadman') return '<span class="badge badge-type badge-deadman">deadman</span>';
+  if (w.watcher_type === 'diff') return '<span class="badge badge-type badge-diff">diff</span>';
+  if (w.watcher_type === 'composite') return '<span class="badge badge-type badge-composite">composite</span>';
+  if (w.watcher_type === 'trend') return '<span class="badge badge-type badge-trend">trend</span>';
+  if (w.watcher_type === 'sequence') return '<span class="badge badge-type badge-sequence">sequence</span>';
   return '<span class="badge badge-type badge-ai">AI</span>';
 }
 

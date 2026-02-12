@@ -15,15 +15,20 @@ import (
 
 // Executor runs a single watcher evaluation.
 type Executor struct {
-	watcherStore    store.WatcherStore
-	runStore        store.WatcherRunStore
-	alertStore      store.AlertStore
-	registry        *connector.Registry
-	providerCache   *llm.ProviderCache
-	agentCfg        agent.RunConfig
-	eventHub        *EventHub
-	ruleEvaluator   *RuleEvaluator
-	adaptiveEngine  *AdaptiveEngine
+	watcherStore      store.WatcherStore
+	runStore          store.WatcherRunStore
+	alertStore        store.AlertStore
+	registry          *connector.Registry
+	providerCache     *llm.ProviderCache
+	agentCfg          agent.RunConfig
+	eventHub          *EventHub
+	ruleEvaluator     *RuleEvaluator
+	deadmanEvaluator  Evaluator
+	diffEvaluator     Evaluator
+	compositeEvaluator Evaluator
+	trendEvaluator    Evaluator
+	sequenceEvaluator Evaluator
+	adaptiveEngine    *AdaptiveEngine
 }
 
 // NewExecutor creates a new watcher executor.
@@ -53,6 +58,21 @@ func (e *Executor) SetRuleEvaluator(re *RuleEvaluator) {
 	e.ruleEvaluator = re
 }
 
+// SetDeadmanEvaluator sets the evaluator for deadman watchers.
+func (e *Executor) SetDeadmanEvaluator(ev Evaluator) { e.deadmanEvaluator = ev }
+
+// SetDiffEvaluator sets the evaluator for diff watchers.
+func (e *Executor) SetDiffEvaluator(ev Evaluator) { e.diffEvaluator = ev }
+
+// SetCompositeEvaluator sets the evaluator for composite watchers.
+func (e *Executor) SetCompositeEvaluator(ev Evaluator) { e.compositeEvaluator = ev }
+
+// SetTrendEvaluator sets the evaluator for trend watchers.
+func (e *Executor) SetTrendEvaluator(ev Evaluator) { e.trendEvaluator = ev }
+
+// SetSequenceEvaluator sets the evaluator for sequence watchers.
+func (e *Executor) SetSequenceEvaluator(ev Evaluator) { e.sequenceEvaluator = ev }
+
 // Execute runs a single watcher: creates a run record, evaluates (AI or rule),
 // creates alerts if needed, and sends notifications.
 func (e *Executor) Execute(ctx context.Context, w store.Watcher) {
@@ -76,6 +96,16 @@ func (e *Executor) Execute(ctx context.Context, w store.Watcher) {
 	switch w.WatcherType {
 	case store.WatcherTypeRule:
 		e.executeRule(ctx, w, run)
+	case store.WatcherTypeDeadman:
+		e.executeTyped(ctx, w, run, e.deadmanEvaluator, "deadman")
+	case store.WatcherTypeDiff:
+		e.executeTyped(ctx, w, run, e.diffEvaluator, "diff")
+	case store.WatcherTypeComposite:
+		e.executeTyped(ctx, w, run, e.compositeEvaluator, "composite")
+	case store.WatcherTypeTrend:
+		e.executeTyped(ctx, w, run, e.trendEvaluator, "trend")
+	case store.WatcherTypeSequence:
+		e.executeTyped(ctx, w, run, e.sequenceEvaluator, "sequence")
 	default: // "ai" or empty (backward compat)
 		e.executeAI(ctx, w, run)
 	}
@@ -115,6 +145,57 @@ func (e *Executor) executeRule(ctx context.Context, w store.Watcher, run *store.
 	}
 
 	// Create alert and notify if needed
+	if result.HasAlert {
+		alert, err := e.alertStore.Create(ctx, store.CreateAlertParams{
+			WatcherID:   &w.ID,
+			RunID:       &run.ID,
+			Title:       w.Title,
+			Summary:     result.Summary,
+			Environment: w.Environment,
+			Severity:    w.Severity,
+		})
+		if err != nil {
+			slog.Error("failed to create alert", "watcher_id", w.ID, "error", err)
+		} else {
+			notifiers := ParseNotifiers(w.Notify)
+			SendAll(ctx, notifiers, *alert)
+		}
+	}
+
+	e.finalizeRun(ctx, &w, RunOutcome{Alerted: result.HasAlert})
+}
+
+// executeTyped runs a typed evaluator (deadman, diff, composite, trend, sequence).
+func (e *Executor) executeTyped(ctx context.Context, w store.Watcher, run *store.WatcherRun, eval Evaluator, typeName string) {
+	if eval == nil {
+		errMsg := fmt.Sprintf("%s evaluator not configured", typeName)
+		slog.Error(errMsg, "watcher_id", w.ID, "watcher_title", w.Title)
+		e.runStore.Fail(ctx, run.ID, errMsg)
+		e.finalizeRun(ctx, &w, RunOutcome{Errored: true})
+		return
+	}
+
+	result, err := eval.Evaluate(ctx, w)
+	if err != nil {
+		errMsg := fmt.Sprintf("%s evaluation error: %v", typeName, err)
+		slog.Error(typeName+" evaluation error", "watcher_id", w.ID, "watcher_title", w.Title, "error", err)
+		e.runStore.Fail(ctx, run.ID, errMsg)
+		e.finalizeRun(ctx, &w, RunOutcome{Errored: true})
+		return
+	}
+
+	if e.eventHub != nil {
+		e.eventHub.Publish(run.ID, RunEvent{
+			Type:    typeName + "_result",
+			Content: result.Summary,
+			Time:    time.Now(),
+		})
+	}
+
+	if err := e.runStore.Complete(ctx, run.ID, result.Summary, result.Details, result.HasAlert); err != nil {
+		slog.Error("failed to complete run", "watcher_id", w.ID, "error", err)
+	}
+
 	if result.HasAlert {
 		alert, err := e.alertStore.Create(ctx, store.CreateAlertParams{
 			WatcherID:   &w.ID,

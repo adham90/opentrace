@@ -312,6 +312,13 @@ func run() error {
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
 
+	// Create evaluators for typed watchers
+	deadmanEval := watcher.NewDeadmanEvaluator(deps.registry, deps.logStore)
+	diffEval := watcher.NewDiffEvaluator(deps.registry, runStore)
+	compositeEval := watcher.NewCompositeEvaluator(deps.watcherStore, runStore, ruleEvaluator)
+	trendEval := watcher.NewTrendEvaluator(deps.registry, deps.logStore, runStore)
+	sequenceEval := watcher.NewSequenceEvaluator(deps.logStore, deps.alertStore)
+
 	// Start watcher scheduler for automatic scheduled runs
 	sched := watcher.NewScheduler(watcher.SchedulerOpts{
 		WatcherStore:  deps.watcherStore,
@@ -324,7 +331,13 @@ func run() error {
 			MaxToolCalls:        deps.cfg.MaxToolCalls,
 			MaxObservationBytes: deps.cfg.MaxObservationBytes,
 		},
-		EventHub: eventHub,
+		EventHub:           eventHub,
+		RuleEvaluator:      ruleEvaluator,
+		DeadmanEvaluator:   deadmanEval,
+		DiffEvaluator:      diffEval,
+		CompositeEvaluator: compositeEval,
+		TrendEvaluator:     trendEval,
+		SequenceEvaluator:  sequenceEval,
 	})
 	sched.Start(ctx)
 

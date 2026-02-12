@@ -204,6 +204,7 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 		Severity: sev, Filters: filters, TimeRange: timeRange,
 		Model: params.Model, Effort: effort, Status: store.WatcherActive, Notify: notify,
 		WatcherType: watcherType, RuleConfig: params.RuleConfig, DataSourceID: params.DataSourceID,
+		TypeConfig: params.TypeConfig,
 		NextRunAt: &now, CreatedAt: now, UpdatedAt: now,
 	}
 	m.watchers[w.ID] = w

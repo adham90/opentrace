@@ -363,6 +363,7 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 		WatcherType:  mt,
 		RuleConfig:   params.RuleConfig,
 		DataSourceID: params.DataSourceID,
+		TypeConfig:   params.TypeConfig,
 		Severity:     params.Severity,
 		Filters:      params.Filters,
 		TimeRange:    params.TimeRange,

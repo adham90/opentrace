@@ -666,18 +666,38 @@ func addWriteTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 	if deps.WatcherStore != nil {
 		maybeAddTool(s,
 			mcp.NewTool("create_watcher",
-				mcp.WithDescription(`Create a new watcher. Use watcher_type=ai for AI-powered analysis or watcher_type=rule for threshold-based checks.
+				mcp.WithDescription(`Create a new watcher. Types: ai, rule, deadman, diff, composite, trend, sequence.
 
-Natural language examples for rule watchers:
-- "Alert when active connections exceed 80" → rule_config: {"source":"query","query":"SELECT count(*) FROM pg_stat_activity WHERE state='active'","metric":"value","operator":"gt","threshold":80}
-- "Alert when dead tuples on users table exceed 10000" → rule_config: {"source":"query","query":"SELECT n_dead_tup FROM pg_stat_user_tables WHERE relname='users'","metric":"value","operator":"gt","threshold":10000}
-- "Alert when slow queries exceed 5 seconds average" → rule_config: {"source":"query","query":"SELECT mean_exec_time FROM pg_stat_statements ORDER BY mean_exec_time DESC LIMIT 1","metric":"value","operator":"gt","threshold":5000}
+- ai: LLM-powered analysis (requires description)
+- rule: threshold-based (requires rule_config)
+- deadman: alerts when expected events are NOT seen (requires type_config)
+- diff: detects changes in query results between runs (requires type_config)
+- composite: correlates multiple watchers with boolean logic (requires type_config)
+- trend: detects % changes relative to a rolling baseline (requires type_config)
+- sequence: detects ordered event patterns within a window (requires type_config)
 
-Use db_query_stats, db_activity, and db_table_stats to discover what to monitor, then use this tool to create the watcher.`),
+Rule watcher examples:
+- {"source":"query","query":"SELECT count(*) FROM pg_stat_activity WHERE state='active'","metric":"value","operator":"gt","threshold":80}
+
+Deadman type_config example:
+- {"source":"logs","filter":{"level":"error"},"min_count":1,"window":"30m"}
+
+Diff type_config example:
+- {"source":"query","query":"SELECT * FROM pg_roles","compare_mode":"hash"}
+
+Composite type_config example:
+- {"logic":"all_of","conditions":[{"watcher_id":"<id1>"},{"watcher_id":"<id2>"}]}
+
+Trend type_config example:
+- {"source":"query","query":"SELECT count(*) FROM orders","metric":"value","baseline_runs":5,"change_percent":50,"direction":"increase"}
+
+Sequence type_config example:
+- {"steps":[{"source":"logs","filter":{"level":"error","service":"auth"}},{"source":"logs","filter":{"level":"error","service":"api"}}],"window":"1h"}`),
 				mcp.WithString("title", mcp.Required(), mcp.Description("Title for the watcher")),
-				mcp.WithString("watcher_type", mcp.Description("Watcher type: ai (default) or rule")),
+				mcp.WithString("watcher_type", mcp.Description("Watcher type: ai (default), rule, deadman, diff, composite, trend, or sequence")),
 				mcp.WithString("description", mcp.Description("Instructions for the AI agent (required for ai watchers)")),
-				mcp.WithString("rule_config", mcp.Description(`JSON string for rule watchers. Example: {"source":"query","query":"SELECT count(*) FROM pg_stat_activity WHERE state='active'","metric":"value","operator":"gt","threshold":80}. Fields: source (query|logs|health), query (SQL SELECT), metric (value|count), operator (gt|lt|gte|lte|eq|neq), threshold (number).`)),
+				mcp.WithString("rule_config", mcp.Description(`JSON string for rule watchers. Fields: source (query|logs|health), query, metric (value|row_count), operator (gt|lt|gte|lte|eq|neq), threshold.`)),
+				mcp.WithString("type_config", mcp.Description("JSON string for typed watchers (deadman, diff, composite, trend, sequence). See tool description for format.")),
 				mcp.WithString("data_source_id", mcp.Description("Data source ID for query/health rule watchers")),
 				mcp.WithString("service", mcp.Description("Filter by service name (ai watchers)")),
 				mcp.WithString("level", mcp.Description("Filter by log level (ai watchers)")),
@@ -693,7 +713,7 @@ Use db_query_stats, db_activity, and db_table_stats to discover what to monitor,
 			),
 			createWatcherHandler(deps.WatcherStore),
 		)
-		b.Add("create_watcher", "Create a new AI or rule-based watcher with SQL query and schedule", "Watchers", "admin", "")
+		b.Add("create_watcher", "Create a watcher (ai, rule, deadman, diff, composite, trend, sequence)", "Watchers", "admin", "")
 	}
 
 	// Preview watcher (rule evaluation without saving).
@@ -1286,6 +1306,23 @@ func createWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 				return mcp.NewToolResultError(fmt.Sprintf("invalid rule_config JSON: %v", err)), nil
 			}
 			params.RuleConfig = &rc
+		}
+
+		// Parse type_config JSON string for typed watchers (deadman, diff, composite, trend, sequence).
+		typedTypes := map[store.WatcherType]bool{
+			store.WatcherTypeDeadman: true, store.WatcherTypeDiff: true,
+			store.WatcherTypeComposite: true, store.WatcherTypeTrend: true,
+			store.WatcherTypeSequence: true,
+		}
+		if typedTypes[watcherType] {
+			tcStr, _ := args["type_config"].(string)
+			if tcStr == "" {
+				return mcp.NewToolResultError("type_config is required for " + string(watcherType) + " watchers"), nil
+			}
+			if !json.Valid([]byte(tcStr)) {
+				return mcp.NewToolResultError("invalid type_config JSON"), nil
+			}
+			params.TypeConfig = json.RawMessage(tcStr)
 		}
 
 		if v, ok := args["data_source_id"].(string); ok && v != "" {

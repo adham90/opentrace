@@ -23,6 +23,14 @@ type SchedulerOpts struct {
 	EventHub      *EventHub
 	PollInterval  time.Duration // how often to check for due watchers (default: 30s)
 	MaxConcurrent int           // max concurrent watcher runs (default: 3)
+
+	// Evaluators for each watcher type
+	RuleEvaluator      *RuleEvaluator
+	DeadmanEvaluator   Evaluator
+	DiffEvaluator      Evaluator
+	CompositeEvaluator Evaluator
+	TrendEvaluator     Evaluator
+	SequenceEvaluator  Evaluator
 }
 
 // Scheduler polls for due watchers and executes them in the background.
@@ -56,6 +64,26 @@ func NewScheduler(opts SchedulerOpts) *Scheduler {
 		opts.AgentCfg,
 		opts.EventHub,
 	)
+
+	// Wire evaluators so scheduled watchers of all types work correctly.
+	if opts.RuleEvaluator != nil {
+		executor.SetRuleEvaluator(opts.RuleEvaluator)
+	}
+	if opts.DeadmanEvaluator != nil {
+		executor.SetDeadmanEvaluator(opts.DeadmanEvaluator)
+	}
+	if opts.DiffEvaluator != nil {
+		executor.SetDiffEvaluator(opts.DiffEvaluator)
+	}
+	if opts.CompositeEvaluator != nil {
+		executor.SetCompositeEvaluator(opts.CompositeEvaluator)
+	}
+	if opts.TrendEvaluator != nil {
+		executor.SetTrendEvaluator(opts.TrendEvaluator)
+	}
+	if opts.SequenceEvaluator != nil {
+		executor.SetSequenceEvaluator(opts.SequenceEvaluator)
+	}
 
 	return &Scheduler{
 		executor:     executor,

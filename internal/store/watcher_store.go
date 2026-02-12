@@ -79,15 +79,21 @@ func (s *watcherStore) Create(ctx context.Context, params CreateWatcherParams) (
 		humanSummaryStr = &s
 	}
 
+	var typeConfigStr *string
+	if params.TypeConfig != nil {
+		s := string(params.TypeConfig)
+		typeConfigStr = &s
+	}
+
 	id := uuid.New()
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO watchers (id, title, description, environment, severity, filters, time_range, schedule, model, effort, notify, watcher_type, rule_config, data_source_id, adaptive_config, human_summary, next_run_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO watchers (id, title, description, environment, severity, filters, time_range, schedule, model, effort, notify, watcher_type, rule_config, data_source_id, type_config, adaptive_config, human_summary, next_run_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id.String(), params.Title, params.Description, params.Environment, string(severity),
 		string(filters), timeRange, params.Schedule, params.Model, string(effort), string(notify),
-		string(watcherType), ruleConfigStr, params.DataSourceID, adaptiveConfigStr, humanSummaryStr,
+		string(watcherType), ruleConfigStr, params.DataSourceID, typeConfigStr, adaptiveConfigStr, humanSummaryStr,
 		now, now, now,
 	)
 	if err != nil {
@@ -99,7 +105,7 @@ func (s *watcherStore) Create(ctx context.Context, params CreateWatcherParams) (
 
 // watcherColumns is the SELECT column list for watcher queries.
 const watcherColumns = `id, title, description, environment, severity, filters, time_range, schedule, model, effort, status, notify,
-	watcher_type, rule_config, data_source_id,
+	watcher_type, rule_config, data_source_id, type_config,
 	last_run_at, next_run_at, last_error, created_at, updated_at,
 	adaptive_config, adaptive_state, consecutive_clean_runs, consecutive_errors, escalated_at, base_time_range,
 	human_summary`
@@ -111,14 +117,14 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 	var createdAt, updatedAt string
 	var lastRunAt, nextRunAt sql.NullString
 	var watcherTypeStr string
-	var ruleConfigStr, dataSourceID sql.NullString
+	var ruleConfigStr, dataSourceID, typeConfigStr sql.NullString
 	var adaptiveConfigStr, escalatedAt, baseTimeRange sql.NullString
 	var humanSummaryStr sql.NullString
 
 	err := sc.Scan(
 		&w.ID, &w.Title, &w.Description, &w.Environment, &w.Severity, &filtersStr,
 		&w.TimeRange, &w.Schedule, &w.Model, &w.Effort, &w.Status, &notifyStr,
-		&watcherTypeStr, &ruleConfigStr, &dataSourceID,
+		&watcherTypeStr, &ruleConfigStr, &dataSourceID, &typeConfigStr,
 		&lastRunAt, &nextRunAt, &w.LastError,
 		&createdAt, &updatedAt,
 		&adaptiveConfigStr, &w.AdaptiveState, &w.ConsecutiveCleanRuns, &w.ConsecutiveErrors,
@@ -145,6 +151,9 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 	}
 	if dataSourceID.Valid {
 		w.DataSourceID = &dataSourceID.String
+	}
+	if typeConfigStr.Valid {
+		w.TypeConfig = json.RawMessage(typeConfigStr.String)
 	}
 	if lastRunAt.Valid {
 		t, _ := time.Parse(time.RFC3339, lastRunAt.String)
@@ -307,6 +316,12 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 		humanSummaryStr = &s
 	}
 
+	var typeConfigUpdateStr *string
+	if params.TypeConfig != nil {
+		s := string(params.TypeConfig)
+		typeConfigUpdateStr = &s
+	}
+
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE watchers
 		 SET title            = COALESCE(?, title),
@@ -322,12 +337,13 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 		     watcher_type     = COALESCE(?, watcher_type),
 		     rule_config      = COALESCE(?, rule_config),
 		     data_source_id   = COALESCE(?, data_source_id),
+		     type_config      = COALESCE(?, type_config),
 		     adaptive_config  = COALESCE(?, adaptive_config),
 		     human_summary    = COALESCE(?, human_summary),
 		     updated_at       = ?
 		 WHERE id = ?`,
 		titleStr, descStr, envStr, sevStr, filtersStr, timeRangeStr, scheduleStr, modelStr, effortStr, notifyStr,
-		watcherTypeStr, ruleConfigStr, dataSourceIDStr, adaptiveConfigStr, humanSummaryStr,
+		watcherTypeStr, ruleConfigStr, dataSourceIDStr, typeConfigUpdateStr, adaptiveConfigStr, humanSummaryStr,
 		now, id.String(),
 	)
 	if err != nil {

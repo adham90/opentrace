@@ -108,8 +108,13 @@ type ServiceLogCount struct {
 type WatcherType string
 
 const (
-	WatcherTypeAI   WatcherType = "ai"
-	WatcherTypeRule WatcherType = "rule"
+	WatcherTypeAI        WatcherType = "ai"
+	WatcherTypeRule      WatcherType = "rule"
+	WatcherTypeDeadman   WatcherType = "deadman"
+	WatcherTypeDiff      WatcherType = "diff"
+	WatcherTypeComposite WatcherType = "composite"
+	WatcherTypeTrend     WatcherType = "trend"
+	WatcherTypeSequence  WatcherType = "sequence"
 )
 
 // RuleSource identifies what the rule evaluates.
@@ -224,7 +229,8 @@ type Watcher struct {
 	Notify       json.RawMessage `json:"notify"`
 	WatcherType  WatcherType     `json:"watcher_type"`
 	RuleConfig   *RuleConfig     `json:"rule_config,omitempty"`
-	DataSourceID *string         `json:"data_source_id,omitempty"`
+	DataSourceID *string          `json:"data_source_id,omitempty"`
+	TypeConfig   json.RawMessage `json:"type_config,omitempty"`
 	LastRunAt    *time.Time      `json:"last_run_at,omitempty"`
 	NextRunAt    *time.Time      `json:"next_run_at,omitempty"`
 	LastError    *string         `json:"last_error,omitempty"`
@@ -286,6 +292,7 @@ type CreateWatcherParams struct {
 	WatcherType  WatcherType     `json:"watcher_type"`
 	RuleConfig      *RuleConfig          `json:"rule_config,omitempty"`
 	DataSourceID    *string              `json:"data_source_id,omitempty"`
+	TypeConfig      json.RawMessage      `json:"type_config,omitempty"`
 	AdaptiveConfig  *AdaptiveConfig      `json:"adaptive_config,omitempty"`
 	HumanSummary    *WatcherHumanSummary `json:"human_summary,omitempty"`
 }
@@ -305,6 +312,7 @@ type UpdateWatcherParams struct {
 	WatcherType  *WatcherType     `json:"watcher_type,omitempty"`
 	RuleConfig      *RuleConfig          `json:"rule_config,omitempty"`
 	DataSourceID    *string              `json:"data_source_id,omitempty"`
+	TypeConfig      json.RawMessage      `json:"type_config,omitempty"`
 	AdaptiveConfig  *AdaptiveConfig      `json:"adaptive_config,omitempty"`
 	HumanSummary    *WatcherHumanSummary `json:"human_summary,omitempty"`
 }
