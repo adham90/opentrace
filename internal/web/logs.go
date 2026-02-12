@@ -20,6 +20,8 @@ type ingestLogEntry struct {
 	Level          string                 `json:"level"`
 	Service        string                 `json:"service"`
 	TraceID        string                 `json:"trace_id"`
+	SpanID         string                 `json:"span_id"`
+	ParentSpanID   string                 `json:"parent_span_id"`
 	Message        string                 `json:"message"`
 	Environment    string                 `json:"environment"`
 	EventType      string                 `json:"event_type"`
@@ -122,14 +124,16 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 	logEntries := make([]store.LogEntry, len(entries))
 	for i, e := range entries {
 		logEntries[i] = store.LogEntry{
-			Timestamp:   e.Timestamp,
-			Level:       e.Level,
-			Service:     e.Service,
-			TraceID:     e.TraceID,
-			Message:     e.Message,
-			Environment: e.Environment,
-			EventType:   e.EventType,
-			Metadata:    e.Metadata,
+			Timestamp:    e.Timestamp,
+			Level:        e.Level,
+			Service:      e.Service,
+			TraceID:      e.TraceID,
+			SpanID:       e.SpanID,
+			ParentSpanID: e.ParentSpanID,
+			Message:      e.Message,
+			Environment:  e.Environment,
+			EventType:    e.EventType,
+			Metadata:     e.Metadata,
 		}
 		if e.RequestSummary != nil {
 			rs := e.RequestSummary

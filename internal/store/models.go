@@ -66,6 +66,8 @@ type LogEntry struct {
 	Level          string          `json:"level"`
 	Service        string          `json:"service,omitempty"`
 	TraceID        string          `json:"trace_id,omitempty"`
+	SpanID         string          `json:"span_id,omitempty"`
+	ParentSpanID   string          `json:"parent_span_id,omitempty"`
 	Message        string          `json:"message"`
 	Environment    string          `json:"environment,omitempty"`
 	EventType      string          `json:"event_type,omitempty"`

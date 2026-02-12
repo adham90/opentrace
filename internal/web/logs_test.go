@@ -766,3 +766,71 @@ func TestIngestLogs_AcceptsNoAPIVersion(t *testing.T) {
 		t.Fatalf("status = %d, want 201 for old client without version header. Body: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestIngestLogs_WithTraceContext(t *testing.T) {
+	srv, ls := setupTestServerWithLogStore()
+
+	body := `[{
+		"timestamp":"2024-01-01T00:00:00Z",
+		"level":"INFO",
+		"service":"api",
+		"message":"traced request",
+		"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736",
+		"span_id":"00f067aa0ba902b7",
+		"parent_span_id":"e5f678901234abcd"
+	}]`
+	req := httptest.NewRequest("POST", "/api/logs", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test-key")
+	req.Header.Set("X-API-Version", "1")
+
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201. Body: %s", w.Code, w.Body.String())
+	}
+
+	if len(ls.entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(ls.entries))
+	}
+
+	entry := ls.entries[0]
+	if entry.TraceID != "4bf92f3577b34da6a3ce929d0e0e4736" {
+		t.Errorf("trace_id = %q, want %q", entry.TraceID, "4bf92f3577b34da6a3ce929d0e0e4736")
+	}
+	if entry.SpanID != "00f067aa0ba902b7" {
+		t.Errorf("span_id = %q, want %q", entry.SpanID, "00f067aa0ba902b7")
+	}
+	if entry.ParentSpanID != "e5f678901234abcd" {
+		t.Errorf("parent_span_id = %q, want %q", entry.ParentSpanID, "e5f678901234abcd")
+	}
+}
+
+func TestIngestLogs_WithoutTraceContext(t *testing.T) {
+	srv, ls := setupTestServerWithLogStore()
+
+	body := `[{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","service":"api","message":"no trace"}]`
+	req := httptest.NewRequest("POST", "/api/logs", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test-key")
+
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", w.Code)
+	}
+
+	if len(ls.entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(ls.entries))
+	}
+
+	entry := ls.entries[0]
+	if entry.SpanID != "" {
+		t.Errorf("span_id should be empty, got %q", entry.SpanID)
+	}
+	if entry.ParentSpanID != "" {
+		t.Errorf("parent_span_id should be empty, got %q", entry.ParentSpanID)
+	}
+}

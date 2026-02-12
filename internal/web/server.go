@@ -42,6 +42,7 @@ var serverCapabilities = []string{
 	"gzip_request",
 	"batch_dedup",
 	"request_summaries",
+	"trace_context",
 }
 
 // Server holds the HTTP server and its dependencies.
