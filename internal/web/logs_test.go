@@ -627,3 +627,142 @@ func TestLogsPage_HTMXFragment(t *testing.T) {
 		t.Error("expected HTMX fragment to contain log level")
 	}
 }
+
+func TestHandleVersion_IncludesAPIVersionFields(t *testing.T) {
+	srv, _ := setupTestServerWithLogStore()
+
+	req := httptest.NewRequest("GET", "/api/version", nil)
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["api_version"] == nil {
+		t.Error("expected api_version in response")
+	}
+	if int(resp["api_version"].(float64)) != APIVersion {
+		t.Errorf("api_version = %v, want %d", resp["api_version"], APIVersion)
+	}
+
+	if resp["min_client_api_version"] == nil {
+		t.Error("expected min_client_api_version in response")
+	}
+	if int(resp["min_client_api_version"].(float64)) != MinClientAPIVersion {
+		t.Errorf("min_client_api_version = %v, want %d", resp["min_client_api_version"], MinClientAPIVersion)
+	}
+
+	caps, ok := resp["capabilities"].([]any)
+	if !ok || len(caps) == 0 {
+		t.Fatal("expected non-empty capabilities array")
+	}
+
+	capStrings := make([]string, len(caps))
+	for i, c := range caps {
+		capStrings[i] = c.(string)
+	}
+
+	expected := []string{"batch_ingest", "gzip_request", "batch_dedup", "request_summaries"}
+	for _, e := range expected {
+		found := false
+		for _, c := range capStrings {
+			if c == e {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected capability %q in response, got %v", e, capStrings)
+		}
+	}
+}
+
+func TestIngestLogs_RejectsOldAPIVersion(t *testing.T) {
+	srv, _ := setupTestServerWithLogStore()
+
+	body := `[{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","service":"api","message":"test"}]`
+	req := httptest.NewRequest("POST", "/api/logs", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test-key")
+	req.Header.Set("X-API-Version", "0") // Below minimum
+
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+
+	if w.Header().Get("X-API-Version") == "" {
+		t.Error("expected X-API-Version in error response headers")
+	}
+	if w.Header().Get("X-Min-Client-API-Version") == "" {
+		t.Error("expected X-Min-Client-API-Version in error response headers")
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse error response: %v", err)
+	}
+	errMsg, _ := resp["error"].(string)
+	if !strings.Contains(errMsg, "below minimum") {
+		t.Errorf("error message %q should contain 'below minimum'", errMsg)
+	}
+}
+
+func TestIngestLogs_InvalidAPIVersion(t *testing.T) {
+	srv, _ := setupTestServerWithLogStore()
+
+	body := `[{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","service":"api","message":"test"}]`
+	req := httptest.NewRequest("POST", "/api/logs", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test-key")
+	req.Header.Set("X-API-Version", "abc")
+
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestIngestLogs_AcceptsValidAPIVersion(t *testing.T) {
+	srv, _ := setupTestServerWithLogStore()
+
+	body := `[{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","service":"api","message":"test"}]`
+	req := httptest.NewRequest("POST", "/api/logs", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test-key")
+	req.Header.Set("X-API-Version", "1")
+
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestIngestLogs_AcceptsNoAPIVersion(t *testing.T) {
+	srv, _ := setupTestServerWithLogStore()
+
+	body := `[{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","service":"api","message":"test"}]`
+	req := httptest.NewRequest("POST", "/api/logs", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test-key")
+	// No X-API-Version header — old clients should still work
+
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 for old client without version header. Body: %s", w.Code, w.Body.String())
+	}
+}

@@ -28,6 +28,22 @@ import (
 	"github.com/adham90/opentrace/internal/watcher"
 )
 
+const (
+	// APIVersion is the current ingestion API version. Increment on breaking changes.
+	APIVersion = 1
+	// MinClientAPIVersion is the minimum client API version the server accepts.
+	MinClientAPIVersion = 1
+)
+
+// serverCapabilities advertises features the server supports.
+// Clients use this for capability-based feature negotiation.
+var serverCapabilities = []string{
+	"batch_ingest",
+	"gzip_request",
+	"batch_dedup",
+	"request_summaries",
+}
+
 // Server holds the HTTP server and its dependencies.
 type Server struct {
 	Router        chi.Router
@@ -398,10 +414,13 @@ func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version":   version.Version,
-		"commit":    version.Commit,
-		"date":      version.Date,
-		"is_docker": isDocker(),
+		"version":                version.Version,
+		"commit":                 version.Commit,
+		"date":                   version.Date,
+		"is_docker":              isDocker(),
+		"api_version":            APIVersion,
+		"min_client_api_version": MinClientAPIVersion,
+		"capabilities":           serverCapabilities,
 	})
 }
 

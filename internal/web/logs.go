@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/adham90/opentrace/internal/connector"
@@ -59,6 +60,22 @@ type ingestRequestSummary struct {
 }
 
 func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
+	// Check client API version compatibility
+	if clientVersion := r.Header.Get("X-API-Version"); clientVersion != "" {
+		v, err := strconv.Atoi(clientVersion)
+		if err != nil {
+			w.Header().Set("X-API-Version", strconv.Itoa(APIVersion))
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid X-API-Version: %s", clientVersion))
+			return
+		}
+		if v < MinClientAPIVersion {
+			w.Header().Set("X-API-Version", strconv.Itoa(APIVersion))
+			w.Header().Set("X-Min-Client-API-Version", strconv.Itoa(MinClientAPIVersion))
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("client API version %d is below minimum %d, please upgrade", v, MinClientAPIVersion))
+			return
+		}
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "failed to read request body")
