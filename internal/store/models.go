@@ -68,6 +68,7 @@ type LogEntry struct {
 	TraceID     string         `json:"trace_id,omitempty"`
 	Message     string         `json:"message"`
 	Environment string         `json:"environment,omitempty"`
+	EventType   string         `json:"event_type,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
 	CreatedAt   time.Time      `json:"created_at"`
 }
@@ -79,6 +80,7 @@ type LogSearchParams struct {
 	Level          string            `json:"level,omitempty"`
 	TraceID        string            `json:"trace_id,omitempty"`
 	Environment    string            `json:"environment,omitempty"`
+	EventType      string            `json:"event_type,omitempty"`
 	Start          *time.Time        `json:"start,omitempty"`
 	End            *time.Time        `json:"end,omitempty"`
 	Limit          int               `json:"limit,omitempty"`

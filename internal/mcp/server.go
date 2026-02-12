@@ -434,6 +434,7 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 				mcp.WithString("level", mcp.Description("Filter by log level: debug, info, warn, error, fatal (comma-separated for multiple)")),
 				mcp.WithString("trace_id", mcp.Description("Filter by trace/correlation ID")),
 				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production, staging)")),
+				mcp.WithString("event_type", mcp.Description("Filter by event type (e.g. payment.completed, auth.login, order.shipped). Use list_log_attributes with field=event_type to discover available types.")),
 				mcp.WithString("time_range", mcp.Description("Lookback window: '15m', '1h' (default: all), '6h', '24h', '7d'")),
 				mcp.WithNumber("limit", mcp.Description("Maximum entries to return (default: 50, max: 200)")),
 				mcp.WithNumber("offset", mcp.Description("Skip this many entries for pagination (default: 0)")),
@@ -448,8 +449,8 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 		// Log attribute discovery.
 		maybeAddTool(s,
 			mcp.NewTool("list_log_attributes",
-				mcp.WithDescription("Discover distinct values for log fields. Call this first to learn what services, levels, environments, and metadata keys exist before filtering with log_search. Essential bootstrapping tool for effective log investigation."),
-				mcp.WithString("field", mcp.Required(), mcp.Description("Field to list values for: 'service', 'level', 'environment', or 'metadata_key'")),
+				mcp.WithDescription("Discover distinct values for log fields. Call this first to learn what services, levels, environments, event types, and metadata keys exist before filtering with log_search. Essential bootstrapping tool for effective log investigation."),
+				mcp.WithString("field", mcp.Required(), mcp.Description("Field to list values for: 'service', 'level', 'environment', 'event_type', or 'metadata_key'")),
 				mcp.WithString("time_range", mcp.Description("Lookback window: '15m', '1h', '6h', '24h' (default), '7d'")),
 				mcp.WithString("service", mcp.Description("Narrow metadata_key discovery to a specific service")),
 				mcp.WithString("environment", mcp.Description("Narrow discovery to a specific environment")),

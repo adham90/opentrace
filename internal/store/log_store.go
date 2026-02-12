@@ -32,8 +32,8 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []LogEntry) (int, er
 	defer tx.Rollback()
 
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO logs (timestamp, level, service, trace_id, message, environment, metadata)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`)
+		`INSERT INTO logs (timestamp, level, service, trace_id, message, environment, event_type, metadata)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return 0, fmt.Errorf("prepare insert: %w", err)
 	}
@@ -45,7 +45,7 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []LogEntry) (int, er
 			return 0, fmt.Errorf("marshaling metadata: %w", err)
 		}
 		ts := e.Timestamp.UTC().Format(time.RFC3339Nano)
-		_, err = stmt.ExecContext(ctx, ts, e.Level, e.Service, e.TraceID, e.Message, e.Environment, string(meta))
+		_, err = stmt.ExecContext(ctx, ts, e.Level, e.Service, e.TraceID, e.Message, e.Environment, e.EventType, string(meta))
 		if err != nil {
 			return 0, fmt.Errorf("inserting log entry: %w", err)
 		}
@@ -94,6 +94,10 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 		conditions = append(conditions, "l.environment = ?")
 		args = append(args, params.Environment)
 	}
+	if params.EventType != "" {
+		conditions = append(conditions, "l.event_type = ?")
+		args = append(args, params.EventType)
+	}
 	if params.SinceID > 0 {
 		conditions = append(conditions, "l.id > ?")
 		args = append(args, params.SinceID)
@@ -109,10 +113,10 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 
 	var query string
 	if useFTS {
-		query = `SELECT l.id, l.timestamp, l.level, l.service, l.trace_id, l.message, l.environment, l.metadata
+		query = `SELECT l.id, l.timestamp, l.level, l.service, l.trace_id, l.message, l.environment, l.event_type, l.metadata
 		         FROM logs l JOIN logs_fts ON l.id = logs_fts.rowid`
 	} else {
-		query = `SELECT l.id, l.timestamp, l.level, l.service, l.trace_id, l.message, l.environment, l.metadata
+		query = `SELECT l.id, l.timestamp, l.level, l.service, l.trace_id, l.message, l.environment, l.event_type, l.metadata
 		         FROM logs l`
 	}
 
@@ -156,7 +160,7 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 		var metaJSON sql.NullString
 		if err := rows.Scan(
 			&entry.ID, &tsStr, &entry.Level, &entry.Service,
-			&entry.TraceID, &entry.Message, &entry.Environment, &metaJSON,
+			&entry.TraceID, &entry.Message, &entry.Environment, &entry.EventType, &metaJSON,
 		); err != nil {
 			return nil, fmt.Errorf("scanning log entry: %w", err)
 		}
@@ -256,8 +260,10 @@ func (s *logStore) DistinctValues(ctx context.Context, field string, params LogC
 		col = "level"
 	case "environment":
 		col = "environment"
+	case "event_type":
+		col = "event_type"
 	default:
-		return nil, fmt.Errorf("unsupported field %q (use service, level, or environment)", field)
+		return nil, fmt.Errorf("unsupported field %q (use service, level, environment, or event_type)", field)
 	}
 
 	query := fmt.Sprintf(`SELECT DISTINCT %s FROM logs WHERE %s != '' AND timestamp >= ? AND timestamp < ?`, col, col)
@@ -324,13 +330,13 @@ func (s *logStore) MetadataKeys(ctx context.Context, params LogCountParams) ([]s
 
 func (s *logStore) GetByID(ctx context.Context, id int64) (*LogEntry, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, timestamp, level, service, trace_id, message, environment, metadata FROM logs WHERE id = ?`, id)
+		`SELECT id, timestamp, level, service, trace_id, message, environment, event_type, metadata FROM logs WHERE id = ?`, id)
 
 	var entry LogEntry
 	var tsStr string
 	var metaJSON sql.NullString
 	if err := row.Scan(&entry.ID, &tsStr, &entry.Level, &entry.Service,
-		&entry.TraceID, &entry.Message, &entry.Environment, &metaJSON); err != nil {
+		&entry.TraceID, &entry.Message, &entry.Environment, &entry.EventType, &metaJSON); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrNotFound
 		}

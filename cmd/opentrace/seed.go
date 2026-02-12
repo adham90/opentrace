@@ -128,6 +128,44 @@ func runSeed() error {
 		logEntries = append(logEntries, entry)
 	}
 
+	// --- Business event logs (event_type) ---
+	eventEntries := []struct {
+		eventType string
+		service   string
+		message   string
+	}{
+		{"payment.completed", "payment-api", "Payment $129.99 processed for order #ORD-9821"},
+		{"payment.completed", "payment-api", "Payment $49.00 processed for order #ORD-9834"},
+		{"payment.failed", "payment-api", "Payment declined for order #ORD-9842: insufficient funds"},
+		{"payment.refunded", "payment-api", "Refund $49.00 issued for order #ORD-9801"},
+		{"auth.login", "user-service", "User alice@example.com logged in via password"},
+		{"auth.login", "user-service", "User bob@example.com logged in via Google OAuth"},
+		{"auth.logout", "user-service", "User alice@example.com logged out"},
+		{"auth.failed", "user-service", "Failed login attempt for unknown@example.com (3rd attempt)"},
+		{"order.created", "order-service", "Order #ORD-9850 created: 3 items, total $189.97"},
+		{"order.shipped", "order-service", "Order #ORD-9821 shipped via FedEx tracking #FX123456"},
+		{"order.delivered", "order-service", "Order #ORD-9800 delivered and confirmed"},
+		{"notification.sent", "notification-service", "Welcome email sent to newuser@example.com"},
+		{"notification.sent", "notification-service", "Order confirmation SMS sent to +1555123456"},
+		{"user.registered", "user-service", "New user registered: charlie@example.com"},
+		{"deploy.completed", "gateway", "Deployment v2.14.3 completed successfully"},
+	}
+	for _, ev := range eventEntries {
+		ts := now.Add(-time.Duration(rand.Intn(7200)) * time.Second)
+		entry := store.LogEntry{
+			Timestamp:   ts,
+			Level:       "INFO",
+			Service:     ev.service,
+			Message:     ev.message,
+			Environment: envs[rand.Intn(len(envs))],
+			EventType:   ev.eventType,
+		}
+		if rand.Float32() < 0.3 {
+			entry.TraceID = fmt.Sprintf("trace-%s", uuid.New().String()[:8])
+		}
+		logEntries = append(logEntries, entry)
+	}
+
 	logStore := store.NewLogStore(deps.db)
 	n, err := logStore.BatchInsert(ctx, logEntries)
 	if err != nil {

@@ -93,6 +93,7 @@ type LogFilters struct {
 	Service     string
 	Level       string
 	Environment string
+	EventType   string
 	TimeRange   string // preset: 15m, 1h, 6h, 24h, 7d, or empty (all)
 }
 
@@ -189,6 +190,7 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		Service:     r.URL.Query().Get("service"),
 		Level:       r.URL.Query().Get("level"),
 		Environment: r.URL.Query().Get("environment"),
+		EventType:   r.URL.Query().Get("event_type"),
 		TimeRange:   r.URL.Query().Get("time_range"),
 	}
 
@@ -214,6 +216,7 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		Service:     filters.Service,
 		Level:       filters.Level,
 		Environment: filters.Environment,
+		EventType:   filters.EventType,
 		Start:       parseTimeRange(filters.TimeRange),
 		Limit:       limit + 1, // fetch one extra to detect if there are more
 		Offset:      offset,
@@ -281,6 +284,7 @@ func (s *Server) handleLogsPoll(w http.ResponseWriter, r *http.Request) {
 		Service:     r.URL.Query().Get("service"),
 		Level:       r.URL.Query().Get("level"),
 		Environment: r.URL.Query().Get("environment"),
+		EventType:   r.URL.Query().Get("event_type"),
 		TimeRange:   r.URL.Query().Get("time_range"),
 	}
 
@@ -289,6 +293,7 @@ func (s *Server) handleLogsPoll(w http.ResponseWriter, r *http.Request) {
 		Service:     filters.Service,
 		Level:       filters.Level,
 		Environment: filters.Environment,
+		EventType:   filters.EventType,
 		Start:       parseTimeRange(filters.TimeRange),
 		SinceID:     sinceID,
 		Limit:       200,
@@ -591,6 +596,22 @@ func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
 		services = []string{}
 	}
 	writeJSON(w, http.StatusOK, services)
+}
+
+func (s *Server) handleListEventTypes(w http.ResponseWriter, r *http.Request) {
+	if s.db == nil {
+		writeJSON(w, http.StatusOK, []string{})
+		return
+	}
+	types, err := store.ListEventTypes(r.Context(), s.db)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list event types")
+		return
+	}
+	if types == nil {
+		types = []string{}
+	}
+	writeJSON(w, http.StatusOK, types)
 }
 
 func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {

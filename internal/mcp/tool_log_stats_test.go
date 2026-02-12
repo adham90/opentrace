@@ -35,6 +35,9 @@ func (m *mockLogStore) Search(_ context.Context, params store.LogSearchParams) (
 		if params.Environment != "" && e.Environment != params.Environment {
 			continue
 		}
+		if params.EventType != "" && e.EventType != params.EventType {
+			continue
+		}
 		if params.Start != nil && e.Timestamp.Before(*params.Start) {
 			continue
 		}
@@ -87,6 +90,8 @@ func (m *mockLogStore) DistinctValues(_ context.Context, field string, params st
 			val = e.Level
 		case "environment":
 			val = e.Environment
+		case "event_type":
+			val = e.EventType
 		}
 		if val != "" {
 			seen[val] = true

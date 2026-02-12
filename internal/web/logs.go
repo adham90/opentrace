@@ -21,6 +21,7 @@ type ingestLogEntry struct {
 	TraceID     string         `json:"trace_id"`
 	Message     string         `json:"message"`
 	Environment string         `json:"environment"`
+	EventType   string         `json:"event_type"`
 	Metadata    map[string]any `json:"metadata"`
 }
 
@@ -64,6 +65,7 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 			TraceID:     e.TraceID,
 			Message:     e.Message,
 			Environment: e.Environment,
+			EventType:   e.EventType,
 			Metadata:    e.Metadata,
 		}
 	}

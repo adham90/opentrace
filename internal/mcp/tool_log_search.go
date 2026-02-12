@@ -25,6 +25,7 @@ func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
 		level, _ := args["level"].(string)
 		traceID, _ := args["trace_id"].(string)
 		environment, _ := args["environment"].(string)
+		eventType, _ := args["event_type"].(string)
 
 		limit := 50
 		if v, ok := args["limit"].(float64); ok && v > 0 {
@@ -69,6 +70,7 @@ func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
 			Level:          level,
 			TraceID:        traceID,
 			Environment:    environment,
+			EventType:      eventType,
 			Limit:          limit,
 			Offset:         offset,
 			SortAsc:        sortAsc,
@@ -149,6 +151,9 @@ func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
 			}
 			if (fields == nil || fields["environment"]) && e.Environment != "" {
 				entry["environment"] = e.Environment
+			}
+			if (fields == nil || fields["event_type"]) && e.EventType != "" {
+				entry["event_type"] = e.EventType
 			}
 			if (fields == nil || fields["metadata"]) && len(e.Metadata) > 0 {
 				entry["metadata"] = e.Metadata

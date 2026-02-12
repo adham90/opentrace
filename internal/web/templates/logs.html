@@ -15,6 +15,7 @@
   <input type="hidden" name="service" id="f-service" value="{{.LogFilters.Service}}">
   <input type="hidden" name="level" id="f-level" value="{{.LogFilters.Level}}">
   <input type="hidden" name="environment" id="f-env" value="{{.LogFilters.Environment}}">
+  <input type="hidden" name="event_type" id="f-event-type" value="{{.LogFilters.EventType}}">
   <input type="hidden" name="time_range" id="f-time-range" value="{{.LogFilters.TimeRange}}">
 
   <div class="filter-bar-search" id="search-wrap">
@@ -43,6 +44,11 @@
       <span class="filter-tag-val" id="tag-env-val">all</span>
       <div class="filter-dropdown" id="drop-env"></div>
     </div>
+    <div class="filter-tag" id="tag-event-type" onclick="toggleDropdown('event-type',event)" title="event type — key: y">
+      <span class="filter-tag-key">y:</span>
+      <span class="filter-tag-val" id="tag-event-type-val">all</span>
+      <div class="filter-dropdown" id="drop-event-type"></div>
+    </div>
   </div>
 
   <div class="filter-bar-actions">
@@ -65,8 +71,10 @@
 
   var serviceList = [''];
   var envList = [''];
+  var eventTypeList = [''];
   var currentServiceIdx = 0;
   var currentEnvIdx = 0;
+  var currentEventTypeIdx = 0;
   var currentTimeIdx = TIME_OPTIONS.indexOf('{{.LogFilters.TimeRange}}');
   if (currentTimeIdx < 0) currentTimeIdx = 0;
   var currentLevelIdx = LEVEL_OPTIONS.indexOf('{{.LogFilters.Level}}');
@@ -112,6 +120,15 @@
     applyFilters();
   }
 
+  function cycleEventType(dir) {
+    currentEventTypeIdx = (currentEventTypeIdx + dir + eventTypeList.length) % eventTypeList.length;
+    document.getElementById('f-event-type').value = eventTypeList[currentEventTypeIdx];
+    var label = eventTypeList[currentEventTypeIdx] || 'all';
+    updateTagDisplay('tag-event-type-val', label, currentEventTypeIdx !== 0);
+    flashTag('tag-event-type');
+    applyFilters();
+  }
+
   function updateTagDisplay(elId, text, isActive) {
     var el = document.getElementById(elId);
     el.textContent = text;
@@ -131,11 +148,13 @@
     var svc = document.getElementById('f-service').value;
     var lvl = document.getElementById('f-level').value;
     var env = document.getElementById('f-env').value;
+    var et  = document.getElementById('f-event-type').value;
     var tr  = document.getElementById('f-time-range').value;
     if (q) params.set('query', q);
     if (svc) params.set('service', svc);
     if (lvl) params.set('level', lvl);
     if (env) params.set('environment', env);
+    if (et) params.set('event_type', et);
     if (tr) params.set('time_range', tr);
     var qs = params.toString();
     var url = '/logs' + (qs ? '?' + qs : '');
@@ -155,14 +174,17 @@
     currentLevelIdx = 0;
     currentServiceIdx = 0;
     currentEnvIdx = 0;
+    currentEventTypeIdx = 0;
     document.getElementById('f-time-range').value = '';
     document.getElementById('f-level').value = '';
     document.getElementById('f-service').value = '';
     document.getElementById('f-env').value = '';
+    document.getElementById('f-event-type').value = '';
     updateTagDisplay('tag-time-val', 'all', false);
     updateTagDisplay('tag-level-val', 'all', false);
     updateTagDisplay('tag-service-val', 'all', false);
     updateTagDisplay('tag-env-val', 'all', false);
+    updateTagDisplay('tag-event-type-val', 'all', false);
     applyFilters();
   }
 
@@ -171,6 +193,7 @@
   window.cycleLevel = cycleLevel;
   window.cycleService = cycleService;
   window.cycleEnv = cycleEnv;
+  window.cycleEventType = cycleEventType;
   window.clearFilters = clearFilters;
 
   // ── Dropdown menus ────────────────────────────────────────
@@ -230,6 +253,14 @@
     applyFilters();
   }
 
+  function selectEventType(idx) {
+    currentEventTypeIdx = idx;
+    document.getElementById('f-event-type').value = eventTypeList[idx];
+    updateTagDisplay('tag-event-type-val', eventTypeList[idx] || 'all', idx !== 0);
+    flashTag('tag-event-type');
+    applyFilters();
+  }
+
   function toggleDropdown(name, e) {
     e.stopPropagation();
     var dropId = 'drop-' + name;
@@ -246,6 +277,9 @@
     } else if (name === 'env') {
       var eLabels = envList.map(function(e){ return e || 'all'; });
       renderDropdown(dropId, envList, eLabels, currentEnvIdx, selectEnv);
+    } else if (name === 'event-type') {
+      var etLabels = eventTypeList.map(function(t){ return t || 'all'; });
+      renderDropdown(dropId, eventTypeList, etLabels, currentEventTypeIdx, selectEventType);
     }
     drop.classList.add('show');
     openDrop = dropId;
@@ -315,6 +349,14 @@
         e.preventDefault();
         cycleEnv(-1);
         break;
+      case 'y':
+        e.preventDefault();
+        cycleEventType(1);
+        break;
+      case 'Y':
+        e.preventDefault();
+        cycleEventType(-1);
+        break;
       case 'c':
         e.preventDefault();
         clearFilters();
@@ -354,6 +396,7 @@
     if (f.level) parts.push('l: ' + f.level);
     if (f.service) parts.push('s: ' + f.service);
     if (f.env) parts.push('e: ' + f.env);
+    if (f.event_type) parts.push('y: ' + f.event_type);
     return parts.join(', ') || 'no filters';
   }
 
@@ -378,6 +421,10 @@
     currentEnvIdx = Math.max(0, envList.indexOf(f.env || ''));
     document.getElementById('f-env').value = envList[currentEnvIdx];
     updateTagDisplay('tag-env-val', envList[currentEnvIdx] || 'all', currentEnvIdx !== 0);
+    // Set event type
+    currentEventTypeIdx = Math.max(0, eventTypeList.indexOf(f.event_type || ''));
+    document.getElementById('f-event-type').value = eventTypeList[currentEventTypeIdx];
+    updateTagDisplay('tag-event-type-val', eventTypeList[currentEventTypeIdx] || 'all', currentEventTypeIdx !== 0);
     applyFilters();
   }
   window.applySavedFilter = applySavedFilter;
@@ -397,7 +444,8 @@
       time_range: TIME_OPTIONS[currentTimeIdx],
       level: LEVEL_OPTIONS[currentLevelIdx],
       service: serviceList[currentServiceIdx],
-      env: envList[currentEnvIdx]
+      env: envList[currentEnvIdx],
+      event_type: eventTypeList[currentEventTypeIdx]
     };
     var name = prompt('Name this filter:');
     if (!name) return;
@@ -412,7 +460,7 @@
 
   function updateSaveBtn() {
     var hasFilter = searchInput.value || currentTimeIdx !== 0 || currentLevelIdx !== 0 ||
-      currentServiceIdx !== 0 || currentEnvIdx !== 0;
+      currentServiceIdx !== 0 || currentEnvIdx !== 0 || currentEventTypeIdx !== 0;
     document.getElementById('save-filter-btn').style.display = hasFilter ? '' : 'none';
   }
 
@@ -422,9 +470,10 @@
     return div.innerHTML;
   }
 
-  // ── Populate service and env lists from API ───────────────
+  // ── Populate service, env, and event type lists from API ──
   var initService = '{{.LogFilters.Service}}';
   var initEnv = '{{.LogFilters.Environment}}' || (typeof getGlobalEnv === 'function' ? getGlobalEnv() : '');
+  var initEventType = '{{.LogFilters.EventType}}';
 
   fetch('/api/services').then(function(r){ return r.json(); }).then(function(services){
     if (!Array.isArray(services)) return;
@@ -441,6 +490,15 @@
     if (initEnv) {
       currentEnvIdx = Math.max(0, envList.indexOf(initEnv));
       if (currentEnvIdx > 0) updateTagDisplay('tag-env-val', initEnv, true);
+    }
+  }).catch(function(){});
+
+  fetch('/api/event_types').then(function(r){ return r.json(); }).then(function(types){
+    if (!Array.isArray(types)) return;
+    types.forEach(function(t){ eventTypeList.push(t); });
+    if (initEventType) {
+      currentEventTypeIdx = Math.max(0, eventTypeList.indexOf(initEventType));
+      if (currentEventTypeIdx > 0) updateTagDisplay('tag-event-type-val', initEventType, true);
     }
   }).catch(function(){});
 
@@ -566,6 +624,10 @@
     currentEnvIdx = Math.max(0, envList.indexOf(env));
     document.getElementById('f-env').value = env;
     updateTagDisplay('tag-env-val', env || 'all', currentEnvIdx !== 0);
+    var et = params.get('event_type') || '';
+    currentEventTypeIdx = Math.max(0, eventTypeList.indexOf(et));
+    document.getElementById('f-event-type').value = et;
+    updateTagDisplay('tag-event-type-val', et || 'all', currentEventTypeIdx !== 0);
     updateSaveBtn();
     htmx.trigger(form, 'submit');
   });
@@ -584,6 +646,7 @@
     <span class="badge badge-{{.Level}}">{{.Level}}</span>
     {{if .Service}}<span class="log-entry-svc">{{.Service}}</span>{{end}}
     {{if .Environment}}<span class="log-entry-env">{{.Environment}}</span>{{end}}
+    {{if .EventType}}<span class="log-entry-event-type">{{.EventType}}</span>{{end}}
   </div>
   <div class="log-entry-msg">{{.Message}}</div>
   <div class="log-entry-detail">
@@ -591,6 +654,7 @@
     {{if .TraceID}}<div class="log-detail-row"><span class="log-detail-key">trace_id</span><span class="log-detail-val">{{.TraceID}}</span></div>{{end}}
     {{if .Service}}<div class="log-detail-row"><span class="log-detail-key">service</span><span class="log-detail-val">{{.Service}}</span></div>{{end}}
     {{if .Environment}}<div class="log-detail-row"><span class="log-detail-key">env</span><span class="log-detail-val">{{.Environment}}</span></div>{{end}}
+    {{if .EventType}}<div class="log-detail-row"><span class="log-detail-key">event_type</span><span class="log-detail-val">{{.EventType}}</span></div>{{end}}
     <div class="log-detail-row"><span class="log-detail-key">level</span><span class="log-detail-val">{{.Level}}</span></div>
     <div class="log-detail-row"><span class="log-detail-key">timestamp</span><span class="log-detail-val">{{.Timestamp.Format "2006-01-02T15:04:05.000Z07:00"}}</span></div>
   </div>
@@ -600,7 +664,7 @@
 {{define "logs-sentinel"}}
 {{if .HasMore}}
 <div class="logs-sentinel"
-     hx-get="/logs?query={{.LogFilters.Query}}&service={{.LogFilters.Service}}&level={{.LogFilters.Level}}&environment={{.LogFilters.Environment}}&time_range={{.LogFilters.TimeRange}}&offset={{add .LogOffset .LogLimit}}&limit={{.LogLimit}}"
+     hx-get="/logs?query={{.LogFilters.Query}}&service={{.LogFilters.Service}}&level={{.LogFilters.Level}}&environment={{.LogFilters.Environment}}&event_type={{.LogFilters.EventType}}&time_range={{.LogFilters.TimeRange}}&offset={{add .LogOffset .LogLimit}}&limit={{.LogLimit}}"
      hx-trigger="revealed"
      hx-swap="outerHTML"
      hx-target="this">
