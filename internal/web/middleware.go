@@ -143,7 +143,12 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 		}
 		entry.count++
 		if entry.count > rl.limit {
+			retryAfter := entry.resetAt.Sub(now).Seconds()
+			if retryAfter < 1 {
+				retryAfter = 1
+			}
 			rl.mu.Unlock()
+			w.Header().Set("Retry-After", fmt.Sprintf("%d", int(retryAfter)))
 			writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 			return
 		}
