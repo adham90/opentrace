@@ -489,6 +489,109 @@ func TestIngestLogs_InvalidGzip(t *testing.T) {
 	}
 }
 
+func TestIngestLogs_WithRequestSummary(t *testing.T) {
+	srv, ls := setupTestServerWithLogStore()
+
+	body := `{
+		"timestamp":"2024-01-01T00:00:00Z",
+		"level":"INFO",
+		"service":"billing-api",
+		"message":"GET /invoices 200 45.2ms",
+		"metadata":{"request_id":"req-abc-123","user_id":42},
+		"request_summary":{
+			"controller":"InvoicesController",
+			"action":"index",
+			"method":"GET",
+			"path":"/invoices",
+			"status":200,
+			"duration_ms":45.2,
+			"sql_count":3,
+			"sql_total_ms":12.1,
+			"sql_slowest_ms":8.2,
+			"sql_slowest_name":"Invoice Load",
+			"n_plus_one":false,
+			"view_count":2,
+			"view_total_ms":28.3,
+			"cache_reads":1,
+			"cache_hits":1,
+			"cache_hit_ratio":1.0,
+			"timeline":[{"t":"sql","n":"Invoice Load","ms":8.2,"at":2.0}]
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	if len(ls.entries) != 1 {
+		t.Fatalf("stored entries = %d, want 1", len(ls.entries))
+	}
+
+	entry := ls.entries[0]
+	if entry.RequestSummary == nil {
+		t.Fatal("expected request_summary to be set on stored entry")
+	}
+
+	rs := entry.RequestSummary
+	if rs.Controller != "InvoicesController" {
+		t.Errorf("controller = %q, want %q", rs.Controller, "InvoicesController")
+	}
+	if rs.Action != "index" {
+		t.Errorf("action = %q, want %q", rs.Action, "index")
+	}
+	if rs.Method != "GET" {
+		t.Errorf("method = %q, want %q", rs.Method, "GET")
+	}
+	if rs.SQLCount != 3 {
+		t.Errorf("sql_count = %d, want 3", rs.SQLCount)
+	}
+	if rs.DurationMs != 45.2 {
+		t.Errorf("duration_ms = %f, want 45.2", rs.DurationMs)
+	}
+	if rs.CacheHitRatio != 1.0 {
+		t.Errorf("cache_hit_ratio = %f, want 1.0", rs.CacheHitRatio)
+	}
+	if rs.Timeline == "" {
+		t.Error("expected timeline to be set")
+	}
+
+	// Metadata should still have request_id and user_id, but NOT controller/action
+	meta := entry.Metadata
+	if meta["request_id"] != "req-abc-123" {
+		t.Errorf("metadata.request_id = %v, want req-abc-123", meta["request_id"])
+	}
+	if meta["user_id"] != float64(42) {
+		t.Errorf("metadata.user_id = %v, want 42", meta["user_id"])
+	}
+}
+
+func TestIngestLogs_WithoutRequestSummary(t *testing.T) {
+	srv, ls := setupTestServerWithLogStore()
+
+	body := `{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","message":"no summary"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	if len(ls.entries) != 1 {
+		t.Fatalf("stored entries = %d, want 1", len(ls.entries))
+	}
+	if ls.entries[0].RequestSummary != nil {
+		t.Fatal("expected request_summary to be nil when not provided")
+	}
+}
+
 func TestLogsPage_HTMXFragment(t *testing.T) {
 	srv, ls := setupTestServerWithLogStore()
 

@@ -61,16 +61,52 @@ type ListDataSourceParams struct {
 
 // LogEntry represents an ingested log line.
 type LogEntry struct {
-	ID          int64          `json:"id"`
-	Timestamp   time.Time      `json:"timestamp"`
-	Level       string         `json:"level"`
-	Service     string         `json:"service,omitempty"`
-	TraceID     string         `json:"trace_id,omitempty"`
-	Message     string         `json:"message"`
-	Environment string         `json:"environment,omitempty"`
-	EventType   string         `json:"event_type,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	CreatedAt   time.Time      `json:"created_at"`
+	ID             int64           `json:"id"`
+	Timestamp      time.Time       `json:"timestamp"`
+	Level          string          `json:"level"`
+	Service        string          `json:"service,omitempty"`
+	TraceID        string          `json:"trace_id,omitempty"`
+	Message        string          `json:"message"`
+	Environment    string          `json:"environment,omitempty"`
+	EventType      string          `json:"event_type,omitempty"`
+	Metadata       map[string]any  `json:"metadata,omitempty"`
+	RequestSummary *RequestSummary `json:"request_summary,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+}
+
+// RequestSummary holds structured performance metrics for an HTTP request.
+type RequestSummary struct {
+	ID                  int64   `json:"id"`
+	LogID               int64   `json:"log_id"`
+	Controller          string  `json:"controller,omitempty"`
+	Action              string  `json:"action,omitempty"`
+	Method              string  `json:"method,omitempty"`
+	Path                string  `json:"path,omitempty"`
+	Status              int     `json:"status,omitempty"`
+	DurationMs          float64 `json:"duration_ms,omitempty"`
+	DBTimeMs            float64 `json:"db_time_ms,omitempty"`
+	ViewTimeMs          float64 `json:"view_time_ms,omitempty"`
+	SQLCount            int     `json:"sql_count,omitempty"`
+	SQLTotalMs          float64 `json:"sql_total_ms,omitempty"`
+	SQLSlowestMs        float64 `json:"sql_slowest_ms,omitempty"`
+	SQLSlowestName      string  `json:"sql_slowest_name,omitempty"`
+	NPlusOne            bool    `json:"n_plus_one,omitempty"`
+	ViewCount           int     `json:"view_count,omitempty"`
+	ViewTotalMs         float64 `json:"view_total_ms,omitempty"`
+	ViewSlowestMs       float64 `json:"view_slowest_ms,omitempty"`
+	ViewSlowestTemplate string  `json:"view_slowest_template,omitempty"`
+	CacheReads          int     `json:"cache_reads,omitempty"`
+	CacheHits           int     `json:"cache_hits,omitempty"`
+	CacheWrites         int     `json:"cache_writes,omitempty"`
+	CacheHitRatio       float64 `json:"cache_hit_ratio,omitempty"`
+	HTTPExternalCount   int     `json:"http_external_count,omitempty"`
+	HTTPExternalTotalMs float64 `json:"http_external_total_ms,omitempty"`
+	HTTPSlowestMs       float64 `json:"http_slowest_ms,omitempty"`
+	HTTPSlowestHost     string  `json:"http_slowest_host,omitempty"`
+	MemoryBeforeMb      float64 `json:"memory_before_mb,omitempty"`
+	MemoryAfterMb       float64 `json:"memory_after_mb,omitempty"`
+	MemoryDeltaMb       float64 `json:"memory_delta_mb,omitempty"`
+	Timeline            string  `json:"timeline,omitempty"`
 }
 
 // LogSearchParams defines filters for log search.

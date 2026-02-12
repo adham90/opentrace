@@ -15,14 +15,47 @@ import (
 )
 
 type ingestLogEntry struct {
-	Timestamp   time.Time      `json:"timestamp"`
-	Level       string         `json:"level"`
-	Service     string         `json:"service"`
-	TraceID     string         `json:"trace_id"`
-	Message     string         `json:"message"`
-	Environment string         `json:"environment"`
-	EventType   string         `json:"event_type"`
-	Metadata    map[string]any `json:"metadata"`
+	Timestamp      time.Time              `json:"timestamp"`
+	Level          string                 `json:"level"`
+	Service        string                 `json:"service"`
+	TraceID        string                 `json:"trace_id"`
+	Message        string                 `json:"message"`
+	Environment    string                 `json:"environment"`
+	EventType      string                 `json:"event_type"`
+	Metadata       map[string]any         `json:"metadata"`
+	RequestSummary *ingestRequestSummary  `json:"request_summary,omitempty"`
+}
+
+type ingestRequestSummary struct {
+	Controller          string  `json:"controller"`
+	Action              string  `json:"action"`
+	Method              string  `json:"method"`
+	Path                string  `json:"path"`
+	Status              int     `json:"status"`
+	DurationMs          float64 `json:"duration_ms"`
+	DBTimeMs            float64 `json:"db_time_ms"`
+	ViewTimeMs          float64 `json:"view_time_ms"`
+	SQLCount            int     `json:"sql_count"`
+	SQLTotalMs          float64 `json:"sql_total_ms"`
+	SQLSlowestMs        float64 `json:"sql_slowest_ms"`
+	SQLSlowestName      string  `json:"sql_slowest_name"`
+	NPlusOne            bool    `json:"n_plus_one"`
+	ViewCount           int     `json:"view_count"`
+	ViewTotalMs         float64 `json:"view_total_ms"`
+	ViewSlowestMs       float64 `json:"view_slowest_ms"`
+	ViewSlowestTemplate string  `json:"view_slowest_template"`
+	CacheReads          int     `json:"cache_reads"`
+	CacheHits           int     `json:"cache_hits"`
+	CacheWrites         int     `json:"cache_writes"`
+	CacheHitRatio       float64 `json:"cache_hit_ratio"`
+	HTTPExternalCount   int     `json:"http_external_count"`
+	HTTPExternalTotalMs float64 `json:"http_external_total_ms"`
+	HTTPSlowestMs       float64 `json:"http_slowest_ms"`
+	HTTPSlowestHost     string  `json:"http_slowest_host"`
+	MemoryBeforeMb      float64 `json:"memory_before_mb"`
+	MemoryAfterMb       float64 `json:"memory_after_mb"`
+	MemoryDeltaMb       float64 `json:"memory_delta_mb"`
+	Timeline            json.RawMessage `json:"timeline,omitempty"`
 }
 
 func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
@@ -80,6 +113,40 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 			Environment: e.Environment,
 			EventType:   e.EventType,
 			Metadata:    e.Metadata,
+		}
+		if e.RequestSummary != nil {
+			rs := e.RequestSummary
+			logEntries[i].RequestSummary = &store.RequestSummary{
+				Controller:          rs.Controller,
+				Action:              rs.Action,
+				Method:              rs.Method,
+				Path:                rs.Path,
+				Status:              rs.Status,
+				DurationMs:          rs.DurationMs,
+				DBTimeMs:            rs.DBTimeMs,
+				ViewTimeMs:          rs.ViewTimeMs,
+				SQLCount:            rs.SQLCount,
+				SQLTotalMs:          rs.SQLTotalMs,
+				SQLSlowestMs:        rs.SQLSlowestMs,
+				SQLSlowestName:      rs.SQLSlowestName,
+				NPlusOne:            rs.NPlusOne,
+				ViewCount:           rs.ViewCount,
+				ViewTotalMs:         rs.ViewTotalMs,
+				ViewSlowestMs:       rs.ViewSlowestMs,
+				ViewSlowestTemplate: rs.ViewSlowestTemplate,
+				CacheReads:          rs.CacheReads,
+				CacheHits:           rs.CacheHits,
+				CacheWrites:         rs.CacheWrites,
+				CacheHitRatio:       rs.CacheHitRatio,
+				HTTPExternalCount:   rs.HTTPExternalCount,
+				HTTPExternalTotalMs: rs.HTTPExternalTotalMs,
+				HTTPSlowestMs:       rs.HTTPSlowestMs,
+				HTTPSlowestHost:     rs.HTTPSlowestHost,
+				MemoryBeforeMb:      rs.MemoryBeforeMb,
+				MemoryAfterMb:       rs.MemoryAfterMb,
+				MemoryDeltaMb:       rs.MemoryDeltaMb,
+				Timeline:            string(rs.Timeline),
+			}
 		}
 	}
 

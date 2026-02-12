@@ -39,15 +39,60 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []LogEntry) (int, er
 	}
 	defer stmt.Close()
 
+	// Prepare summary statement lazily (only if any entry has a request_summary)
+	var summaryStmt *sql.Stmt
+
 	for _, e := range entries {
 		meta, err := json.Marshal(e.Metadata)
 		if err != nil {
 			return 0, fmt.Errorf("marshaling metadata: %w", err)
 		}
 		ts := e.Timestamp.UTC().Format(time.RFC3339Nano)
-		_, err = stmt.ExecContext(ctx, ts, e.Level, e.Service, e.TraceID, e.Message, e.Environment, e.EventType, string(meta))
+		res, err := stmt.ExecContext(ctx, ts, e.Level, e.Service, e.TraceID, e.Message, e.Environment, e.EventType, string(meta))
 		if err != nil {
 			return 0, fmt.Errorf("inserting log entry: %w", err)
+		}
+
+		if e.RequestSummary != nil {
+			logID, err := res.LastInsertId()
+			if err != nil {
+				return 0, fmt.Errorf("getting last insert id: %w", err)
+			}
+
+			if summaryStmt == nil {
+				summaryStmt, err = tx.PrepareContext(ctx,
+					`INSERT INTO request_summaries (
+						log_id, controller, action, method, path, status,
+						duration_ms, db_time_ms, view_time_ms,
+						sql_count, sql_total_ms, sql_slowest_ms, sql_slowest_name, n_plus_one,
+						view_count, view_total_ms, view_slowest_ms, view_slowest_template,
+						cache_reads, cache_hits, cache_writes, cache_hit_ratio,
+						http_external_count, http_external_total_ms, http_slowest_ms, http_slowest_host,
+						memory_before_mb, memory_after_mb, memory_delta_mb, timeline
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+				if err != nil {
+					return 0, fmt.Errorf("prepare summary insert: %w", err)
+				}
+				defer summaryStmt.Close()
+			}
+
+			rs := e.RequestSummary
+			nPlusOne := 0
+			if rs.NPlusOne {
+				nPlusOne = 1
+			}
+			_, err = summaryStmt.ExecContext(ctx,
+				logID, rs.Controller, rs.Action, rs.Method, rs.Path, rs.Status,
+				rs.DurationMs, rs.DBTimeMs, rs.ViewTimeMs,
+				rs.SQLCount, rs.SQLTotalMs, rs.SQLSlowestMs, rs.SQLSlowestName, nPlusOne,
+				rs.ViewCount, rs.ViewTotalMs, rs.ViewSlowestMs, rs.ViewSlowestTemplate,
+				rs.CacheReads, rs.CacheHits, rs.CacheWrites, rs.CacheHitRatio,
+				rs.HTTPExternalCount, rs.HTTPExternalTotalMs, rs.HTTPSlowestMs, rs.HTTPSlowestHost,
+				rs.MemoryBeforeMb, rs.MemoryAfterMb, rs.MemoryDeltaMb, rs.Timeline,
+			)
+			if err != nil {
+				return 0, fmt.Errorf("inserting request summary: %w", err)
+			}
 		}
 	}
 
