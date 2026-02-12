@@ -366,6 +366,122 @@ func runSeed() error {
 			},
 		},
 
+		// --- Deadman watchers ---
+		{
+			Title:       "Heartbeat: Payment API",
+			Environment: "production",
+			Severity:    store.SeverityCritical,
+			WatcherType: store.WatcherTypeDeadman,
+			TimeRange:   "5m",
+			Schedule:    "*/5 * * * *",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			TypeConfig:  json.RawMessage(`{"source":"logs","filter":{"service":"payment-api","level":"INFO"},"min_count":5,"window":"5m"}`),
+		},
+		{
+			Title:       "Heartbeat: Order Processing",
+			Environment: "production",
+			Severity:    store.SeverityWarning,
+			WatcherType: store.WatcherTypeDeadman,
+			TimeRange:   "15m",
+			Schedule:    "*/15 * * * *",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			TypeConfig:  json.RawMessage(`{"source":"logs","filter":{"service":"order-service","level":"INFO","query":"processed"},"min_count":1,"window":"15m"}`),
+		},
+
+		// --- Diff watchers ---
+		{
+			Title:       "Schema Drift: Users Table",
+			Environment: "production",
+			Severity:    store.SeverityWarning,
+			WatcherType: store.WatcherTypeDiff,
+			TimeRange:   "1h",
+			Schedule:    "@hourly",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			TypeConfig:  json.RawMessage(`{"source":"query","query":"SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'users' ORDER BY ordinal_position","compare_mode":"hash"}`),
+		},
+		{
+			Title:       "Config Table Changes",
+			Environment: "production",
+			Severity:    store.SeverityInfo,
+			WatcherType: store.WatcherTypeDiff,
+			TimeRange:   "30m",
+			Schedule:    "*/30 * * * *",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			TypeConfig:  json.RawMessage(`{"source":"query","query":"SELECT key, value FROM app_config ORDER BY key","compare_mode":"exact","ignore_columns":["updated_at"]}`),
+		},
+
+		// --- Composite watchers ---
+		{
+			Title:       "Payment Pipeline Health",
+			Environment: "production",
+			Severity:    store.SeverityCritical,
+			WatcherType: store.WatcherTypeComposite,
+			TimeRange:   "5m",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			TypeConfig:  json.RawMessage(`{"logic":"all_of","conditions":[{"label":"Payment errors high","rule_config":"{\"source\":\"logs\",\"metric\":\"count\",\"operator\":\"gt\",\"threshold\":10,\"time_window\":\"5m\",\"filter\":{\"service\":\"payment-api\",\"level\":\"ERROR\"}}"},{"label":"Gateway degraded","rule_config":"{\"source\":\"logs\",\"metric\":\"count\",\"operator\":\"gt\",\"threshold\":5,\"time_window\":\"5m\",\"filter\":{\"service\":\"gateway\",\"query\":\"503\"}}"}]}`),
+		},
+		{
+			Title:       "Any Service Down",
+			Environment: "production",
+			Severity:    store.SeverityCritical,
+			WatcherType: store.WatcherTypeComposite,
+			TimeRange:   "5m",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			TypeConfig:  json.RawMessage(`{"logic":"any_of","conditions":[{"label":"Payment heartbeat missing","rule_config":"{\"source\":\"logs\",\"metric\":\"count\",\"operator\":\"lt\",\"threshold\":1,\"time_window\":\"5m\",\"filter\":{\"service\":\"payment-api\",\"level\":\"INFO\"}}"},{"label":"Gateway heartbeat missing","rule_config":"{\"source\":\"logs\",\"metric\":\"count\",\"operator\":\"lt\",\"threshold\":1,\"time_window\":\"5m\",\"filter\":{\"service\":\"gateway\",\"level\":\"INFO\"}}"}]}`),
+		},
+
+		// --- Trend watchers ---
+		{
+			Title:       "Error Rate Trend",
+			Environment: "production",
+			Severity:    store.SeverityWarning,
+			WatcherType: store.WatcherTypeTrend,
+			TimeRange:   "1h",
+			Schedule:    "@hourly",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			TypeConfig:  json.RawMessage(`{"source":"logs","filter":{"level":"ERROR"},"baseline_runs":5,"change_percent":50,"direction":"increase","window":"1h"}`),
+		},
+		{
+			Title:       "Order Volume Trend",
+			Environment: "production",
+			Severity:    store.SeverityInfo,
+			WatcherType: store.WatcherTypeTrend,
+			TimeRange:   "1h",
+			Schedule:    "@hourly",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			TypeConfig:  json.RawMessage(`{"source":"logs","filter":{"service":"order-service","level":"INFO","query":"created"},"baseline_runs":5,"change_percent":30,"direction":"both","window":"1h"}`),
+		},
+
+		// --- Sequence watchers ---
+		{
+			Title:       "Cascading Failure: Auth → API → DB",
+			Environment: "production",
+			Severity:    store.SeverityCritical,
+			WatcherType: store.WatcherTypeSequence,
+			TimeRange:   "1h",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			TypeConfig:  json.RawMessage(`{"window":"1h","steps":[{"source":"logs","filter":{"service":"user-service","level":"ERROR"},"label":"auth_errors"},{"source":"logs","filter":{"service":"gateway","level":"ERROR","query":"503"},"label":"gateway_503"},{"source":"logs","filter":{"service":"order-service","level":"ERROR","query":"timeout"},"label":"order_timeouts"}]}`),
+		},
+		{
+			Title:       "Deploy → Error Spike Pattern",
+			Environment: "production",
+			Severity:    store.SeverityWarning,
+			WatcherType: store.WatcherTypeSequence,
+			TimeRange:   "30m",
+			Filters:     json.RawMessage(`{}`),
+			Notify:      json.RawMessage(`["dashboard"]`),
+			TypeConfig:  json.RawMessage(`{"window":"30m","steps":[{"source":"logs","filter":{"level":"INFO","query":"deployment"},"label":"deploy_started"},{"source":"logs","filter":{"level":"ERROR"},"label":"error_spike"}]}`),
+		},
+
 		// --- Rule watchers: health source ---
 		{
 			Title:       "Primary DB Health",
@@ -650,6 +766,130 @@ func runSeed() error {
 		}
 	}
 
+	// --- Typed watcher runs ---
+
+	// [15] Heartbeat: Payment API — mostly OK, one deadman alert
+	for j := 0; j < 5; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[15])
+		if err != nil {
+			continue
+		}
+		if j == 3 {
+			runStore.Complete(ctx, run.ID, "DEADMAN ALERT: Expected at least 5 events but found 0 in last 5m (payment-api INFO logs)", nil, true)
+		} else {
+			runStore.Complete(ctx, run.ID, "OK: Found 12 events in last 5m (min: 5)", nil, false)
+		}
+	}
+
+	// [16] Heartbeat: Order Processing — clean
+	for j := 0; j < 4; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[16])
+		if err != nil {
+			continue
+		}
+		runStore.Complete(ctx, run.ID, "OK: Found 3 events in last 15m (min: 1)", nil, false)
+	}
+
+	// [17] Schema Drift: Users Table — one diff alert
+	for j := 0; j < 4; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[17])
+		if err != nil {
+			continue
+		}
+		if j == 3 {
+			runStore.Complete(ctx, run.ID, "DIFF ALERT: Query result hash changed (mode: hash). Previous: a1b2c3..., Current: d4e5f6...", nil, true)
+		} else {
+			runStore.Complete(ctx, run.ID, "OK: Query result unchanged (hash match)", nil, false)
+		}
+	}
+
+	// [18] Config Table Changes — clean (baseline building)
+	for j := 0; j < 3; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[18])
+		if err != nil {
+			continue
+		}
+		if j == 0 {
+			runStore.Complete(ctx, run.ID, "OK: First run — baseline snapshot stored (12 rows)", nil, false)
+		} else {
+			runStore.Complete(ctx, run.ID, "OK: Query result unchanged (exact match)", nil, false)
+		}
+	}
+
+	// [19] Payment Pipeline Health (composite) — recent alert
+	for j := 0; j < 4; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[19])
+		if err != nil {
+			continue
+		}
+		if j >= 3 {
+			runStore.Complete(ctx, run.ID, "COMPOSITE ALERT (all_of): All 2 conditions triggered — Payment errors high: TRUE, Gateway degraded: TRUE", nil, true)
+		} else {
+			runStore.Complete(ctx, run.ID, "OK: 1/2 conditions met (all_of requires all)", nil, false)
+		}
+	}
+
+	// [20] Any Service Down (composite) — clean
+	for j := 0; j < 3; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[20])
+		if err != nil {
+			continue
+		}
+		runStore.Complete(ctx, run.ID, "OK: 0/2 conditions met (any_of requires at least one)", nil, false)
+	}
+
+	// [21] Error Rate Trend — building baseline then alert
+	for j := 0; j < 6; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[21])
+		if err != nil {
+			continue
+		}
+		if j < 4 {
+			snap := fmt.Sprintf(`{"value":%d}`, 10+j*2)
+			runStore.Complete(ctx, run.ID, fmt.Sprintf("Building baseline: %.2f (need 5 runs, have %d)", float64(10+j*2), j+1), json.RawMessage(snap), false)
+		} else if j == 4 {
+			runStore.Complete(ctx, run.ID, "OK: Value 18.00 within 50% of baseline 14.00 (change: 28.6%)", json.RawMessage(`{"value":18}`), false)
+		} else {
+			runStore.Complete(ctx, run.ID, "TREND ALERT: Value increased by 85.7% (current: 26.00, baseline avg: 14.00, threshold: 50%)", json.RawMessage(`{"value":26}`), true)
+		}
+	}
+
+	// [22] Order Volume Trend — stable
+	for j := 0; j < 5; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[22])
+		if err != nil {
+			continue
+		}
+		snap := fmt.Sprintf(`{"value":%d}`, 40+j*2)
+		runStore.Complete(ctx, run.ID, fmt.Sprintf("Building baseline: %.2f (need 5 runs, have %d)", float64(40+j*2), j+1), json.RawMessage(snap), false)
+	}
+
+	// [23] Cascading Failure sequence — one full match
+	for j := 0; j < 4; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[23])
+		if err != nil {
+			continue
+		}
+		if j == 2 {
+			runStore.Complete(ctx, run.ID, "SEQUENCE ALERT: All 3 steps matched in order within 1h0m0s (auth_errors → gateway_503 → order_timeouts)", nil, true)
+		} else {
+			runStore.Complete(ctx, run.ID, "OK: 1/3 steps matched (sequence incomplete)", nil, false)
+		}
+	}
+
+	// [24] Deploy → Error Spike — two matches
+	for j := 0; j < 5; j++ {
+		run, err := runStore.Create(ctx, watcherIDs[24])
+		if err != nil {
+			continue
+		}
+		if j >= 3 {
+			runStore.Complete(ctx, run.ID, "SEQUENCE ALERT: All 2 steps matched in order within 30m0s (deploy_started → error_spike)", nil, true)
+		} else {
+			runStore.Complete(ctx, run.ID, "OK: 0/2 steps matched (sequence incomplete)", nil, false)
+		}
+	}
+
 	slog.Info("seeded watcher runs")
 
 	// --- Alerts ---
@@ -734,6 +974,59 @@ func runSeed() error {
 			Details:     json.RawMessage(`{"current_value":3200,"threshold":2000,"source":"health","check":"latency"}`),
 		},
 	}
+
+	// Typed watcher alerts
+	typedAlertDefs := []store.CreateAlertParams{
+		{
+			WatcherID:   &watcherIDs[15],
+			Title:       "Payment API heartbeat missing",
+			Summary:     "No INFO logs from payment-api in the last 5 minutes. Expected at least 5 events but found 0. The service may be down or experiencing a complete outage.",
+			Environment: "production",
+			Severity:    store.SeverityCritical,
+			Details:     json.RawMessage(`{"watcher_type":"deadman","found":0,"min_count":5,"window":"5m","service":"payment-api"}`),
+		},
+		{
+			WatcherID:   &watcherIDs[17],
+			Title:       "Users table schema changed",
+			Summary:     "Schema drift detected on the users table. Column structure hash changed between runs. A new column may have been added or a type modified. Review recent migrations.",
+			Environment: "production",
+			Severity:    store.SeverityWarning,
+			Details:     json.RawMessage(`{"watcher_type":"diff","compare_mode":"hash","previous_hash":"a1b2c3d4","current_hash":"d4e5f6a7"}`),
+		},
+		{
+			WatcherID:   &watcherIDs[19],
+			Title:       "Payment pipeline degraded",
+			Summary:     "All composite conditions triggered simultaneously: payment-api errors above 10/5m AND gateway 503 errors above 5/5m. This indicates a correlated failure across the payment pipeline.",
+			Environment: "production",
+			Severity:    store.SeverityCritical,
+			Details:     json.RawMessage(`{"watcher_type":"composite","logic":"all_of","conditions_met":2,"conditions_total":2}`),
+		},
+		{
+			WatcherID:   &watcherIDs[21],
+			Title:       "Error rate increased 85%",
+			Summary:     "Error log volume increased by 85.7% compared to the rolling baseline (current: 26, baseline avg: 14). This exceeds the 50% threshold. Investigate recent deployments or upstream changes.",
+			Environment: "production",
+			Severity:    store.SeverityWarning,
+			Details:     json.RawMessage(`{"watcher_type":"trend","current_value":26,"baseline_avg":14,"change_percent":85.7,"direction":"increase"}`),
+		},
+		{
+			WatcherID:   &watcherIDs[23],
+			Title:       "Cascading failure detected: auth → gateway → orders",
+			Summary:     "All 3 steps of the cascading failure sequence matched within the 1-hour window: auth errors appeared first, followed by gateway 503s, then order service timeouts. This pattern indicates a propagating failure originating from the auth layer.",
+			Environment: "production",
+			Severity:    store.SeverityCritical,
+			Details:     json.RawMessage(`{"watcher_type":"sequence","steps_matched":3,"steps_total":3,"window":"1h"}`),
+		},
+		{
+			WatcherID:   &watcherIDs[24],
+			Title:       "Deploy triggered error spike",
+			Summary:     "Deployment event detected followed by a spike in ERROR logs within 30 minutes. The deployment at v2.14.3 appears to have introduced a regression causing elevated errors.",
+			Environment: "production",
+			Severity:    store.SeverityWarning,
+			Details:     json.RawMessage(`{"watcher_type":"sequence","steps_matched":2,"steps_total":2,"window":"30m","deployment":"v2.14.3"}`),
+		},
+	}
+	alertDefs = append(alertDefs, typedAlertDefs...)
 
 	for _, p := range alertDefs {
 		a, err := alertStore.Create(ctx, p)
