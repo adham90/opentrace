@@ -4,7 +4,9 @@ import (
 	"embed"
 	"html/template"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -100,6 +102,20 @@ func parseTimeRange(preset string) *time.Time {
 	return &t
 }
 
+// parseMetadataParams extracts "meta.key=value" query params into a map.
+func parseMetadataParams(q url.Values) map[string]string {
+	m := make(map[string]string)
+	for key, vals := range q {
+		if strings.HasPrefix(key, "meta.") && len(vals) > 0 && vals[0] != "" {
+			m[strings.TrimPrefix(key, "meta.")] = vals[0]
+		}
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
 // Breadcrumb represents a single navigation breadcrumb.
 type Breadcrumb struct {
 	Label string
@@ -193,16 +209,30 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	logs, err := s.logStore.Search(r.Context(), store.LogSearchParams{
-		Query:       filters.Query,
-		Service:     filters.Service,
-		Level:       filters.Level,
-		Environment: filters.Environment,
-		EventType:   filters.EventType,
-		Start:       parseTimeRange(filters.TimeRange),
-		Limit:       limit + 1, // fetch one extra to detect if there are more
-		Offset:      offset,
-	})
+	searchParams := store.LogSearchParams{
+		Query:          filters.Query,
+		Service:        filters.Service,
+		Level:          filters.Level,
+		Environment:    filters.Environment,
+		EventType:      filters.EventType,
+		Start:          parseTimeRange(filters.TimeRange),
+		Limit:          limit + 1, // fetch one extra to detect if there are more
+		Offset:         offset,
+		MetadataFilter: parseMetadataParams(r.URL.Query()),
+	}
+	// Explicit start/end override time_range preset
+	if s := r.URL.Query().Get("start"); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			searchParams.Start = &t
+		}
+	}
+	if e := r.URL.Query().Get("end"); e != "" {
+		if t, err := time.Parse(time.RFC3339, e); err == nil {
+			searchParams.End = &t
+		}
+	}
+
+	logs, err := s.logStore.Search(r.Context(), searchParams)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to search logs")
 		return
@@ -270,16 +300,28 @@ func (s *Server) handleLogsPoll(w http.ResponseWriter, r *http.Request) {
 		TimeRange:   r.URL.Query().Get("time_range"),
 	}
 
-	logs, err := s.logStore.Search(r.Context(), store.LogSearchParams{
-		Query:       filters.Query,
-		Service:     filters.Service,
-		Level:       filters.Level,
-		Environment: filters.Environment,
-		EventType:   filters.EventType,
-		Start:       parseTimeRange(filters.TimeRange),
-		SinceID:     sinceID,
-		Limit:       200,
-	})
+	pollParams := store.LogSearchParams{
+		Query:          filters.Query,
+		Service:        filters.Service,
+		Level:          filters.Level,
+		Environment:    filters.Environment,
+		EventType:      filters.EventType,
+		Start:          parseTimeRange(filters.TimeRange),
+		SinceID:        sinceID,
+		Limit:          200,
+		MetadataFilter: parseMetadataParams(r.URL.Query()),
+	}
+	if s := r.URL.Query().Get("start"); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			pollParams.Start = &t
+		}
+	}
+	if e := r.URL.Query().Get("end"); e != "" {
+		if t, err := time.Parse(time.RFC3339, e); err == nil {
+			pollParams.End = &t
+		}
+	}
+	logs, err := s.logStore.Search(r.Context(), pollParams)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return

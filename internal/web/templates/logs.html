@@ -376,10 +376,24 @@
   font-size: 11px;
 }
 
-/* ── Smart search status ──────────────────────────────────── */
+/* ── AI search mode ───────────────────────────────────────── */
+.term-cmdline.ai-mode {
+  border-top-color: var(--purple, #a78bfa);
+  background: color-mix(in srgb, var(--bg-secondary) 92%, var(--purple, #a78bfa));
+}
+.term-cmdline.ai-mode .term-prompt-symbol {
+  color: var(--purple, #a78bfa);
+}
+.term-cmdline.ai-loading .term-prompt-symbol {
+  animation: ai-pulse 1s ease-in-out infinite;
+}
+@keyframes ai-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.3; }
+}
 .smart-search-status {
   display: none;
-  color: var(--text-dim);
+  color: var(--purple, #a78bfa);
   font-family: var(--font-mono);
   font-size: 11px;
   white-space: nowrap;
@@ -444,7 +458,10 @@
     level: '{{.LogFilters.Level}}',
     environment: '{{.LogFilters.Environment}}',
     event_type: '{{.LogFilters.EventType}}',
-    time_range: '{{.LogFilters.TimeRange}}'
+    time_range: '{{.LogFilters.TimeRange}}',
+    start: '',
+    end: '',
+    metadata: {}  // key-value pairs for metadata filters
   };
 
   // ── Auto-scroll state ─────────────────────────────────────
@@ -503,7 +520,7 @@
   }
 
   function clearAllFilters() {
-    filters = { query: '', service: '', level: '', environment: '', event_type: '', time_range: '' };
+    filters = { query: '', service: '', level: '', environment: '', event_type: '', time_range: '', start: '', end: '', metadata: {} };
     syncHiddenFields();
     renderFilterChips();
     applyFilters();
@@ -516,11 +533,33 @@
     document.getElementById('f-event-type').value = filters.event_type;
     document.getElementById('f-time-range').value = filters.time_range;
     document.getElementById('f-query').value = filters.query;
+
+    // Remove old dynamic fields
+    form.querySelectorAll('.dynamic-field').forEach(function(el) { el.remove(); });
+
+    // Add start/end if present
+    if (filters.start) addHiddenField('start', filters.start);
+    if (filters.end) addHiddenField('end', filters.end);
+
+    // Add metadata fields
+    Object.keys(filters.metadata).forEach(function(k) {
+      if (filters.metadata[k]) addHiddenField('meta.' + k, filters.metadata[k]);
+    });
+  }
+
+  function addHiddenField(name, value) {
+    var input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = name;
+    input.value = value;
+    input.className = 'dynamic-field';
+    form.appendChild(input);
   }
 
   function hasActiveFilters() {
     return filters.query || filters.service || filters.level ||
-           filters.environment || filters.event_type || filters.time_range;
+           filters.environment || filters.event_type || filters.time_range ||
+           filters.start || filters.end || Object.keys(filters.metadata).length > 0;
   }
 
   function renderFilterChips() {
@@ -540,9 +579,24 @@
     if (filters.time_range) {
       html += chip('time', filters.time_range);
     }
+    if (filters.start || filters.end) {
+      var timeLabel = '';
+      if (filters.start && filters.end) {
+        timeLabel = shortTime(filters.start) + ' \u2192 ' + shortTime(filters.end);
+      } else if (filters.start) {
+        timeLabel = 'from ' + shortTime(filters.start);
+      } else {
+        timeLabel = 'until ' + shortTime(filters.end);
+      }
+      html += chip('range', timeLabel);
+    }
     if (filters.query) {
       html += chip('search', filters.query);
     }
+    // Metadata chips
+    Object.keys(filters.metadata).forEach(function(k) {
+      html += chip('meta.' + k, filters.metadata[k]);
+    });
     activeFiltersEl.innerHTML = html;
     if (html) {
       activeFiltersEl.classList.add('has-filters');
@@ -558,9 +612,30 @@
         else if (k === 'env') k = 'environment';
         else if (k === 'type') k = 'event_type';
         else if (k === 'time') k = 'time_range';
+        else if (k === 'range') {
+          filters.start = '';
+          filters.end = '';
+          syncHiddenFields();
+          renderFilterChips();
+          applyFilters();
+          return;
+        } else if (k.indexOf('meta.') === 0) {
+          delete filters.metadata[k.substring(5)];
+          syncHiddenFields();
+          renderFilterChips();
+          applyFilters();
+          return;
+        }
         removeFilter(k);
       });
     });
+  }
+
+  function shortTime(iso) {
+    try {
+      var d = new Date(iso);
+      return d.toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    } catch(e) { return iso; }
   }
 
   function chip(key, val) {
@@ -577,6 +652,13 @@
   }
 
   function pushFilterURL() {
+    var params = buildFilterParams();
+    var qs = params.toString();
+    var url = '/logs' + (qs ? '?' + qs : '');
+    history.pushState(null, '', url);
+  }
+
+  function buildFilterParams() {
     var params = new URLSearchParams();
     if (filters.query) params.set('query', filters.query);
     if (filters.service) params.set('service', filters.service);
@@ -584,9 +666,12 @@
     if (filters.environment) params.set('environment', filters.environment);
     if (filters.event_type) params.set('event_type', filters.event_type);
     if (filters.time_range) params.set('time_range', filters.time_range);
-    var qs = params.toString();
-    var url = '/logs' + (qs ? '?' + qs : '');
-    history.pushState(null, '', url);
+    if (filters.start) params.set('start', filters.start);
+    if (filters.end) params.set('end', filters.end);
+    Object.keys(filters.metadata).forEach(function(k) {
+      if (filters.metadata[k]) params.set('meta.' + k, filters.metadata[k]);
+    });
+    return params;
   }
 
   function applyFilters() {
@@ -665,11 +750,25 @@
 
   // ── Smart search ─────────────────────────────────────────
   var smartSearchStatus = document.getElementById('smart-search-status');
+  var promptSymbol = document.querySelector('.term-prompt-symbol');
+
+  function setAIMode(on) {
+    if (on) {
+      form.classList.add('ai-mode');
+      promptSymbol.textContent = '?';
+    } else {
+      form.classList.remove('ai-mode', 'ai-loading');
+      promptSymbol.textContent = '$';
+    }
+  }
 
   function runSmartSearch(query) {
     if (!query) return;
-    smartSearchStatus.textContent = 'searching...';
+    setAIMode(true);
+    form.classList.add('ai-loading');
+    smartSearchStatus.textContent = 'thinking...';
     smartSearchStatus.classList.add('visible');
+    cmdInput.disabled = true;
 
     fetch('/api/logs/smart-search', {
       method: 'POST',
@@ -678,19 +777,25 @@
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
+      cmdInput.disabled = false;
+      form.classList.remove('ai-loading');
       smartSearchStatus.classList.remove('visible');
       if (data.error) {
         showToast(data.error, 'error');
+        setAIMode(false);
         return;
       }
       if (data.filters) {
+        // Clear previous filters before applying new ones
+        filters = { query: '', service: '', level: '', environment: '', event_type: '', time_range: '', start: '', end: '', metadata: {} };
         var f = data.filters;
-        if (f.level) filters.level = f.level;
-        if (f.service) filters.service = f.service;
-        if (f.environment) filters.environment = f.environment;
-        if (f.event_type) filters.event_type = f.event_type;
-        if (f.time_range) filters.time_range = f.time_range;
-        if (f.query) filters.query = f.query;
+        Object.keys(f).forEach(function(k) {
+          if (k.indexOf('meta.') === 0) {
+            filters.metadata[k.substring(5)] = f[k];
+          } else if (k === 'level' || k === 'service' || k === 'environment' || k === 'event_type' || k === 'time_range' || k === 'query' || k === 'start' || k === 'end') {
+            filters[k] = f[k];
+          }
+        });
         syncHiddenFields();
         renderFilterChips();
         applyFilters();
@@ -698,9 +803,14 @@
       if (data.reasoning) {
         showToast(data.reasoning, 'info');
       }
+      // Keep AI mode visuals briefly, then revert
+      setTimeout(function() { setAIMode(false); }, 2000);
     })
     .catch(function(err) {
+      cmdInput.disabled = false;
+      form.classList.remove('ai-loading');
       smartSearchStatus.classList.remove('visible');
+      setAIMode(false);
       showToast('Smart search failed: ' + err.message, 'error');
     });
   }
@@ -721,6 +831,24 @@
   var filterOrder = ['query', 'time_range', 'event_type', 'environment', 'service', 'level'];
 
   function removeLastFilter() {
+    // Check metadata first
+    var metaKeys = Object.keys(filters.metadata);
+    if (metaKeys.length > 0) {
+      delete filters.metadata[metaKeys[metaKeys.length - 1]];
+      syncHiddenFields();
+      renderFilterChips();
+      applyFilters();
+      return true;
+    }
+    // Check custom time range
+    if (filters.start || filters.end) {
+      filters.start = '';
+      filters.end = '';
+      syncHiddenFields();
+      renderFilterChips();
+      applyFilters();
+      return true;
+    }
     for (var i = 0; i < filterOrder.length; i++) {
       if (filters[filterOrder[i]]) {
         removeFilter(filterOrder[i]);
@@ -780,14 +908,7 @@
   var POLL_INTERVAL = 2000;
 
   function getFilters() {
-    var params = new URLSearchParams();
-    if (filters.query) params.set('query', filters.query);
-    if (filters.service) params.set('service', filters.service);
-    if (filters.level) params.set('level', filters.level);
-    if (filters.environment) params.set('environment', filters.environment);
-    if (filters.event_type) params.set('event_type', filters.event_type);
-    if (filters.time_range) params.set('time_range', filters.time_range);
-    return params.toString();
+    return buildFilterParams().toString();
   }
 
   function getMaxID() {
@@ -905,13 +1026,7 @@
     if (loadingOlder || !hasMoreOlder) return;
     loadingOlder = true;
 
-    var params = new URLSearchParams();
-    if (filters.query) params.set('query', filters.query);
-    if (filters.service) params.set('service', filters.service);
-    if (filters.level) params.set('level', filters.level);
-    if (filters.environment) params.set('environment', filters.environment);
-    if (filters.event_type) params.set('event_type', filters.event_type);
-    if (filters.time_range) params.set('time_range', filters.time_range);
+    var params = buildFilterParams();
     params.set('offset', currentOffset);
     params.set('limit', '50');
 
@@ -985,6 +1100,12 @@
     filters.environment = params.get('environment') || '';
     filters.event_type = params.get('event_type') || '';
     filters.time_range = params.get('time_range') || '';
+    filters.start = params.get('start') || '';
+    filters.end = params.get('end') || '';
+    filters.metadata = {};
+    params.forEach(function(v, k) {
+      if (k.indexOf('meta.') === 0) filters.metadata[k.substring(5)] = v;
+    });
     syncHiddenFields();
     renderFilterChips();
     htmx.trigger(form, 'submit');
@@ -992,6 +1113,7 @@
 
   // ── Expose for global use ─────────────────────────────────
   window.clearFilters = clearAllFilters;
+  window.setAIMode = setAIMode;
   window.pauseLiveOnFilter = function() {
     // When filters change, keep polling but reset
   };
@@ -1166,7 +1288,13 @@
     });
   }
 
-  cmdInput.addEventListener('input', updateDropdown);
+  cmdInput.addEventListener('input', function() {
+    // Live AI mode indicator when typing ? prefix
+    if (window.setAIMode) {
+      window.setAIMode(cmdInput.value.startsWith('?'));
+    }
+    updateDropdown();
+  });
   cmdInput.addEventListener('focus', updateDropdown);
 
   cmdInput.addEventListener('blur', function() {
