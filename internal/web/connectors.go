@@ -23,49 +23,7 @@ func isHTMX(r *http.Request) bool {
 	return r.Header.Get("HX-Request") == "true"
 }
 
-// renderConnectorList sends an HTML fragment of the connector list (for HTMX swaps).
-func (s *Server) renderConnectorList(w http.ResponseWriter, r *http.Request) {
-	connectors, err := s.dsStore.List(r.Context(), store.ListDataSourceParams{})
-	if err != nil {
-		http.Error(w, "failed to list connectors", http.StatusInternalServerError)
-		return
-	}
-	data := pageData{Connectors: connectors}
-	w.Header().Set("Content-Type", "text/html")
-	templates.ExecuteTemplate(w, "connector-list", data)
-}
-
 func (s *Server) handleCreateConnectorAPI(w http.ResponseWriter, r *http.Request) {
-	// HTMX form sends form-encoded data
-	if isHTMX(r) {
-		r.ParseForm()
-		configStr := r.FormValue("config")
-		cfg := map[string]any{}
-		if configStr != "" {
-			if err := json.Unmarshal([]byte(configStr), &cfg); err != nil {
-				http.Error(w, "invalid config JSON", http.StatusBadRequest)
-				return
-			}
-		}
-		connType := store.ConnectorType(r.FormValue("type"))
-		name := r.FormValue("name")
-		environment := r.FormValue("environment")
-		if connType == "" || name == "" {
-			http.Error(w, "type and name required", http.StatusBadRequest)
-			return
-		}
-		_, err := s.dsStore.Create(r.Context(), store.CreateDataSourceParams{
-			Type: connType, Name: name, Environment: environment, Config: cfg,
-		})
-		if err != nil {
-			http.Error(w, "failed to create", http.StatusInternalServerError)
-			return
-		}
-		s.renderConnectorList(w, r)
-		return
-	}
-
-	// JSON API
 	var req createConnectorRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -125,10 +83,6 @@ func (s *Server) handleTestConnectorAPI(w http.ResponseWriter, r *http.Request) 
 		s.dsStore.Update(r.Context(), ds.ID, store.UpdateDataSourceParams{
 			Status: &status, StatusMessage: &msg, LastTestedAt: &now,
 		})
-		if isHTMX(r) {
-			s.renderConnectorList(w, r)
-			return
-		}
 		writeError(w, http.StatusUnprocessableEntity, "connector test failed: unable to initialize connector")
 		return
 	}
@@ -140,10 +94,6 @@ func (s *Server) handleTestConnectorAPI(w http.ResponseWriter, r *http.Request) 
 		s.dsStore.Update(r.Context(), ds.ID, store.UpdateDataSourceParams{
 			Status: &status, StatusMessage: &msg, LastTestedAt: &now,
 		})
-		if isHTMX(r) {
-			s.renderConnectorList(w, r)
-			return
-		}
 		writeError(w, http.StatusUnprocessableEntity, "connector test failed: unable to connect")
 		return
 	}
@@ -161,10 +111,6 @@ func (s *Server) handleTestConnectorAPI(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if isHTMX(r) {
-		s.renderConnectorList(w, r)
-		return
-	}
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -272,9 +218,5 @@ func (s *Server) handleDeleteConnectorAPI(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if isHTMX(r) {
-		s.renderConnectorList(w, r)
-		return
-	}
 	w.WriteHeader(http.StatusNoContent)
 }

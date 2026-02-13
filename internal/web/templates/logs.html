@@ -1,365 +1,603 @@
 {{define "content"}}
-<div class="page-header">
-  <h1><span class="prompt">$</span> logs <span class="dim" id="logs-count">{{len .Logs}} entries</span></h1>
-  <div class="actions">
-    <button id="live-toggle" class="btn btn-sm live-btn live-on" onclick="toggleLive()">
-      <span class="live-dot"></span> <span id="live-label">live</span>
-    </button>
+<div class="term-container" id="term-container">
+  <div class="term-output" id="term-output">
+    <div id="logs-list" data-max-id="{{.MaxLogID}}">
+    {{template "logs-list" .}}
+    </div>
   </div>
+
+  <div class="term-new-indicator" id="new-indicator" style="display:none" onclick="scrollToBottom()">
+    <span id="new-indicator-count">0</span> new logs
+  </div>
+
+  <form id="filter-form" class="term-cmdline" autocomplete="off"
+        hx-get="/logs" hx-target="#logs-list" hx-swap="innerHTML" hx-trigger="submit" hx-push-url="false"
+        onsubmit="return false;">
+    <input type="hidden" name="service" id="f-service" value="{{.LogFilters.Service}}">
+    <input type="hidden" name="level" id="f-level" value="{{.LogFilters.Level}}">
+    <input type="hidden" name="environment" id="f-env" value="{{.LogFilters.Environment}}">
+    <input type="hidden" name="event_type" id="f-event-type" value="{{.LogFilters.EventType}}">
+    <input type="hidden" name="time_range" id="f-time-range" value="{{.LogFilters.TimeRange}}">
+    <input type="hidden" name="query" id="f-query" value="{{.LogFilters.Query}}">
+
+    <div class="term-cmdline-inner">
+      <span class="term-prompt-symbol">$</span>
+      <input type="text" id="cmd-input" class="term-cmd-input" placeholder="type a command... level:error service:my-app time:1h or search text" spellcheck="false">
+      <div class="term-live-badge" id="live-badge" onclick="window.toggleLive()" title="toggle live tail (p)">
+        <span class="term-live-dot" id="live-dot"></span>
+        <span id="live-label">LIVE</span>
+      </div>
+    </div>
+
+    <div class="term-active-filters" id="active-filters"></div>
+  </form>
 </div>
 
-<div id="saved-filters" class="saved-filters" style="display:none"></div>
+<style nonce="{{.CSPNonce}}">
+/* ── Terminal container ────────────────────────────────────── */
+.term-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  position: relative;
+}
 
-<form id="filter-form" class="filter-bar" hx-get="/logs" hx-target="#logs-list" hx-swap="innerHTML" hx-trigger="submit" hx-push-url="false"
-      onsubmit="pauseLiveOnFilter()">
-  <input type="hidden" name="service" id="f-service" value="{{.LogFilters.Service}}">
-  <input type="hidden" name="level" id="f-level" value="{{.LogFilters.Level}}">
-  <input type="hidden" name="environment" id="f-env" value="{{.LogFilters.Environment}}">
-  <input type="hidden" name="event_type" id="f-event-type" value="{{.LogFilters.EventType}}">
-  <input type="hidden" name="time_range" id="f-time-range" value="{{.LogFilters.TimeRange}}">
+.term-output {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+  scroll-behavior: auto;
+}
 
-  <div class="filter-bar-search" id="search-wrap">
-    <span class="filter-prompt">/</span>
-    <input type="text" name="query" id="search-input" placeholder="search..." value="{{.LogFilters.Query}}" autocomplete="off">
-  </div>
+/* ── Terminal log lines ────────────────────────────────────── */
+.term-line {
+  display: flex;
+  align-items: baseline;
+  padding: 1px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 0.1s;
+  gap: 0;
+}
 
-  <div class="filter-bar-tags">
-    <div class="filter-tag" id="tag-time" onclick="toggleDropdown('time',event)" title="time range — key: t">
-      <span class="filter-tag-key">t:</span>
-      <span class="filter-tag-val" id="tag-time-val">all</span>
-      <div class="filter-dropdown" id="drop-time"></div>
-    </div>
-    <div class="filter-tag" id="tag-level" onclick="toggleDropdown('level',event)" title="log level — key: l">
-      <span class="filter-tag-key">l:</span>
-      <span class="filter-tag-val" id="tag-level-val">all</span>
-      <div class="filter-dropdown" id="drop-level"></div>
-    </div>
-    <div class="filter-tag" id="tag-service" onclick="toggleDropdown('service',event)" title="service — key: s">
-      <span class="filter-tag-key">s:</span>
-      <span class="filter-tag-val" id="tag-service-val">all</span>
-      <div class="filter-dropdown" id="drop-service"></div>
-    </div>
-    <div class="filter-tag" id="tag-env" onclick="toggleDropdown('env',event)" title="environment — key: e">
-      <span class="filter-tag-key">e:</span>
-      <span class="filter-tag-val" id="tag-env-val">all</span>
-      <div class="filter-dropdown" id="drop-env"></div>
-    </div>
-    <div class="filter-tag" id="tag-event-type" onclick="toggleDropdown('event-type',event)" title="event type — key: y">
-      <span class="filter-tag-key">y:</span>
-      <span class="filter-tag-val" id="tag-event-type-val">all</span>
-      <div class="filter-dropdown" id="drop-event-type"></div>
-    </div>
-  </div>
+.term-line:hover {
+  background: var(--bg-secondary);
+}
 
-  <div class="filter-bar-actions">
-    <button type="button" class="filter-bar-btn btn-clear" onclick="clearFilters()" title="clear all (c)">clear</button>
-    <button type="button" class="filter-bar-btn" id="save-filter-btn" onclick="saveCurrentFilter()" style="display:none" title="save filter">save</button>
-  </div>
-</form>
+.term-line.level-ERROR { border-left-color: var(--red); }
+.term-line.level-WARN  { border-left-color: var(--yellow); }
+.term-line.level-INFO  { border-left-color: var(--green); }
+.term-line.level-DEBUG { border-left-color: var(--bg-tertiary); }
 
-<div id="logs-list" data-max-id="{{.MaxLogID}}">
-{{template "logs-list" .}}
-</div>
+.term-ts {
+  color: var(--text-dim);
+  min-width: 100px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.term-level {
+  min-width: 52px;
+  flex-shrink: 0;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  user-select: none;
+}
+.term-level.level-ERROR { color: var(--red); }
+.term-level.level-WARN  { color: var(--yellow); }
+.term-level.level-INFO  { color: var(--green); }
+.term-level.level-DEBUG { color: var(--text-dim); }
+
+.term-source {
+  color: var(--cyan);
+  min-width: 80px;
+  max-width: 140px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.term-source:empty { min-width: 80px; }
+
+.term-msg {
+  color: var(--text);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.term-line.level-DEBUG .term-msg { color: var(--text-dim); }
+.term-line.level-ERROR .term-msg { color: var(--red); }
+
+/* ── Expanded detail ───────────────────────────────────────── */
+.term-detail {
+  display: none;
+  padding: 6px 12px 8px 116px;
+  font-size: 11px;
+  line-height: 1.5;
+  background: var(--bg-secondary);
+  border-left: 2px solid var(--border);
+  margin: 0;
+}
+.term-line.expanded + .term-detail { display: block; }
+.term-line.expanded { background: var(--bg-secondary); }
+
+.term-detail-row {
+  display: flex;
+  gap: 12px;
+  padding: 1px 0;
+}
+.term-detail-key {
+  color: var(--text-dim);
+  min-width: 90px;
+  flex-shrink: 0;
+  user-select: none;
+}
+.term-detail-key::after { content: ':'; }
+.term-detail-val {
+  color: var(--text);
+  word-break: break-all;
+}
+.term-detail-val.trace-link { color: var(--cyan); cursor: pointer; }
+.term-detail-val.trace-link:hover { text-decoration: underline; }
+
+/* ── New entry animation ───────────────────────────────────── */
+.term-entry-new .term-line {
+  animation: term-flash 0.6s ease-out;
+}
+@keyframes term-flash {
+  0%   { background: rgba(74, 222, 128, 0.15); }
+  100% { background: transparent; }
+}
+
+/* ── New logs indicator ────────────────────────────────────── */
+.term-new-indicator {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-tertiary);
+  color: var(--green);
+  border: 1px solid var(--border);
+  padding: 4px 16px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  z-index: 10;
+  user-select: none;
+  transition: opacity 0.2s;
+}
+.term-new-indicator:hover { background: var(--bg-secondary); }
+
+/* ── Command line ──────────────────────────────────────────── */
+.term-cmdline {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+  padding: 0;
+}
+
+.term-cmdline-inner {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  gap: 8px;
+  flex: 1;
+}
+
+.term-prompt-symbol {
+  color: var(--green);
+  font-weight: 700;
+  font-size: 13px;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.term-cmd-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  outline: none;
+  padding: 2px 0;
+  caret-color: var(--green);
+}
+.term-cmd-input::placeholder {
+  color: var(--text-dim);
+  opacity: 0.5;
+}
+
+.term-live-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  margin-left: auto;
+  transition: border-color 0.15s;
+}
+.term-live-badge:hover { border-color: var(--text-dim); }
+.term-live-badge.live-on { color: var(--green); }
+.term-live-badge.live-off { color: var(--text-dim); }
+
+.term-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.term-live-badge.live-on .term-live-dot {
+  background: var(--green);
+  box-shadow: 0 0 4px var(--green);
+  animation: term-pulse 2s infinite;
+}
+.term-live-badge.live-off .term-live-dot {
+  background: var(--text-dim);
+}
+@keyframes term-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+
+/* ── Active filters bar ────────────────────────────────────── */
+.term-active-filters {
+  display: none;
+  padding: 3px 12px 6px 32px;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.term-active-filters.has-filters { display: flex; }
+
+.term-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+.term-filter-chip:hover { border-color: var(--red); color: var(--red); }
+.term-filter-chip .chip-key { color: var(--text-dim); }
+.term-filter-chip .chip-val { color: var(--cyan); }
+.term-filter-chip .chip-x {
+  color: var(--text-dim);
+  margin-left: 2px;
+  font-size: 13px;
+}
+
+/* ── Loading sentinel ──────────────────────────────────────── */
+.logs-sentinel {
+  padding: 8px 12px;
+  text-align: center;
+}
+.logs-loading {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+/* ── Empty state ───────────────────────────────────────────── */
+.term-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  text-align: center;
+}
+.term-empty-prompt {
+  font-size: 14px;
+  color: var(--green);
+  margin-bottom: 12px;
+}
+.term-empty-msg {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* ── Log list ──────────────────────────────────────────────── */
+.log-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Responsive: stack timestamp above message on narrow screens */
+@media (max-width: 700px) {
+  .term-line {
+    flex-wrap: wrap;
+    padding: 4px 8px;
+  }
+  .term-ts { min-width: auto; font-size: 10px; }
+  .term-source { max-width: 80px; min-width: auto; }
+  .term-msg { flex-basis: 100%; padding-left: 0; margin-top: 1px; }
+  .term-detail { padding-left: 12px; }
+}
+</style>
 
 <script nonce="{{.CSPNonce}}">
 (function(){
-  // ── Filter state ──────────────────────────────────────────
-  var TIME_OPTIONS = ['', '15m', '1h', '6h', '24h', '7d'];
-  var TIME_LABELS  = ['all', '15m', '1h', '6h', '24h', '7d'];
-  var LEVEL_OPTIONS = ['', 'ERROR', 'WARN', 'INFO', 'DEBUG', 'ERROR,WARN', 'ERROR,WARN,INFO'];
-  var LEVEL_LABELS  = ['all', 'ERR', 'WARN', 'INFO', 'DBG', 'ERR+WARN', 'ERR+WARN+INF'];
-
-  var serviceList = [''];
-  var envList = [''];
-  var eventTypeList = [''];
-  var currentServiceIdx = 0;
-  var currentEnvIdx = 0;
-  var currentEventTypeIdx = 0;
-  var currentTimeIdx = TIME_OPTIONS.indexOf('{{.LogFilters.TimeRange}}');
-  if (currentTimeIdx < 0) currentTimeIdx = 0;
-  var currentLevelIdx = LEVEL_OPTIONS.indexOf('{{.LogFilters.Level}}');
-  if (currentLevelIdx < 0) currentLevelIdx = 0;
-
   // ── DOM refs ──────────────────────────────────────────────
-  var searchInput = document.getElementById('search-input');
-  var searchWrap = document.getElementById('search-wrap');
-  var form = document.getElementById('filter-form');
+  var termOutput = document.getElementById('term-output');
+  var cmdInput   = document.getElementById('cmd-input');
+  var form       = document.getElementById('filter-form');
+  var liveBadge  = document.getElementById('live-badge');
+  var liveLabel  = document.getElementById('live-label');
+  var newIndicator = document.getElementById('new-indicator');
+  var newIndicatorCount = document.getElementById('new-indicator-count');
+  var activeFiltersEl = document.getElementById('active-filters');
 
-  // ── Cycling functions ─────────────────────────────────────
-  function cycleTime(dir) {
-    currentTimeIdx = (currentTimeIdx + dir + TIME_OPTIONS.length) % TIME_OPTIONS.length;
-    document.getElementById('f-time-range').value = TIME_OPTIONS[currentTimeIdx];
-    updateTagDisplay('tag-time-val', TIME_LABELS[currentTimeIdx], currentTimeIdx !== 0);
-    flashTag('tag-time');
+  // ── Filter state ──────────────────────────────────────────
+  var filters = {
+    query: '{{.LogFilters.Query}}',
+    service: '{{.LogFilters.Service}}',
+    level: '{{.LogFilters.Level}}',
+    environment: '{{.LogFilters.Environment}}',
+    event_type: '{{.LogFilters.EventType}}',
+    time_range: '{{.LogFilters.TimeRange}}'
+  };
+
+  // ── Auto-scroll state ─────────────────────────────────────
+  var autoScroll = true;
+  var pendingNew = 0;
+  var userScrolling = false;
+
+  function isNearBottom() {
+    var threshold = 60;
+    return (termOutput.scrollHeight - termOutput.scrollTop - termOutput.clientHeight) < threshold;
+  }
+
+  function scrollToBottom() {
+    termOutput.scrollTop = termOutput.scrollHeight;
+    autoScroll = true;
+    pendingNew = 0;
+    newIndicator.style.display = 'none';
+  }
+  window.scrollToBottom = scrollToBottom;
+
+  termOutput.addEventListener('scroll', function() {
+    if (isNearBottom()) {
+      autoScroll = true;
+      pendingNew = 0;
+      newIndicator.style.display = 'none';
+    } else {
+      autoScroll = false;
+    }
+  });
+
+  // Initial scroll to bottom
+  setTimeout(scrollToBottom, 50);
+
+  // ── Toggle expand/collapse ────────────────────────────────
+  document.addEventListener('click', function(e) {
+    var line = e.target.closest('.term-line');
+    if (!line) return;
+    // Don't toggle if user is selecting text
+    if (window.getSelection().toString()) return;
+    line.classList.toggle('expanded');
+  });
+
+  // ── Filter helpers ────────────────────────────────────────
+  function setFilter(key, val) {
+    filters[key] = val;
+    syncHiddenFields();
+    renderFilterChips();
     applyFilters();
   }
 
-  function cycleLevel(dir) {
-    currentLevelIdx = (currentLevelIdx + dir + LEVEL_OPTIONS.length) % LEVEL_OPTIONS.length;
-    document.getElementById('f-level').value = LEVEL_OPTIONS[currentLevelIdx];
-    updateTagDisplay('tag-level-val', LEVEL_LABELS[currentLevelIdx], currentLevelIdx !== 0);
-    flashTag('tag-level');
+  function removeFilter(key) {
+    filters[key] = '';
+    syncHiddenFields();
+    renderFilterChips();
     applyFilters();
   }
 
-  function cycleService(dir) {
-    currentServiceIdx = (currentServiceIdx + dir + serviceList.length) % serviceList.length;
-    document.getElementById('f-service').value = serviceList[currentServiceIdx];
-    var label = serviceList[currentServiceIdx] || 'all';
-    updateTagDisplay('tag-service-val', label, currentServiceIdx !== 0);
-    flashTag('tag-service');
+  function clearAllFilters() {
+    filters = { query: '', service: '', level: '', environment: '', event_type: '', time_range: '' };
+    syncHiddenFields();
+    renderFilterChips();
     applyFilters();
   }
 
-  function cycleEnv(dir) {
-    currentEnvIdx = (currentEnvIdx + dir + envList.length) % envList.length;
-    document.getElementById('f-env').value = envList[currentEnvIdx];
-    var label = envList[currentEnvIdx] || 'all';
-    updateTagDisplay('tag-env-val', label, currentEnvIdx !== 0);
-    flashTag('tag-env');
-    applyFilters();
+  function syncHiddenFields() {
+    document.getElementById('f-service').value = filters.service;
+    document.getElementById('f-level').value = filters.level;
+    document.getElementById('f-env').value = filters.environment;
+    document.getElementById('f-event-type').value = filters.event_type;
+    document.getElementById('f-time-range').value = filters.time_range;
+    document.getElementById('f-query').value = filters.query;
   }
 
-  function cycleEventType(dir) {
-    currentEventTypeIdx = (currentEventTypeIdx + dir + eventTypeList.length) % eventTypeList.length;
-    document.getElementById('f-event-type').value = eventTypeList[currentEventTypeIdx];
-    var label = eventTypeList[currentEventTypeIdx] || 'all';
-    updateTagDisplay('tag-event-type-val', label, currentEventTypeIdx !== 0);
-    flashTag('tag-event-type');
-    applyFilters();
+  function hasActiveFilters() {
+    return filters.query || filters.service || filters.level ||
+           filters.environment || filters.event_type || filters.time_range;
   }
 
-  function updateTagDisplay(elId, text, isActive) {
-    var el = document.getElementById(elId);
-    el.textContent = text;
-    el.className = 'filter-tag-val' + (isActive ? ' val-active' : ' val-all');
+  function renderFilterChips() {
+    var html = '';
+    if (filters.level) {
+      html += chip('level', filters.level);
+    }
+    if (filters.service) {
+      html += chip('service', filters.service);
+    }
+    if (filters.environment) {
+      html += chip('env', filters.environment);
+    }
+    if (filters.event_type) {
+      html += chip('type', filters.event_type);
+    }
+    if (filters.time_range) {
+      html += chip('time', filters.time_range);
+    }
+    if (filters.query) {
+      html += chip('search', filters.query);
+    }
+    activeFiltersEl.innerHTML = html;
+    if (html) {
+      activeFiltersEl.classList.add('has-filters');
+    } else {
+      activeFiltersEl.classList.remove('has-filters');
+    }
+
+    // Bind remove handlers
+    activeFiltersEl.querySelectorAll('.term-filter-chip').forEach(function(el) {
+      el.addEventListener('click', function() {
+        var k = el.getAttribute('data-filter-key');
+        if (k === 'search') k = 'query';
+        else if (k === 'env') k = 'environment';
+        else if (k === 'type') k = 'event_type';
+        else if (k === 'time') k = 'time_range';
+        removeFilter(k);
+      });
+    });
   }
 
-  function flashTag(tagId) {
-    var el = document.getElementById(tagId);
-    el.classList.remove('filter-flash');
-    void el.offsetWidth; // reflow
-    el.classList.add('filter-flash');
+  function chip(key, val) {
+    return '<span class="term-filter-chip" data-filter-key="' + escH(key) + '">' +
+      '<span class="chip-key">' + escH(key) + ':</span>' +
+      '<span class="chip-val">' + escH(val) + '</span>' +
+      '<span class="chip-x">\u00d7</span></span>';
+  }
+
+  function escH(s) {
+    var d = document.createElement('div');
+    d.textContent = s || '';
+    return d.innerHTML;
   }
 
   function pushFilterURL() {
     var params = new URLSearchParams();
-    var q = searchInput.value;
-    var svc = document.getElementById('f-service').value;
-    var lvl = document.getElementById('f-level').value;
-    var env = document.getElementById('f-env').value;
-    var et  = document.getElementById('f-event-type').value;
-    var tr  = document.getElementById('f-time-range').value;
-    if (q) params.set('query', q);
-    if (svc) params.set('service', svc);
-    if (lvl) params.set('level', lvl);
-    if (env) params.set('environment', env);
-    if (et) params.set('event_type', et);
-    if (tr) params.set('time_range', tr);
+    if (filters.query) params.set('query', filters.query);
+    if (filters.service) params.set('service', filters.service);
+    if (filters.level) params.set('level', filters.level);
+    if (filters.environment) params.set('environment', filters.environment);
+    if (filters.event_type) params.set('event_type', filters.event_type);
+    if (filters.time_range) params.set('time_range', filters.time_range);
     var qs = params.toString();
     var url = '/logs' + (qs ? '?' + qs : '');
     history.pushState(null, '', url);
   }
 
   function applyFilters() {
-    pauseLiveOnFilter();
     pushFilterURL();
     htmx.trigger(form, 'submit');
-    updateSaveBtn();
+    // Resume live after filter apply if was live
   }
 
-  function clearFilters() {
-    searchInput.value = '';
-    currentTimeIdx = 0;
-    currentLevelIdx = 0;
-    currentServiceIdx = 0;
-    currentEnvIdx = 0;
-    currentEventTypeIdx = 0;
-    document.getElementById('f-time-range').value = '';
-    document.getElementById('f-level').value = '';
-    document.getElementById('f-service').value = '';
-    document.getElementById('f-env').value = '';
-    document.getElementById('f-event-type').value = '';
-    updateTagDisplay('tag-time-val', 'all', false);
-    updateTagDisplay('tag-level-val', 'all', false);
-    updateTagDisplay('tag-service-val', 'all', false);
-    updateTagDisplay('tag-env-val', 'all', false);
-    updateTagDisplay('tag-event-type-val', 'all', false);
-    applyFilters();
-  }
+  // ── Command line parsing ──────────────────────────────────
+  function parseCommand(input) {
+    input = input.trim();
+    if (!input) return;
 
-  // Expose for onclick handlers
-  window.cycleTime = cycleTime;
-  window.cycleLevel = cycleLevel;
-  window.cycleService = cycleService;
-  window.cycleEnv = cycleEnv;
-  window.cycleEventType = cycleEventType;
-  window.clearFilters = clearFilters;
-
-  // ── Dropdown menus ────────────────────────────────────────
-  var openDrop = null;
-
-  function closeAllDropdowns() {
-    document.querySelectorAll('.filter-dropdown.show').forEach(function(d){ d.classList.remove('show'); });
-    openDrop = null;
-  }
-
-  function renderDropdown(dropId, options, labels, currentIdx, selectFn) {
-    var drop = document.getElementById(dropId);
-    var html = '';
-    for (var i = 0; i < options.length; i++) {
-      var cls = i === currentIdx ? 'filter-drop-item drop-active' : 'filter-drop-item';
-      html += '<button type="button" class="' + cls + '" data-idx="' + i + '">' + escapeHtmlLocal(labels[i]) + '</button>';
+    // "clear" command resets everything
+    if (input === 'clear') {
+      clearAllFilters();
+      cmdInput.value = '';
+      if (!live) window.toggleLive();
+      return;
     }
-    drop.innerHTML = html;
-    drop.querySelectorAll('.filter-drop-item').forEach(function(btn){
-      btn.addEventListener('click', function(e){
-        e.stopPropagation();
-        selectFn(parseInt(btn.getAttribute('data-idx')));
-        closeAllDropdowns();
-      });
+
+    // Parse key:value pairs and bare text
+    var parts = input.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+    var searchParts = [];
+    var changed = false;
+
+    parts.forEach(function(part) {
+      var m = part.match(/^(level|l|service|svc|s|env|environment|e|time|t|type|event_type|y):(.+)$/i);
+      if (m) {
+        var key = m[1].toLowerCase();
+        var val = m[2].replace(/^"(.*)"$/, '$1');
+        changed = true;
+
+        switch (key) {
+          case 'level': case 'l':
+            filters.level = val.toUpperCase();
+            break;
+          case 'service': case 'svc': case 's':
+            filters.service = val;
+            break;
+          case 'env': case 'environment': case 'e':
+            filters.environment = val;
+            break;
+          case 'time': case 't':
+            filters.time_range = val;
+            break;
+          case 'type': case 'event_type': case 'y':
+            filters.event_type = val;
+            break;
+        }
+      } else {
+        searchParts.push(part);
+      }
     });
-  }
 
-  function selectTime(idx) {
-    currentTimeIdx = idx;
-    document.getElementById('f-time-range').value = TIME_OPTIONS[idx];
-    updateTagDisplay('tag-time-val', TIME_LABELS[idx], idx !== 0);
-    flashTag('tag-time');
-    applyFilters();
-  }
-
-  function selectLevel(idx) {
-    currentLevelIdx = idx;
-    document.getElementById('f-level').value = LEVEL_OPTIONS[idx];
-    updateTagDisplay('tag-level-val', LEVEL_LABELS[idx], idx !== 0);
-    flashTag('tag-level');
-    applyFilters();
-  }
-
-  function selectService(idx) {
-    currentServiceIdx = idx;
-    document.getElementById('f-service').value = serviceList[idx];
-    updateTagDisplay('tag-service-val', serviceList[idx] || 'all', idx !== 0);
-    flashTag('tag-service');
-    applyFilters();
-  }
-
-  function selectEnv(idx) {
-    currentEnvIdx = idx;
-    document.getElementById('f-env').value = envList[idx];
-    updateTagDisplay('tag-env-val', envList[idx] || 'all', idx !== 0);
-    flashTag('tag-env');
-    applyFilters();
-  }
-
-  function selectEventType(idx) {
-    currentEventTypeIdx = idx;
-    document.getElementById('f-event-type').value = eventTypeList[idx];
-    updateTagDisplay('tag-event-type-val', eventTypeList[idx] || 'all', idx !== 0);
-    flashTag('tag-event-type');
-    applyFilters();
-  }
-
-  function toggleDropdown(name, e) {
-    e.stopPropagation();
-    var dropId = 'drop-' + name;
-    var drop = document.getElementById(dropId);
-    var wasOpen = drop.classList.contains('show');
-    closeAllDropdowns();
-    if (wasOpen) return;
-
-    if (name === 'time') renderDropdown(dropId, TIME_OPTIONS, TIME_LABELS, currentTimeIdx, selectTime);
-    else if (name === 'level') renderDropdown(dropId, LEVEL_OPTIONS, LEVEL_LABELS, currentLevelIdx, selectLevel);
-    else if (name === 'service') {
-      var sLabels = serviceList.map(function(s){ return s || 'all'; });
-      renderDropdown(dropId, serviceList, sLabels, currentServiceIdx, selectService);
-    } else if (name === 'env') {
-      var eLabels = envList.map(function(e){ return e || 'all'; });
-      renderDropdown(dropId, envList, eLabels, currentEnvIdx, selectEnv);
-    } else if (name === 'event-type') {
-      var etLabels = eventTypeList.map(function(t){ return t || 'all'; });
-      renderDropdown(dropId, eventTypeList, etLabels, currentEventTypeIdx, selectEventType);
+    if (searchParts.length > 0) {
+      filters.query = searchParts.join(' ');
+      changed = true;
     }
-    drop.classList.add('show');
-    openDrop = dropId;
-  }
-  window.toggleDropdown = toggleDropdown;
 
-  // Close dropdown when clicking outside
-  document.addEventListener('click', function(){ closeAllDropdowns(); });
-
-  // ── Search focus ──────────────────────────────────────────
-  searchInput.addEventListener('focus', function(){ searchWrap.classList.add('focused'); });
-  searchInput.addEventListener('blur', function(){ searchWrap.classList.remove('focused'); });
-  searchInput.addEventListener('keydown', function(e){
-    if (e.key === 'Enter') {
-      e.preventDefault();
+    if (changed) {
+      syncHiddenFields();
+      renderFilterChips();
       applyFilters();
     }
+
+    cmdInput.value = '';
+  }
+
+  // ── Command input handlers ────────────────────────────────
+  cmdInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      parseCommand(cmdInput.value);
+    }
     if (e.key === 'Escape') {
-      searchInput.blur();
+      cmdInput.value = '';
+      cmdInput.blur();
     }
   });
 
   // ── Keyboard shortcuts ────────────────────────────────────
-  document.addEventListener('keydown', function(e){
-    // Skip if typing in an input/textarea
+  document.addEventListener('keydown', function(e) {
     var tag = document.activeElement.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-    // Skip if shortcut overlay is visible
     var overlay = document.getElementById('shortcut-overlay');
     if (overlay && overlay.style.display !== 'none') return;
 
-    closeAllDropdowns();
-    switch(e.key) {
+    switch (e.key) {
       case '/':
         e.preventDefault();
-        searchInput.focus();
-        break;
-      case 't':
-        e.preventDefault();
-        cycleTime(1);
-        break;
-      case 'T':
-        e.preventDefault();
-        cycleTime(-1);
-        break;
-      case 'l':
-        e.preventDefault();
-        cycleLevel(1);
-        break;
-      case 'L':
-        e.preventDefault();
-        cycleLevel(-1);
-        break;
-      case 's':
-        e.preventDefault();
-        cycleService(1);
-        break;
-      case 'S':
-        e.preventDefault();
-        cycleService(-1);
-        break;
-      case 'e':
-        e.preventDefault();
-        cycleEnv(1);
-        break;
-      case 'E':
-        e.preventDefault();
-        cycleEnv(-1);
-        break;
-      case 'y':
-        e.preventDefault();
-        cycleEventType(1);
-        break;
-      case 'Y':
-        e.preventDefault();
-        cycleEventType(-1);
+        cmdInput.focus();
         break;
       case 'c':
         e.preventDefault();
-        clearFilters();
+        clearAllFilters();
         break;
       case 'p':
         e.preventDefault();
@@ -368,153 +606,19 @@
     }
   });
 
-  // ── Save/load filters (localStorage) ──────────────────────
-  var SAVED_KEY = 'opentrace-saved-filters';
-
-  function getSavedFilters() {
-    try { return JSON.parse(localStorage.getItem(SAVED_KEY)) || []; } catch(ex) { return []; }
-  }
-
-  function renderSavedFilters() {
-    var filters = getSavedFilters();
-    var container = document.getElementById('saved-filters');
-    if (!filters.length) { container.style.display = 'none'; return; }
-    container.style.display = 'flex';
-    var html = '';
-    filters.forEach(function(f, i) {
-      html += '<button class="saved-filter-chip" onclick="applySavedFilter(' + i + ')" title="' + describeSavedFilter(f) + '">' +
-        escapeHtmlLocal(f.name) +
-        '<span class="chip-remove" onclick="event.stopPropagation();removeSavedFilter(' + i + ')">\u00d7</span></button>';
-    });
-    container.innerHTML = html;
-  }
-
-  function describeSavedFilter(f) {
-    var parts = [];
-    if (f.query) parts.push('query: ' + f.query);
-    if (f.time_range) parts.push('t: ' + f.time_range);
-    if (f.level) parts.push('l: ' + f.level);
-    if (f.service) parts.push('s: ' + f.service);
-    if (f.env) parts.push('e: ' + f.env);
-    if (f.event_type) parts.push('y: ' + f.event_type);
-    return parts.join(', ') || 'no filters';
-  }
-
-  function applySavedFilter(idx) {
-    var filters = getSavedFilters();
-    var f = filters[idx];
-    if (!f) return;
-    searchInput.value = f.query || '';
-    // Set time
-    currentTimeIdx = Math.max(0, TIME_OPTIONS.indexOf(f.time_range || ''));
-    document.getElementById('f-time-range').value = TIME_OPTIONS[currentTimeIdx];
-    updateTagDisplay('tag-time-val', TIME_LABELS[currentTimeIdx], currentTimeIdx !== 0);
-    // Set level
-    currentLevelIdx = Math.max(0, LEVEL_OPTIONS.indexOf(f.level || ''));
-    document.getElementById('f-level').value = LEVEL_OPTIONS[currentLevelIdx];
-    updateTagDisplay('tag-level-val', LEVEL_LABELS[currentLevelIdx], currentLevelIdx !== 0);
-    // Set service
-    currentServiceIdx = Math.max(0, serviceList.indexOf(f.service || ''));
-    document.getElementById('f-service').value = serviceList[currentServiceIdx];
-    updateTagDisplay('tag-service-val', serviceList[currentServiceIdx] || 'all', currentServiceIdx !== 0);
-    // Set env
-    currentEnvIdx = Math.max(0, envList.indexOf(f.env || ''));
-    document.getElementById('f-env').value = envList[currentEnvIdx];
-    updateTagDisplay('tag-env-val', envList[currentEnvIdx] || 'all', currentEnvIdx !== 0);
-    // Set event type
-    currentEventTypeIdx = Math.max(0, eventTypeList.indexOf(f.event_type || ''));
-    document.getElementById('f-event-type').value = eventTypeList[currentEventTypeIdx];
-    updateTagDisplay('tag-event-type-val', eventTypeList[currentEventTypeIdx] || 'all', currentEventTypeIdx !== 0);
-    applyFilters();
-  }
-  window.applySavedFilter = applySavedFilter;
-
-  function removeSavedFilter(idx) {
-    var filters = getSavedFilters();
-    filters.splice(idx, 1);
-    localStorage.setItem(SAVED_KEY, JSON.stringify(filters));
-    renderSavedFilters();
-    if (typeof showToast === 'function') showToast('Filter removed', 'info');
-  }
-  window.removeSavedFilter = removeSavedFilter;
-
-  function saveCurrentFilter() {
-    var f = {
-      query: searchInput.value,
-      time_range: TIME_OPTIONS[currentTimeIdx],
-      level: LEVEL_OPTIONS[currentLevelIdx],
-      service: serviceList[currentServiceIdx],
-      env: envList[currentEnvIdx],
-      event_type: eventTypeList[currentEventTypeIdx]
-    };
-    var name = prompt('Name this filter:');
-    if (!name) return;
-    f.name = name;
-    var filters = getSavedFilters();
-    filters.push(f);
-    localStorage.setItem(SAVED_KEY, JSON.stringify(filters));
-    renderSavedFilters();
-    if (typeof showToast === 'function') showToast('Filter saved: ' + name, 'success');
-  }
-  window.saveCurrentFilter = saveCurrentFilter;
-
-  function updateSaveBtn() {
-    var hasFilter = searchInput.value || currentTimeIdx !== 0 || currentLevelIdx !== 0 ||
-      currentServiceIdx !== 0 || currentEnvIdx !== 0 || currentEventTypeIdx !== 0;
-    document.getElementById('save-filter-btn').style.display = hasFilter ? '' : 'none';
-  }
-
-  function escapeHtmlLocal(str) {
-    var div = document.createElement('div');
-    div.textContent = str || '';
-    return div.innerHTML;
-  }
-
-  // ── Populate service, env, and event type lists from API ──
-  var initService = '{{.LogFilters.Service}}';
-  var initEnv = '{{.LogFilters.Environment}}' || (typeof getGlobalEnv === 'function' ? getGlobalEnv() : '');
-  var initEventType = '{{.LogFilters.EventType}}';
-
-  fetch('/api/services').then(function(r){ return r.json(); }).then(function(services){
-    if (!Array.isArray(services)) return;
-    services.forEach(function(s){ serviceList.push(s); });
-    if (initService) {
-      currentServiceIdx = Math.max(0, serviceList.indexOf(initService));
-      if (currentServiceIdx > 0) updateTagDisplay('tag-service-val', initService, true);
-    }
-  }).catch(function(){});
-
-  fetch('/api/environments').then(function(r){ return r.json(); }).then(function(envs){
-    if (!Array.isArray(envs)) return;
-    envs.forEach(function(e){ envList.push(e); });
-    if (initEnv) {
-      currentEnvIdx = Math.max(0, envList.indexOf(initEnv));
-      if (currentEnvIdx > 0) updateTagDisplay('tag-env-val', initEnv, true);
-    }
-  }).catch(function(){});
-
-  fetch('/api/event_types').then(function(r){ return r.json(); }).then(function(types){
-    if (!Array.isArray(types)) return;
-    types.forEach(function(t){ eventTypeList.push(t); });
-    if (initEventType) {
-      currentEventTypeIdx = Math.max(0, eventTypeList.indexOf(initEventType));
-      if (currentEventTypeIdx > 0) updateTagDisplay('tag-event-type-val', initEventType, true);
-    }
-  }).catch(function(){});
-
-  // ── Initial display ───────────────────────────────────────
-  updateTagDisplay('tag-time-val', TIME_LABELS[currentTimeIdx], currentTimeIdx !== 0);
-  updateTagDisplay('tag-level-val', LEVEL_LABELS[currentLevelIdx], currentLevelIdx !== 0);
-  renderSavedFilters();
-  updateSaveBtn();
-
   // ── Live polling ──────────────────────────────────────────
   var live = true;
   var timer = null;
   var POLL_INTERVAL = 2000;
 
   function getFilters() {
-    var params = new URLSearchParams(new FormData(form));
+    var params = new URLSearchParams();
+    if (filters.query) params.set('query', filters.query);
+    if (filters.service) params.set('service', filters.service);
+    if (filters.level) params.set('level', filters.level);
+    if (filters.environment) params.set('environment', filters.environment);
+    if (filters.event_type) params.set('event_type', filters.event_type);
+    if (filters.time_range) params.set('time_range', filters.time_range);
     return params.toString();
   }
 
@@ -531,10 +635,10 @@
   function poll() {
     if (!live) return;
     var sinceID = getMaxID();
-    var filters = getFilters();
-    var url = '/api/logs/poll?since_id=' + sinceID + '&' + filters;
+    var f = getFilters();
+    var url = '/api/logs/poll?since_id=' + sinceID + (f ? '&' + f : '');
 
-    fetch(url).then(function(r){ return r.text(); }).then(function(html){
+    fetch(url).then(function(r){ return r.text(); }).then(function(html) {
       if (!live) return;
       html = html.trim();
       if (!html) return;
@@ -554,19 +658,35 @@
         if (listEl) {
           listEl.innerHTML = '<div class="log-list">' + container.innerHTML + '</div>';
         }
+        if (autoScroll) scrollToBottom();
         return;
       }
 
-      var newEntries = container.querySelectorAll('.log-entry');
-      for (var i = newEntries.length - 1; i >= 0; i--) {
-        newEntries[i].classList.add('log-entry-new');
-        logList.insertBefore(newEntries[i], logList.firstChild);
+      // Append new entries at the bottom
+      var newEntries = container.querySelectorAll('.term-entry');
+      var count = 0;
+      for (var i = 0; i < newEntries.length; i++) {
+        newEntries[i].classList.add('term-entry-new');
+        logList.appendChild(newEntries[i]);
+        count++;
       }
 
-      var countEl = document.getElementById('logs-count');
-      if (countEl) {
-        var total = logList.querySelectorAll('.log-entry').length;
-        countEl.textContent = total + ' entries';
+      // Also handle legacy .log-entry format from logs-new template
+      var legacyEntries = container.querySelectorAll('.log-entry');
+      for (var j = 0; j < legacyEntries.length; j++) {
+        legacyEntries[j].classList.add('log-entry-new');
+        logList.appendChild(legacyEntries[j]);
+        count++;
+      }
+
+      if (count > 0) {
+        if (autoScroll) {
+          scrollToBottom();
+        } else {
+          pendingNew += count;
+          newIndicatorCount.textContent = pendingNew;
+          newIndicator.style.display = '';
+        }
       }
     }).catch(function(){});
   }
@@ -583,94 +703,163 @@
 
   window.toggleLive = function() {
     live = !live;
-    var btn = document.getElementById('live-toggle');
-    var label = document.getElementById('live-label');
     if (live) {
-      btn.classList.remove('live-off');
-      btn.classList.add('live-on');
-      label.textContent = 'live';
+      liveBadge.classList.remove('live-off');
+      liveBadge.classList.add('live-on');
+      liveLabel.textContent = 'LIVE';
       startPolling();
+      scrollToBottom();
     } else {
-      btn.classList.remove('live-on');
-      btn.classList.add('live-off');
-      label.textContent = 'paused';
+      liveBadge.classList.remove('live-on');
+      liveBadge.classList.add('live-off');
+      liveLabel.textContent = 'PAUSED';
       stopPolling();
     }
   };
 
-  window.pauseLiveOnFilter = function() {
-    if (live) window.toggleLive();
-  };
-
+  // Set initial live badge state
+  liveBadge.classList.add('live-on');
   startPolling();
 
-  // ── Browser back/forward ─────────────────────────────────
+  // ── Infinite scroll upward (load older) ───────────────────
+  var loadingOlder = false;
+  var currentOffset = {{.LogOffset}} + {{.LogLimit}};
+  var hasMoreOlder = {{if .HasMore}}true{{else}}false{{end}};
+
+  termOutput.addEventListener('scroll', function() {
+    if (loadingOlder || !hasMoreOlder) return;
+    if (termOutput.scrollTop < 80) {
+      loadOlderLogs();
+    }
+  });
+
+  function loadOlderLogs() {
+    if (loadingOlder || !hasMoreOlder) return;
+    loadingOlder = true;
+
+    var params = new URLSearchParams();
+    if (filters.query) params.set('query', filters.query);
+    if (filters.service) params.set('service', filters.service);
+    if (filters.level) params.set('level', filters.level);
+    if (filters.environment) params.set('environment', filters.environment);
+    if (filters.event_type) params.set('event_type', filters.event_type);
+    if (filters.time_range) params.set('time_range', filters.time_range);
+    params.set('offset', currentOffset);
+    params.set('limit', '50');
+
+    var url = '/logs?' + params.toString();
+
+    // Save scroll position so we can restore after prepend
+    var prevHeight = termOutput.scrollHeight;
+
+    fetch(url, { headers: { 'HX-Request': 'true' } })
+      .then(function(r) { return r.text(); })
+      .then(function(html) {
+        html = html.trim();
+        if (!html) {
+          hasMoreOlder = false;
+          loadingOlder = false;
+          return;
+        }
+
+        var logList = document.querySelector('.log-list');
+        if (!logList) {
+          loadingOlder = false;
+          return;
+        }
+
+        // Check if response contains a sentinel (hasMore indicator)
+        var temp = document.createElement('div');
+        temp.innerHTML = html;
+
+        var sentinel = temp.querySelector('.logs-sentinel');
+        if (sentinel) {
+          hasMoreOlder = true;
+          sentinel.remove();
+        } else {
+          hasMoreOlder = false;
+        }
+
+        // Count the entries we got
+        var entries = temp.querySelectorAll('.term-entry, .log-entry');
+        if (entries.length === 0) {
+          hasMoreOlder = false;
+          loadingOlder = false;
+          return;
+        }
+
+        // Prepend entries at top of the list
+        var frag = document.createDocumentFragment();
+        for (var i = 0; i < entries.length; i++) {
+          frag.appendChild(entries[i]);
+        }
+        logList.insertBefore(frag, logList.firstChild);
+
+        currentOffset += entries.length;
+
+        // Restore scroll position
+        var newHeight = termOutput.scrollHeight;
+        termOutput.scrollTop += (newHeight - prevHeight);
+
+        loadingOlder = false;
+      })
+      .catch(function() {
+        loadingOlder = false;
+      });
+  }
+
+  // ── Browser back/forward ──────────────────────────────────
   window.addEventListener('popstate', function() {
     var params = new URLSearchParams(window.location.search);
-    searchInput.value = params.get('query') || '';
-    var tr = params.get('time_range') || '';
-    currentTimeIdx = Math.max(0, TIME_OPTIONS.indexOf(tr));
-    document.getElementById('f-time-range').value = TIME_OPTIONS[currentTimeIdx];
-    updateTagDisplay('tag-time-val', TIME_LABELS[currentTimeIdx], currentTimeIdx !== 0);
-    var lvl = params.get('level') || '';
-    currentLevelIdx = Math.max(0, LEVEL_OPTIONS.indexOf(lvl));
-    document.getElementById('f-level').value = LEVEL_OPTIONS[currentLevelIdx];
-    updateTagDisplay('tag-level-val', LEVEL_LABELS[currentLevelIdx], currentLevelIdx !== 0);
-    var svc = params.get('service') || '';
-    currentServiceIdx = Math.max(0, serviceList.indexOf(svc));
-    document.getElementById('f-service').value = svc;
-    updateTagDisplay('tag-service-val', svc || 'all', currentServiceIdx !== 0);
-    var env = params.get('environment') || '';
-    currentEnvIdx = Math.max(0, envList.indexOf(env));
-    document.getElementById('f-env').value = env;
-    updateTagDisplay('tag-env-val', env || 'all', currentEnvIdx !== 0);
-    var et = params.get('event_type') || '';
-    currentEventTypeIdx = Math.max(0, eventTypeList.indexOf(et));
-    document.getElementById('f-event-type').value = et;
-    updateTagDisplay('tag-event-type-val', et || 'all', currentEventTypeIdx !== 0);
-    updateSaveBtn();
+    filters.query = params.get('query') || '';
+    filters.service = params.get('service') || '';
+    filters.level = params.get('level') || '';
+    filters.environment = params.get('environment') || '';
+    filters.event_type = params.get('event_type') || '';
+    filters.time_range = params.get('time_range') || '';
+    syncHiddenFields();
+    renderFilterChips();
     htmx.trigger(form, 'submit');
   });
 
+  // ── Expose for global use ─────────────────────────────────
+  window.clearFilters = clearAllFilters;
+  window.pauseLiveOnFilter = function() {
+    // When filters change, keep polling but reset
+  };
   window.loadPageData = function() {
     applyFilters();
   };
+
+  // ── Initial render ────────────────────────────────────────
+  syncHiddenFields();
+  renderFilterChips();
 })();
 </script>
 {{end}}
 
 {{define "log-entry"}}
-<div class="log-entry collapsed level-{{.Level}}" onclick="this.classList.toggle('collapsed');this.classList.toggle('expanded')">
-  <div class="log-entry-meta">
-    <span class="log-entry-ts" title="{{.Timestamp.Format "2006-01-02T15:04:05.000Z07:00"}}">{{.Timestamp.Format "2006-01-02 15:04:05"}}</span>
-    <span class="badge badge-{{.Level}}">{{.Level}}</span>
-    {{if .Service}}<span class="log-entry-svc">{{.Service}}</span>{{end}}
-    {{if .Environment}}<span class="log-entry-env">{{.Environment}}</span>{{end}}
-    {{if .EventType}}<span class="log-entry-event-type">{{.EventType}}</span>{{end}}
+<div class="term-entry">
+  <div class="term-line level-{{.Level}}">
+    <span class="term-ts" title="{{.Timestamp.Format "2006-01-02T15:04:05.000Z07:00"}}">{{.Timestamp.Format "15:04:05.000"}}</span>
+    <span class="term-level level-{{.Level}}">{{.Level}}</span>
+    <span class="term-source" title="{{.Service}}">{{if .Service}}{{.Service}}{{end}}</span>
+    <span class="term-msg">{{.Message}}</span>
   </div>
-  <div class="log-entry-msg">{{.Message}}</div>
-  <div class="log-entry-detail">
-    <div class="log-detail-row"><span class="log-detail-key">id</span><span class="log-detail-val">{{.ID}}</span></div>
-    {{if .TraceID}}<div class="log-detail-row"><span class="log-detail-key">trace_id</span><span class="log-detail-val">{{.TraceID}}</span></div>{{end}}
-    {{if .Service}}<div class="log-detail-row"><span class="log-detail-key">service</span><span class="log-detail-val">{{.Service}}</span></div>{{end}}
-    {{if .Environment}}<div class="log-detail-row"><span class="log-detail-key">env</span><span class="log-detail-val">{{.Environment}}</span></div>{{end}}
-    {{if .EventType}}<div class="log-detail-row"><span class="log-detail-key">event_type</span><span class="log-detail-val">{{.EventType}}</span></div>{{end}}
-    <div class="log-detail-row"><span class="log-detail-key">level</span><span class="log-detail-val">{{.Level}}</span></div>
-    <div class="log-detail-row"><span class="log-detail-key">timestamp</span><span class="log-detail-val">{{.Timestamp.Format "2006-01-02T15:04:05.000Z07:00"}}</span></div>
+  <div class="term-detail">
+    <div class="term-detail-row"><span class="term-detail-key">id</span><span class="term-detail-val">{{.ID}}</span></div>
+    {{if .TraceID}}<div class="term-detail-row"><span class="term-detail-key">trace_id</span><span class="term-detail-val trace-link">{{.TraceID}}</span></div>{{end}}
+    {{if .SpanID}}<div class="term-detail-row"><span class="term-detail-key">span_id</span><span class="term-detail-val">{{.SpanID}}</span></div>{{end}}
+    {{if .Service}}<div class="term-detail-row"><span class="term-detail-key">service</span><span class="term-detail-val">{{.Service}}</span></div>{{end}}
+    {{if .Environment}}<div class="term-detail-row"><span class="term-detail-key">environment</span><span class="term-detail-val">{{.Environment}}</span></div>{{end}}
+    {{if .EventType}}<div class="term-detail-row"><span class="term-detail-key">event_type</span><span class="term-detail-val">{{.EventType}}</span></div>{{end}}
+    <div class="term-detail-row"><span class="term-detail-key">level</span><span class="term-detail-val">{{.Level}}</span></div>
+    <div class="term-detail-row"><span class="term-detail-key">timestamp</span><span class="term-detail-val">{{.Timestamp.Format "2006-01-02T15:04:05.000Z07:00"}}</span></div>
   </div>
 </div>
 {{end}}
 
 {{define "logs-sentinel"}}
-{{if .HasMore}}
-<div class="logs-sentinel"
-     hx-get="/logs?query={{.LogFilters.Query}}&service={{.LogFilters.Service}}&level={{.LogFilters.Level}}&environment={{.LogFilters.Environment}}&event_type={{.LogFilters.EventType}}&time_range={{.LogFilters.TimeRange}}&offset={{add .LogOffset .LogLimit}}&limit={{.LogLimit}}"
-     hx-trigger="revealed"
-     hx-swap="outerHTML"
-     hx-target="this">
-  <div class="logs-loading">loading more...</div>
-</div>
-{{end}}
 {{end}}
 
 {{define "logs-list"}}
@@ -682,10 +871,12 @@
   {{template "logs-sentinel" .}}
 </div>
 {{else}}
-<div class="empty-state">
-  <div class="empty-icon">--</div>
-  <p class="empty-state-title">no logs found</p>
-  <p class="empty-state-desc">Logs will appear here once ingested via POST /api/logs</p>
+<div class="term-empty">
+  <div class="term-empty-prompt">$ tail -f /var/log/app.log</div>
+  <div class="term-empty-msg">
+    no logs found<br>
+    logs will appear here once ingested via POST /api/logs
+  </div>
 </div>
 {{end}}
 {{end}}

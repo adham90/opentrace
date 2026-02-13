@@ -1,0 +1,725 @@
+{{define "content"}}
+<div class="sources-page">
+  <div class="page-header">
+    <h1><span class="prompt">$</span> sources</h1>
+    <div class="actions">
+      {{if .IsAdmin}}
+      <button class="btn btn-sm" onclick="showAddConnectorModal()">+ database</button>
+      <button class="btn btn-sm" onclick="showInstallPanel()">+ server</button>
+      {{end}}
+    </div>
+  </div>
+
+  <div id="sources-list">
+    <div class="loading-state">loading sources</div>
+  </div>
+
+  <!-- Install agent panel (hidden by default) -->
+  {{if .IsAdmin}}
+  <div id="install-panel" class="source-install-panel" style="display:none">
+    <div class="source-install-header">
+      <span class="prompt">$</span> install agent
+      <button class="btn-close" onclick="hideInstallPanel()">&times;</button>
+    </div>
+    <div class="source-install-body">
+      <p class="dim" style="margin-bottom:12px;font-size:12px">Run this on any Linux server to install the OpenTrace agent. It will auto-register and start sending metrics.</p>
+      <div class="source-install-cmd">
+        <code id="install-cmd">curl -fsSL <span id="install-url"></span>/api/agent/install.sh?key={{.APIKey}} | bash</code>
+        <button class="btn btn-sm" onclick="copyInstallCmd()">copy</button>
+      </div>
+      <div style="margin-top:8px">
+        <span class="dim" style="font-size:11px">Or download the script and review it first:</span>
+        <div class="source-install-cmd" style="margin-top:4px">
+          <code>curl -fsSL <span class="install-url-mirror"></span>/api/agent/install.sh?key={{.APIKey}} -o install.sh && chmod +x install.sh && ./install.sh</code>
+        </div>
+      </div>
+    </div>
+  </div>
+  {{end}}
+</div>
+
+<!-- Connector Create/Edit Modal -->
+{{if .IsAdmin}}
+<div id="connector-modal" class="modal" role="dialog" aria-modal="true" style="display:none" onclick="if(event.target===this)hideConnectorModal()">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3><span class="prompt">$</span> <span id="connector-modal-title">add-database</span></h3>
+      <button class="btn-close" onclick="hideConnectorModal()">&times;</button>
+    </div>
+    <form id="connector-form" onsubmit="saveConnector(event)">
+      <div class="modal-body">
+        <input type="hidden" id="connector-edit-id" value="">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" id="connector-name" placeholder="e.g. production-db" required>
+        </div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Type</label>
+            <select id="connector-type">
+              <option value="database">Database (PostgreSQL)</option>
+              <option value="logs">Logs</option>
+              <option value="monitoring">Monitoring</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Environment</label>
+            <input type="text" id="connector-env" placeholder="e.g. production">
+          </div>
+        </div>
+        <div id="connector-db-fields">
+          <div class="form-group">
+            <label>Host</label>
+            <input type="text" id="connector-host" placeholder="localhost">
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Port</label>
+              <input type="number" id="connector-port" placeholder="5432" value="5432">
+            </div>
+            <div class="form-group">
+              <label>Database</label>
+              <input type="text" id="connector-dbname" placeholder="myapp_production">
+            </div>
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Username</label>
+              <input type="text" id="connector-user" placeholder="postgres">
+            </div>
+            <div class="form-group">
+              <label>Password</label>
+              <input type="password" id="connector-pass" placeholder="password">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>SSL Mode</label>
+            <select id="connector-ssl">
+              <option value="prefer">prefer</option>
+              <option value="require">require</option>
+              <option value="disable">disable</option>
+              <option value="verify-full">verify-full</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn" onclick="hideConnectorModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="connector-save-btn">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+{{end}}
+
+<script nonce="{{.CSPNonce}}">
+var isAdmin = {{.IsAdmin}};
+var allConnectors = [];
+var allServers = [];
+var expandedSources = {};
+
+function escapeHtml(str) {
+  var div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+
+function getTimeAgo(dateStr) {
+  if (!dateStr) return 'never';
+  var now = new Date();
+  var date = new Date(dateStr);
+  var diff = Math.floor((now - date) / 1000);
+  if (diff < 0) return 'just now';
+  if (diff < 60) return diff + 's ago';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return Math.floor(diff / 86400) + 'd ago';
+}
+
+// ── Data loading ──────────────────────────────────────────
+
+function loadSources() {
+  var env = getGlobalEnv();
+  var connUrl = '/api/connectors' + (env ? '?env=' + encodeURIComponent(env) : '');
+  var srvUrl = '/api/servers';
+
+  Promise.all([
+    fetch(connUrl).then(function(r) { return r.json(); }),
+    fetch(srvUrl).then(function(r) { return r.json(); })
+  ]).then(function(results) {
+    allConnectors = results[0] || [];
+    allServers = results[1] || [];
+    renderSources();
+  }).catch(function() {
+    document.getElementById('sources-list').innerHTML =
+      '<div class="empty-state"><div class="empty-icon">!!</div><p>Failed to load sources</p></div>';
+  });
+}
+
+// ── Rendering ─────────────────────────────────────────────
+
+function getConnectorStatusClass(status) {
+  if (status === 'connected') return 'status-online';
+  if (status === 'error') return 'status-error';
+  return 'status-offline';
+}
+
+function getServerStatusClass(status) {
+  if (status === 'online') return 'status-online';
+  if (status === 'offline') return 'status-error';
+  return 'status-offline';
+}
+
+function renderSources() {
+  var container = document.getElementById('sources-list');
+
+  if (allConnectors.length === 0 && allServers.length === 0) {
+    var desc = isAdmin
+      ? 'Add a database connection or install the agent on a server to get started.'
+      : 'No sources have been configured yet. Ask an admin to add databases or servers.';
+    container.innerHTML = '<div class="empty-state">' +
+      '<div class="empty-icon">--</div>' +
+      '<p class="empty-state-title">No sources configured</p>' +
+      '<p class="empty-state-desc">' + escapeHtml(desc) + '</p>' +
+      '</div>';
+    return;
+  }
+
+  var html = '';
+
+  // Section: Databases
+  if (allConnectors.length > 0) {
+    html += '<div class="source-section-label"><span class="dim"># databases (' + allConnectors.length + ')</span></div>';
+    for (var i = 0; i < allConnectors.length; i++) {
+      html += renderConnectorRow(allConnectors[i]);
+    }
+  }
+
+  // Section: Servers
+  if (allServers.length > 0) {
+    html += '<div class="source-section-label" style="margin-top:16px"><span class="dim"># servers (' + allServers.length + ')</span></div>';
+    for (var j = 0; j < allServers.length; j++) {
+      html += renderServerRow(allServers[j]);
+    }
+  }
+
+  container.innerHTML = html;
+}
+
+function renderConnectorRow(c) {
+  var statusClass = getConnectorStatusClass(c.status);
+  var statusDot = c.status === 'connected' ? '&#9679;' : c.status === 'error' ? '&#9888;' : '&#9675;';
+  var lastSeen = c.last_tested_at ? getTimeAgo(c.last_tested_at) : 'never tested';
+  var env = c.environment || '';
+  var expanded = expandedSources['db-' + c.id] ? true : false;
+
+  var html = '<div class="source-row" data-source-id="db-' + c.id + '">';
+  html += '  <div class="source-row-main" onclick="toggleSourceDetail(\'db-' + c.id + '\')" style="cursor:pointer">';
+  html += '    <span class="source-type-tag source-type-db">[db]</span>';
+  html += '    <span class="source-name">' + escapeHtml(c.name) + '</span>';
+  if (env) {
+    html += '    <span class="badge badge-env">' + escapeHtml(env) + '</span>';
+  }
+  html += '    <span class="source-status ' + statusClass + '">' + statusDot + ' ' + escapeHtml(c.status) + '</span>';
+  html += '    <span class="source-time-ago">' + lastSeen + '</span>';
+  html += '  </div>';
+
+  // Expandable detail
+  html += '  <div class="source-detail" id="source-detail-db-' + c.id + '" style="display:' + (expanded ? 'block' : 'none') + '">';
+  html += '    <div class="source-detail-meta">';
+  html += '      <div class="alert-detail-row"><span class="alert-detail-key">id</span><span class="alert-detail-val dim" style="font-size:10px">' + c.id + '</span></div>';
+  html += '      <div class="alert-detail-row"><span class="alert-detail-key">type</span><span class="alert-detail-val">' + escapeHtml(c.type) + '</span></div>';
+  if (c.config) {
+    if (c.config.host) {
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key">host</span><span class="alert-detail-val">' + escapeHtml(c.config.host) + (c.config.port ? ':' + c.config.port : '') + '</span></div>';
+    }
+    if (c.config.database) {
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key">database</span><span class="alert-detail-val">' + escapeHtml(c.config.database) + '</span></div>';
+    }
+    if (c.config.user) {
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key">user</span><span class="alert-detail-val">' + escapeHtml(c.config.user) + '</span></div>';
+    }
+    if (c.config.sslmode) {
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key">ssl</span><span class="alert-detail-val">' + escapeHtml(c.config.sslmode) + '</span></div>';
+    }
+  }
+  if (c.status_message) {
+    html += '      <div class="alert-detail-row"><span class="alert-detail-key">message</span><span class="alert-detail-val">' + escapeHtml(c.status_message) + '</span></div>';
+  }
+  if (c.created_at) {
+    html += '      <div class="alert-detail-row"><span class="alert-detail-key">created</span><span class="alert-detail-val">' + new Date(c.created_at).toLocaleString() + '</span></div>';
+  }
+  html += '    </div>';
+
+  // Actions
+  if (isAdmin) {
+    html += '    <div class="source-detail-actions">';
+    html += '      <button class="btn btn-sm" onclick="event.stopPropagation();testConnector(\'' + c.id + '\')">Test Connection</button>';
+    html += '      <button class="btn btn-sm" onclick="event.stopPropagation();editConnector(\'' + c.id + '\')">Edit</button>';
+    html += '      <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteConnector(\'' + c.id + '\')">Delete</button>';
+    html += '    </div>';
+  }
+  html += '  </div>';
+  html += '</div>';
+  return html;
+}
+
+function renderServerRow(srv) {
+  var statusClass = getServerStatusClass(srv.status);
+  var statusDot = srv.status === 'online' ? '&#9679;' : srv.status === 'offline' ? '&#9888;' : '&#9675;';
+  var lastSeen = srv.last_seen_at ? getTimeAgo(srv.last_seen_at) : 'never';
+  var expanded = expandedSources['srv-' + srv.id] ? true : false;
+
+  var html = '<div class="source-row" data-source-id="srv-' + srv.id + '">';
+  html += '  <div class="source-row-main" onclick="toggleSourceDetail(\'srv-' + srv.id + '\')" style="cursor:pointer">';
+  html += '    <span class="source-type-tag source-type-srv">[server]</span>';
+  html += '    <span class="source-name">' + escapeHtml(srv.hostname) + '</span>';
+  if (srv.labels && srv.labels.environment) {
+    html += '    <span class="badge badge-env">' + escapeHtml(srv.labels.environment) + '</span>';
+  }
+  html += '    <span class="source-status ' + statusClass + '">' + statusDot + ' ' + escapeHtml(srv.status) + '</span>';
+  html += '    <span class="source-time-ago">' + lastSeen + '</span>';
+  html += '  </div>';
+
+  // Expandable detail
+  html += '  <div class="source-detail" id="source-detail-srv-' + srv.id + '" style="display:' + (expanded ? 'block' : 'none') + '">';
+  html += '    <div class="source-detail-meta">';
+  html += '      <div class="alert-detail-row"><span class="alert-detail-key">id</span><span class="alert-detail-val dim" style="font-size:10px">' + srv.id + '</span></div>';
+  if (srv.ip_address) {
+    html += '      <div class="alert-detail-row"><span class="alert-detail-key">ip</span><span class="alert-detail-val">' + escapeHtml(srv.ip_address) + '</span></div>';
+  }
+  if (srv.os) {
+    html += '      <div class="alert-detail-row"><span class="alert-detail-key">os</span><span class="alert-detail-val">' + escapeHtml(srv.os) + (srv.arch ? ' (' + escapeHtml(srv.arch) + ')' : '') + '</span></div>';
+  }
+  if (srv.agent_version) {
+    html += '      <div class="alert-detail-row"><span class="alert-detail-key">agent</span><span class="alert-detail-val">v' + escapeHtml(srv.agent_version) + '</span></div>';
+  }
+  if (srv.labels) {
+    var labelKeys = Object.keys(srv.labels);
+    if (labelKeys.length > 0) {
+      var labelStr = labelKeys.map(function(k) { return k + '=' + srv.labels[k]; }).join(', ');
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key">labels</span><span class="alert-detail-val">' + escapeHtml(labelStr) + '</span></div>';
+    }
+  }
+  if (srv.last_seen_at) {
+    html += '      <div class="alert-detail-row"><span class="alert-detail-key">last seen</span><span class="alert-detail-val">' + new Date(srv.last_seen_at).toLocaleString() + '</span></div>';
+  }
+  if (srv.created_at) {
+    html += '      <div class="alert-detail-row"><span class="alert-detail-key">registered</span><span class="alert-detail-val">' + new Date(srv.created_at).toLocaleString() + '</span></div>';
+  }
+
+  // Load latest metrics on expand
+  html += '      <div id="server-metrics-' + srv.id + '"></div>';
+  html += '    </div>';
+
+  // Actions
+  if (isAdmin) {
+    html += '    <div class="source-detail-actions">';
+    html += '      <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteServer(\'' + srv.id + '\')">Remove</button>';
+    html += '    </div>';
+  }
+  html += '  </div>';
+  html += '</div>';
+  return html;
+}
+
+// ── Toggle expand/collapse ────────────────────────────────
+
+function toggleSourceDetail(key) {
+  var el = document.getElementById('source-detail-' + key);
+  if (!el) return;
+  if (el.style.display !== 'none') {
+    el.style.display = 'none';
+    delete expandedSources[key];
+    return;
+  }
+  el.style.display = 'block';
+  expandedSources[key] = true;
+
+  // Load server metrics on first expand
+  if (key.indexOf('srv-') === 0) {
+    var serverId = key.substring(4);
+    loadServerMetrics(serverId);
+  }
+}
+window.toggleSourceDetail = toggleSourceDetail;
+
+function loadServerMetrics(serverId) {
+  var el = document.getElementById('server-metrics-' + serverId);
+  if (!el || el.dataset.loaded) return;
+  el.dataset.loaded = '1';
+  el.innerHTML = '<span class="dim" style="font-size:11px">loading metrics...</span>';
+
+  var end = new Date().toISOString();
+  var start = new Date(Date.now() - 3600000).toISOString();
+  fetch('/api/servers/' + serverId + '/metrics?start=' + encodeURIComponent(start) + '&end=' + encodeURIComponent(end))
+    .then(function(r) { return r.json(); })
+    .then(function(points) {
+      if (!points || points.length === 0) {
+        el.innerHTML = '<span class="dim" style="font-size:11px">no recent metrics</span>';
+        return;
+      }
+      // Group by metric name and show latest value
+      var latest = {};
+      for (var i = 0; i < points.length; i++) {
+        var p = points[i];
+        if (!latest[p.metric_name] || new Date(p.timestamp) > new Date(latest[p.metric_name].timestamp)) {
+          latest[p.metric_name] = p;
+        }
+      }
+      var html = '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">';
+      html += '<div class="alert-detail-row"><span class="alert-detail-key" style="font-weight:600">metrics</span><span class="alert-detail-val dim" style="font-size:10px">latest (1h)</span></div>';
+      var names = Object.keys(latest).sort();
+      for (var n = 0; n < names.length; n++) {
+        var m = latest[names[n]];
+        var val = m.metric_value;
+        var display = val % 1 === 0 ? val.toString() : val.toFixed(2);
+        if (m.unit) display += ' ' + m.unit;
+        html += '<div class="alert-detail-row"><span class="alert-detail-key">' + escapeHtml(names[n]) + '</span><span class="alert-detail-val">' + escapeHtml(display) + '</span></div>';
+      }
+      html += '</div>';
+      el.innerHTML = html;
+    })
+    .catch(function() {
+      el.innerHTML = '<span class="dim" style="font-size:11px">failed to load metrics</span>';
+    });
+}
+
+// ── Connector CRUD ────────────────────────────────────────
+
+function showAddConnectorModal() {
+  document.getElementById('connector-modal-title').textContent = 'add-database';
+  document.getElementById('connector-edit-id').value = '';
+  document.getElementById('connector-form').reset();
+  document.getElementById('connector-port').value = '5432';
+  document.getElementById('connector-ssl').value = 'prefer';
+  document.getElementById('connector-type').disabled = false;
+  updateConnectorFields();
+  document.getElementById('connector-modal').style.display = 'flex';
+}
+window.showAddConnectorModal = showAddConnectorModal;
+
+function editConnector(id) {
+  fetch('/api/connectors/' + id).then(function(r) { return r.json(); }).then(function(c) {
+    document.getElementById('connector-modal-title').textContent = 'edit-database';
+    document.getElementById('connector-edit-id').value = c.id;
+    document.getElementById('connector-name').value = c.name || '';
+    document.getElementById('connector-type').value = c.type || 'database';
+    document.getElementById('connector-type').disabled = true;
+    document.getElementById('connector-env').value = c.environment || '';
+    if (c.config) {
+      document.getElementById('connector-host').value = c.config.host || '';
+      document.getElementById('connector-port').value = c.config.port || '5432';
+      document.getElementById('connector-dbname').value = c.config.database || '';
+      document.getElementById('connector-user').value = c.config.user || '';
+      document.getElementById('connector-pass').value = '';
+      document.getElementById('connector-ssl').value = c.config.sslmode || 'prefer';
+    }
+    updateConnectorFields();
+    document.getElementById('connector-modal').style.display = 'flex';
+  }).catch(function() {
+    showToast('Failed to load connector details', 'error');
+  });
+}
+window.editConnector = editConnector;
+
+function hideConnectorModal() {
+  document.getElementById('connector-modal').style.display = 'none';
+}
+window.hideConnectorModal = hideConnectorModal;
+
+function updateConnectorFields() {
+  var type = document.getElementById('connector-type').value;
+  var dbFields = document.getElementById('connector-db-fields');
+  dbFields.style.display = (type === 'database') ? 'block' : 'none';
+}
+
+document.getElementById('connector-type').addEventListener('change', updateConnectorFields);
+
+function saveConnector(e) {
+  e.preventDefault();
+  var btn = document.getElementById('connector-save-btn');
+  var editId = document.getElementById('connector-edit-id').value;
+  var isEdit = editId !== '';
+
+  var name = document.getElementById('connector-name').value.trim();
+  var type = document.getElementById('connector-type').value;
+  var env = document.getElementById('connector-env').value.trim();
+
+  if (!name) {
+    showToast('Name is required', 'error');
+    return;
+  }
+
+  var config = {};
+  if (type === 'database') {
+    config.host = document.getElementById('connector-host').value.trim();
+    config.port = parseInt(document.getElementById('connector-port').value) || 5432;
+    config.database = document.getElementById('connector-dbname').value.trim();
+    config.user = document.getElementById('connector-user').value.trim();
+    var pass = document.getElementById('connector-pass').value;
+    if (pass) config.password = pass;
+    config.sslmode = document.getElementById('connector-ssl').value;
+  }
+
+  setButtonLoading(btn, true, 'saving...');
+
+  if (isEdit) {
+    var body = { name: name, environment: env, config: config };
+    fetch('/api/connectors/' + editId, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    }).then(function(r) {
+      setButtonLoading(btn, false, 'Save');
+      if (!r.ok) return r.json().then(function(d) { showToast(d.error || 'Failed to update connector', 'error'); });
+      showToast('Connector updated', 'success');
+      hideConnectorModal();
+      loadSources();
+    }).catch(function() {
+      setButtonLoading(btn, false, 'Save');
+      showToast('Network error', 'error');
+    });
+  } else {
+    var body = { type: type, name: name, environment: env, config: config };
+    fetch('/api/connectors', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    }).then(function(r) {
+      setButtonLoading(btn, false, 'Save');
+      if (!r.ok) return r.json().then(function(d) { showToast(d.error || 'Failed to create connector', 'error'); });
+      showToast('Connector created', 'success');
+      hideConnectorModal();
+      loadSources();
+    }).catch(function() {
+      setButtonLoading(btn, false, 'Save');
+      showToast('Network error', 'error');
+    });
+  }
+}
+window.saveConnector = saveConnector;
+
+function testConnector(id) {
+  showToast('Testing connection...', 'info');
+  fetch('/api/connectors/' + id + '/test', { method: 'POST' }).then(function(r) {
+    if (r.ok) {
+      showToast('Connection successful', 'success');
+    } else {
+      return r.json().then(function(d) {
+        showToast(d.error || 'Connection test failed', 'error', 0);
+      });
+    }
+    loadSources();
+  }).catch(function() {
+    showToast('Network error', 'error');
+  });
+}
+window.testConnector = testConnector;
+
+function deleteConnector(id) {
+  if (!confirm('Delete this database connector? This cannot be undone.')) return;
+  fetch('/api/connectors/' + id, { method: 'DELETE' }).then(function(r) {
+    if (r.ok || r.status === 204) {
+      showToast('Connector deleted', 'success');
+    } else {
+      showToast('Failed to delete connector', 'error');
+    }
+    loadSources();
+  }).catch(function() {
+    showToast('Network error', 'error');
+  });
+}
+window.deleteConnector = deleteConnector;
+
+// ── Server actions ────────────────────────────────────────
+
+function deleteServer(id) {
+  if (!confirm('Remove this server? It will re-register on next heartbeat if the agent is still running.')) return;
+  fetch('/api/servers/' + id, { method: 'DELETE' }).then(function(r) {
+    if (r.ok || r.status === 204) {
+      showToast('Server removed', 'success');
+    } else {
+      showToast('Failed to remove server', 'error');
+    }
+    loadSources();
+  }).catch(function() {
+    showToast('Network error', 'error');
+  });
+}
+window.deleteServer = deleteServer;
+
+// ── Install panel ─────────────────────────────────────────
+
+function showInstallPanel() {
+  var panel = document.getElementById('install-panel');
+  if (!panel) return;
+  // Set the server URL dynamically
+  var baseUrl = window.location.protocol + '//' + window.location.host;
+  var urlEl = document.getElementById('install-url');
+  if (urlEl) urlEl.textContent = baseUrl;
+  var mirrors = document.querySelectorAll('.install-url-mirror');
+  for (var i = 0; i < mirrors.length; i++) {
+    mirrors[i].textContent = baseUrl;
+  }
+  panel.style.display = 'block';
+  panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+window.showInstallPanel = showInstallPanel;
+
+function hideInstallPanel() {
+  var panel = document.getElementById('install-panel');
+  if (panel) panel.style.display = 'none';
+}
+window.hideInstallPanel = hideInstallPanel;
+
+function copyInstallCmd() {
+  var baseUrl = window.location.protocol + '//' + window.location.host;
+  var cmd = 'curl -fsSL ' + baseUrl + '/api/agent/install.sh?key={{.APIKey}} | bash';
+  navigator.clipboard.writeText(cmd).then(function() {
+    showToast('Install command copied', 'success');
+  }).catch(function() {
+    showToast('Failed to copy', 'error');
+  });
+}
+window.copyInstallCmd = copyInstallCmd;
+
+// ── Init ──────────────────────────────────────────────────
+
+loadSources();
+window.loadPageData = loadSources;
+setInterval(loadSources, 30000);
+</script>
+
+<style nonce="{{.CSPNonce}}">
+/* Sources page styles */
+.sources-page { max-width: 100%; }
+
+.source-section-label {
+  padding: 8px 12px 4px;
+  font-size: 12px;
+  font-family: var(--font-mono, 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace);
+  user-select: none;
+}
+
+.source-row {
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+}
+
+.source-row:hover {
+  background: var(--bg-secondary);
+}
+
+.source-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-family: var(--font-mono, 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace);
+  min-height: 40px;
+}
+
+.source-type-tag {
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 60px;
+  flex-shrink: 0;
+}
+
+.source-type-db { color: var(--blue); }
+.source-type-srv { color: var(--purple); }
+
+.source-name {
+  flex: 1;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-status {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.status-online { color: var(--green); }
+.status-error { color: var(--red); }
+.status-offline { color: var(--text-dim); }
+
+.source-time-ago {
+  font-size: 11px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  min-width: 60px;
+  text-align: right;
+}
+
+.source-detail {
+  padding: 0 12px 12px 84px;
+}
+
+.source-detail-meta {
+  font-size: 12px;
+}
+
+.source-detail-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Install panel */
+.source-install-panel {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+}
+
+.source-install-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono, 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.source-install-header .prompt { color: var(--green); }
+
+.source-install-header .btn-close {
+  margin-left: auto;
+}
+
+.source-install-body {
+  padding: 14px;
+}
+
+.source-install-cmd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-family: var(--font-mono, 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace);
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.source-install-cmd code {
+  flex: 1;
+  word-break: break-all;
+}
+
+.source-install-cmd .btn {
+  flex-shrink: 0;
+}
+</style>
+{{end}}

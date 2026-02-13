@@ -262,8 +262,8 @@ func TestLogsPage_Renders(t *testing.T) {
 	if !strings.Contains(body, "INFO") {
 		t.Error("expected body to contain log level")
 	}
-	if !strings.Contains(body, "1 entries") {
-		t.Error("expected body to contain entry count")
+	if !strings.Contains(body, "term-entry") {
+		t.Error("expected body to contain terminal log entry")
 	}
 }
 

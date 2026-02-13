@@ -198,25 +198,28 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	// Pages — require auth, redirect to onboarding if no users
 	router.Group(func(r chi.Router) {
 		r.Use(srv.RedirectToOnboardingIfNeeded)
-		r.Get("/", srv.handleOverviewPage)
+		r.Get("/", srv.handleLogsPage)
+		r.Get("/logs", srv.handleLogsPage)
 		r.Get("/alerts", srv.handleAlertsPage)
 		r.Get("/watchers", srv.handleWatchersPage)
 		r.Get("/watchers/{id}/runs", srv.handleWatcherRunsPage)
-		r.Get("/logs", srv.handleLogsPage)
-		r.Get("/connectors", srv.handleConnectorsPage)
-		r.Get("/servers", srv.handleServersPage)
-		r.Get("/servers/{id}", srv.handleServerDetailPage)
-		r.Get("/setup", srv.handleSetupPage)
+		r.Get("/sources", srv.handleSourcesPage)
 		r.Get("/tools", srv.handleToolsPage)
 		r.Get("/profile", srv.handleProfilePage)
 	})
 
-	// Admin pages
+	// Settings (admin) — consolidated page for settings, users, setup, profile
 	router.Group(func(r chi.Router) {
 		r.Use(srv.RedirectToOnboardingIfNeeded)
 		r.Use(RequireAdmin)
-		r.Get("/admin/users", srv.handleUsersPage)
-		r.Get("/admin/settings", srv.handleSettingsPage)
+		r.Get("/settings", srv.handleSettingsPage)
+		// Legacy redirects
+		r.Get("/admin/users", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/settings", http.StatusMovedPermanently)
+		})
+		r.Get("/admin/settings", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/settings", http.StatusMovedPermanently)
+		})
 	})
 
 	// Debug/pprof endpoints — admin only

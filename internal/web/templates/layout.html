@@ -15,7 +15,6 @@
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/htmx.min.js"></script>
   <script nonce="{{.CSPNonce}}">
-  // Global environment helpers — must be in <head> so content scripts can use them
   function getGlobalEnv() {
     return localStorage.getItem('opentrace-env') || '';
   }
@@ -33,50 +32,6 @@
   </script>
 </head>
 <body>
-  <header class="topbar">
-    <div class="topbar-inner">
-      <a href="/" class="logo">[opentrace]</a>
-      <nav class="topbar-nav">
-        <a href="/logs" class="nav-item {{if eq .Nav "logs"}}active{{end}}">1:logs</a>
-        <a href="/alerts" class="nav-item {{if eq .Nav "alerts"}}active{{end}}">2:alerts<span id="alert-badge" class="nav-badge" style="display:none">0</span></a>
-        <a href="/watchers" class="nav-item {{if eq .Nav "watchers"}}active{{end}}">3:watchers</a>
-        <a href="/connectors" class="nav-item {{if eq .Nav "connectors"}}active{{end}}">4:connectors</a>
-        <a href="/servers" class="nav-item {{if eq .Nav "servers"}}active{{end}}">5:servers</a>
-        <a href="/tools" class="nav-item {{if eq .Nav "tools"}}active{{end}}">6:tools</a>
-      </nav>
-      <div class="topbar-right">
-        <div class="topbar-env-tag" id="topbar-env-tag" onclick="toggleTopbarEnv(event)" title="Filter by environment">
-          <span class="topbar-env-key">env:</span><span class="topbar-env-val" id="topbar-env-val">all</span>
-          <div class="filter-dropdown" id="topbar-env-drop"></div>
-        </div>
-        {{if .User}}
-        <div class="user-dropdown">
-          <button class="user-dropdown-toggle" onclick="toggleUserMenu()">
-            {{.User.DisplayName}}
-          </button>
-          <div class="user-dropdown-menu" id="user-dropdown-menu">
-            <a href="/profile" class="dropdown-item">profile</a>
-            <a href="/setup" class="dropdown-item">setup</a>
-            <div class="dropdown-divider"></div>
-            <button type="button" class="dropdown-item" onclick="cycleTheme();event.stopPropagation()">
-              theme <span class="dropdown-item-hint" id="theme-label">system</span>
-            </button>
-            <button type="button" class="dropdown-item" onclick="toggleShortcuts();toggleUserMenu()">
-              shortcuts <span class="dropdown-item-hint">?</span>
-            </button>
-            {{if .IsAdmin}}<div class="dropdown-divider"></div>{{end}}
-            {{if .IsAdmin}}<a href="/admin/users" class="dropdown-item">users</a>{{end}}
-            {{if .IsAdmin}}<a href="/admin/settings" class="dropdown-item">settings</a>{{end}}
-            <div class="dropdown-divider"></div>
-            <form method="POST" action="/logout"><button type="submit" class="dropdown-item dropdown-item-danger">logout</button></form>
-          </div>
-        </div>
-        {{else}}
-        <a href="/login" class="nav-item">login</a>
-        {{end}}
-      </div>
-    </div>
-  </header>
   <div hx-get="/api/version/banner" hx-trigger="load" hx-swap="innerHTML" id="version-banner-container"></div>
   <div class="toast-container" id="toast-container"></div>
 
@@ -86,21 +41,16 @@
       <div class="shortcut-title">Keyboard Shortcuts</div>
       <div class="shortcut-section">
         <div class="shortcut-section-label">Navigation</div>
-        <div class="shortcut-row"><kbd>1</kbd><span>Go to Logs</span></div>
+        <div class="shortcut-row"><kbd>0</kbd><span>Go to Logs</span></div>
+        <div class="shortcut-row"><kbd>1</kbd><span>Go to Watchers</span></div>
         <div class="shortcut-row"><kbd>2</kbd><span>Go to Alerts</span></div>
-        <div class="shortcut-row"><kbd>3</kbd><span>Go to Watchers</span></div>
-        <div class="shortcut-row"><kbd>4</kbd><span>Go to Connectors</span></div>
-        <div class="shortcut-row"><kbd>5</kbd><span>Go to Servers</span></div>
-        <div class="shortcut-row"><kbd>6</kbd><span>Go to Tools</span></div>
+        <div class="shortcut-row"><kbd>3</kbd><span>Go to Sources</span></div>
+        <div class="shortcut-row"><kbd>4</kbd><span>Go to Settings</span></div>
       </div>
       {{if eq .Nav "logs"}}
       <div class="shortcut-section">
         <div class="shortcut-section-label">Log Filters</div>
-        <div class="shortcut-row"><kbd>/</kbd><span>Focus search</span></div>
-        <div class="shortcut-row"><kbd>t</kbd> / <kbd>T</kbd><span>Cycle time range</span></div>
-        <div class="shortcut-row"><kbd>l</kbd> / <kbd>L</kbd><span>Cycle log level</span></div>
-        <div class="shortcut-row"><kbd>s</kbd> / <kbd>S</kbd><span>Cycle service</span></div>
-        <div class="shortcut-row"><kbd>e</kbd> / <kbd>E</kbd><span>Cycle environment</span></div>
+        <div class="shortcut-row"><kbd>/</kbd><span>Focus command line</span></div>
         <div class="shortcut-row"><kbd>c</kbd><span>Clear all filters</span></div>
         <div class="shortcut-row"><kbd>p</kbd><span>Toggle live/paused</span></div>
       </div>
@@ -133,81 +83,29 @@
     </div>
   </div>
 
+  <nav class="tmux-bar">
+    <div class="tmux-left">
+      <a href="/" class="tmux-tab {{if eq .Nav "logs"}}active{{end}}">[0:logs]</a>
+      <a href="/watchers" class="tmux-tab {{if eq .Nav "watchers"}}active{{end}}">1:watchers</a>
+      <a href="/alerts" class="tmux-tab {{if eq .Nav "alerts"}}active{{end}}">2:alerts<span id="alert-badge" class="nav-badge" style="display:none">0</span></a>
+      <a href="/sources" class="tmux-tab {{if eq .Nav "sources"}}active{{end}}">3:sources</a>
+      <a href="/settings" class="tmux-tab {{if eq .Nav "settings"}}active{{end}}">4:settings</a>
+    </div>
+    <div class="tmux-right">
+      {{if .User}}<span class="tmux-info">{{.User.DisplayName}}@opentrace</span>{{end}}
+    </div>
+  </nav>
+
   {{if .Breadcrumbs}}
   <div class="breadcrumb-bar">
-    <div class="content-container">
-      {{range $i, $b := .Breadcrumbs}}{{if $i}} <span class="breadcrumb-sep">/</span> {{end}}{{if $b.URL}}<a href="{{$b.URL}}" class="breadcrumb-link">{{$b.Label}}</a>{{else}}<span class="breadcrumb-current">{{$b.Label}}</span>{{end}}{{end}}
-    </div>
+    {{range $i, $b := .Breadcrumbs}}{{if $i}} <span class="breadcrumb-sep">/</span> {{end}}{{if $b.URL}}<a href="{{$b.URL}}" class="breadcrumb-link">{{$b.Label}}</a>{{else}}<span class="breadcrumb-current">{{$b.Label}}</span>{{end}}{{end}}
   </div>
   {{end}}
-  <main class="content{{if .Breadcrumbs}} has-breadcrumb{{end}}">
-    <div class="content-container">
-      {{template "content" .}}
-    </div>
+  <main class="main-content{{if .Breadcrumbs}} has-breadcrumb{{end}}{{if eq .Nav "logs"}} logs-page{{end}}">
+    {{template "content" .}}
   </main>
+
   <script nonce="{{.CSPNonce}}">
-  var topbarEnvList = [''];
-  var topbarEnvOpen = false;
-
-  function loadEnvironments() {
-    fetch('/api/environments').then(function(r){return r.json()}).then(function(envs){
-      topbarEnvList = [''];
-      (envs || []).forEach(function(e){ topbarEnvList.push(e); });
-      updateTopbarEnvDisplay();
-    }).catch(function(){});
-  }
-
-  function updateTopbarEnvDisplay() {
-    var val = document.getElementById('topbar-env-val');
-    var tag = document.getElementById('topbar-env-tag');
-    if (!val) return;
-    var current = getGlobalEnv();
-    val.textContent = current || 'all';
-    if (current) {
-      val.classList.add('val-active');
-      val.classList.remove('val-all');
-    } else {
-      val.classList.remove('val-active');
-      val.classList.add('val-all');
-    }
-  }
-
-  function toggleTopbarEnv(e) {
-    e.stopPropagation();
-    var drop = document.getElementById('topbar-env-drop');
-    var wasOpen = drop.classList.contains('show');
-    closeTopbarEnvDrop();
-    if (wasOpen) return;
-    var current = getGlobalEnv();
-    var html = '';
-    for (var i = 0; i < topbarEnvList.length; i++) {
-      var v = topbarEnvList[i];
-      var label = v || 'all';
-      var cls = 'filter-drop-item' + (v === current ? ' drop-active' : '');
-      html += '<button class="' + cls + '" onclick="selectTopbarEnv(\'' + v.replace(/'/g, "\\'") + '\',event)">' + label + '</button>';
-    }
-    drop.innerHTML = html;
-    drop.classList.add('show');
-    topbarEnvOpen = true;
-  }
-  window.toggleTopbarEnv = toggleTopbarEnv;
-
-  function selectTopbarEnv(val, e) {
-    e.stopPropagation();
-    setGlobalEnv(val);
-    updateTopbarEnvDisplay();
-    closeTopbarEnvDrop();
-    updateBadge();
-  }
-  window.selectTopbarEnv = selectTopbarEnv;
-
-  function closeTopbarEnvDrop() {
-    var drop = document.getElementById('topbar-env-drop');
-    if (drop) drop.classList.remove('show');
-    topbarEnvOpen = false;
-  }
-
-  document.addEventListener('click', function() { closeTopbarEnvDrop(); });
   function updateBadge() {
     fetch('/api/alerts/count' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r){return r.json()}).then(function(d){
       var b=document.getElementById('alert-badge');
@@ -215,12 +113,10 @@
     }).catch(function(){});
   }
   updateBadge();
-  loadEnvironments();
   setInterval(updateBadge, 30000);
 
   (function(){
     var themes = ['system', 'dark', 'light'];
-    var icons = {'system': '\u25D4', 'dark': '\u25CF', 'light': '\u25CB'};
 
     function getTheme() {
       return localStorage.getItem('opentrace-theme') || 'system';
@@ -232,10 +128,6 @@
       } else {
         document.documentElement.removeAttribute('data-theme');
       }
-      var icon = document.getElementById('theme-icon');
-      var label = document.getElementById('theme-label');
-      if (icon) icon.textContent = icons[t] || icons['system'];
-      if (label) label.textContent = t;
     }
 
     window.cycleTheme = function() {
@@ -247,20 +139,6 @@
     };
 
     applyTheme(getTheme());
-  })();
-
-  (function(){
-    window.toggleUserMenu = function() {
-      var menu = document.getElementById('user-dropdown-menu');
-      if (menu) menu.classList.toggle('show');
-    };
-    document.addEventListener('click', function(e) {
-      var dropdown = document.querySelector('.user-dropdown');
-      var menu = document.getElementById('user-dropdown-menu');
-      if (menu && dropdown && !dropdown.contains(e.target)) {
-        menu.classList.remove('show');
-      }
-    });
   })();
 
   // Toast notification system
@@ -353,7 +231,7 @@
 
   // Keyboard navigation + shortcut overlay
   (function(){
-    var tabs = {1:'/logs', 2:'/alerts', 3:'/watchers', 4:'/connectors', 5:'/servers', 6:'/tools'};
+    var tabs = {0:'/', 1:'/watchers', 2:'/alerts', 3:'/sources', 4:'/settings'};
 
     window.toggleShortcuts = function() {
       var overlay = document.getElementById('shortcut-overlay');
@@ -371,13 +249,11 @@
         return;
       }
       if (e.key === 'Escape') {
-        // Close shortcut overlay first
         var overlay = document.getElementById('shortcut-overlay');
         if (overlay && overlay.style.display !== 'none') {
           overlay.style.display = 'none';
           return;
         }
-        // Close any open modal
         var modals = document.querySelectorAll('.modal[style*="flex"]');
         if (modals.length > 0) {
           modals[modals.length - 1].style.display = 'none';
@@ -386,7 +262,7 @@
       }
 
       var n = parseInt(e.key, 10);
-      if (tabs[n]) {
+      if (n >= 0 && n <= 4 && tabs[n]) {
         window.location.href = tabs[n];
       }
     });

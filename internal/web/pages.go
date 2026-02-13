@@ -23,19 +23,14 @@ var tmplFuncs = template.FuncMap{
 }
 
 var (
-	overviewTmpl       *template.Template
-	connectorsTmpl     *template.Template
 	logsTmpl           *template.Template
 	alertsTmpl         *template.Template
 	watchersTmpl       *template.Template
 	watcherRunsTmpl    *template.Template
-	setupTmpl          *template.Template
-	serversTmpl        *template.Template
-	serverDetailTmpl   *template.Template
+	sourcesTmpl        *template.Template
 	loginTmpl          *template.Template
 	registerTmpl       *template.Template
 	profileTmpl        *template.Template
-	usersTmpl          *template.Template
 	settingsTmpl       *template.Template
 	toolsTmpl          *template.Template
 	onboardingTmpl     *template.Template
@@ -43,10 +38,6 @@ var (
 
 func init() {
 	// Each page gets layout + its own content template
-	overviewTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/overview.html"))
-	connectorsTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/connectors.html"))
 	logsTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
 		"templates/layout.html", "templates/logs.html"))
 	alertsTmpl = template.Must(template.ParseFS(templateFS,
@@ -55,20 +46,14 @@ func init() {
 		"templates/layout.html", "templates/watchers.html"))
 	watcherRunsTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/watcher_runs.html"))
-	setupTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/setup.html"))
-	serversTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/servers.html"))
-	serverDetailTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/server_detail.html"))
+	sourcesTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/sources.html"))
 	loginTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/login.html"))
 	registerTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/register.html"))
 	profileTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/profile.html"))
-	usersTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/users.html"))
 	settingsTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/settings.html"))
 	toolsTmpl = template.Must(template.ParseFS(templateFS,
@@ -77,14 +62,10 @@ func init() {
 		"templates/layout_minimal.html", "templates/onboarding.html"))
 }
 
-// templates is used for rendering HTMX fragment responses (e.g. connector-list)
-var templates *template.Template
-
 // logsFragmentTmpl is used for rendering HTMX fragment responses for logs-list
 var logsFragmentTmpl *template.Template
 
 func init() {
-	templates = template.Must(template.ParseFS(templateFS, "templates/connectors.html"))
 	logsFragmentTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS, "templates/logs.html"))
 }
 
@@ -141,6 +122,7 @@ type pageData struct {
 	HasMore        bool
 	MaxLogID       int64
 	User           *store.User
+	Users          []store.User
 	IsAdmin        bool
 	RetentionDays  int
 	APIKey         string
@@ -346,29 +328,11 @@ func (s *Server) handleWatcherRunsPage(w http.ResponseWriter, r *http.Request) {
 	tmpl.ExecuteTemplate(w, "layout", data)
 }
 
-func (s *Server) handleServersPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Servers", "servers")
-	tmpl := s.getTemplate(serversTmpl,
+func (s *Server) handleSourcesPage(w http.ResponseWriter, r *http.Request) {
+	data := s.newPageData(r, "Sources", "sources")
+	tmpl := s.getTemplate(sourcesTmpl,
 		"internal/web/templates/layout.html",
-		"internal/web/templates/servers.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
-}
-
-func (s *Server) handleServerDetailPage(w http.ResponseWriter, r *http.Request) {
-	serverID := chi.URLParam(r, "id")
-	data := s.newPageData(r, "Server", "servers")
-	data.ServerID = serverID
-	tmpl := s.getTemplate(serverDetailTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/server_detail.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
-}
-
-func (s *Server) handleSetupPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Setup", "setup")
-	tmpl := s.getTemplate(setupTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/setup.html")
+		"internal/web/templates/sources.html")
 	tmpl.ExecuteTemplate(w, "layout", data)
 }
 
@@ -435,29 +399,6 @@ func (s *Server) handleToolsAPI(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, categories)
 }
 
-func (s *Server) handleConnectorsPage(w http.ResponseWriter, r *http.Request) {
-	connectors, err := s.dsStore.List(r.Context(), store.ListDataSourceParams{})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list connectors")
-		return
-	}
-
-	data := s.newPageData(r, "Connectors", "connectors")
-	data.Content = "connectors"
-	data.Connectors = connectors
-	tmpl := s.getTemplate(connectorsTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/connectors.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
-}
-
-func (s *Server) handleOverviewPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Overview", "overview")
-	tmpl := s.getTemplate(overviewTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/overview.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
-}
 
 func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -627,6 +568,15 @@ func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 		data.RetentionDays = 30
 	}
 	data.EnvKeyOverride = s.cfg != nil && s.cfg.APIKey != ""
+
+	// Load users for user management tab
+	if s.userStore != nil {
+		users, err := s.userStore.List(r.Context())
+		if err == nil {
+			data.Users = users
+		}
+	}
+
 	tmpl := s.getTemplate(settingsTmpl,
 		"internal/web/templates/layout.html",
 		"internal/web/templates/settings.html")

@@ -215,8 +215,8 @@ func (s *Server) handleRegisterSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Admin created a new user — redirect to user management
-	http.Redirect(w, r, "/admin/users", http.StatusFound)
+	// Admin created a new user — redirect to settings (user management tab)
+	http.Redirect(w, r, "/settings#users", http.StatusFound)
 }
 
 func (s *Server) renderRegisterError(w http.ResponseWriter, r *http.Request, msg string) {
@@ -325,23 +325,6 @@ func (s *Server) handleGetOwnMCPToken(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- Admin User Management ---
-
-func (s *Server) handleUsersPage(w http.ResponseWriter, r *http.Request) {
-	users, err := s.userStore.List(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list users")
-		return
-	}
-
-	data := authPageData{
-		pageData: s.newPageData(r, "Users", "users"),
-		Users:    users,
-	}
-	tmpl := s.getTemplate(usersTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/users.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
-}
 
 func (s *Server) handleUpdateUserRole(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "id")
