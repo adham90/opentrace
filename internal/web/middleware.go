@@ -4,9 +4,11 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -98,22 +100,29 @@ type rateLimitEntry struct {
 
 // RateLimiter provides per-IP rate limiting.
 type RateLimiter struct {
-	mu       sync.Mutex
-	entries  map[string]*rateLimitEntry
-	limit    int
-	window   time.Duration
-	done     chan struct{}
+	mu             sync.Mutex
+	entries        map[string]*rateLimitEntry
+	limit          int
+	window         time.Duration
+	done           chan struct{}
+	trustedProxies map[string]bool
 }
 
 // NewRateLimiter creates a rate limiter allowing limit requests per window per IP.
 // It starts a background goroutine that evicts expired entries every 5 minutes.
 // Call Stop() to terminate the background goroutine.
-func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
+// The trusted parameter lists proxy IPs whose X-Forwarded-For header should be trusted.
+func NewRateLimiter(limit int, window time.Duration, trusted []string) *RateLimiter {
+	tp := make(map[string]bool, len(trusted))
+	for _, t := range trusted {
+		tp[t] = true
+	}
 	rl := &RateLimiter{
-		entries: make(map[string]*rateLimitEntry),
-		limit:   limit,
-		window:  window,
-		done:    make(chan struct{}),
+		entries:        make(map[string]*rateLimitEntry),
+		limit:          limit,
+		window:         window,
+		done:           make(chan struct{}),
+		trustedProxies: tp,
 	}
 	go rl.cleanup()
 	return rl
@@ -149,14 +158,25 @@ func (rl *RateLimiter) cleanup() {
 	}
 }
 
+// clientIP extracts the client IP from the request. It only trusts
+// X-Forwarded-For when the direct connection is from a configured trusted proxy.
+func (rl *RateLimiter) clientIP(r *http.Request) string {
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr
+	}
+	if len(rl.trustedProxies) > 0 && rl.trustedProxies[ip] {
+		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			return strings.TrimSpace(strings.SplitN(fwd, ",", 2)[0])
+		}
+	}
+	return ip
+}
+
 // Middleware returns an HTTP middleware that enforces the rate limit.
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := r.RemoteAddr
-		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-			// Use the leftmost (client) IP; X-Forwarded-For is comma-separated.
-			ip = strings.TrimSpace(strings.SplitN(fwd, ",", 2)[0])
-		}
+		ip := rl.clientIP(r)
 
 		rl.mu.Lock()
 		now := time.Now()
@@ -193,6 +213,7 @@ func StaticCacheHeaders(next http.Handler) http.Handler {
 
 // APIKeyAuth returns middleware that validates a Bearer token against the given
 // API key. If apiKey is empty, all requests are allowed (auth disabled).
+// Uses constant-time comparison to prevent timing side-channel attacks.
 func APIKeyAuth(apiKey string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +222,8 @@ func APIKeyAuth(apiKey string) func(http.Handler) http.Handler {
 				return
 			}
 			header := r.Header.Get("Authorization")
-			if header != "Bearer "+apiKey {
+			expected := "Bearer " + apiKey
+			if subtle.ConstantTimeCompare([]byte(header), []byte(expected)) != 1 {
 				writeError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
@@ -212,6 +234,7 @@ func APIKeyAuth(apiKey string) func(http.Handler) http.Handler {
 
 // DynamicAPIKeyAuth resolves the API key per-request (env var or DB) and
 // validates the Bearer token. If no key is configured, all requests pass.
+// Uses constant-time comparison to prevent timing side-channel attacks.
 func (s *Server) DynamicAPIKeyAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		apiKey := s.getEffectiveAPIKey(r.Context())
@@ -220,7 +243,8 @@ func (s *Server) DynamicAPIKeyAuth(next http.Handler) http.Handler {
 			return
 		}
 		header := r.Header.Get("Authorization")
-		if header != "Bearer "+apiKey {
+		expected := "Bearer " + apiKey
+		if subtle.ConstantTimeCompare([]byte(header), []byte(expected)) != 1 {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}

@@ -3,7 +3,9 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -77,7 +79,8 @@ func (s *Server) handleTestConnectorAPI(w http.ResponseWriter, r *http.Request) 
 	now := time.Now()
 	if err != nil {
 		status := store.StatusError
-		msg := err.Error()
+		msg := sanitizeConnectorError(err)
+		slog.Warn("connector init failed", "connector_id", ds.ID, "error", err)
 		s.dsStore.Update(r.Context(), ds.ID, store.UpdateDataSourceParams{
 			Status: &status, StatusMessage: &msg, LastTestedAt: &now,
 		})
@@ -88,7 +91,8 @@ func (s *Server) handleTestConnectorAPI(w http.ResponseWriter, r *http.Request) 
 	if err := c.TestConnection(r.Context()); err != nil {
 		c.Close()
 		status := store.StatusError
-		msg := err.Error()
+		msg := sanitizeConnectorError(err)
+		slog.Warn("connector test failed", "connector_id", ds.ID, "error", err)
 		s.dsStore.Update(r.Context(), ds.ID, store.UpdateDataSourceParams{
 			Status: &status, StatusMessage: &msg, LastTestedAt: &now,
 		})
@@ -215,4 +219,28 @@ func (s *Server) handleDeleteConnectorAPI(w http.ResponseWriter, r *http.Request
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// sanitizeConnectorError returns a user-safe error message, stripping
+// potentially sensitive details like hostnames, ports, and credentials.
+func sanitizeConnectorError(err error) string {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "password authentication failed"):
+		return "authentication failed — check credentials"
+	case strings.Contains(msg, "connection refused"):
+		return "connection refused — check host and port"
+	case strings.Contains(msg, "no such host"):
+		return "host not found — check hostname"
+	case strings.Contains(msg, "timeout") || strings.Contains(msg, "timed out"):
+		return "connection timed out"
+	case strings.Contains(msg, "SSL") || strings.Contains(msg, "TLS") || strings.Contains(msg, "x509"):
+		return "SSL/TLS error — check SSL configuration"
+	case strings.Contains(msg, "does not exist"):
+		return "database does not exist — check database name"
+	case strings.Contains(msg, "permission denied"):
+		return "permission denied — check user privileges"
+	default:
+		return "connection failed — check connector settings"
+	}
 }

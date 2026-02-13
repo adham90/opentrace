@@ -33,6 +33,8 @@ type Config struct {
 	MaxToolCalls        int
 	MaxObservationBytes int
 
+	TrustedProxies []string
+
 	DevMode bool
 }
 
@@ -120,6 +122,7 @@ func Load() (*Config, error) {
 		MaxAgentSteps:       maxSteps,
 		MaxToolCalls:        maxTools,
 		MaxObservationBytes: maxObs,
+		TrustedProxies:      parseTrustedProxies(os.Getenv("OPENTRACE_TRUSTED_PROXIES")),
 		DevMode:             os.Getenv("OPENTRACE_DEV") == "true",
 	}, nil
 }
@@ -134,6 +137,21 @@ func envOrDefault(key, defaultVal string) string {
 		return v
 	}
 	return defaultVal
+}
+
+func parseTrustedProxies(val string) []string {
+	if val == "" {
+		return nil
+	}
+	parts := strings.Split(val, ",")
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 func envOrDefaultInt(key string, defaultVal int) (int, error) {

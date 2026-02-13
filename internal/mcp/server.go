@@ -53,6 +53,9 @@ func NewConfiguredServer(deps Deps, isAdmin bool) *server.MCPServer {
 
 	// Set the package-level activity store for tool logging.
 	activityStoreForLogging = deps.MCPActivityStore
+	if deps.MCPActivityStore != nil {
+		activityLogger = NewActivityLogger(deps.MCPActivityStore, 256, 2)
+	}
 
 	s := server.NewMCPServer(
 		name,
@@ -117,6 +120,7 @@ func Serve(deps Deps) error {
 // available. It is used by maybeAddTool to wrap handlers with activity logging.
 // This is package-level to avoid threading it through every addXxxTools call.
 var activityStoreForLogging store.MCPActivityStore
+var activityLogger *ActivityLogger
 
 // maybeAddTool registers a tool on the MCP server if s is non-nil.
 // When s is nil (catalog-only mode), this is a no-op.
@@ -164,11 +168,9 @@ func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler ser
 		sessionID := "mcp"
 		userID := ""
 
-		// Log asynchronously to avoid blocking
-		go func() {
-			logCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = as.Log(logCtx, store.LogMCPActivityParams{
+		// Log via bounded activity logger to avoid unbounded goroutine growth
+		if activityLogger != nil {
+			activityLogger.Log(store.LogMCPActivityParams{
 				SessionID:     sessionID,
 				UserID:        userID,
 				ToolName:      toolName,
@@ -178,7 +180,7 @@ func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler ser
 				DurationMs:    &elapsed,
 				EventType:     "tool_call",
 			})
-		}()
+		}
 
 		return result, err
 	}

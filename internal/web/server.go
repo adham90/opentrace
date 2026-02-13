@@ -142,8 +142,12 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 
 	cfg := deps.Cfg
 
-	srv.loginLimiter = NewRateLimiter(10, 1*time.Minute)
-	srv.apiLimiter = NewRateLimiter(120, 1*time.Minute)
+	var trustedProxies []string
+	if cfg != nil {
+		trustedProxies = cfg.TrustedProxies
+	}
+	srv.loginLimiter = NewRateLimiter(10, 1*time.Minute, trustedProxies)
+	srv.apiLimiter = NewRateLimiter(120, 1*time.Minute, trustedProxies)
 	loginLimiter := srv.loginLimiter
 	apiLimiter := srv.apiLimiter
 
