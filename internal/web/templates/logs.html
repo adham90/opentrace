@@ -685,9 +685,9 @@
     input = input.trim();
     if (!input) return;
 
-    // Smart search: "?" prefix triggers AI-powered natural language search
-    if (input.startsWith('?')) {
-      runSmartSearch(input.slice(1).trim());
+    // Smart search: AI mode uses natural language search
+    if (aiMode) {
+      runSmartSearch(input);
       cmdInput.value = '';
       return;
     }
@@ -751,14 +751,20 @@
   // ── Smart search ─────────────────────────────────────────
   var smartSearchStatus = document.getElementById('smart-search-status');
   var promptSymbol = document.querySelector('.term-prompt-symbol');
+  var aiMode = false;
+  var defaultPlaceholder = cmdInput.placeholder || '';
 
   function setAIMode(on) {
-    if (on) {
+    aiMode = !!on;
+    window.aiMode = aiMode;
+    if (aiMode) {
       form.classList.add('ai-mode');
       promptSymbol.textContent = '?';
+      cmdInput.placeholder = 'describe what you\'re looking for...';
     } else {
       form.classList.remove('ai-mode', 'ai-loading');
       promptSymbol.textContent = '$';
+      cmdInput.placeholder = defaultPlaceholder;
     }
   }
 
@@ -803,8 +809,9 @@
       if (data.reasoning) {
         showToast(data.reasoning, 'info');
       }
-      // Keep AI mode visuals briefly, then revert
-      setTimeout(function() { setAIMode(false); }, 2000);
+      // Stay in AI mode — user exits with ESC
+      cmdInput.value = '';
+      cmdInput.focus();
     })
     .catch(function(err) {
       cmdInput.disabled = false;
@@ -865,6 +872,11 @@
       parseCommand(cmdInput.value);
     }
     if (e.key === 'Escape') {
+      if (aiMode) {
+        cmdInput.value = '';
+        setAIMode(false);
+        return;
+      }
       if (cmdInput.value) {
         cmdInput.value = '';
       } else if (hasActiveFilters()) {
@@ -1114,6 +1126,7 @@
   // ── Expose for global use ─────────────────────────────────
   window.clearFilters = clearAllFilters;
   window.setAIMode = setAIMode;
+  window.aiMode = false;
   window.pauseLiveOnFilter = function() {
     // When filters change, keep polling but reset
   };
@@ -1237,9 +1250,19 @@
   function selectItem(idx) {
     if (idx < 0 || idx >= items.length) return;
     var item = items[idx];
+    var replacement = item.value || item.label;
+
+    // Selecting "?" enters AI mode without putting ? in the input
+    if (replacement === '?') {
+      cmdInput.value = '';
+      hide();
+      if (window.setAIMode) window.setAIMode(true);
+      cmdInput.focus();
+      return;
+    }
+
     var token = getCurrentToken();
     var val = cmdInput.value;
-    var replacement = item.value || item.label;
     // If selecting a prefix suggestion, just insert it
     // If selecting a value, insert prefix:value
     var newVal = val.substring(0, token.start) + replacement + val.substring(token.end);
@@ -1262,6 +1285,9 @@
   }
 
   function updateDropdown() {
+    // Hide autocomplete in AI mode — input is free-form natural language
+    if (window.aiMode) { hide(); return; }
+
     var token = getCurrentToken();
     var text = token.text;
 
@@ -1289,9 +1315,12 @@
   }
 
   cmdInput.addEventListener('input', function() {
-    // Live AI mode indicator when typing ? prefix
-    if (window.setAIMode) {
-      window.setAIMode(cmdInput.value.startsWith('?'));
+    // Typing "?" activates AI mode and clears the ? from input
+    if (!window.aiMode && cmdInput.value === '?') {
+      cmdInput.value = '';
+      if (window.setAIMode) window.setAIMode(true);
+      hide();
+      return;
     }
     updateDropdown();
   });

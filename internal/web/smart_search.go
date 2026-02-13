@@ -120,93 +120,122 @@ func fetchSearchContext(ctx context.Context, logStore store.LogStore) searchCont
 }
 
 func buildAISearchPrompt(ctx searchContext, query string) string {
+	now := time.Now().UTC()
 	var b strings.Builder
-	b.WriteString(`You are a log search assistant. Convert the user's natural language query into structured log filters.
 
-Available filter values:
+	b.WriteString("Convert the user's log search query into JSON filters. Respond with ONLY valid JSON.\n\n")
 
-`)
+	// Context
 	b.WriteString("Services: ")
 	if len(ctx.Services) > 0 {
 		b.WriteString(strings.Join(ctx.Services, ", "))
 	} else {
-		b.WriteString("(none found)")
+		b.WriteString("(none)")
 	}
-	b.WriteString("\n")
-
-	b.WriteString("Environments: ")
+	b.WriteString("\nEnvironments: ")
 	if len(ctx.Environments) > 0 {
 		b.WriteString(strings.Join(ctx.Environments, ", "))
 	} else {
-		b.WriteString("(none found)")
+		b.WriteString("(none)")
 	}
-	b.WriteString("\n")
-
-	b.WriteString("Event types: ")
+	b.WriteString("\nEvent types: ")
 	if len(ctx.EventTypes) > 0 {
 		b.WriteString(strings.Join(ctx.EventTypes, ", "))
 	} else {
-		b.WriteString("(none found)")
+		b.WriteString("(none)")
 	}
-	b.WriteString("\n")
-
-	b.WriteString("Metadata keys: ")
 	if len(ctx.MetadataKeys) > 0 {
+		b.WriteString("\nMetadata keys: ")
 		b.WriteString(strings.Join(ctx.MetadataKeys, ", "))
-	} else {
-		b.WriteString("(none found)")
 	}
-	b.WriteString("\n")
-
-	b.WriteString("\nCurrent time: ")
-	b.WriteString(time.Now().UTC().Format(time.RFC3339))
+	b.WriteString("\nNow: ")
+	b.WriteString(now.Format(time.RFC3339))
 	b.WriteString("\n")
 
 	b.WriteString(`
-Valid log levels: DEBUG, INFO, WARN, ERROR
-Shortcut time ranges: 15m, 1h, 6h, 24h, 7d
+JSON fields:
+- "level": "ERROR", "WARN", "INFO", or "DEBUG". Words like "errors"/"failures"/"wrong" mean ERROR. "warnings" means WARN.
+- "service": Must be from the services list above. Match typos (e.g. "gatway"→"gateway").
+- "environment": Must be from the environments list above.
+- "event_type": Must be from the event types list above.
+- "time_range": Only use these exact values: "15m", "1h", "6h", "24h", "7d".
+- "start_time": RFC3339 timestamp for custom time ranges (e.g. "45 hours ago", "yesterday", "last 3 days"). Calculate from current time.
+- "end_time": RFC3339 timestamp. Use with start_time for date ranges.
+- "query": Specific keywords to search in log message text (e.g. "timeout", "TLS handshake", "rate limit exceeded", "cache miss", "card declined"). Leave empty "" if the user only wants to filter by level/service/time — do NOT repeat filter values here.
+- "metadata": Key-value pairs using only the metadata keys listed above.
+- "reasoning": One sentence summary.
 
-Respond with a JSON object containing ONLY these fields:
-{
-  "level": "",
-  "service": "",
-  "environment": "",
-  "event_type": "",
-  "time_range": "",
-  "start_time": "",
-  "end_time": "",
-  "query": "",
-  "metadata": {},
-  "reasoning": ""
-}
+Leave fields as "" if not applicable. Only set service/environment if user mentioned them.
 
-Rules:
-- Only use values from the lists above for service, environment, and event_type
-- Leave a field as empty string "" if the user's query doesn't specify it or you're uncertain
-- "query" is for free-text search terms that don't map to structured filters — use it only for actual keywords the user wants to find in log messages, NOT for restating structured filters
-- "metadata" is for key-value filters on log metadata fields — only use keys from the metadata keys list above
-- "reasoning" should be a brief one-sentence explanation of your interpretation
-- For relative time like "last hour" use time_range "1h", "last 15 minutes" use "15m", "last day" use "24h", "last week" use "7d"
-- For specific dates/times (e.g. "yesterday", "last Tuesday", "January 15", "between 2pm and 5pm"), use start_time and/or end_time in RFC3339 format (e.g. "2006-01-02T15:04:05Z"). Calculate from the current time provided above.
-- If using time_range, leave start_time and end_time empty. If using start_time/end_time, leave time_range empty.
-- Match service/environment names even if the user uses abbreviations or partial names
+Examples:
 `)
+
+	// Dynamic examples using actual services from context
+	svc := "my-service"
+	if len(ctx.Services) > 0 {
+		svc = ctx.Services[0]
+	}
+	env := "production"
+	if len(ctx.Environments) > 0 {
+		env = ctx.Environments[0]
+	}
+
+	yesterday := now.AddDate(0, 0, -1).Truncate(24 * time.Hour)
+	ago45h := now.Add(-45 * time.Hour)
+
+	fmt.Fprintf(&b, `"errors from %s last hour" → {"level":"ERROR","service":"%s","time_range":"1h","query":"","reasoning":"Errors from %s in the last hour"}
+"TLS handshake failures" → {"level":"ERROR","query":"TLS handshake","reasoning":"Error logs mentioning TLS handshake"}
+"rate limit exceeded errors" → {"level":"ERROR","query":"rate limit exceeded","reasoning":"Error logs mentioning rate limit exceeded"}
+"cache miss logs from the last 15 minutes" → {"query":"cache miss","time_range":"15m","reasoning":"Logs mentioning cache miss in last 15 minutes"}
+"what went wrong in %s" → {"level":"ERROR","environment":"%s","query":"","reasoning":"Errors in %s"}
+"errors from 45 hours ago until now" → {"level":"ERROR","start_time":"%s","query":"","reasoning":"Errors from the last 45 hours"}
+"errors from yesterday" → {"level":"ERROR","start_time":"%s","end_time":"%s","query":"","reasoning":"Errors from yesterday"}
+"connection pool nearing capacity" → {"query":"connection pool nearing capacity","reasoning":"Logs mentioning connection pool capacity"}
+"memory usage warnings last 3 hours" → {"level":"WARN","start_time":"%s","query":"memory usage","reasoning":"Warning logs about memory usage in last 3 hours"}
+`,
+		svc, svc, svc,
+		env, env, env,
+		ago45h.Format(time.RFC3339),
+		yesterday.Format(time.RFC3339), now.Truncate(24*time.Hour).Format(time.RFC3339),
+		now.Add(-3*time.Hour).Format(time.RFC3339),
+	)
 
 	return b.String()
 }
 
 // llmSearchResult is the parsed JSON response from the LLM.
 type llmSearchResult struct {
-	Level       string            `json:"level"`
-	Service     string            `json:"service"`
-	Environment string            `json:"environment"`
-	EventType   string            `json:"event_type"`
-	TimeRange   string            `json:"time_range"`
-	StartTime   string            `json:"start_time"`
-	EndTime     string            `json:"end_time"`
-	Query       string            `json:"query"`
-	Metadata    map[string]string `json:"metadata"`
-	Reasoning   string            `json:"reasoning"`
+	Level       string         `json:"level"`
+	Service     string         `json:"service"`
+	Environment string         `json:"environment"`
+	EventType   string         `json:"event_type"`
+	TimeRange   string         `json:"time_range"`
+	StartTime   string         `json:"start_time"`
+	EndTime     string         `json:"end_time"`
+	Query       string         `json:"query"`
+	Metadata    flexibleMeta   `json:"metadata"`
+	Reasoning   string         `json:"reasoning"`
+}
+
+// flexibleMeta handles LLM returning either {} or "" for metadata.
+type flexibleMeta map[string]string
+
+func (m *flexibleMeta) UnmarshalJSON(data []byte) error {
+	// Handle empty string, null, or missing
+	s := strings.TrimSpace(string(data))
+	if s == `""` || s == "null" || s == "" {
+		*m = nil
+		return nil
+	}
+	// Try parsing as map
+	var result map[string]string
+	if err := json.Unmarshal(data, &result); err != nil {
+		// Silently ignore — metadata is optional
+		*m = nil
+		return nil
+	}
+	*m = result
+	return nil
 }
 
 func normalizeFilters(raw llmSearchResult, ctx searchContext) map[string]string {
@@ -265,9 +294,13 @@ func normalizeFilters(raw llmSearchResult, ctx searchContext) map[string]string 
 		}
 	}
 
-	// Query: pass through as-is for FTS search
+	// Query: pass through only if it contains meaningful search terms
+	// beyond what's already captured by structured filters.
 	if q := strings.TrimSpace(raw.Query); q != "" {
-		filters["query"] = q
+		cleaned := stripRedundantTerms(q, filters, ctx)
+		if cleaned != "" {
+			filters["query"] = cleaned
+		}
 	}
 
 	// Metadata: validate keys against known metadata keys, pass through values
@@ -352,5 +385,63 @@ func bestMatch(input string, candidates []string) string {
 	}
 
 	return ""
+}
+
+// stripRedundantTerms removes words from the query string that merely restate
+// structured filters (level names, service names, time words, etc.).
+func stripRedundantTerms(query string, filters map[string]string, ctx searchContext) string {
+	// Words that are just noise — they describe the intent, not a search term
+	noise := map[string]bool{
+		"show": true, "me": true, "the": true, "from": true, "in": true,
+		"on": true, "all": true, "logs": true, "log": true, "find": true,
+		"get": true, "with": true, "for": true, "and": true, "or": true,
+		"a": true, "an": true, "of": true, "to": true, "that": true,
+		"last": true, "ago": true, "until": true, "now": true, "since": true,
+		"recent": true, "latest": true, "today": true, "yesterday": true,
+		"hours": true, "hour": true, "minutes": true, "minute": true,
+		"days": true, "day": true, "week": true,
+	}
+
+	// Filter value words (level, service, environment names)
+	filterWords := make(map[string]bool)
+	for _, v := range filters {
+		for _, w := range strings.Fields(strings.ToLower(v)) {
+			filterWords[w] = true
+		}
+	}
+	// Also add level synonyms
+	filterWords["errors"] = true
+	filterWords["error"] = true
+	filterWords["warnings"] = true
+	filterWords["warning"] = true
+	filterWords["debug"] = true
+	filterWords["info"] = true
+	// Service/environment names from context
+	for _, s := range ctx.Services {
+		for _, w := range strings.Fields(strings.ToLower(s)) {
+			filterWords[w] = true
+		}
+	}
+	for _, s := range ctx.Environments {
+		filterWords[strings.ToLower(s)] = true
+	}
+
+	words := strings.Fields(query)
+	var kept []string
+	for _, w := range words {
+		lower := strings.ToLower(w)
+		if noise[lower] || filterWords[lower] {
+			continue
+		}
+		// Skip numeric-looking tokens (likely time values like "45h", "30m")
+		trimmed := strings.TrimRight(lower, "hms")
+		if trimmed != "" && trimmed != lower {
+			if _, err := fmt.Sscanf(trimmed, "%f", new(float64)); err == nil {
+				continue
+			}
+		}
+		kept = append(kept, w)
+	}
+	return strings.Join(kept, " ")
 }
 
