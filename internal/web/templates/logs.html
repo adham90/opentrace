@@ -27,6 +27,7 @@
         <span class="term-live-dot" id="live-dot"></span>
         <span id="live-label">LIVE</span>
       </div>
+      <div class="ac-dropdown" id="ac-dropdown" style="display:none"></div>
     </div>
 
     <div class="term-active-filters" id="active-filters"></div>
@@ -337,6 +338,37 @@
   .term-source { max-width: 80px; min-width: auto; }
   .term-msg { flex-basis: 100%; padding-left: 0; margin-top: 1px; }
   .term-detail { padding-left: 12px; }
+}
+
+/* ── Autocomplete dropdown ─────────────────────────────────── */
+.term-cmdline-inner { position: relative; }
+.ac-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  z-index: 200;
+}
+.ac-item {
+  padding: 4px 12px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+}
+.ac-item:hover, .ac-item.ac-active {
+  background: var(--bg-tertiary, rgba(255,255,255,0.05));
+  color: var(--text-bright);
+}
+.ac-item .ac-hint {
+  color: var(--text-dim);
+  font-size: 11px;
 }
 </style>
 
@@ -834,6 +866,219 @@
   // ── Initial render ────────────────────────────────────────
   syncHiddenFields();
   renderFilterChips();
+})();
+
+// ── Autocomplete ───────────────────────────────────────────
+(function(){
+  var cmdInput  = document.getElementById('cmd-input');
+  var dropdown  = document.getElementById('ac-dropdown');
+  var activeIdx = -1;
+  var items     = [];
+
+  var prefixes = [
+    { label: 'level:',   hint: 'filter by log level' },
+    { label: 'service:', hint: 'filter by service name' },
+    { label: 'env:',     hint: 'filter by environment' },
+    { label: 'time:',    hint: 'filter by time range' },
+    { label: 'type:',    hint: 'filter by event type' }
+  ];
+
+  var staticValues = {
+    'level':   ['DEBUG','INFO','WARN','ERROR'],
+    'l':       ['DEBUG','INFO','WARN','ERROR'],
+    'time':    ['15m','1h','6h','24h','7d'],
+    't':       ['15m','1h','6h','24h','7d']
+  };
+
+  var apiMap = {
+    'service': '/api/services',
+    'svc':     '/api/services',
+    's':       '/api/services',
+    'env':     '/api/environments',
+    'environment': '/api/environments',
+    'e':       '/api/environments',
+    'type':    '/api/event_types',
+    'event_type': '/api/event_types',
+    'y':       '/api/event_types'
+  };
+
+  var cache = {};
+  var CACHE_TTL = 30000;
+
+  function fetchValues(prefix, fragment, cb) {
+    var key = prefix.toLowerCase();
+    if (staticValues[key]) {
+      return cb(filterBy(staticValues[key], fragment));
+    }
+    var url = apiMap[key];
+    if (!url) return cb([]);
+
+    var cached = cache[url];
+    if (cached && (Date.now() - cached.ts < CACHE_TTL)) {
+      return cb(filterBy(cached.data, fragment));
+    }
+
+    fetch(url).then(function(r){ return r.json(); }).then(function(data) {
+      if (!Array.isArray(data)) data = [];
+      cache[url] = { data: data, ts: Date.now() };
+      cb(filterBy(data, fragment));
+    }).catch(function(){ cb([]); });
+  }
+
+  function filterBy(arr, frag) {
+    if (!frag) return arr;
+    var lf = frag.toLowerCase();
+    return arr.filter(function(v){ return v.toLowerCase().indexOf(lf) !== -1; });
+  }
+
+  function getCurrentToken() {
+    var val = cmdInput.value;
+    var pos = cmdInput.selectionStart;
+    var before = val.substring(0, pos);
+    var start = before.lastIndexOf(' ') + 1;
+    return { text: before.substring(start), start: start, end: pos };
+  }
+
+  function renderDropdown(list) {
+    items = list;
+    activeIdx = -1;
+    if (list.length === 0) { hide(); return; }
+
+    var html = '';
+    for (var i = 0; i < list.length; i++) {
+      html += '<div class="ac-item" data-idx="' + i + '">' +
+        '<span>' + escH(list[i].label) + '</span>' +
+        (list[i].hint ? '<span class="ac-hint">' + escH(list[i].hint) + '</span>' : '') +
+        '</div>';
+    }
+    dropdown.innerHTML = html;
+    dropdown.style.display = '';
+
+    dropdown.querySelectorAll('.ac-item').forEach(function(el) {
+      el.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        selectItem(parseInt(el.getAttribute('data-idx')));
+      });
+    });
+  }
+
+  function escH(s) {
+    var d = document.createElement('div');
+    d.textContent = s || '';
+    return d.innerHTML;
+  }
+
+  function hide() {
+    dropdown.style.display = 'none';
+    dropdown.innerHTML = '';
+    items = [];
+    activeIdx = -1;
+  }
+
+  function selectItem(idx) {
+    if (idx < 0 || idx >= items.length) return;
+    var item = items[idx];
+    var token = getCurrentToken();
+    var val = cmdInput.value;
+    var replacement = item.value || item.label;
+    // If selecting a prefix suggestion, just insert it
+    // If selecting a value, insert prefix:value
+    var newVal = val.substring(0, token.start) + replacement + val.substring(token.end);
+    cmdInput.value = newVal;
+    var newPos = token.start + replacement.length;
+    cmdInput.setSelectionRange(newPos, newPos);
+    hide();
+    cmdInput.focus();
+  }
+
+  function navigate(dir) {
+    if (items.length === 0) return;
+    var els = dropdown.querySelectorAll('.ac-item');
+    if (activeIdx >= 0 && activeIdx < els.length) els[activeIdx].classList.remove('ac-active');
+    activeIdx += dir;
+    if (activeIdx < 0) activeIdx = items.length - 1;
+    if (activeIdx >= items.length) activeIdx = 0;
+    els[activeIdx].classList.add('ac-active');
+    els[activeIdx].scrollIntoView({ block: 'nearest' });
+  }
+
+  function updateDropdown() {
+    var token = getCurrentToken();
+    var text = token.text;
+
+    if (text === '') {
+      renderDropdown(prefixes.map(function(p){ return { label: p.label, hint: p.hint, value: p.label }; }));
+      return;
+    }
+
+    var colonIdx = text.indexOf(':');
+    if (colonIdx === -1) {
+      // Filter prefix suggestions
+      var lf = text.toLowerCase();
+      var matched = prefixes.filter(function(p){ return p.label.toLowerCase().indexOf(lf) !== -1; });
+      renderDropdown(matched.map(function(p){ return { label: p.label, hint: p.hint, value: p.label }; }));
+      return;
+    }
+
+    // After colon — suggest values
+    var prefix = text.substring(0, colonIdx);
+    var fragment = text.substring(colonIdx + 1);
+
+    fetchValues(prefix, fragment, function(vals) {
+      renderDropdown(vals.map(function(v){ return { label: prefix + ':' + v, hint: '', value: prefix + ':' + v }; }));
+    });
+  }
+
+  cmdInput.addEventListener('input', updateDropdown);
+  cmdInput.addEventListener('focus', updateDropdown);
+
+  cmdInput.addEventListener('blur', function() {
+    setTimeout(hide, 150);
+  });
+
+  // Intercept keydown on cmd-input for autocomplete navigation
+  cmdInput.addEventListener('keydown', function(e) {
+    if (dropdown.style.display === 'none') return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      navigate(1);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      navigate(-1);
+      return;
+    }
+    if (e.key === 'Tab') {
+      if (items.length > 0) {
+        e.preventDefault();
+        selectItem(activeIdx >= 0 ? activeIdx : 0);
+        return;
+      }
+    }
+    if (e.key === 'Enter') {
+      if (activeIdx >= 0 && items.length > 0) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        selectItem(activeIdx);
+        return;
+      }
+      // If dropdown is open but nothing highlighted, let Enter submit normally
+      hide();
+      return;
+    }
+    if (e.key === 'Escape') {
+      hide();
+      // Don't stop propagation — let existing handler clear input
+    }
+  }, true); // capture phase so we run before the existing handler
+
+  document.addEventListener('click', function(e) {
+    if (!dropdown.contains(e.target) && e.target !== cmdInput) {
+      hide();
+    }
+  });
 })();
 </script>
 {{end}}
