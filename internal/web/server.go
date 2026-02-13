@@ -278,6 +278,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Get("/overview/triage", srv.handleTriageAPI)
 			r.Get("/tools", srv.handleToolsAPI)
 			r.Get("/logs/poll", srv.handleLogsPoll)
+			r.Post("/logs/smart-search", srv.handleSmartSearch)
 
 			// MCP activity
 			if srv.mcpActivityStore != nil {
