@@ -586,6 +586,10 @@
       if (rs.duration_ms) html += dRow('duration', rs.duration_ms.toFixed(1) + ' ms');
       if (rs.db_time_ms) html += dRow('db_time', rs.db_time_ms.toFixed(1) + ' ms');
       if (rs.view_time_ms) html += dRow('view_time', rs.view_time_ms.toFixed(1) + ' ms');
+      if (rs.time_breakdown) {
+        var tb = typeof rs.time_breakdown === 'string' ? JSON.parse(rs.time_breakdown) : rs.time_breakdown;
+        html += dRow('breakdown', 'sql:' + tb.sql_pct + '% view:' + tb.view_pct + '% http:' + tb.http_pct + '% other:' + tb.other_pct + '%');
+      }
       html += '</div>';
 
       if (rs.sql_count > 0) {
@@ -593,6 +597,15 @@
         html += '<div class="term-detail-section-title">SQL (' + rs.sql_count + ' queries' + (rs.sql_total_ms ? ', ' + rs.sql_total_ms.toFixed(1) + ' ms' : '') + ')</div>';
         if (rs.sql_slowest_ms) html += dRow('slowest', rs.sql_slowest_ms.toFixed(1) + ' ms' + (rs.sql_slowest_name ? '  ' + escH(rs.sql_slowest_name) : ''));
         if (rs.n_plus_one) html += '<div class="term-detail-row"><span class="term-detail-key">N+1</span><span class="term-detail-val term-detail-flag">DETECTED</span></div>';
+        if (rs.duplicate_queries > 0) {
+          html += dRow('duplicates', rs.duplicate_queries + ' queries, worst: ' + rs.worst_duplicate_count + 'x');
+        }
+        if (rs.top_duplicates) {
+          var dups = typeof rs.top_duplicates === 'string' ? JSON.parse(rs.top_duplicates) : rs.top_duplicates;
+          dups.forEach(function(d) {
+            html += dRow('dup ' + d.count + 'x', d.fingerprint);
+          });
+        }
         html += '</div>';
       }
 
@@ -639,8 +652,7 @@
       html += '<div class="term-detail-section-title">Metadata</div>';
       Object.keys(log.metadata).sort().forEach(function(k) {
         var v = log.metadata[k];
-        if (typeof v === 'object') v = JSON.stringify(v);
-        html += dRow(k, v);
+        html += renderMetadataField(k, v);
       });
       html += '</div>';
     }
@@ -651,6 +663,77 @@
   function dRow(key, val) {
     return '<div class="term-detail-row"><span class="term-detail-key">' + escH(key) +
       '</span><span class="term-detail-val">' + escH(String(val)) + '</span></div>';
+  }
+
+  function renderMetadataField(key, val) {
+    if (val == null) return dRow(key, '');
+    var parsed = val;
+    if (typeof val === 'string') {
+      try { parsed = JSON.parse(val); } catch(e) { return dRow(key, val); }
+    }
+
+    switch (key) {
+      case 'breadcrumbs':
+        if (!Array.isArray(parsed)) return dRow(key, JSON.stringify(parsed));
+        var h = '';
+        parsed.forEach(function(c) {
+          h += dRow('breadcrumb', '[' + escH(c.category || '') + '] ' + escH(c.message || ''));
+        });
+        return h;
+
+      case 'source_context':
+        if (typeof parsed !== 'object') return dRow(key, String(parsed));
+        var h = '';
+        if (parsed.file) h += dRow('source', escH(parsed.file) + ':' + (parsed.line || ''));
+        if (Array.isArray(parsed.code)) {
+          parsed.code.forEach(function(line) {
+            h += dRow('', line);
+          });
+        }
+        return h;
+
+      case 'local_variables':
+        if (typeof parsed !== 'object' || Array.isArray(parsed)) return dRow(key, JSON.stringify(parsed));
+        var h = '';
+        Object.keys(parsed).forEach(function(name) {
+          var entry = parsed[name];
+          if (typeof entry === 'object' && entry !== null && entry.value !== undefined) {
+            h += dRow(name, entry.value + (entry.type ? ' (' + entry.type + ')' : ''));
+          } else {
+            h += dRow(name, String(entry));
+          }
+        });
+        return h;
+
+      case 'exception_causes':
+        if (!Array.isArray(parsed)) return dRow(key, JSON.stringify(parsed));
+        var h = '';
+        parsed.forEach(function(cause) {
+          h += dRow('cause', (cause.class || cause.type || '') + ': ' + (cause.message || ''));
+        });
+        return h;
+
+      case 'explain_plans':
+        if (!Array.isArray(parsed)) return dRow(key, JSON.stringify(parsed));
+        var h = '';
+        parsed.forEach(function(plan) {
+          if (plan.sql) h += dRow('sql', plan.sql);
+          if (plan.plan) h += dRow('plan', plan.plan);
+        });
+        return h;
+
+      case 'backtrace':
+        if (!Array.isArray(parsed)) return dRow(key, String(parsed));
+        var h = '';
+        parsed.forEach(function(frame) {
+          h += dRow('', frame);
+        });
+        return h;
+
+      default:
+        if (typeof parsed === 'object') return dRow(key, JSON.stringify(parsed));
+        return dRow(key, String(parsed));
+    }
   }
 
   // ── Filter helpers ────────────────────────────────────────

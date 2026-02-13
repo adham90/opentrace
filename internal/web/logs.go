@@ -55,10 +55,14 @@ type ingestRequestSummary struct {
 	HTTPExternalTotalMs float64 `json:"http_external_total_ms"`
 	HTTPSlowestMs       float64 `json:"http_slowest_ms"`
 	HTTPSlowestHost     string  `json:"http_slowest_host"`
-	MemoryBeforeMb      float64 `json:"memory_before_mb"`
-	MemoryAfterMb       float64 `json:"memory_after_mb"`
-	MemoryDeltaMb       float64 `json:"memory_delta_mb"`
+	MemoryBeforeMb      float64         `json:"memory_before_mb"`
+	MemoryAfterMb       float64         `json:"memory_after_mb"`
+	MemoryDeltaMb       float64         `json:"memory_delta_mb"`
 	Timeline            json.RawMessage `json:"timeline,omitempty"`
+	TimeBreakdown       json.RawMessage `json:"time_breakdown,omitempty"`
+	DuplicateQueries    int             `json:"duplicate_queries"`
+	WorstDuplicateCount int             `json:"worst_duplicate_count"`
+	TopDuplicates       json.RawMessage `json:"top_duplicates,omitempty"`
 }
 
 func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
@@ -167,6 +171,10 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 				MemoryAfterMb:       rs.MemoryAfterMb,
 				MemoryDeltaMb:       rs.MemoryDeltaMb,
 				Timeline:            string(rs.Timeline),
+				TimeBreakdown:       string(rs.TimeBreakdown),
+				DuplicateQueries:    rs.DuplicateQueries,
+				WorstDuplicateCount: rs.WorstDuplicateCount,
+				TopDuplicates:       string(rs.TopDuplicates),
 			}
 		}
 	}

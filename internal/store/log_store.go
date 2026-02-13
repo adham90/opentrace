@@ -68,8 +68,9 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []LogEntry) (int, er
 						view_count, view_total_ms, view_slowest_ms, view_slowest_template,
 						cache_reads, cache_hits, cache_writes, cache_hit_ratio,
 						http_external_count, http_external_total_ms, http_slowest_ms, http_slowest_host,
-						memory_before_mb, memory_after_mb, memory_delta_mb, timeline
-					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+						memory_before_mb, memory_after_mb, memory_delta_mb, timeline,
+						time_breakdown, duplicate_queries, worst_duplicate_count, top_duplicates
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 				if err != nil {
 					return 0, fmt.Errorf("prepare summary insert: %w", err)
 				}
@@ -89,6 +90,7 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []LogEntry) (int, er
 				rs.CacheReads, rs.CacheHits, rs.CacheWrites, rs.CacheHitRatio,
 				rs.HTTPExternalCount, rs.HTTPExternalTotalMs, rs.HTTPSlowestMs, rs.HTTPSlowestHost,
 				rs.MemoryBeforeMb, rs.MemoryAfterMb, rs.MemoryDeltaMb, rs.Timeline,
+				rs.TimeBreakdown, rs.DuplicateQueries, rs.WorstDuplicateCount, rs.TopDuplicates,
 			)
 			if err != nil {
 				return 0, fmt.Errorf("inserting request summary: %w", err)
@@ -418,7 +420,9 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*LogEntry, error) {
 			view_count, view_total_ms, view_slowest_ms, view_slowest_template,
 			cache_reads, cache_hits, cache_writes, cache_hit_ratio,
 			http_external_count, http_external_total_ms, http_slowest_ms, http_slowest_host,
-			memory_before_mb, memory_after_mb, memory_delta_mb, timeline
+			memory_before_mb, memory_after_mb, memory_delta_mb, timeline,
+			COALESCE(time_breakdown, ''), COALESCE(duplicate_queries, 0),
+			COALESCE(worst_duplicate_count, 0), COALESCE(top_duplicates, '')
 		FROM request_summaries WHERE log_id = ?`, id,
 	).Scan(&rs.ID, &rs.LogID, &rs.Controller, &rs.Action, &rs.Method, &rs.Path, &rs.Status,
 		&rs.DurationMs, &rs.DBTimeMs, &rs.ViewTimeMs,
@@ -426,7 +430,8 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*LogEntry, error) {
 		&rs.ViewCount, &rs.ViewTotalMs, &rs.ViewSlowestMs, &rs.ViewSlowestTemplate,
 		&rs.CacheReads, &rs.CacheHits, &rs.CacheWrites, &rs.CacheHitRatio,
 		&rs.HTTPExternalCount, &rs.HTTPExternalTotalMs, &rs.HTTPSlowestMs, &rs.HTTPSlowestHost,
-		&rs.MemoryBeforeMb, &rs.MemoryAfterMb, &rs.MemoryDeltaMb, &rs.Timeline)
+		&rs.MemoryBeforeMb, &rs.MemoryAfterMb, &rs.MemoryDeltaMb, &rs.Timeline,
+		&rs.TimeBreakdown, &rs.DuplicateQueries, &rs.WorstDuplicateCount, &rs.TopDuplicates)
 	if err == nil {
 		rs.NPlusOne = nPlusOne == 1
 		entry.RequestSummary = &rs

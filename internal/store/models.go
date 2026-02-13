@@ -109,6 +109,10 @@ type RequestSummary struct {
 	MemoryAfterMb       float64 `json:"memory_after_mb,omitempty"`
 	MemoryDeltaMb       float64 `json:"memory_delta_mb,omitempty"`
 	Timeline            string  `json:"timeline,omitempty"`
+	TimeBreakdown       string  `json:"time_breakdown,omitempty"`
+	DuplicateQueries    int     `json:"duplicate_queries,omitempty"`
+	WorstDuplicateCount int     `json:"worst_duplicate_count,omitempty"`
+	TopDuplicates       string  `json:"top_duplicates,omitempty"`
 }
 
 // LogSearchParams defines filters for log search.
