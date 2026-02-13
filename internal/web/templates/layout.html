@@ -69,6 +69,7 @@
 
   <nav class="tmux-bar">
     <div class="tmux-left">
+      <button class="mobile-menu-btn" onclick="toggleMobileMenu()" aria-label="Menu">&#9776;</button>
       <a href="/" class="tmux-tab {{if eq .Nav "logs"}}active{{end}}">[0:logs]</a>
       <a href="/watchers" class="tmux-tab {{if eq .Nav "watchers"}}active{{end}}">1:watchers</a>
       <a href="/alerts" class="tmux-tab {{if eq .Nav "alerts"}}active{{end}}">2:alerts<span id="alert-badge" class="nav-badge" style="display:none">0</span></a>
@@ -79,6 +80,21 @@
       {{if .User}}<span class="tmux-info">{{.User.DisplayName}}@opentrace</span>{{end}}
     </div>
   </nav>
+
+  <!-- Mobile slide-out menu -->
+  <div class="mobile-menu-overlay" id="mobile-menu-overlay" onclick="closeMobileMenu()"></div>
+  <div class="mobile-menu" id="mobile-menu">
+    <div class="mobile-menu-header">
+      <span class="mobile-menu-title">OpenTrace</span>
+      <button class="mobile-menu-close" onclick="closeMobileMenu()">&times;</button>
+    </div>
+    <a href="/" class="mobile-menu-item {{if eq .Nav "logs"}}active{{end}}">logs</a>
+    <a href="/watchers" class="mobile-menu-item {{if eq .Nav "watchers"}}active{{end}}">watchers</a>
+    <a href="/alerts" class="mobile-menu-item {{if eq .Nav "alerts"}}active{{end}}">alerts<span id="alert-badge-mobile" class="nav-badge" style="display:none">0</span></a>
+    <a href="/sources" class="mobile-menu-item {{if eq .Nav "sources"}}active{{end}}">sources</a>
+    <a href="/settings" class="mobile-menu-item {{if eq .Nav "settings"}}active{{end}}">settings</a>
+    {{if .User}}<div class="mobile-menu-user">{{.User.DisplayName}}@opentrace</div>{{end}}
+  </div>
 
   {{if .Breadcrumbs}}
   <div class="breadcrumb-bar">
@@ -94,6 +110,8 @@
     fetch('/api/alerts/count').then(function(r){return r.json()}).then(function(d){
       var b=document.getElementById('alert-badge');
       if(b){b.textContent=d.count;b.style.display=d.count>0?'inline':'none';}
+      var bm=document.getElementById('alert-badge-mobile');
+      if(bm){bm.textContent=d.count;bm.style.display=d.count>0?'inline':'none';}
     }).catch(function(){});
   }
   updateBadge();
@@ -250,6 +268,29 @@
         window.location.href = tabs[n];
       }
     });
+  })();
+
+  // Mobile menu
+  (function(){
+    window.toggleMobileMenu = function() {
+      var menu = document.getElementById('mobile-menu');
+      var overlay = document.getElementById('mobile-menu-overlay');
+      var open = menu.classList.contains('open');
+      if (open) {
+        closeMobileMenu();
+      } else {
+        menu.classList.add('open');
+        overlay.classList.add('open');
+        document.body.classList.add('mobile-menu-open');
+      }
+    };
+    window.closeMobileMenu = function() {
+      var menu = document.getElementById('mobile-menu');
+      var overlay = document.getElementById('mobile-menu-overlay');
+      menu.classList.remove('open');
+      overlay.classList.remove('open');
+      document.body.classList.remove('mobile-menu-open');
+    };
   })();
   </script>
   {{if .DevMode}}<script nonce="{{.CSPNonce}}">(function(){var h='';setInterval(function(){fetch('/api/dev/hash').then(function(r){return r.text()}).then(function(v){if(h&&v!==h)location.reload();h=v}).catch(function(){})},1000)})();</script>{{end}}

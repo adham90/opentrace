@@ -2550,3 +2550,460 @@ th.sortable.sort-desc::after { content: '\25BC'; opacity: 0.8; }
   letter-spacing: 0.3px;
   text-transform: uppercase;
 }
+
+/* ============================================================
+   MOBILE RESPONSIVE
+   ============================================================ */
+
+/* --- Mobile hamburger button (hidden on desktop) --- */
+.mobile-menu-btn {
+  display: none;
+  background: none;
+  border: none;
+  color: #000;
+  font-size: 16px;
+  padding: 0 6px;
+  cursor: pointer;
+  line-height: var(--tmux-height);
+  font-family: var(--font-mono);
+}
+
+/* --- Mobile slide-out menu --- */
+.mobile-menu-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  z-index: 999;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.mobile-menu-overlay.open {
+  display: block;
+  opacity: 1;
+}
+
+.mobile-menu {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 260px;
+  max-width: 80vw;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  z-index: 1000;
+  transform: translateX(-100%);
+  transition: transform 0.25s ease;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.mobile-menu.open {
+  display: flex;
+  transform: translateX(0);
+}
+
+.mobile-menu-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--green);
+  color: #000;
+}
+.mobile-menu-title {
+  font-weight: 700;
+  font-size: 14px;
+  font-family: var(--font-mono);
+}
+.mobile-menu-close {
+  background: none;
+  border: none;
+  color: #000;
+  font-size: 22px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.mobile-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  text-decoration: none;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+.mobile-menu-item:hover {
+  background: var(--bg-tertiary);
+  text-decoration: none;
+}
+.mobile-menu-item.active {
+  color: var(--green);
+  font-weight: 700;
+  background: var(--bg-tertiary);
+}
+
+.mobile-menu-user {
+  padding: 16px;
+  margin-top: auto;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  border-top: 1px solid var(--border);
+}
+
+/* --- Mobile breakpoint (< 700px) --- */
+@media (max-width: 699px) {
+  /* Show hamburger, hide desktop tabs */
+  .mobile-menu-btn { display: block; }
+  .tmux-tab { display: none; }
+  .mobile-menu { display: flex; transform: translateX(-100%); }
+  .mobile-menu.open { transform: translateX(0); }
+
+  /* Prevent body scroll when menu is open */
+  body.mobile-menu-open { overflow: hidden; }
+
+  /* Nav bar adjustments */
+  .tmux-bar { padding: 0 4px; }
+  .tmux-info { font-size: 11px; }
+
+  /* Main content */
+  .main-content { padding: 10px; }
+
+  /* Breadcrumbs */
+  .breadcrumb-bar {
+    padding: 6px 10px;
+    font-size: 11px;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  /* Page header */
+  .page-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .page-header h1 { font-size: 13px; }
+  .page-header .actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  /* Terminal log lines — stack columns on narrow screens */
+  .term-line {
+    flex-wrap: wrap;
+    padding: 4px 6px;
+    gap: 4px;
+  }
+  .term-ts {
+    width: auto;
+    font-size: 10px;
+  }
+  .term-level {
+    width: auto;
+    font-size: 11px;
+  }
+  .term-src {
+    width: auto;
+    max-width: 120px;
+    font-size: 11px;
+  }
+  .term-msg {
+    width: 100%;
+    flex-basis: 100%;
+    font-size: 12px;
+  }
+  .term-detail {
+    padding: 4px 6px 8px 6px;
+  }
+  .term-detail-row {
+    flex-direction: column;
+    gap: 2px;
+  }
+  .term-detail-key { min-width: 0; }
+
+  /* Terminal command line */
+  .term-cmdline {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 36px;
+    padding: 4px 6px;
+    gap: 4px;
+  }
+  .term-filter-chips {
+    flex-wrap: wrap;
+    margin-right: 0;
+    width: 100%;
+    order: 2;
+  }
+  .term-cmdline input {
+    min-width: 100px;
+  }
+  .term-cmdline-right {
+    gap: 4px;
+  }
+
+  /* Level toggles */
+  .level-toggles {
+    flex-wrap: wrap;
+  }
+
+  /* Saved filters */
+  .saved-filters {
+    gap: 4px;
+  }
+
+  /* Tables — make horizontally scrollable */
+  table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  th, td {
+    padding: 6px 8px;
+    white-space: nowrap;
+  }
+
+  /* Forms */
+  .form-row {
+    flex-direction: column;
+    gap: 0;
+  }
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Modals — full-width on mobile */
+  .modal-content {
+    width: 100%;
+    max-width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+    margin: 0;
+  }
+  .modal {
+    align-items: flex-start;
+  }
+  .modal-header { border-radius: 0; }
+  .modal-footer {
+    border-radius: 0;
+    flex-wrap: wrap;
+  }
+  .modal-body { padding: 12px; }
+
+  /* Wizard */
+  .wizard-progress {
+    padding: 10px 12px 8px;
+    overflow-x: auto;
+  }
+  .wizard-step-indicator {
+    font-size: 10px;
+  }
+  .wizard-footer {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  /* Watcher type grid */
+  .watcher-type-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Template row */
+  .template-card {
+    max-width: none;
+  }
+
+  /* Alert rows */
+  .alert-row-main {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .alert-title-text {
+    white-space: normal;
+    flex-basis: 100%;
+    order: -1;
+  }
+  .alert-ts { font-size: 10px; }
+  .alert-time-ago { font-size: 10px; }
+  .alert-detail-row {
+    flex-direction: column;
+    gap: 2px;
+  }
+  .alert-detail-actions {
+    flex-wrap: wrap;
+  }
+
+  /* Watcher rows */
+  .watcher-row-main {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .watcher-title {
+    white-space: normal;
+    flex-basis: 100%;
+    order: -1;
+  }
+  .watcher-summary-meta {
+    max-width: none;
+    white-space: normal;
+  }
+  .watcher-detail-actions {
+    flex-wrap: wrap;
+  }
+
+  /* Connector cards */
+  .connector-header { flex-wrap: wrap; }
+  .connector-meta {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .connector-actions { flex-wrap: wrap; }
+
+  /* Bulk action bar */
+  .bulk-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .bulk-bar .bulk-actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  /* Server detail grid */
+  .server-detail-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 12px;
+  }
+
+  /* Metric chart grid */
+  .metric-charts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Server card meta */
+  .server-card-meta {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* Cards & panels */
+  .card { padding: 10px 12px; }
+  .panel { padding: 10px 12px; }
+
+  /* Toasts */
+  .toast-container {
+    right: 8px;
+    left: 8px;
+    max-width: none;
+  }
+
+  /* Triage items */
+  .triage-item {
+    flex-wrap: wrap;
+    padding: 8px 10px;
+  }
+  .triage-title {
+    flex-basis: 100%;
+    order: -1;
+  }
+  .triage-detail {
+    max-width: none;
+    white-space: normal;
+  }
+
+  /* MCP events */
+  .mcp-event {
+    flex-wrap: wrap;
+    padding: 4px 10px;
+  }
+
+  /* Code blocks */
+  .code-block {
+    padding: 8px 10px;
+    font-size: 11px;
+  }
+  .code-block pre { font-size: 11px; }
+
+  /* Shortcut dialog — narrower on mobile */
+  .shortcut-dialog {
+    min-width: 0;
+    max-width: 90vw;
+    padding: 16px 20px;
+  }
+
+  /* Update banner */
+  .update-banner {
+    flex-wrap: wrap;
+    padding: 8px 10px;
+    font-size: 12px;
+    gap: 6px;
+  }
+
+  /* Run cards */
+  .run-header {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* Summary rows in wizard */
+  .summary-row {
+    flex-direction: column;
+    gap: 2px;
+  }
+  .summary-key { min-width: 0; }
+
+  /* Buttons — slightly larger touch targets */
+  .btn {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+  .btn-sm {
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+
+  /* Setup page */
+  .setup-section { margin-bottom: 20px; }
+
+  /* Notify channel detail */
+  .notify-channel-detail {
+    padding: 8px 10px 8px 10px;
+  }
+
+  /* Dismiss select */
+  .dismiss-reason-select {
+    font-size: 12px;
+  }
+}
+
+/* --- Small phones (< 380px) --- */
+@media (max-width: 379px) {
+  body { font-size: 12px; }
+
+  .tmux-bar { font-size: 11px; }
+
+  .term-ts { display: none; }
+  .term-src { max-width: 80px; }
+
+  .modal-header { padding: 12px; }
+  .modal-body { padding: 10px; }
+  .modal-footer { padding: 10px; }
+
+  .server-detail-grid { grid-template-columns: 1fr; }
+
+  .alert-row { padding: 8px 8px 8px 10px; }
+  .watcher-row { padding: 8px 8px 8px 10px; }
+
+  .filter-tag { padding: 6px 8px; min-width: 100%; }
+}
