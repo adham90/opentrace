@@ -68,6 +68,7 @@ type Server struct {
 	toolCatalog      *mcpserver.ToolCatalog
 	mcpActivityStore store.MCPActivityStore
 	alertGroupStore  store.AlertGroupStore
+	auditStore       store.AuditStore
 	versionChecker   *versionChecker
 	selfUpdater    *selfUpdater
 	sseServer      *mcpgoserver.SSEServer
@@ -102,6 +103,7 @@ type ServerDeps struct {
 	RuleEvaluator    *watcher.RuleEvaluator
 	MCPActivityStore store.MCPActivityStore
 	AlertGroupStore  store.AlertGroupStore
+	AuditStore       store.AuditStore
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
@@ -137,6 +139,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		ruleEvaluator:    deps.RuleEvaluator,
 		mcpActivityStore: deps.MCPActivityStore,
 		alertGroupStore:  deps.AlertGroupStore,
+		auditStore:       deps.AuditStore,
 		versionChecker:   newVersionChecker("adham90", "opentrace"),
 		selfUpdater:    newSelfUpdater("adham90", "opentrace"),
 		restartCh:      make(chan struct{}),
@@ -362,6 +365,9 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Get("/settings/auto-update", srv.handleGetAutoUpdate)
 			r.Put("/settings/auto-update", srv.handleSetAutoUpdate)
 			r.Post("/version/update", srv.handleSelfUpdate)
+			if srv.auditStore != nil {
+				r.Get("/audit-log", srv.handleAuditLog)
+			}
 		})
 
 		// User management API (admin only)
@@ -426,11 +432,61 @@ func (s *Server) getEffectiveAPIKey(ctx context.Context) string {
 	return ""
 }
 
+// audit logs an admin action asynchronously. Safe to call even if auditStore is nil.
+func (s *Server) audit(r *http.Request, action, targetType, targetID, details string) {
+	if s.auditStore == nil {
+		return
+	}
+	user := UserFromContext(r.Context())
+	if user == nil {
+		return
+	}
+	// Fire-and-forget to avoid slowing down the request
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = s.auditStore.Log(ctx, store.LogAuditParams{
+			UserID:     user.ID,
+			UserEmail:  user.Email,
+			Action:     action,
+			TargetType: targetType,
+			TargetID:   targetID,
+			Details:    details,
+			IPAddress:  r.RemoteAddr,
+		})
+	}()
+}
+
+func (s *Server) handleAuditLog(w http.ResponseWriter, r *http.Request) {
+	entries, err := s.auditStore.Recent(r.Context(), 100)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to fetch audit log")
+		return
+	}
+	writeJSON(w, http.StatusOK, entries)
+}
+
 func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+	checks := map[string]any{
 		"status":  "ok",
 		"version": version.Version,
-	})
+	}
+
+	// Check database connectivity
+	if s.db != nil {
+		if err := s.db.PingContext(r.Context()); err != nil {
+			checks["database"] = "error"
+			checks["status"] = "degraded"
+		} else {
+			checks["database"] = "ok"
+		}
+	}
+
+	status := http.StatusOK
+	if checks["status"] != "ok" {
+		status = http.StatusServiceUnavailable
+	}
+	writeJSON(w, status, checks)
 }
 
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {

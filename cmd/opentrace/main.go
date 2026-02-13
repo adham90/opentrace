@@ -37,6 +37,7 @@ type appDeps struct {
 	settingsStore    store.SettingsStore
 	mcpActivityStore store.MCPActivityStore
 	alertGroupStore  store.AlertGroupStore
+	auditStore       store.AuditStore
 	registry         *connector.Registry
 	cfg              *config.Config
 }
@@ -117,6 +118,7 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	settingsStore := store.NewSettingsStore(db)
 	mcpActivityStore := store.NewMCPActivityStore(db)
 	alertGroupStore := store.NewAlertGroupStore(db)
+	auditStore := store.NewAuditStore(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
@@ -135,6 +137,7 @@ func initApp(ctx context.Context) (*appDeps, error) {
 		settingsStore:    settingsStore,
 		mcpActivityStore: mcpActivityStore,
 		alertGroupStore:  alertGroupStore,
+		auditStore:       auditStore,
 		registry:         registry,
 		cfg:              cfg,
 	}, nil
@@ -298,6 +301,7 @@ func run() error {
 		RuleEvaluator:    ruleEvaluator,
 		MCPActivityStore: deps.mcpActivityStore,
 		AlertGroupStore:  deps.alertGroupStore,
+		AuditStore:       deps.auditStore,
 	})
 
 	httpServer := &http.Server{
@@ -428,6 +432,13 @@ func run() error {
 					slog.Warn("mcp activity prune failed", "error", err)
 				} else if n > 0 {
 					slog.Info("pruned old mcp activity records", "count", n)
+				}
+				if deps.auditStore != nil {
+					if n, err := deps.auditStore.Prune(ctx, retention); err != nil {
+						slog.Warn("audit log prune failed", "error", err)
+					} else if n > 0 {
+						slog.Info("pruned old audit log entries", "count", n)
+					}
 				}
 			}
 

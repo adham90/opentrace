@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -292,6 +293,7 @@ func (s *Server) handleRegisterSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Admin created a new user — redirect to settings (user management tab)
+	s.audit(r, "user.create", "user", user.ID, fmt.Sprintf("email=%s role=%s", email, role))
 	http.Redirect(w, r, "/settings#users", http.StatusFound)
 }
 
@@ -382,6 +384,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		setSessionCookie(w, token, int(sessionDuration.Seconds()), s.secureCookies)
 	}
 
+	s.audit(r, "user.password_change", "user", user.ID, "")
 	http.Redirect(w, r, "/profile?success=Password+changed", http.StatusFound)
 }
 
@@ -430,6 +433,7 @@ func (s *Server) handleUpdateUserRole(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update role")
 		return
 	}
+	s.audit(r, "user.role_change", "user", userID, fmt.Sprintf("role=%s", body.Role))
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -486,6 +490,7 @@ func (s *Server) handleToggleUserActive(w http.ResponseWriter, r *http.Request) 
 		s.sessionStore.DeleteAllForUser(r.Context(), userID)
 	}
 
+	s.audit(r, "user.toggle_active", "user", userID, fmt.Sprintf("active=%t", body.Active))
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -536,5 +541,6 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	// Clean up sessions
 	s.sessionStore.DeleteAllForUser(r.Context(), userID)
 
+	s.audit(r, "user.delete", "user", userID, "")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

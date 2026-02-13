@@ -177,6 +177,13 @@ type MCPActivityStore interface {
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
 }
 
+// AuditStore tracks admin actions for security audit trail.
+type AuditStore interface {
+	Log(ctx context.Context, params LogAuditParams) error
+	Recent(ctx context.Context, limit int) ([]AuditEntry, error)
+	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
+}
+
 // AlertGroupStore manages alert groups (incidents).
 type AlertGroupStore interface {
 	Create(ctx context.Context, params CreateAlertGroupParams) (*AlertGroup, error)
