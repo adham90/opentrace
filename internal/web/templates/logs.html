@@ -22,6 +22,7 @@
 
     <div class="term-cmdline-inner">
       <span class="term-prompt-symbol">$</span>
+      <div class="term-active-filters" id="active-filters"></div>
       <input type="text" id="cmd-input" class="term-cmd-input" placeholder="type a command... level:error service:my-app time:1h or search text" spellcheck="false">
       <div class="term-live-badge" id="live-badge" onclick="window.toggleLive()" title="toggle live tail (p)">
         <span class="term-live-dot" id="live-dot"></span>
@@ -29,8 +30,6 @@
       </div>
       <div class="ac-dropdown" id="ac-dropdown" style="display:none"></div>
     </div>
-
-    <div class="term-active-filters" id="active-filters"></div>
   </form>
 </div>
 
@@ -261,25 +260,29 @@
 /* ── Active filters bar ────────────────────────────────────── */
 .term-active-filters {
   display: none;
-  padding: 3px 12px 6px 32px;
-  gap: 6px;
-  flex-wrap: wrap;
+  gap: 4px;
+  flex-wrap: nowrap;
   font-size: 11px;
   font-family: var(--font-mono);
+  flex-shrink: 0;
+  align-items: center;
 }
 .term-active-filters.has-filters { display: flex; }
 
 .term-filter-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 1px 8px;
+  gap: 3px;
+  padding: 0 6px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border);
   border-radius: 3px;
   color: var(--text);
   cursor: pointer;
   user-select: none;
+  white-space: nowrap;
+  line-height: 1.6;
+  font-size: 11px;
 }
 .term-filter-chip:hover { border-color: var(--red); color: var(--red); }
 .term-filter-chip .chip-key { color: var(--text-dim); }
@@ -603,6 +606,19 @@
     cmdInput.value = '';
   }
 
+  // ── Active filter order (for backspace removal) ──────────
+  var filterOrder = ['query', 'time_range', 'event_type', 'environment', 'service', 'level'];
+
+  function removeLastFilter() {
+    for (var i = 0; i < filterOrder.length; i++) {
+      if (filters[filterOrder[i]]) {
+        removeFilter(filterOrder[i]);
+        return true;
+      }
+    }
+    return false;
+  }
+
   // ── Command input handlers ────────────────────────────────
   cmdInput.addEventListener('keydown', function(e) {
     if (e.key === 'Enter') {
@@ -610,8 +626,17 @@
       parseCommand(cmdInput.value);
     }
     if (e.key === 'Escape') {
-      cmdInput.value = '';
-      cmdInput.blur();
+      if (cmdInput.value) {
+        cmdInput.value = '';
+      } else if (hasActiveFilters()) {
+        clearAllFilters();
+      } else {
+        cmdInput.blur();
+      }
+    }
+    if (e.key === 'Backspace' && cmdInput.value === '' && cmdInput.selectionStart === 0) {
+      e.preventDefault();
+      removeLastFilter();
     }
   });
 
