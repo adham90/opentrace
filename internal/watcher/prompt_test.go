@@ -80,7 +80,6 @@ func TestBuildQuery_AllFilters(t *testing.T) {
 		Filters: json.RawMessage(`{
 			"service":"api",
 			"level":"error",
-			"environment":"production",
 			"query":"timeout"
 		}`),
 	}
@@ -90,7 +89,6 @@ func TestBuildQuery_AllFilters(t *testing.T) {
 	for _, expected := range []string{
 		"Service: api",
 		"Level: error",
-		"Environment: production",
 		"Time range: last 1h",
 		"Query: timeout",
 	} {

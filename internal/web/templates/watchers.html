@@ -57,12 +57,6 @@
           </div>
           <div class="form-grid">
             <div class="form-group">
-              <label>Environment</label>
-              <select id="edit-env">
-                <option value="">None</option>
-              </select>
-            </div>
-            <div class="form-group">
               <label>Severity</label>
               <select id="edit-severity">
                 <option value="info">Info</option>
@@ -476,7 +470,6 @@ function renderWatchers(watchers) {
     html += '  <div class="watcher-info">';
     html += '    <span>Last run: ' + lastRun + '</span>';
     html += '    <span class="severity-badge severity-' + w.severity + '">' + w.severity + '</span>';
-    html += (w.environment ? '    <span class="badge badge-env">' + escapeHtml(w.environment) + '</span>' : '');
     html += '  </div>';
     var typedSummary = getTypedWatcherSummary(w);
     if (typedSummary) {
@@ -557,7 +550,7 @@ function renderWatchers(watchers) {
 }
 
 function loadWatchers() {
-  fetch('/api/watchers' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r) { return r.json(); }).then(function(watchers) {
+  fetch('/api/watchers').then(function(r) { return r.json(); }).then(function(watchers) {
     allWatchers = watchers || [];
     var filtered = filterWatchers();
     updateFilterCount(filtered.length, allWatchers.length);
@@ -571,13 +564,9 @@ function openEditModal(id) {
     document.getElementById('edit-watcher-id').value = w.id;
     document.getElementById('edit-title').value = w.title;
     document.getElementById('edit-description').value = w.description || '';
-    document.getElementById('edit-env').value = w.environment || '';
     document.getElementById('edit-severity').value = w.severity || 'warning';
     document.getElementById('edit-timerange').value = w.time_range || '15m';
     document.getElementById('edit-effort').value = w.effort || 'medium';
-
-    // Load environments dropdown
-    loadEnvironmentsForEdit(w.environment || '');
 
     // Show model selector only for AI watchers
     var modelGroup = document.getElementById('edit-model-group');
@@ -589,31 +578,6 @@ function openEditModal(id) {
     }
 
     document.getElementById('edit-modal').style.display = 'flex';
-  });
-}
-
-function loadEnvironmentsForEdit(currentEnv) {
-  var sel = document.getElementById('edit-env');
-  while (sel.options.length > 1) sel.remove(1);
-  sel.value = '';
-
-  fetch('/api/environments').then(function(r) { return r.json(); }).then(function(envs) {
-    if (envs && envs.length) {
-      envs.forEach(function(e) {
-        var opt = document.createElement('option');
-        opt.value = e;
-        opt.textContent = e;
-        sel.appendChild(opt);
-      });
-    }
-    // If current env isn't in the list, add it
-    if (currentEnv && !Array.from(sel.options).some(function(o) { return o.value === currentEnv; })) {
-      var opt = document.createElement('option');
-      opt.value = currentEnv;
-      opt.textContent = currentEnv;
-      sel.appendChild(opt);
-    }
-    sel.value = currentEnv;
   });
 }
 
@@ -649,7 +613,6 @@ function saveEditWatcher(e) {
   var body = {
     title: document.getElementById('edit-title').value,
     description: document.getElementById('edit-description').value,
-    environment: document.getElementById('edit-env').value,
     severity: document.getElementById('edit-severity').value,
     time_range: document.getElementById('edit-timerange').value,
     effort: document.getElementById('edit-effort').value

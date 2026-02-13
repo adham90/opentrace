@@ -13,9 +13,9 @@ func TestListLogAttributesHandler_Services(t *testing.T) {
 	now := time.Now().UTC()
 	ls := &mockLogStore{
 		entries: []store.LogEntry{
-			{ID: 1, Timestamp: now.Add(-1 * time.Hour), Level: "error", Service: "api", Environment: "production"},
-			{ID: 2, Timestamp: now.Add(-2 * time.Hour), Level: "info", Service: "worker", Environment: "production"},
-			{ID: 3, Timestamp: now.Add(-3 * time.Hour), Level: "warn", Service: "api", Environment: "staging"},
+			{ID: 1, Timestamp: now.Add(-1 * time.Hour), Level: "error", Service: "api"},
+			{ID: 2, Timestamp: now.Add(-2 * time.Hour), Level: "info", Service: "worker"},
+			{ID: 3, Timestamp: now.Add(-3 * time.Hour), Level: "warn", Service: "api"},
 		},
 	}
 

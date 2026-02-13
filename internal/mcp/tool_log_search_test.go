@@ -198,7 +198,7 @@ func TestLogSearchHandler_FieldsProjection(t *testing.T) {
 	ls := &mockLogStore{
 		entries: []store.LogEntry{
 			{ID: 1, Timestamp: now.Add(-5 * time.Minute), Level: "error", Service: "api",
-				Message: "test error", Environment: "production",
+				Message: "test error",
 				Metadata: map[string]any{"host": "server-01"}},
 		},
 	}
@@ -233,12 +233,9 @@ func TestLogSearchHandler_FieldsProjection(t *testing.T) {
 	if _, ok := entry["message"]; !ok {
 		t.Error("expected 'message' in projected fields")
 	}
-	// Should NOT have service, environment, metadata, timestamp.
+	// Should NOT have service, metadata, timestamp.
 	if _, ok := entry["service"]; ok {
 		t.Error("did not expect 'service' in projected fields")
-	}
-	if _, ok := entry["environment"]; ok {
-		t.Error("did not expect 'environment' in projected fields")
 	}
 	if _, ok := entry["metadata"]; ok {
 		t.Error("did not expect 'metadata' in projected fields")

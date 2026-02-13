@@ -28,9 +28,9 @@ func (s *alertGroupStore) Create(ctx context.Context, params CreateAlertGroupPar
 	}
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO alert_groups (id, title, severity, environment, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		id, params.Title, severity, params.Environment, now, now,
+		`INSERT INTO alert_groups (id, title, severity, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		id, params.Title, severity, now, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating alert group: %w", err)
@@ -57,11 +57,11 @@ func (s *alertGroupStore) GetByID(ctx context.Context, id string) (*AlertGroup, 
 	var rootCause, resolution sql.NullString
 
 	err := s.db.QueryRowContext(ctx,
-		`SELECT g.id, g.title, g.status, g.severity, g.environment,
+		`SELECT g.id, g.title, g.status, g.severity,
 		        g.root_cause, g.resolution, g.created_at, g.updated_at, g.resolved_at,
 		        (SELECT COUNT(*) FROM alert_group_members WHERE group_id = g.id)
 		 FROM alert_groups g WHERE g.id = ?`, id,
-	).Scan(&g.ID, &g.Title, &g.Status, &g.Severity, &g.Environment,
+	).Scan(&g.ID, &g.Title, &g.Status, &g.Severity,
 		&rootCause, &resolution, &createdAt, &updatedAt, &resolvedAt,
 		&g.AlertCount,
 	)
@@ -88,7 +88,7 @@ func (s *alertGroupStore) GetByID(ctx context.Context, id string) (*AlertGroup, 
 	// Load member alerts
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT a.id, a.watcher_id, a.run_id, COALESCE(a.watcher_title, ''), a.title, a.summary,
-		        COALESCE(a.environment, ''), a.severity, a.details, a.read, a.dismissed, a.created_at
+		        a.severity, a.details, a.read, a.dismissed, a.created_at
 		 FROM alerts a
 		 JOIN alert_group_members m ON m.alert_id = a.id
 		 WHERE m.group_id = ?
@@ -108,7 +108,7 @@ func (s *alertGroupStore) GetByID(ctx context.Context, id string) (*AlertGroup, 
 
 		if err := rows.Scan(
 			&a.ID, &watcherID, &runID, &a.WatcherTitle, &a.Title, &a.Summary,
-			&a.Environment, &a.Severity, &detailsStr, &readInt, &dismissedInt, &alertCreated,
+			&a.Severity, &detailsStr, &readInt, &dismissedInt, &alertCreated,
 		); err != nil {
 			return nil, fmt.Errorf("scanning group alert: %w", err)
 		}
@@ -131,8 +131,8 @@ func (s *alertGroupStore) GetByID(ctx context.Context, id string) (*AlertGroup, 
 	return g, rows.Err()
 }
 
-func (s *alertGroupStore) List(ctx context.Context, status string, environment string) ([]AlertGroup, error) {
-	query := `SELECT g.id, g.title, g.status, g.severity, g.environment,
+func (s *alertGroupStore) List(ctx context.Context, status string) ([]AlertGroup, error) {
+	query := `SELECT g.id, g.title, g.status, g.severity,
 	                  g.root_cause, g.resolution, g.created_at, g.updated_at, g.resolved_at,
 	                  (SELECT COUNT(*) FROM alert_group_members WHERE group_id = g.id)
 	           FROM alert_groups g WHERE 1=1`
@@ -141,10 +141,6 @@ func (s *alertGroupStore) List(ctx context.Context, status string, environment s
 	if status != "" {
 		query += ` AND g.status = ?`
 		args = append(args, status)
-	}
-	if environment != "" {
-		query += ` AND g.environment = ?`
-		args = append(args, environment)
 	}
 
 	query += ` ORDER BY g.created_at DESC`
@@ -162,7 +158,7 @@ func (s *alertGroupStore) List(ctx context.Context, status string, environment s
 		var resolvedAt, rootCause, resolution sql.NullString
 
 		if err := rows.Scan(
-			&g.ID, &g.Title, &g.Status, &g.Severity, &g.Environment,
+			&g.ID, &g.Title, &g.Status, &g.Severity,
 			&rootCause, &resolution, &createdAt, &updatedAt, &resolvedAt,
 			&g.AlertCount,
 		); err != nil {
@@ -297,10 +293,9 @@ func (s *alertGroupStore) AutoCorrelate(ctx context.Context, windowMinutes int) 
 
 	// Find pairs of alerts from different watchers within the time window, not already grouped
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT a1.id, a2.id, a1.environment
+		SELECT a1.id, a2.id
 		FROM alerts a1
 		JOIN alerts a2 ON a1.id < a2.id
-		  AND a1.environment = a2.environment
 		  AND COALESCE(a1.watcher_id, '') != COALESCE(a2.watcher_id, '')
 		  AND ABS(julianday(a1.created_at) - julianday(a2.created_at)) * 1440 < ?
 		  AND a1.dismissed = 0 AND a2.dismissed = 0
@@ -317,7 +312,6 @@ func (s *alertGroupStore) AutoCorrelate(ctx context.Context, windowMinutes int) 
 
 	// Build connected components using union-find
 	parent := make(map[string]string)
-	envMap := make(map[string]string)
 
 	find := func(x string) string {
 		for parent[x] != x {
@@ -335,8 +329,8 @@ func (s *alertGroupStore) AutoCorrelate(ctx context.Context, windowMinutes int) 
 	}
 
 	for rows.Next() {
-		var id1, id2, env string
-		if err := rows.Scan(&id1, &id2, &env); err != nil {
+		var id1, id2 string
+		if err := rows.Scan(&id1, &id2); err != nil {
 			return nil, fmt.Errorf("scanning correlation pair: %w", err)
 		}
 		if _, ok := parent[id1]; !ok {
@@ -345,8 +339,6 @@ func (s *alertGroupStore) AutoCorrelate(ctx context.Context, windowMinutes int) 
 		if _, ok := parent[id2]; !ok {
 			parent[id2] = id2
 		}
-		envMap[id1] = env
-		envMap[id2] = env
 		union(id1, id2)
 	}
 	if err := rows.Err(); err != nil {
@@ -367,12 +359,10 @@ func (s *alertGroupStore) AutoCorrelate(ctx context.Context, windowMinutes int) 
 			continue
 		}
 
-		env := envMap[alertIDs[0]]
 		g, err := s.Create(ctx, CreateAlertGroupParams{
-			Title:       fmt.Sprintf("Correlated alerts (%d)", len(alertIDs)),
-			Severity:    "warning",
-			Environment: env,
-			AlertIDs:    alertIDs,
+			Title:    fmt.Sprintf("Correlated alerts (%d)", len(alertIDs)),
+			Severity: "warning",
+			AlertIDs: alertIDs,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("creating correlated group: %w", err)

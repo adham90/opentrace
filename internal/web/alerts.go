@@ -29,10 +29,6 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if env := r.URL.Query().Get("env"); env != "" {
-		params.Environment = env
-	}
-
 	if r.URL.Query().Get("dismissed") == "true" {
 		params.DismissedOnly = true
 	} else if r.URL.Query().Get("unread") == "true" {
@@ -61,13 +57,12 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAlertCount(w http.ResponseWriter, r *http.Request) {
-	env := r.URL.Query().Get("env")
-	unread, err := s.alertStore.CountUnread(r.Context(), env)
+	unread, err := s.alertStore.CountUnread(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to count alerts")
 		return
 	}
-	total, err := s.alertStore.CountTotal(r.Context(), env)
+	total, err := s.alertStore.CountTotal(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to count alerts")
 		return
@@ -94,8 +89,7 @@ func (s *Server) handleMarkAlertRead(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMarkAllAlertsRead(w http.ResponseWriter, r *http.Request) {
-	env := r.URL.Query().Get("env")
-	if err := s.alertStore.MarkAllRead(r.Context(), env); err != nil {
+	if err := s.alertStore.MarkAllRead(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to mark all alerts read")
 		return
 	}
@@ -103,8 +97,7 @@ func (s *Server) handleMarkAllAlertsRead(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleDismissAllAlerts(w http.ResponseWriter, r *http.Request) {
-	env := r.URL.Query().Get("env")
-	if err := s.alertStore.DismissAll(r.Context(), env); err != nil {
+	if err := s.alertStore.DismissAll(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to dismiss all alerts")
 		return
 	}

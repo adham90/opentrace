@@ -59,9 +59,6 @@ func (m *mockDataSourceStore) Update(_ context.Context, id uuid.UUID, params sto
 			if params.Name != nil {
 				m.dataSources[i].Name = *params.Name
 			}
-			if params.Environment != nil {
-				m.dataSources[i].Environment = *params.Environment
-			}
 			if params.Config != nil {
 				m.dataSources[i].Config = params.Config
 			}

@@ -14,9 +14,8 @@ import (
 // handleListAlertGroups lists alert groups with optional status/environment filters.
 func (s *Server) handleListAlertGroups(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
-	env := r.URL.Query().Get("env")
 
-	groups, err := s.alertGroupStore.List(r.Context(), status, env)
+	groups, err := s.alertGroupStore.List(r.Context(), status)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list alert groups")
 		return

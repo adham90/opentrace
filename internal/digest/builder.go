@@ -15,8 +15,7 @@ import (
 type DigestOpts struct {
 	PeriodStart time.Time
 	PeriodEnd   time.Time
-	Environment string // optional filter
-	TopN        int    // max alerts to include (default 10)
+	TopN        int // max alerts to include (default 10)
 }
 
 // Builder generates digests from store data.
@@ -66,7 +65,6 @@ func (b *Builder) Generate(ctx context.Context, opts DigestOpts) (*Digest, error
 		GeneratedAt:    time.Now().UTC(),
 		PeriodStart:    opts.PeriodStart,
 		PeriodEnd:      opts.PeriodEnd,
-		Environment:    opts.Environment,
 		Status:         status,
 		AlertSummary:   alertSummary,
 		WatcherSummary: watcherSummary,
@@ -80,7 +78,7 @@ func (b *Builder) Generate(ctx context.Context, opts DigestOpts) (*Digest, error
 
 func (b *Builder) buildAlertData(ctx context.Context, opts DigestOpts) (AlertSummary, []AlertItem, error) {
 	// Count by severity in period
-	severityCounts, err := b.alertStore.CountBySeverity(ctx, opts.PeriodStart, opts.PeriodEnd, opts.Environment)
+	severityCounts, err := b.alertStore.CountBySeverity(ctx, opts.PeriodStart, opts.PeriodEnd)
 	if err != nil {
 		return AlertSummary{}, nil, err
 	}
@@ -90,7 +88,7 @@ func (b *Builder) buildAlertData(ctx context.Context, opts DigestOpts) (AlertSum
 		total += c
 	}
 
-	unread, err := b.alertStore.CountUnread(ctx, opts.Environment)
+	unread, err := b.alertStore.CountUnread(ctx)
 	if err != nil {
 		return AlertSummary{}, nil, err
 	}
@@ -106,8 +104,7 @@ func (b *Builder) buildAlertData(ctx context.Context, opts DigestOpts) (AlertSum
 
 	// Get top alerts in period (sorted by severity then time)
 	alerts, err := b.alertStore.List(ctx, store.ListAlertParams{
-		Environment: opts.Environment,
-		Limit:       opts.TopN,
+		Limit: opts.TopN,
 	})
 	if err != nil {
 		return AlertSummary{}, nil, err
@@ -150,9 +147,7 @@ func (b *Builder) buildAlertData(ctx context.Context, opts DigestOpts) (AlertSum
 }
 
 func (b *Builder) buildWatcherData(ctx context.Context, opts DigestOpts) (WatcherSummary, []WatcherHealth, error) {
-	watchers, err := b.watcherStore.List(ctx, store.ListWatcherParams{
-		Environment: opts.Environment,
-	})
+	watchers, err := b.watcherStore.List(ctx, store.ListWatcherParams{})
 	if err != nil {
 		return WatcherSummary{}, nil, err
 	}
@@ -195,9 +190,8 @@ func (b *Builder) buildWatcherData(ctx context.Context, opts DigestOpts) (Watche
 
 		// Count alerts for this watcher in period
 		watcherAlerts, err := b.alertStore.List(ctx, store.ListAlertParams{
-			WatcherID:   &w.ID,
-			Environment: opts.Environment,
-			Limit:       1000,
+			WatcherID: &w.ID,
+			Limit:     1000,
 		})
 		if err != nil {
 			return WatcherSummary{}, nil, err
@@ -240,7 +234,7 @@ func (b *Builder) buildTrends(ctx context.Context, opts DigestOpts) (*Trends, er
 	prevEnd := opts.PeriodStart
 
 	// Current period alert count (already computed but we count again for trends comparison)
-	currentAlerts, err := b.alertStore.CountBySeverity(ctx, opts.PeriodStart, opts.PeriodEnd, opts.Environment)
+	currentAlerts, err := b.alertStore.CountBySeverity(ctx, opts.PeriodStart, opts.PeriodEnd)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +244,7 @@ func (b *Builder) buildTrends(ctx context.Context, opts DigestOpts) (*Trends, er
 	}
 
 	// Previous period alert count
-	prevAlerts, err := b.alertStore.CountBySeverity(ctx, prevStart, prevEnd, opts.Environment)
+	prevAlerts, err := b.alertStore.CountBySeverity(ctx, prevStart, prevEnd)
 	if err != nil {
 		return nil, err
 	}

@@ -62,10 +62,6 @@
               <option value="monitoring">Monitoring</option>
             </select>
           </div>
-          <div class="form-group">
-            <label>Environment</label>
-            <input type="text" id="connector-env" placeholder="e.g. production">
-          </div>
         </div>
         <div id="connector-db-fields">
           <div class="form-group">
@@ -139,8 +135,7 @@ function getTimeAgo(dateStr) {
 // ── Data loading ──────────────────────────────────────────
 
 function loadSources() {
-  var env = getGlobalEnv();
-  var connUrl = '/api/connectors' + (env ? '?env=' + encodeURIComponent(env) : '');
+  var connUrl = '/api/connectors';
   var srvUrl = '/api/servers';
 
   Promise.all([
@@ -210,16 +205,12 @@ function renderConnectorRow(c) {
   var statusClass = getConnectorStatusClass(c.status);
   var statusDot = c.status === 'connected' ? '&#9679;' : c.status === 'error' ? '&#9888;' : '&#9675;';
   var lastSeen = c.last_tested_at ? getTimeAgo(c.last_tested_at) : 'never tested';
-  var env = c.environment || '';
   var expanded = expandedSources['db-' + c.id] ? true : false;
 
   var html = '<div class="source-row" data-source-id="db-' + c.id + '">';
   html += '  <div class="source-row-main" onclick="toggleSourceDetail(\'db-' + c.id + '\')" style="cursor:pointer">';
   html += '    <span class="source-type-tag source-type-db">[db]</span>';
   html += '    <span class="source-name">' + escapeHtml(c.name) + '</span>';
-  if (env) {
-    html += '    <span class="badge badge-env">' + escapeHtml(env) + '</span>';
-  }
   html += '    <span class="source-status ' + statusClass + '">' + statusDot + ' ' + escapeHtml(c.status) + '</span>';
   html += '    <span class="source-time-ago">' + lastSeen + '</span>';
   html += '  </div>';
@@ -406,7 +397,6 @@ function editConnector(id) {
     document.getElementById('connector-name').value = c.name || '';
     document.getElementById('connector-type').value = c.type || 'database';
     document.getElementById('connector-type').disabled = true;
-    document.getElementById('connector-env').value = c.environment || '';
     if (c.config) {
       document.getElementById('connector-host').value = c.config.host || '';
       document.getElementById('connector-port').value = c.config.port || '5432';
@@ -444,7 +434,6 @@ function saveConnector(e) {
 
   var name = document.getElementById('connector-name').value.trim();
   var type = document.getElementById('connector-type').value;
-  var env = document.getElementById('connector-env').value.trim();
 
   if (!name) {
     showToast('Name is required', 'error');
@@ -465,7 +454,7 @@ function saveConnector(e) {
   setButtonLoading(btn, true, 'saving...');
 
   if (isEdit) {
-    var body = { name: name, environment: env, config: config };
+    var body = { name: name, config: config };
     fetch('/api/connectors/' + editId, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
@@ -481,7 +470,7 @@ function saveConnector(e) {
       showToast('Network error', 'error');
     });
   } else {
-    var body = { type: type, name: name, environment: env, config: config };
+    var body = { type: type, name: name, config: config };
     fetch('/api/connectors', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},

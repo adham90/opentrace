@@ -46,7 +46,7 @@ func TestAlertStore_CRUD(t *testing.T) {
 	}
 
 	// CountUnread
-	count, err := as.CountUnread(ctx, "")
+	count, err := as.CountUnread(ctx)
 	if err != nil {
 		t.Fatalf("CountUnread: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestAlertStore_CRUD(t *testing.T) {
 		t.Fatalf("MarkRead: %v", err)
 	}
 
-	count, _ = as.CountUnread(ctx, "")
+	count, _ = as.CountUnread(ctx)
 	if count != 1 {
 		t.Errorf("unread after MarkRead = %d, want 1", count)
 	}
@@ -92,7 +92,7 @@ func TestAlertStore_CRUD(t *testing.T) {
 		t.Fatalf("Dismiss: %v", err)
 	}
 
-	count, _ = as.CountUnread(ctx, "")
+	count, _ = as.CountUnread(ctx)
 	if count != 0 {
 		t.Errorf("unread after Dismiss = %d, want 0", count)
 	}
@@ -247,7 +247,7 @@ func TestAlertStore_CountBySeverity(t *testing.T) {
 		t.Fatalf("insert old: %v", err)
 	}
 
-	counts, err := as.CountBySeverity(ctx, periodStart, now, "")
+	counts, err := as.CountBySeverity(ctx, periodStart, now)
 	if err != nil {
 		t.Fatalf("CountBySeverity: %v", err)
 	}
@@ -260,47 +260,6 @@ func TestAlertStore_CountBySeverity(t *testing.T) {
 	}
 	if counts["info"] != 1 {
 		t.Errorf("info = %d, want 1", counts["info"])
-	}
-}
-
-func TestAlertStore_CountBySeverity_Environment(t *testing.T) {
-	db := setupTestDB(t)
-	as := NewAlertStore(db)
-	ctx := context.Background()
-
-	now := time.Now().UTC()
-	periodStart := now.Add(-24 * time.Hour)
-
-	// Production alert
-	_, err := db.ExecContext(ctx,
-		`INSERT INTO alerts (id, title, summary, severity, environment, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		uuid.New().String(), "prod", "prod", "critical", "production",
-		now.Add(-1*time.Hour).Format(time.RFC3339),
-	)
-	if err != nil {
-		t.Fatalf("insert: %v", err)
-	}
-
-	// Staging alert
-	_, err = db.ExecContext(ctx,
-		`INSERT INTO alerts (id, title, summary, severity, environment, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		uuid.New().String(), "stag", "stag", "warning", "staging",
-		now.Add(-2*time.Hour).Format(time.RFC3339),
-	)
-	if err != nil {
-		t.Fatalf("insert: %v", err)
-	}
-
-	counts, err := as.CountBySeverity(ctx, periodStart, now, "production")
-	if err != nil {
-		t.Fatalf("CountBySeverity: %v", err)
-	}
-
-	if counts["critical"] != 1 {
-		t.Errorf("critical = %d, want 1", counts["critical"])
-	}
-	if counts["warning"] != 0 {
-		t.Errorf("warning = %d, want 0 (staging filtered out)", counts["warning"])
 	}
 }
 

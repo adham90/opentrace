@@ -119,40 +119,6 @@ func TestListDataSources_Empty(t *testing.T) {
 	}
 }
 
-func TestListDataSources_EnvironmentFilter(t *testing.T) {
-	db := setupTestDB(t)
-	s := NewDataSourceStore(db)
-	ctx := context.Background()
-
-	s.Create(ctx, CreateDataSourceParams{Type: ConnectorLogs, Name: "Prod Logs", Environment: "production", Config: map[string]any{}})
-	s.Create(ctx, CreateDataSourceParams{Type: ConnectorDatabase, Name: "Staging DB", Environment: "staging", Config: map[string]any{}})
-	s.Create(ctx, CreateDataSourceParams{Type: ConnectorLogs, Name: "No Env", Config: map[string]any{}})
-
-	// All
-	all, err := s.List(ctx, ListDataSourceParams{})
-	if err != nil {
-		t.Fatalf("List all failed: %v", err)
-	}
-	if len(all) != 3 {
-		t.Fatalf("len = %d, want 3", len(all))
-	}
-
-	// Filter production
-	prod, err := s.List(ctx, ListDataSourceParams{Environment: "production"})
-	if err != nil {
-		t.Fatalf("List prod failed: %v", err)
-	}
-	if len(prod) != 1 {
-		t.Fatalf("len = %d, want 1", len(prod))
-	}
-	if prod[0].Name != "Prod Logs" {
-		t.Errorf("Name = %q, want %q", prod[0].Name, "Prod Logs")
-	}
-	if prod[0].Environment != "production" {
-		t.Errorf("Environment = %q, want %q", prod[0].Environment, "production")
-	}
-}
-
 func TestUpdateDataSource_Status(t *testing.T) {
 	db := setupTestDB(t)
 	s := NewDataSourceStore(db)

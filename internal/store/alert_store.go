@@ -49,10 +49,10 @@ func (s *alertStore) Create(ctx context.Context, params CreateAlertParams) (*Ale
 	}
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO alerts (id, watcher_id, run_id, title, summary, environment, severity, details, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO alerts (id, watcher_id, run_id, title, summary, severity, details, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		id.String(), watcherIDStr, runIDStr, params.Title, params.Summary,
-		params.Environment, string(severity), detailsStr, nowStr,
+		string(severity), detailsStr, nowStr,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating alert: %w", err)
@@ -64,7 +64,6 @@ func (s *alertStore) Create(ctx context.Context, params CreateAlertParams) (*Ale
 		RunID:       params.RunID,
 		Title:       params.Title,
 		Summary:     params.Summary,
-		Environment: params.Environment,
 		Severity:    severity,
 		Details:     params.Details,
 		CreatedAt:   now,
@@ -78,12 +77,12 @@ func (s *alertStore) GetByID(ctx context.Context, id uuid.UUID) (*Alert, error) 
 	var readInt, dismissedInt int
 
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, watcher_id, run_id, title, summary, environment, severity, details, read, dismissed,
+		`SELECT id, watcher_id, run_id, title, summary, severity, details, read, dismissed,
 		        dismiss_reason, dismissed_at, snoozed_until, created_at
 		 FROM alerts WHERE id = ?`, id.String(),
 	).Scan(
 		&a.ID, &a.WatcherID, &a.RunID, &a.Title, &a.Summary,
-		&a.Environment, &a.Severity, &detailsStr, &readInt, &dismissedInt,
+		&a.Severity, &detailsStr, &readInt, &dismissedInt,
 		&dismissReason, &dismissedAt, &snoozedUntil, &createdAt,
 	)
 	if err != nil {
@@ -120,7 +119,7 @@ func (s *alertStore) List(ctx context.Context, params ListAlertParams) ([]Alert,
 		limit = 50
 	}
 
-	query := `SELECT a.id, a.watcher_id, a.run_id, COALESCE(w.title, ''), a.title, a.summary, a.environment, a.severity, a.details, a.read, a.dismissed,
+	query := `SELECT a.id, a.watcher_id, a.run_id, COALESCE(w.title, ''), a.title, a.summary, a.severity, a.details, a.read, a.dismissed,
 	                 a.dismiss_reason, a.dismissed_at, a.snoozed_until, a.created_at
 		 FROM alerts a LEFT JOIN watchers w ON a.watcher_id = w.id`
 	var conditions []string
@@ -151,11 +150,6 @@ func (s *alertStore) List(ctx context.Context, params ListAlertParams) ([]Alert,
 		args = append(args, params.WatcherID.String())
 	}
 
-	if params.Environment != "" {
-		conditions = append(conditions, `a.environment = ?`)
-		args = append(args, params.Environment)
-	}
-
 	if len(conditions) > 0 {
 		query += ` WHERE ` + strings.Join(conditions, ` AND `)
 	}
@@ -184,7 +178,7 @@ func (s *alertStore) List(ctx context.Context, params ListAlertParams) ([]Alert,
 
 		if err := rows.Scan(
 			&a.ID, &a.WatcherID, &a.RunID, &a.WatcherTitle, &a.Title, &a.Summary,
-			&a.Environment, &a.Severity, &detailsStr, &readInt, &dismissedInt,
+			&a.Severity, &detailsStr, &readInt, &dismissedInt,
 			&dismissReason, &dismissedAt, &snoozedUntil, &createdAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning alert: %w", err)
@@ -214,46 +208,31 @@ func (s *alertStore) List(ctx context.Context, params ListAlertParams) ([]Alert,
 	return result, rows.Err()
 }
 
-func (s *alertStore) CountUnread(ctx context.Context, environment string) (int, error) {
+func (s *alertStore) CountUnread(ctx context.Context) (int, error) {
 	var count int
-	query := `SELECT COUNT(*) FROM alerts WHERE read = 0 AND dismissed = 0`
-	var args []any
-	if environment != "" {
-		query += ` AND environment = ?`
-		args = append(args, environment)
-	}
-	err := s.db.QueryRowContext(ctx, query, args...).Scan(&count)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM alerts WHERE read = 0 AND dismissed = 0`,
+	).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("counting unread alerts: %w", err)
 	}
 	return count, nil
 }
 
-func (s *alertStore) CountTotal(ctx context.Context, environment string) (int, error) {
+func (s *alertStore) CountTotal(ctx context.Context) (int, error) {
 	var count int
-	query := `SELECT COUNT(*) FROM alerts WHERE dismissed = 0`
-	var args []any
-	if environment != "" {
-		query += ` AND environment = ?`
-		args = append(args, environment)
-	}
-	err := s.db.QueryRowContext(ctx, query, args...).Scan(&count)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM alerts WHERE dismissed = 0`,
+	).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("counting total alerts: %w", err)
 	}
 	return count, nil
 }
 
-func (s *alertStore) CountBySeverity(ctx context.Context, since, until time.Time, environment string) (map[string]int, error) {
-	query := `SELECT severity, COUNT(*) FROM alerts WHERE dismissed = 0 AND created_at >= ? AND created_at < ?`
+func (s *alertStore) CountBySeverity(ctx context.Context, since, until time.Time) (map[string]int, error) {
+	query := `SELECT severity, COUNT(*) FROM alerts WHERE dismissed = 0 AND created_at >= ? AND created_at < ? GROUP BY severity`
 	args := []any{since.UTC().Format(time.RFC3339), until.UTC().Format(time.RFC3339)}
-
-	if environment != "" {
-		query += ` AND environment = ?`
-		args = append(args, environment)
-	}
-
-	query += ` GROUP BY severity`
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -285,14 +264,8 @@ func (s *alertStore) MarkRead(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (s *alertStore) MarkAllRead(ctx context.Context, environment string) error {
-	query := `UPDATE alerts SET read = 1 WHERE read = 0 AND dismissed = 0`
-	var args []any
-	if environment != "" {
-		query += ` AND environment = ?`
-		args = append(args, environment)
-	}
-	_, err := s.db.ExecContext(ctx, query, args...)
+func (s *alertStore) MarkAllRead(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE alerts SET read = 1 WHERE read = 0 AND dismissed = 0`)
 	if err != nil {
 		return fmt.Errorf("marking all alerts read: %w", err)
 	}
@@ -315,15 +288,11 @@ func (s *alertStore) Dismiss(ctx context.Context, id uuid.UUID, reason string) e
 	return nil
 }
 
-func (s *alertStore) DismissAll(ctx context.Context, environment string) error {
+func (s *alertStore) DismissAll(ctx context.Context) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	query := `UPDATE alerts SET dismissed = 1, dismissed_at = ? WHERE dismissed = 0`
-	args := []any{now}
-	if environment != "" {
-		query += ` AND environment = ?`
-		args = append(args, environment)
-	}
-	_, err := s.db.ExecContext(ctx, query, args...)
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE alerts SET dismissed = 1, dismissed_at = ? WHERE dismissed = 0`, now,
+	)
 	if err != nil {
 		return fmt.Errorf("dismissing all alerts: %w", err)
 	}

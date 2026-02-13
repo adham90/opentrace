@@ -73,12 +73,11 @@ func init() {
 }
 
 type LogFilters struct {
-	Query       string
-	Service     string
-	Level       string
-	Environment string
-	EventType   string
-	TimeRange   string // preset: 15m, 1h, 6h, 24h, 7d, or empty (all)
+	Query     string
+	Service   string
+	Level     string
+	EventType string
+	TimeRange string // preset: 15m, 1h, 6h, 24h, 7d, or empty (all)
 }
 
 // parseTimeRange converts a time range preset string to a Start time pointer.
@@ -185,12 +184,11 @@ func (s *Server) getTemplate(fallback *template.Template, files ...string) *temp
 
 func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 	filters := LogFilters{
-		Query:       r.URL.Query().Get("query"),
-		Service:     r.URL.Query().Get("service"),
-		Level:       r.URL.Query().Get("level"),
-		Environment: r.URL.Query().Get("environment"),
-		EventType:   r.URL.Query().Get("event_type"),
-		TimeRange:   r.URL.Query().Get("time_range"),
+		Query:     r.URL.Query().Get("query"),
+		Service:   r.URL.Query().Get("service"),
+		Level:     r.URL.Query().Get("level"),
+		EventType: r.URL.Query().Get("event_type"),
+		TimeRange: r.URL.Query().Get("time_range"),
 	}
 
 	limit := 50
@@ -214,7 +212,6 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		Query:          filters.Query,
 		Service:        filters.Service,
 		Level:          filters.Level,
-		Environment:    filters.Environment,
 		EventType:      filters.EventType,
 		Start:          parseTimeRange(filters.TimeRange),
 		Limit:          limit + 1, // fetch one extra to detect if there are more
@@ -293,19 +290,17 @@ func (s *Server) handleLogsPoll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filters := LogFilters{
-		Query:       r.URL.Query().Get("query"),
-		Service:     r.URL.Query().Get("service"),
-		Level:       r.URL.Query().Get("level"),
-		Environment: r.URL.Query().Get("environment"),
-		EventType:   r.URL.Query().Get("event_type"),
-		TimeRange:   r.URL.Query().Get("time_range"),
+		Query:     r.URL.Query().Get("query"),
+		Service:   r.URL.Query().Get("service"),
+		Level:     r.URL.Query().Get("level"),
+		EventType: r.URL.Query().Get("event_type"),
+		TimeRange: r.URL.Query().Get("time_range"),
 	}
 
 	pollParams := store.LogSearchParams{
 		Query:          filters.Query,
 		Service:        filters.Service,
 		Level:          filters.Level,
-		Environment:    filters.Environment,
 		EventType:      filters.EventType,
 		Start:          parseTimeRange(filters.TimeRange),
 		SinceID:        sinceID,
@@ -462,7 +457,6 @@ func (s *Server) handleToolsAPI(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	env := r.URL.Query().Get("env")
 
 	type overviewStats struct {
 		Alerts     map[string]int `json:"alerts"`
@@ -482,11 +476,11 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 
 	// Alerts stats — use aggregate counts instead of fetching all rows
 	if s.alertStore != nil {
-		if total, err := s.alertStore.CountTotal(ctx, env); err == nil {
+		if total, err := s.alertStore.CountTotal(ctx); err == nil {
 			stats.Alerts["total"] = total
 		}
 		oneHourAgo := time.Now().Add(-1 * time.Hour)
-		if bySev, err := s.alertStore.CountBySeverity(ctx, oneHourAgo, time.Now(), env); err == nil {
+		if bySev, err := s.alertStore.CountBySeverity(ctx, oneHourAgo, time.Now()); err == nil {
 			for sev, count := range bySev {
 				stats.Alerts[sev] = count
 			}
@@ -495,7 +489,7 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 
 	// Watchers stats
 	if s.watcherStore != nil {
-		watchers, err := s.watcherStore.List(ctx, store.ListWatcherParams{Environment: env})
+		watchers, err := s.watcherStore.List(ctx, store.ListWatcherParams{})
 		if err == nil {
 			stats.Watchers["total"] = len(watchers)
 			for _, w := range watchers {
@@ -516,9 +510,8 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 		now := time.Now()
 		logOneHourAgo := now.Add(-1 * time.Hour)
 		counts, err := s.logStore.CountByLevel(ctx, store.LogCountParams{
-			Since:       logOneHourAgo,
-			Until:       now,
-			Environment: env,
+			Since: logOneHourAgo,
+			Until: now,
 		})
 		if err == nil {
 			total := 0
@@ -534,7 +527,7 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 
 	// Connectors stats
 	if s.dsStore != nil {
-		connectors, err := s.dsStore.List(ctx, store.ListDataSourceParams{Environment: env})
+		connectors, err := s.dsStore.List(ctx, store.ListDataSourceParams{})
 		if err == nil {
 			stats.Connectors["total"] = len(connectors)
 			for _, c := range connectors {
@@ -565,22 +558,6 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, stats)
-}
-
-func (s *Server) handleListEnvironments(w http.ResponseWriter, r *http.Request) {
-	if s.db == nil {
-		writeJSON(w, http.StatusOK, []string{})
-		return
-	}
-	envs, err := store.ListEnvironments(r.Context(), s.db)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list environments")
-		return
-	}
-	if envs == nil {
-		envs = []string{}
-	}
-	writeJSON(w, http.StatusOK, envs)
 }
 
 func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {

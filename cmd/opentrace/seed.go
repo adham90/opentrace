@@ -65,8 +65,6 @@ func runSeed() error {
 	// --- Logs ---
 	services := []string{"payment-api", "user-service", "gateway", "notification-service", "order-service"}
 	levels := []string{"DEBUG", "INFO", "INFO", "INFO", "WARN", "ERROR"} // weighted toward INFO
-	envs := []string{"production", "staging"}
-
 	messages := map[string][]string{
 		"DEBUG": {
 			"Cache miss for key user:session:abc123",
@@ -110,17 +108,15 @@ func runSeed() error {
 	for i := 0; i < 500; i++ {
 		level := levels[rand.Intn(len(levels))]
 		svc := services[rand.Intn(len(services))]
-		env := envs[rand.Intn(len(envs))]
 		msgs := messages[level]
 		msg := msgs[rand.Intn(len(msgs))]
 		ts := now.Add(-time.Duration(rand.Intn(7200)) * time.Second) // last 2 hours
 
 		entry := store.LogEntry{
-			Timestamp:   ts,
-			Level:       level,
-			Service:     svc,
-			Message:     msg,
-			Environment: env,
+			Timestamp: ts,
+			Level:     level,
+			Service:   svc,
+			Message:   msg,
 		}
 		if rand.Float32() < 0.3 {
 			entry.TraceID = fmt.Sprintf("trace-%s", uuid.New().String()[:8])
@@ -153,12 +149,11 @@ func runSeed() error {
 	for _, ev := range eventEntries {
 		ts := now.Add(-time.Duration(rand.Intn(7200)) * time.Second)
 		entry := store.LogEntry{
-			Timestamp:   ts,
-			Level:       "INFO",
-			Service:     ev.service,
-			Message:     ev.message,
-			Environment: envs[rand.Intn(len(envs))],
-			EventType:   ev.eventType,
+			Timestamp: ts,
+			Level:     "INFO",
+			Service:   ev.service,
+			Message:   ev.message,
+			EventType: ev.eventType,
 		}
 		if rand.Float32() < 0.3 {
 			entry.TraceID = fmt.Sprintf("trace-%s", uuid.New().String()[:8])
@@ -178,7 +173,7 @@ func runSeed() error {
 		{
 			Title:       "Payment Error Spike",
 			Description: "Alert when payment errors exceed normal levels",
-			Environment: "production",
+
 			Severity:    store.SeverityCritical,
 			Filters:     json.RawMessage(`{"service":"payment-api","level":"ERROR"}`),
 			TimeRange:   "15m",
@@ -195,7 +190,7 @@ func runSeed() error {
 		{
 			Title:       "Slow Query Watcher",
 			Description: "Detect slow database queries across all services",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			Filters:     json.RawMessage(`{"level":"WARN"}`),
 			TimeRange:   "30m",
@@ -215,7 +210,7 @@ func runSeed() error {
 		{
 			Title:       "Error Rate Watcher",
 			Description: "Watch for unusual error patterns in all services",
-			Environment: "",
+
 			Severity:    store.SeverityWarning,
 			Filters:     json.RawMessage(`{"level":"ERROR"}`),
 			TimeRange:   "1h",
@@ -230,7 +225,6 @@ func runSeed() error {
 		{
 			Title:       "Staging Health Check",
 			Description: "Watch staging environment for issues before prod deploy",
-			Environment: "staging",
 			Severity:    store.SeverityInfo,
 			Filters:     json.RawMessage(`{}`),
 			TimeRange:   "1h",
@@ -240,7 +234,7 @@ func runSeed() error {
 		{
 			Title:       "Connection Saturation",
 			Description: "Watch PostgreSQL connection pool usage and alert on saturation",
-			Environment: "production",
+
 			Severity:    store.SeverityCritical,
 			Filters:     json.RawMessage(`{"service":"gateway"}`),
 			TimeRange:   "5m",
@@ -260,7 +254,7 @@ func runSeed() error {
 		{
 			Title:       "Replication Lag",
 			Description: "Alert when database replication lag exceeds acceptable levels",
-			Environment: "production",
+
 			Severity:    store.SeverityCritical,
 			Filters:     json.RawMessage(`{"service":"db-replica"}`),
 			TimeRange:   "5m",
@@ -280,7 +274,7 @@ func runSeed() error {
 		// --- Rule watchers: query source ---
 		{
 			Title:       "Idle-in-Transaction Sessions",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "5m",
@@ -296,7 +290,7 @@ func runSeed() error {
 		},
 		{
 			Title:       "Dead Tuples on Orders Table",
-			Environment: "production",
+
 			Severity:    store.SeverityCritical,
 			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "15m",
@@ -320,7 +314,7 @@ func runSeed() error {
 		},
 		{
 			Title:       "Long-Running Queries",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "5m",
@@ -338,7 +332,7 @@ func runSeed() error {
 		// --- Rule watchers: logs source ---
 		{
 			Title:       "Error Log Volume",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "5m",
@@ -357,7 +351,7 @@ func runSeed() error {
 		},
 		{
 			Title:       "Payment Service Timeouts",
-			Environment: "production",
+
 			Severity:    store.SeverityCritical,
 			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "5m",
@@ -385,7 +379,7 @@ func runSeed() error {
 		},
 		{
 			Title:       "Gateway 503 Errors",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "15m",
@@ -407,7 +401,7 @@ func runSeed() error {
 		// --- Deadman watchers ---
 		{
 			Title:       "Heartbeat: Payment API",
-			Environment: "production",
+
 			Severity:    store.SeverityCritical,
 			WatcherType: store.WatcherTypeDeadman,
 			TimeRange:   "5m",
@@ -418,7 +412,7 @@ func runSeed() error {
 		},
 		{
 			Title:       "Heartbeat: Order Processing",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			WatcherType: store.WatcherTypeDeadman,
 			TimeRange:   "15m",
@@ -431,7 +425,7 @@ func runSeed() error {
 		// --- Diff watchers ---
 		{
 			Title:       "Schema Drift: Users Table",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			WatcherType: store.WatcherTypeDiff,
 			TimeRange:   "1h",
@@ -442,7 +436,7 @@ func runSeed() error {
 		},
 		{
 			Title:       "Config Table Changes",
-			Environment: "production",
+
 			Severity:    store.SeverityInfo,
 			WatcherType: store.WatcherTypeDiff,
 			TimeRange:   "30m",
@@ -455,7 +449,7 @@ func runSeed() error {
 		// --- Composite watchers ---
 		{
 			Title:       "Payment Pipeline Health",
-			Environment: "production",
+
 			Severity:    store.SeverityCritical,
 			WatcherType: store.WatcherTypeComposite,
 			TimeRange:   "5m",
@@ -465,7 +459,7 @@ func runSeed() error {
 		},
 		{
 			Title:       "Any Service Down",
-			Environment: "production",
+
 			Severity:    store.SeverityCritical,
 			WatcherType: store.WatcherTypeComposite,
 			TimeRange:   "5m",
@@ -477,7 +471,7 @@ func runSeed() error {
 		// --- Trend watchers ---
 		{
 			Title:       "Error Rate Trend",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			WatcherType: store.WatcherTypeTrend,
 			TimeRange:   "1h",
@@ -488,7 +482,7 @@ func runSeed() error {
 		},
 		{
 			Title:       "Order Volume Trend",
-			Environment: "production",
+
 			Severity:    store.SeverityInfo,
 			WatcherType: store.WatcherTypeTrend,
 			TimeRange:   "1h",
@@ -501,7 +495,7 @@ func runSeed() error {
 		// --- Sequence watchers ---
 		{
 			Title:       "Cascading Failure: Auth → API → DB",
-			Environment: "production",
+
 			Severity:    store.SeverityCritical,
 			WatcherType: store.WatcherTypeSequence,
 			TimeRange:   "1h",
@@ -511,7 +505,7 @@ func runSeed() error {
 		},
 		{
 			Title:       "Deploy → Error Spike Pattern",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			WatcherType: store.WatcherTypeSequence,
 			TimeRange:   "30m",
@@ -523,7 +517,7 @@ func runSeed() error {
 		// --- Rule watchers: health source ---
 		{
 			Title:       "Primary DB Health",
-			Environment: "production",
+
 			Severity:    store.SeverityCritical,
 			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "1m",
@@ -537,7 +531,7 @@ func runSeed() error {
 		},
 		{
 			Title:       "Replica DB Health",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "5m",
@@ -551,7 +545,7 @@ func runSeed() error {
 		},
 		{
 			Title:       "Staging DB Connectivity",
-			Environment: "staging",
+
 			Severity:    store.SeverityInfo,
 			WatcherType: store.WatcherTypeRule,
 			TimeRange:   "15m",
@@ -937,7 +931,7 @@ func runSeed() error {
 			WatcherID:   &watcherIDs[0],
 			Title:       "Payment errors spiked to 23/min",
 			Summary:     "Payment error rate jumped from ~2/min to 23/min over the last 15 minutes. Most failures are card-declined errors from the payment-api service. This correlates with a new deployment (v2.14.3) that rolled out 20 minutes ago.",
-			Environment: "production",
+
 			Severity:    store.SeverityCritical,
 			Details:     json.RawMessage(`{"error_count":23,"baseline":2,"service":"payment-api","deployment":"v2.14.3"}`),
 		},
@@ -945,7 +939,7 @@ func runSeed() error {
 			WatcherID:   &watcherIDs[1],
 			Title:       "Slow queries on order-service",
 			Summary:     "3 queries exceeding 500ms threshold detected in order-service. The slowest query (850ms) hits the orders table with a missing index on customer_id.",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			Details:     json.RawMessage(`{"slow_queries":3,"max_duration_ms":850,"table":"orders"}`),
 		},
@@ -953,21 +947,21 @@ func runSeed() error {
 			WatcherID:   &watcherIDs[2],
 			Title:       "TLS errors from gateway",
 			Summary:     "Multiple TLS handshake failures detected from the gateway service connecting to upstream payment-gateway. The upstream certificate appears to have expired.",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			Details:     json.RawMessage(`{"error_type":"tls_handshake","upstream":"payment-gateway","count":12}`),
 		},
 		{
 			Title:       "High memory usage on db-01.prod",
 			Summary:     "Memory usage on db-01.prod has been above 85% for the last 30 minutes. Current usage: 91%. Consider scaling or investigating memory-intensive queries.",
-			Environment: "production",
+
 			Severity:    store.SeverityCritical,
 		},
 		{
 			WatcherID:   &watcherIDs[2],
 			Title:       "Notification service connection refused",
 			Summary:     "notification-service is experiencing SMTP connection refused errors. 15 email delivery failures in the last hour.",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 		},
 		// Rule watcher alerts
@@ -975,7 +969,7 @@ func runSeed() error {
 			WatcherID:   &watcherIDs[6],
 			Title:       "Idle-in-transaction sessions detected",
 			Summary:     "5 sessions idle-in-transaction for >5 minutes (threshold: 3). Longest running: 12 minutes on table pg_catalog.pg_class. Consider checking for uncommitted transactions.",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			Details:     json.RawMessage(`{"current_value":5,"threshold":3,"source":"query"}`),
 		},
@@ -983,7 +977,7 @@ func runSeed() error {
 			WatcherID:   &watcherIDs[8],
 			Title:       "Long-running queries detected",
 			Summary:     "7 queries running >30 seconds (threshold: 5). Most are SELECT queries hitting the orders table without using the customer_id index.",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			Details:     json.RawMessage(`{"current_value":7,"threshold":5,"source":"query"}`),
 		},
@@ -991,7 +985,7 @@ func runSeed() error {
 			WatcherID:   &watcherIDs[9],
 			Title:       "Error log volume spike",
 			Summary:     "73 ERROR logs in last 5 minutes (threshold: 50). Top contributor: payment-api with 41 errors, mostly connection timeouts to upstream payment gateway.",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			Details:     json.RawMessage(`{"current_value":73,"threshold":50,"source":"logs","top_service":"payment-api"}`),
 		},
@@ -999,7 +993,7 @@ func runSeed() error {
 			WatcherID:   &watcherIDs[10],
 			Title:       "Payment service timeout surge",
 			Summary:     "14 timeout errors from payment-api in last 5 minutes (threshold: 10). Upstream payment-gateway appears to be experiencing degraded performance.",
-			Environment: "production",
+
 			Severity:    store.SeverityCritical,
 			Details:     json.RawMessage(`{"current_value":14,"threshold":10,"source":"logs","service":"payment-api"}`),
 		},
@@ -1007,7 +1001,7 @@ func runSeed() error {
 			WatcherID:   &watcherIDs[12],
 			Title:       "Primary DB high latency",
 			Summary:     "Primary database ping latency spiked to 3,200ms (threshold: 2,000ms). This may indicate disk I/O saturation or lock contention.",
-			Environment: "production",
+
 			Severity:    store.SeverityCritical,
 			Details:     json.RawMessage(`{"current_value":3200,"threshold":2000,"source":"health","check":"latency"}`),
 		},
@@ -1019,7 +1013,7 @@ func runSeed() error {
 			WatcherID:   &watcherIDs[15],
 			Title:       "Payment API heartbeat missing",
 			Summary:     "No INFO logs from payment-api in the last 5 minutes. Expected at least 5 events but found 0. The service may be down or experiencing a complete outage.",
-			Environment: "production",
+
 			Severity:    store.SeverityCritical,
 			Details:     json.RawMessage(`{"watcher_type":"deadman","found":0,"min_count":5,"window":"5m","service":"payment-api"}`),
 		},
@@ -1027,7 +1021,7 @@ func runSeed() error {
 			WatcherID:   &watcherIDs[17],
 			Title:       "Users table schema changed",
 			Summary:     "Schema drift detected on the users table. Column structure hash changed between runs. A new column may have been added or a type modified. Review recent migrations.",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			Details:     json.RawMessage(`{"watcher_type":"diff","compare_mode":"hash","previous_hash":"a1b2c3d4","current_hash":"d4e5f6a7"}`),
 		},
@@ -1035,7 +1029,7 @@ func runSeed() error {
 			WatcherID:   &watcherIDs[19],
 			Title:       "Payment pipeline degraded",
 			Summary:     "All composite conditions triggered simultaneously: payment-api errors above 10/5m AND gateway 503 errors above 5/5m. This indicates a correlated failure across the payment pipeline.",
-			Environment: "production",
+
 			Severity:    store.SeverityCritical,
 			Details:     json.RawMessage(`{"watcher_type":"composite","logic":"all_of","conditions_met":2,"conditions_total":2}`),
 		},
@@ -1043,7 +1037,7 @@ func runSeed() error {
 			WatcherID:   &watcherIDs[21],
 			Title:       "Error rate increased 85%",
 			Summary:     "Error log volume increased by 85.7% compared to the rolling baseline (current: 26, baseline avg: 14). This exceeds the 50% threshold. Investigate recent deployments or upstream changes.",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			Details:     json.RawMessage(`{"watcher_type":"trend","current_value":26,"baseline_avg":14,"change_percent":85.7,"direction":"increase"}`),
 		},
@@ -1051,7 +1045,7 @@ func runSeed() error {
 			WatcherID:   &watcherIDs[23],
 			Title:       "Cascading failure detected: auth → gateway → orders",
 			Summary:     "All 3 steps of the cascading failure sequence matched within the 1-hour window: auth errors appeared first, followed by gateway 503s, then order service timeouts. This pattern indicates a propagating failure originating from the auth layer.",
-			Environment: "production",
+
 			Severity:    store.SeverityCritical,
 			Details:     json.RawMessage(`{"watcher_type":"sequence","steps_matched":3,"steps_total":3,"window":"1h"}`),
 		},
@@ -1059,7 +1053,7 @@ func runSeed() error {
 			WatcherID:   &watcherIDs[24],
 			Title:       "Deploy triggered error spike",
 			Summary:     "Deployment event detected followed by a spike in ERROR logs within 30 minutes. The deployment at v2.14.3 appears to have introduced a regression causing elevated errors.",
-			Environment: "production",
+
 			Severity:    store.SeverityWarning,
 			Details:     json.RawMessage(`{"watcher_type":"sequence","steps_matched":2,"steps_total":2,"window":"30m","deployment":"v2.14.3"}`),
 		},
@@ -1081,8 +1075,8 @@ func runSeed() error {
 	// --- Data Sources (connectors) ---
 	dsStore := store.NewDataSourceStore(deps.db)
 	dsDefs := []store.CreateDataSourceParams{
-		{Type: store.ConnectorLogs, Name: "Production Logs", Environment: "production", Config: map[string]any{}},
-		{Type: store.ConnectorLogs, Name: "Staging Logs", Environment: "staging", Config: map[string]any{}},
+		{Type: store.ConnectorLogs, Name: "Production Logs", Config: map[string]any{}},
+		{Type: store.ConnectorLogs, Name: "Staging Logs", Config: map[string]any{}},
 	}
 	for _, p := range dsDefs {
 		ds, err := dsStore.Create(ctx, p)

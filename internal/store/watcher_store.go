@@ -89,9 +89,9 @@ func (s *watcherStore) Create(ctx context.Context, params CreateWatcherParams) (
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO watchers (id, title, description, environment, severity, filters, time_range, schedule, model, effort, notify, watcher_type, rule_config, data_source_id, type_config, adaptive_config, human_summary, next_run_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id.String(), params.Title, params.Description, params.Environment, string(severity),
+		`INSERT INTO watchers (id, title, description, severity, filters, time_range, schedule, model, effort, notify, watcher_type, rule_config, data_source_id, type_config, adaptive_config, human_summary, next_run_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id.String(), params.Title, params.Description, string(severity),
 		string(filters), timeRange, params.Schedule, params.Model, string(effort), string(notify),
 		string(watcherType), ruleConfigStr, params.DataSourceID, typeConfigStr, adaptiveConfigStr, humanSummaryStr,
 		now, now, now,
@@ -104,7 +104,7 @@ func (s *watcherStore) Create(ctx context.Context, params CreateWatcherParams) (
 }
 
 // watcherColumns is the SELECT column list for watcher queries.
-const watcherColumns = `id, title, description, environment, severity, filters, time_range, schedule, model, effort, status, notify,
+const watcherColumns = `id, title, description, severity, filters, time_range, schedule, model, effort, status, notify,
 	watcher_type, rule_config, data_source_id, type_config,
 	last_run_at, next_run_at, last_error, created_at, updated_at,
 	adaptive_config, adaptive_state, consecutive_clean_runs, consecutive_errors, escalated_at, base_time_range,
@@ -122,7 +122,7 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 	var humanSummaryStr sql.NullString
 
 	err := sc.Scan(
-		&w.ID, &w.Title, &w.Description, &w.Environment, &w.Severity, &filtersStr,
+		&w.ID, &w.Title, &w.Description, &w.Severity, &filtersStr,
 		&w.TimeRange, &w.Schedule, &w.Model, &w.Effort, &w.Status, &notifyStr,
 		&watcherTypeStr, &ruleConfigStr, &dataSourceID, &typeConfigStr,
 		&lastRunAt, &nextRunAt, &w.LastError,
@@ -208,10 +208,6 @@ func (s *watcherStore) List(ctx context.Context, params ListWatcherParams) ([]Wa
 	query := `SELECT ` + watcherColumns + ` FROM watchers`
 	var conditions []string
 	var args []any
-	if params.Environment != "" {
-		conditions = append(conditions, `environment = ?`)
-		args = append(args, params.Environment)
-	}
 	if params.WatcherType != "" {
 		conditions = append(conditions, `watcher_type = ?`)
 		args = append(args, string(params.WatcherType))
@@ -242,7 +238,7 @@ func (s *watcherStore) List(ctx context.Context, params ListWatcherParams) ([]Wa
 func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWatcherParams) (*Watcher, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	var titleStr, descStr, envStr *string
+	var titleStr, descStr *string
 	var sevStr, effortStr *string
 	var filtersStr, timeRangeStr, scheduleStr, modelStr, notifyStr *string
 	var watcherTypeStr, ruleConfigStr, dataSourceIDStr *string
@@ -251,9 +247,6 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 	}
 	if params.Description != nil {
 		descStr = params.Description
-	}
-	if params.Environment != nil {
-		envStr = params.Environment
 	}
 	if params.Severity != nil {
 		s := string(*params.Severity)
@@ -326,7 +319,6 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 		`UPDATE watchers
 		 SET title            = COALESCE(?, title),
 		     description      = COALESCE(?, description),
-		     environment      = COALESCE(?, environment),
 		     severity         = COALESCE(?, severity),
 		     filters          = COALESCE(?, filters),
 		     time_range       = COALESCE(?, time_range),
@@ -342,7 +334,7 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 		     human_summary    = COALESCE(?, human_summary),
 		     updated_at       = ?
 		 WHERE id = ?`,
-		titleStr, descStr, envStr, sevStr, filtersStr, timeRangeStr, scheduleStr, modelStr, effortStr, notifyStr,
+		titleStr, descStr, sevStr, filtersStr, timeRangeStr, scheduleStr, modelStr, effortStr, notifyStr,
 		watcherTypeStr, ruleConfigStr, dataSourceIDStr, typeConfigUpdateStr, adaptiveConfigStr, humanSummaryStr,
 		now, id.String(),
 	)

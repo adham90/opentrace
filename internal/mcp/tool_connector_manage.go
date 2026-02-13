@@ -39,13 +39,10 @@ func createConnectorHandler(dsStore store.DataSourceStore) server.ToolHandlerFun
 			return mcp.NewToolResultError("connection_string is required for database connectors"), nil
 		}
 
-		environment, _ := args["environment"].(string)
-
 		ds, err := dsStore.Create(ctx, store.CreateDataSourceParams{
-			Type:        store.ConnectorType(dsType),
-			Name:        name,
-			Environment: environment,
-			Config:      cfg,
+			Type:   store.ConnectorType(dsType),
+			Name:   name,
+			Config: cfg,
 		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create connector: %v", err)), nil
@@ -209,9 +206,6 @@ func updateConnectorHandler(dsStore store.DataSourceStore, registry *connector.R
 
 		if v, ok := args["name"].(string); ok && v != "" {
 			params.Name = &v
-		}
-		if v, ok := args["environment"].(string); ok {
-			params.Environment = &v
 		}
 
 		// Build config from connection_string if provided.

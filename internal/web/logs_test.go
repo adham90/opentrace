@@ -147,28 +147,6 @@ func TestIngestLogs_SingleObject(t *testing.T) {
 	}
 }
 
-func TestIngestLogs_WithEnvironment(t *testing.T) {
-	srv, ls := setupTestServerWithLogStore()
-
-	body := `{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","message":"hello","environment":"production"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	srv.Router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusCreated, w.Body.String())
-	}
-
-	if len(ls.entries) != 1 {
-		t.Fatalf("stored entries = %d, want 1", len(ls.entries))
-	}
-	if ls.entries[0].Environment != "production" {
-		t.Fatalf("environment = %q, want %q", ls.entries[0].Environment, "production")
-	}
-}
-
 func TestAPIKeyAuth_ValidKey(t *testing.T) {
 	srv, _ := setupTestServerWithAPIKey("test-secret")
 
@@ -238,12 +216,11 @@ func TestLogsPage_Renders(t *testing.T) {
 	// Seed a log entry
 	ls.entries = []store.LogEntry{
 		{
-			ID:          1,
-			Timestamp:   time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
-			Level:       "INFO",
-			Service:     "api",
-			Environment: "production",
-			Message:     "request received",
+			ID:        1,
+			Timestamp: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+			Level:     "INFO",
+			Service:   "api",
+			Message:   "request received",
 		},
 	}
 
@@ -270,7 +247,7 @@ func TestLogsPage_Renders(t *testing.T) {
 func TestLogsPage_WithFilters(t *testing.T) {
 	srv, ls := setupTestServerWithLogStore()
 
-	req := httptest.NewRequest(http.MethodGet, "/logs?level=ERROR&service=api&environment=staging&query=timeout", nil)
+	req := httptest.NewRequest(http.MethodGet, "/logs?level=ERROR&service=api&query=timeout", nil)
 	w := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)
 
@@ -287,9 +264,6 @@ func TestLogsPage_WithFilters(t *testing.T) {
 	}
 	if params.Service != "api" {
 		t.Errorf("service = %q, want %q", params.Service, "api")
-	}
-	if params.Environment != "staging" {
-		t.Errorf("environment = %q, want %q", params.Environment, "staging")
 	}
 	if params.Query != "timeout" {
 		t.Errorf("query = %q, want %q", params.Query, "timeout")

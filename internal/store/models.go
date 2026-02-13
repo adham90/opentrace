@@ -28,7 +28,6 @@ type DataSource struct {
 	ID            uuid.UUID       `json:"id"`
 	Type          ConnectorType   `json:"type"`
 	Name          string          `json:"name"`
-	Environment   string          `json:"environment,omitempty"`
 	Config        map[string]any  `json:"config"`
 	Status        ConnectorStatus `json:"status"`
 	StatusMessage *string         `json:"status_message,omitempty"`
@@ -40,7 +39,6 @@ type DataSource struct {
 type CreateDataSourceParams struct {
 	Type        ConnectorType  `json:"type"`
 	Name        string         `json:"name"`
-	Environment string         `json:"environment,omitempty"`
 	Config      map[string]any `json:"config"`
 }
 
@@ -50,13 +48,11 @@ type UpdateDataSourceParams struct {
 	Status        *ConnectorStatus `json:"status,omitempty"`
 	StatusMessage *string          `json:"status_message,omitempty"`
 	LastTestedAt  *time.Time       `json:"last_tested_at,omitempty"`
-	Environment   *string          `json:"environment,omitempty"`
 }
 
 // ListDataSourceParams defines filters for listing data sources.
 type ListDataSourceParams struct {
-	Environment string        `json:"environment,omitempty"`
-	Type        ConnectorType `json:"type,omitempty"`
+	Type ConnectorType `json:"type,omitempty"`
 }
 
 // LogEntry represents an ingested log line.
@@ -69,7 +65,6 @@ type LogEntry struct {
 	SpanID         string          `json:"span_id,omitempty"`
 	ParentSpanID   string          `json:"parent_span_id,omitempty"`
 	Message        string          `json:"message"`
-	Environment    string          `json:"environment,omitempty"`
 	EventType      string          `json:"event_type,omitempty"`
 	Metadata       map[string]any  `json:"metadata,omitempty"`
 	RequestSummary *RequestSummary `json:"request_summary,omitempty"`
@@ -121,7 +116,6 @@ type LogSearchParams struct {
 	Service        string            `json:"service,omitempty"`
 	Level          string            `json:"level,omitempty"`
 	TraceID        string            `json:"trace_id,omitempty"`
-	Environment    string            `json:"environment,omitempty"`
 	EventType      string            `json:"event_type,omitempty"`
 	Start          *time.Time        `json:"start,omitempty"`
 	End            *time.Time        `json:"end,omitempty"`
@@ -134,11 +128,10 @@ type LogSearchParams struct {
 
 // LogCountParams defines filters for log aggregation queries.
 type LogCountParams struct {
-	Since       time.Time
-	Until       time.Time
-	Service     string // optional filter
-	Level       string // optional filter
-	Environment string // optional filter
+	Since   time.Time
+	Until   time.Time
+	Service string // optional filter
+	Level   string // optional filter
 }
 
 // ServiceLogCount holds per-service log counts.
@@ -197,10 +190,9 @@ type RuleConfig struct {
 
 // LogFilter defines log search criteria for rule watchers.
 type LogFilter struct {
-	Service     string `json:"service,omitempty"`
-	Level       string `json:"level,omitempty"`
-	Query       string `json:"query,omitempty"`
-	Environment string `json:"environment,omitempty"`
+	Service string `json:"service,omitempty"`
+	Level   string `json:"level,omitempty"`
+	Query   string `json:"query,omitempty"`
 }
 
 // WatcherSeverity represents the severity level of a watcher.
@@ -262,7 +254,6 @@ type Watcher struct {
 	ID           uuid.UUID       `json:"id"`
 	Title        string          `json:"title"`
 	Description  string          `json:"description"`
-	Environment  string          `json:"environment,omitempty"`
 	Severity     WatcherSeverity `json:"severity"`
 	Filters      json.RawMessage `json:"filters"`
 	TimeRange    string          `json:"time_range"`
@@ -325,7 +316,6 @@ type WatcherEffectiveness struct {
 type CreateWatcherParams struct {
 	Title        string          `json:"title"`
 	Description  string          `json:"description"`
-	Environment  string          `json:"environment,omitempty"`
 	Severity     WatcherSeverity `json:"severity"`
 	Filters      json.RawMessage `json:"filters"`
 	TimeRange    string          `json:"time_range"`
@@ -345,7 +335,6 @@ type CreateWatcherParams struct {
 type UpdateWatcherParams struct {
 	Title        *string          `json:"title,omitempty"`
 	Description  *string          `json:"description,omitempty"`
-	Environment  *string          `json:"environment,omitempty"`
 	Severity     *WatcherSeverity `json:"severity,omitempty"`
 	Filters      json.RawMessage  `json:"filters,omitempty"`
 	TimeRange    *string          `json:"time_range,omitempty"`
@@ -363,7 +352,6 @@ type UpdateWatcherParams struct {
 
 // ListWatcherParams defines filters for listing watchers.
 type ListWatcherParams struct {
-	Environment string      `json:"environment,omitempty"`
 	WatcherType WatcherType `json:"watcher_type,omitempty"`
 }
 
@@ -391,7 +379,6 @@ type Alert struct {
 	WatcherTitle  string          `json:"watcher_title,omitempty"`
 	Title         string          `json:"title"`
 	Summary       string          `json:"summary"`
-	Environment   string          `json:"environment,omitempty"`
 	Severity      WatcherSeverity `json:"severity"`
 	Details       json.RawMessage `json:"details,omitempty"`
 	Read          bool            `json:"read"`
@@ -408,7 +395,6 @@ type CreateAlertParams struct {
 	RunID       *uuid.UUID      `json:"run_id,omitempty"`
 	Title       string          `json:"title"`
 	Summary     string          `json:"summary"`
-	Environment string          `json:"environment,omitempty"`
 	Severity    WatcherSeverity `json:"severity"`
 	Details     json.RawMessage `json:"details,omitempty"`
 }
@@ -419,7 +405,6 @@ type ListAlertParams struct {
 	DismissedOnly bool            `json:"dismissed_only,omitempty"`
 	Severity      WatcherSeverity `json:"severity,omitempty"`
 	WatcherID     *uuid.UUID      `json:"watcher_id,omitempty"`
-	Environment   string          `json:"environment,omitempty"`
 	Limit         int             `json:"limit,omitempty"`
 	Offset        int             `json:"offset,omitempty"`
 }
@@ -572,7 +557,6 @@ type AlertGroup struct {
 	Title       string     `json:"title"`
 	Status      string     `json:"status"`
 	Severity    string     `json:"severity"`
-	Environment string     `json:"environment,omitempty"`
 	RootCause   *string    `json:"root_cause,omitempty"`
 	Resolution  *string    `json:"resolution,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
@@ -584,10 +568,9 @@ type AlertGroup struct {
 
 // CreateAlertGroupParams defines input for creating an alert group.
 type CreateAlertGroupParams struct {
-	Title       string   `json:"title"`
-	Severity    string   `json:"severity"`
-	Environment string   `json:"environment,omitempty"`
-	AlertIDs    []string `json:"alert_ids"`
+	Title    string   `json:"title"`
+	Severity string   `json:"severity"`
+	AlertIDs []string `json:"alert_ids"`
 }
 
 // UpdateAlertGroupParams defines input for updating an alert group.

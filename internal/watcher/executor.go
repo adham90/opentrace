@@ -147,12 +147,11 @@ func (e *Executor) executeRule(ctx context.Context, w store.Watcher, run *store.
 	// Create alert and notify if needed
 	if result.HasAlert {
 		alert, err := e.alertStore.Create(ctx, store.CreateAlertParams{
-			WatcherID:   &w.ID,
-			RunID:       &run.ID,
-			Title:       w.Title,
-			Summary:     result.Summary,
-			Environment: w.Environment,
-			Severity:    w.Severity,
+			WatcherID: &w.ID,
+			RunID:     &run.ID,
+			Title:     w.Title,
+			Summary:   result.Summary,
+			Severity:  w.Severity,
 		})
 		if err != nil {
 			slog.Error("failed to create alert", "watcher_id", w.ID, "error", err)
@@ -198,12 +197,11 @@ func (e *Executor) executeTyped(ctx context.Context, w store.Watcher, run *store
 
 	if result.HasAlert {
 		alert, err := e.alertStore.Create(ctx, store.CreateAlertParams{
-			WatcherID:   &w.ID,
-			RunID:       &run.ID,
-			Title:       w.Title,
-			Summary:     result.Summary,
-			Environment: w.Environment,
-			Severity:    w.Severity,
+			WatcherID: &w.ID,
+			RunID:     &run.ID,
+			Title:     w.Title,
+			Summary:   result.Summary,
+			Severity:  w.Severity,
 		})
 		if err != nil {
 			slog.Error("failed to create alert", "watcher_id", w.ID, "error", err)
@@ -303,12 +301,11 @@ func (e *Executor) executeAI(ctx context.Context, w store.Watcher, run *store.Wa
 	// 9. Create alert and notify if needed
 	if hasAlert {
 		alert, err := e.alertStore.Create(ctx, store.CreateAlertParams{
-			WatcherID:   &w.ID,
-			RunID:       &run.ID,
-			Title:       w.Title,
-			Summary:     answer,
-			Environment: w.Environment,
-			Severity:    w.Severity,
+			WatcherID: &w.ID,
+			RunID:     &run.ID,
+			Title:     w.Title,
+			Summary:   answer,
+			Severity:  w.Severity,
 		})
 		if err != nil {
 			slog.Error("failed to create alert", "watcher_id", w.ID, "error", err)

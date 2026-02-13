@@ -80,10 +80,9 @@ func promoteInvestigationHandler(ws store.WatcherStore, as store.AlertStore, rs 
 
 		// Build CreateWatcherParams from the parent watcher.
 		params := store.CreateWatcherParams{
-			Title:          fmt.Sprintf("Monitor: %s", parent.Title),
-			Description:    parent.Description,
-			Environment:    parent.Environment,
-			Severity:       parent.Severity,
+			Title:       fmt.Sprintf("Monitor: %s", parent.Title),
+			Description: parent.Description,
+			Severity:    parent.Severity,
 			Filters:        parent.Filters,
 			TimeRange:      parent.TimeRange,
 			Schedule:       parent.Schedule,

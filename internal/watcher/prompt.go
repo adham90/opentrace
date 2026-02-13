@@ -13,10 +13,9 @@ import (
 
 // WatcherFilters represents the parsed filter configuration for a watcher.
 type WatcherFilters struct {
-	Service     string `json:"service,omitempty"`
-	Level       string `json:"level,omitempty"`
-	Environment string `json:"environment,omitempty"`
-	Query       string `json:"query,omitempty"`
+	Service string `json:"service,omitempty"`
+	Level   string `json:"level,omitempty"`
+	Query   string `json:"query,omitempty"`
 }
 
 // ParseTimeRange parses a time range string like "5m", "15m", "1h", "6h", "24h"
@@ -90,9 +89,6 @@ func BuildQuery(w store.Watcher, lastRunSummary string, hasServers ...bool) stri
 		}
 		if filters.Level != "" {
 			b.WriteString(fmt.Sprintf("- Level: %s\n", filters.Level))
-		}
-		if filters.Environment != "" {
-			b.WriteString(fmt.Sprintf("- Environment: %s\n", filters.Environment))
 		}
 		if w.TimeRange != "" {
 			b.WriteString(fmt.Sprintf("- Time range: last %s\n", w.TimeRange))
@@ -192,5 +188,5 @@ func parseFilters(raw json.RawMessage) WatcherFilters {
 }
 
 func hasFilters(f WatcherFilters) bool {
-	return f.Service != "" || f.Level != "" || f.Environment != "" || f.Query != ""
+	return f.Service != "" || f.Level != "" || f.Query != ""
 }

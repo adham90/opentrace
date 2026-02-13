@@ -33,7 +33,6 @@ func logStatsHandler(ls store.LogStore) server.ToolHandlerFunc {
 
 		serviceFilter, _ := args["service"].(string)
 		levelFilter, _ := args["level"].(string)
-		envFilter, _ := args["environment"].(string)
 
 		bucketInterval := "5m"
 		if v, ok := args["bucket_interval"].(string); ok && v != "" {
@@ -54,11 +53,10 @@ func logStatsHandler(ls store.LogStore) server.ToolHandlerFunc {
 		since := now.Add(-duration)
 
 		params := store.LogCountParams{
-			Since:       since,
-			Until:       now,
-			Service:     serviceFilter,
-			Level:       levelFilter,
-			Environment: envFilter,
+			Since:   since,
+			Until:   now,
+			Service: serviceFilter,
+			Level:   levelFilter,
 		}
 
 		switch groupBy {
@@ -67,7 +65,7 @@ func logStatsHandler(ls store.LogStore) server.ToolHandlerFunc {
 		case "service":
 			return logStatsByService(ctx, ls, params, since, now)
 		case "pattern":
-			return logStatsByPattern(ctx, ls, since, now, serviceFilter, envFilter)
+			return logStatsByPattern(ctx, ls, since, now, serviceFilter)
 		default:
 			return mcp.NewToolResultError(fmt.Sprintf("invalid group_by: %q (use level, service, or pattern)", groupBy)), nil
 		}
@@ -99,11 +97,10 @@ func logStatsByLevel(ctx context.Context, ls store.LogStore, params store.LogCou
 			bucketEnd = until
 		}
 		bucketParams := store.LogCountParams{
-			Since:       t,
-			Until:       bucketEnd,
-			Service:     params.Service,
-			Level:       params.Level,
-			Environment: params.Environment,
+			Since:   t,
+			Until:   bucketEnd,
+			Service: params.Service,
+			Level:   params.Level,
 		}
 		bucketCounts, err := ls.CountByLevel(ctx, bucketParams)
 		if err != nil {
@@ -201,15 +198,14 @@ func logStatsByService(ctx context.Context, ls store.LogStore, params store.LogC
 	return mcp.NewToolResultText(string(data)), nil
 }
 
-func logStatsByPattern(ctx context.Context, ls store.LogStore, since, until time.Time, service, environment string) (*mcp.CallToolResult, error) {
+func logStatsByPattern(ctx context.Context, ls store.LogStore, since, until time.Time, service string) (*mcp.CallToolResult, error) {
 	// Fetch error/fatal logs for pattern clustering.
 	searchParams := store.LogSearchParams{
-		Level:       "error",
-		Service:     service,
-		Environment: environment,
-		Start:       &since,
-		End:         &until,
-		Limit:       10000,
+		Level:   "error",
+		Service: service,
+		Start:   &since,
+		End:     &until,
+		Limit:   10000,
 	}
 
 	errorLogs, err := ls.Search(ctx, searchParams)

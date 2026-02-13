@@ -36,7 +36,6 @@ func comparePeriodsHandler(ls store.LogStore, as store.AlertStore) server.ToolHa
 		}
 
 		serviceFilter, _ := args["service"].(string)
-		envFilter, _ := args["environment"].(string)
 
 		now := time.Now().UTC()
 		currentStart, currentEnd, err := resolvePeriod(currentPeriod, now)
@@ -51,23 +50,23 @@ func comparePeriodsHandler(ls store.LogStore, as store.AlertStore) server.ToolHa
 
 		switch metric {
 		case "errors":
-			return compareErrors(ctx, ls, currentStart, currentEnd, baseStart, baseEnd, serviceFilter, envFilter)
+			return compareErrors(ctx, ls, currentStart, currentEnd, baseStart, baseEnd, serviceFilter)
 		case "log_volume":
-			return compareLogVolume(ctx, ls, currentStart, currentEnd, baseStart, baseEnd, serviceFilter, envFilter)
+			return compareLogVolume(ctx, ls, currentStart, currentEnd, baseStart, baseEnd, serviceFilter)
 		case "alerts":
 			if as == nil {
 				return mcp.NewToolResultError("alert store not available"), nil
 			}
-			return compareAlerts(ctx, as, currentStart, currentEnd, baseStart, baseEnd, envFilter)
+			return compareAlerts(ctx, as, currentStart, currentEnd, baseStart, baseEnd)
 		default:
 			return mcp.NewToolResultError(fmt.Sprintf("invalid metric: %q (use errors, log_volume, or alerts)", metric)), nil
 		}
 	}
 }
 
-func compareErrors(ctx context.Context, ls store.LogStore, curStart, curEnd, baseStart, baseEnd time.Time, service, env string) (*mcp.CallToolResult, error) {
-	curParams := store.LogCountParams{Since: curStart, Until: curEnd, Service: service, Environment: env}
-	baseParams := store.LogCountParams{Since: baseStart, Until: baseEnd, Service: service, Environment: env}
+func compareErrors(ctx context.Context, ls store.LogStore, curStart, curEnd, baseStart, baseEnd time.Time, service string) (*mcp.CallToolResult, error) {
+	curParams := store.LogCountParams{Since: curStart, Until: curEnd, Service: service}
+	baseParams := store.LogCountParams{Since: baseStart, Until: baseEnd, Service: service}
 
 	curSvc, err := ls.CountByService(ctx, curParams)
 	if err != nil {
@@ -162,9 +161,9 @@ func compareErrors(ctx context.Context, ls store.LogStore, curStart, curEnd, bas
 	return mcp.NewToolResultText(string(data)), nil
 }
 
-func compareLogVolume(ctx context.Context, ls store.LogStore, curStart, curEnd, baseStart, baseEnd time.Time, service, env string) (*mcp.CallToolResult, error) {
-	curParams := store.LogCountParams{Since: curStart, Until: curEnd, Service: service, Environment: env}
-	baseParams := store.LogCountParams{Since: baseStart, Until: baseEnd, Service: service, Environment: env}
+func compareLogVolume(ctx context.Context, ls store.LogStore, curStart, curEnd, baseStart, baseEnd time.Time, service string) (*mcp.CallToolResult, error) {
+	curParams := store.LogCountParams{Since: curStart, Until: curEnd, Service: service}
+	baseParams := store.LogCountParams{Since: baseStart, Until: baseEnd, Service: service}
 
 	curLevels, err := ls.CountByLevel(ctx, curParams)
 	if err != nil {
@@ -229,12 +228,12 @@ func compareLogVolume(ctx context.Context, ls store.LogStore, curStart, curEnd, 
 	return mcp.NewToolResultText(string(data)), nil
 }
 
-func compareAlerts(ctx context.Context, as store.AlertStore, curStart, curEnd, baseStart, baseEnd time.Time, env string) (*mcp.CallToolResult, error) {
-	curCounts, err := as.CountBySeverity(ctx, curStart, curEnd, env)
+func compareAlerts(ctx context.Context, as store.AlertStore, curStart, curEnd, baseStart, baseEnd time.Time) (*mcp.CallToolResult, error) {
+	curCounts, err := as.CountBySeverity(ctx, curStart, curEnd)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to count current alerts: %v", err)), nil
 	}
-	baseCounts, err := as.CountBySeverity(ctx, baseStart, baseEnd, env)
+	baseCounts, err := as.CountBySeverity(ctx, baseStart, baseEnd)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to count baseline alerts: %v", err)), nil
 	}

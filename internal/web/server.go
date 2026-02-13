@@ -258,7 +258,6 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		// Read API — require auth, 503 if onboarding needed
 		r.Group(func(r chi.Router) {
 			r.Use(srv.requireAuthOrOnboardingAPI)
-			r.Get("/environments", srv.handleListEnvironments)
 			r.Get("/services", srv.handleListServices)
 			r.Get("/event_types", srv.handleListEventTypes)
 			r.Get("/connectors", srv.handleListConnectors)

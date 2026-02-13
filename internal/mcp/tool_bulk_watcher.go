@@ -15,7 +15,6 @@ import (
 func bulkWatcherTool() mcp.Tool {
 	return mcp.NewTool("bulk_watcher_update",
 		mcp.WithDescription("Update multiple watchers at once. Apply status, schedule, or severity changes to watchers matching the given filters. At least one filter and one update field are required."),
-		mcp.WithString("filter_environment", mcp.Description("Filter watchers by environment (e.g. production, staging)")),
 		mcp.WithString("filter_status", mcp.Description("Filter watchers by current status: active or paused")),
 		mcp.WithString("filter_watcher_type", mcp.Description("Filter watchers by type: ai or rule")),
 		mcp.WithString("set_status", mcp.Description("New status to apply: active or paused")),
@@ -30,7 +29,6 @@ func bulkWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 		args := request.GetArguments()
 
 		// Parse filter fields.
-		filterEnv, _ := args["filter_environment"].(string)
 		filterStatus, _ := args["filter_status"].(string)
 		filterType, _ := args["filter_watcher_type"].(string)
 
@@ -40,9 +38,9 @@ func bulkWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 		setSeverity, _ := args["set_severity"].(string)
 
 		// Validate at least one filter is provided.
-		hasFilter := filterEnv != "" || filterStatus != "" || filterType != ""
+		hasFilter := filterStatus != "" || filterType != ""
 		if !hasFilter {
-			return mcp.NewToolResultError("at least one filter is required: filter_environment, filter_status, or filter_watcher_type"), nil
+			return mcp.NewToolResultError("at least one filter is required: filter_status or filter_watcher_type"), nil
 		}
 
 		// Validate at least one update field is provided.
@@ -56,10 +54,8 @@ func bulkWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 			return mcp.NewToolResultError("set_status must be 'active' or 'paused'"), nil
 		}
 
-		// List watchers with environment and watcher_type filters via ListWatcherParams.
-		listParams := store.ListWatcherParams{
-			Environment: filterEnv,
-		}
+		// List watchers with watcher_type filter via ListWatcherParams.
+		listParams := store.ListWatcherParams{}
 		if filterType != "" {
 			listParams.WatcherType = store.WatcherType(filterType)
 		}

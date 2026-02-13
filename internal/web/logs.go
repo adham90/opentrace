@@ -23,7 +23,6 @@ type ingestLogEntry struct {
 	SpanID         string                 `json:"span_id"`
 	ParentSpanID   string                 `json:"parent_span_id"`
 	Message        string                 `json:"message"`
-	Environment    string                 `json:"environment"`
 	EventType      string                 `json:"event_type"`
 	Metadata       map[string]any         `json:"metadata"`
 	RequestSummary *ingestRequestSummary  `json:"request_summary,omitempty"`
@@ -135,7 +134,6 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 			SpanID:       e.SpanID,
 			ParentSpanID: e.ParentSpanID,
 			Message:      e.Message,
-			Environment:  e.Environment,
 			EventType:    e.EventType,
 			Metadata:     e.Metadata,
 		}

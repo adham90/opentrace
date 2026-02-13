@@ -22,9 +22,8 @@ func TestIncidentTimelineHandler_Success(t *testing.T) {
 				WatcherTitle: "Connection Watcher",
 				Title:       "High connections",
 				Summary:     "92/100 connections",
-				Severity:    store.SeverityCritical,
-				Environment: "production",
-				CreatedAt:   now.Add(-30 * time.Minute),
+				Severity:  store.SeverityCritical,
+				CreatedAt: now.Add(-30 * time.Minute),
 			},
 		},
 	}
@@ -36,8 +35,7 @@ func TestIncidentTimelineHandler_Success(t *testing.T) {
 				Timestamp:   now.Add(-25 * time.Minute),
 				Level:       "error",
 				Service:     "api",
-				Message:     "connection pool exhausted",
-				Environment: "production",
+				Message: "connection pool exhausted",
 			},
 		},
 	}

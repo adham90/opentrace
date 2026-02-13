@@ -32,9 +32,9 @@ func (s *dataSourceStore) Create(ctx context.Context, params CreateDataSourcePar
 	nowStr := now.Format(time.RFC3339)
 
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO data_sources (id, type, name, environment, config, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id.String(), params.Type, params.Name, params.Environment, string(configJSON), nowStr, nowStr,
+		`INSERT INTO data_sources (id, type, name, config, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		id.String(), params.Type, params.Name, string(configJSON), nowStr, nowStr,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("inserting data source: %w", err)
@@ -44,7 +44,6 @@ func (s *dataSourceStore) Create(ctx context.Context, params CreateDataSourcePar
 		ID:          id,
 		Type:        params.Type,
 		Name:        params.Name,
-		Environment: params.Environment,
 		Config:      params.Config,
 		Status:      StatusDisconnected,
 		CreatedAt:   now,
@@ -59,10 +58,10 @@ func (s *dataSourceStore) GetByID(ctx context.Context, id uuid.UUID) (*DataSourc
 	var lastTestedAt sql.NullString
 
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, type, name, environment, config, status, status_message, last_tested_at, created_at, updated_at
+		`SELECT id, type, name, config, status, status_message, last_tested_at, created_at, updated_at
 		 FROM data_sources WHERE id = ?`, id.String(),
 	).Scan(
-		&ds.ID, &ds.Type, &ds.Name, &ds.Environment, &configJSON,
+		&ds.ID, &ds.Type, &ds.Name, &configJSON,
 		&ds.Status, &ds.StatusMessage, &lastTestedAt,
 		&createdAt, &updatedAt,
 	)
@@ -87,13 +86,9 @@ func (s *dataSourceStore) GetByID(ctx context.Context, id uuid.UUID) (*DataSourc
 }
 
 func (s *dataSourceStore) List(ctx context.Context, params ListDataSourceParams) ([]DataSource, error) {
-	query := `SELECT id, type, name, environment, config, status, status_message, last_tested_at, created_at, updated_at
+	query := `SELECT id, type, name, config, status, status_message, last_tested_at, created_at, updated_at
 		 FROM data_sources WHERE 1=1`
 	var args []any
-	if params.Environment != "" {
-		query += ` AND environment = ?`
-		args = append(args, params.Environment)
-	}
 	if params.Type != "" {
 		query += ` AND type = ?`
 		args = append(args, string(params.Type))
@@ -114,7 +109,7 @@ func (s *dataSourceStore) List(ctx context.Context, params ListDataSourceParams)
 		var lastTestedAt sql.NullString
 
 		if err := rows.Scan(
-			&ds.ID, &ds.Type, &ds.Name, &ds.Environment, &configJSON,
+			&ds.ID, &ds.Type, &ds.Name, &configJSON,
 			&ds.Status, &ds.StatusMessage, &lastTestedAt,
 			&createdAt, &updatedAt,
 		); err != nil {
@@ -140,7 +135,7 @@ func (s *dataSourceStore) List(ctx context.Context, params ListDataSourceParams)
 func (s *dataSourceStore) Update(ctx context.Context, id uuid.UUID, params UpdateDataSourceParams) (*DataSource, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	var nameStr, statusStr, statusMsg, testedAt, envStr, configStr *string
+	var nameStr, statusStr, statusMsg, testedAt, configStr *string
 	if params.Name != nil {
 		nameStr = params.Name
 	}
@@ -163,9 +158,6 @@ func (s *dataSourceStore) Update(ctx context.Context, id uuid.UUID, params Updat
 		ts := params.LastTestedAt.UTC().Format(time.RFC3339)
 		testedAt = &ts
 	}
-	if params.Environment != nil {
-		envStr = params.Environment
-	}
 
 	// When config changes, reset status to disconnected so the user knows to re-test.
 	if params.Config != nil && params.Status == nil {
@@ -180,10 +172,9 @@ func (s *dataSourceStore) Update(ctx context.Context, id uuid.UUID, params Updat
 		     status = COALESCE(?, status),
 		     status_message = COALESCE(?, status_message),
 		     last_tested_at = COALESCE(?, last_tested_at),
-		     environment = COALESCE(?, environment),
 		     updated_at = ?
 		 WHERE id = ?`,
-		nameStr, configStr, statusStr, statusMsg, testedAt, envStr, now, id.String(),
+		nameStr, configStr, statusStr, statusMsg, testedAt, now, id.String(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("updating data source: %w", err)

@@ -160,19 +160,17 @@ func TestAcknowledgeAllAlertsHandler(t *testing.T) {
 	}
 }
 
-func TestDismissAllAlertsHandler_WithEnvironment(t *testing.T) {
+func TestDismissAllAlertsHandler(t *testing.T) {
 	as := &mockAlertStore{}
 	handler := dismissAllAlertsHandler(as)
 
-	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"environment": "production",
-	}))
+	result, err := handler(context.Background(), makeRequest(map[string]any{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	text := resultText(t, result)
-	if !contains(text, "production") {
-		t.Errorf("expected environment in response, got: %s", text)
+	if !contains(text, "All alerts dismissed") {
+		t.Errorf("expected 'All alerts dismissed', got: %s", text)
 	}
 }

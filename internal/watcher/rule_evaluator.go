@@ -127,7 +127,6 @@ func (re *RuleEvaluator) evaluateLogs(ctx context.Context, w store.Watcher) (*Ev
 		params.Service = cfg.Filter.Service
 		params.Level = cfg.Filter.Level
 		params.Query = cfg.Filter.Query
-		params.Environment = cfg.Filter.Environment
 	}
 
 	logs, err := re.logStore.Search(ctx, params)

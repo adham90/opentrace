@@ -26,12 +26,11 @@ func (m *mockDataSourceStore) Create(ctx context.Context, params store.CreateDat
 	defer m.mu.Unlock()
 
 	ds := &store.DataSource{
-		ID:          uuid.New(),
-		Type:        params.Type,
-		Name:        params.Name,
-		Environment: params.Environment,
-		Config:      params.Config,
-		Status:      store.StatusDisconnected,
+		ID:     uuid.New(),
+		Type:   params.Type,
+		Name:   params.Name,
+		Config: params.Config,
+		Status: store.StatusDisconnected,
 	}
 	m.sources[ds.ID] = ds
 	return ds, nil
@@ -54,9 +53,6 @@ func (m *mockDataSourceStore) List(ctx context.Context, params store.ListDataSou
 
 	result := make([]store.DataSource, 0, len(m.sources))
 	for _, ds := range m.sources {
-		if params.Environment != "" && ds.Environment != params.Environment {
-			continue
-		}
 		result = append(result, *ds)
 	}
 	return result, nil
@@ -84,9 +80,6 @@ func (m *mockDataSourceStore) Update(ctx context.Context, id uuid.UUID, params s
 	}
 	if params.LastTestedAt != nil {
 		ds.LastTestedAt = params.LastTestedAt
-	}
-	if params.Environment != nil {
-		ds.Environment = *params.Environment
 	}
 	return ds, nil
 }
@@ -220,7 +213,6 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 	now := time.Now()
 	w := &store.Watcher{
 		ID: uuid.New(), Title: params.Title, Description: params.Description,
-		Environment: params.Environment,
 		Severity: sev, Filters: filters, TimeRange: timeRange,
 		Model: params.Model, Effort: effort, Status: store.WatcherActive, Notify: notify,
 		WatcherType: watcherType, RuleConfig: params.RuleConfig, DataSourceID: params.DataSourceID,
@@ -246,9 +238,6 @@ func (m *mockWatcherStore) List(ctx context.Context, params store.ListWatcherPar
 	defer m.mu.Unlock()
 	result := make([]store.Watcher, 0, len(m.watchers))
 	for _, w := range m.watchers {
-		if params.Environment != "" && w.Environment != params.Environment {
-			continue
-		}
 		result = append(result, *w)
 	}
 	return result, nil
@@ -266,9 +255,6 @@ func (m *mockWatcherStore) Update(ctx context.Context, id uuid.UUID, params stor
 	}
 	if params.Description != nil {
 		w.Description = *params.Description
-	}
-	if params.Environment != nil {
-		w.Environment = *params.Environment
 	}
 	if params.Severity != nil {
 		w.Severity = *params.Severity
@@ -454,7 +440,7 @@ func (m *mockAlertStore) Create(ctx context.Context, params store.CreateAlertPar
 	}
 	a := &store.Alert{
 		ID: uuid.New(), WatcherID: params.WatcherID, RunID: params.RunID,
-		Title: params.Title, Summary: params.Summary, Environment: params.Environment,
+		Title: params.Title, Summary: params.Summary,
 		Severity: sev, Details: params.Details, CreatedAt: time.Now(),
 	}
 	m.alerts[a.ID] = a
@@ -474,15 +460,12 @@ func (m *mockAlertStore) List(ctx context.Context, params store.ListAlertParams)
 	return result, nil
 }
 
-func (m *mockAlertStore) CountUnread(ctx context.Context, environment string) (int, error) {
+func (m *mockAlertStore) CountUnread(ctx context.Context) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	count := 0
 	for _, a := range m.alerts {
 		if !a.Read && !a.Dismissed {
-			if environment != "" && a.Environment != environment {
-				continue
-			}
 			count++
 		}
 	}
@@ -540,40 +523,32 @@ func (m *mockAlertStore) WatcherAlertStats(ctx context.Context, watcherID uuid.U
 	return &store.WatcherEffectiveness{WatcherID: watcherID.String()}, nil
 }
 
-func (m *mockAlertStore) DismissAll(ctx context.Context, environment string) error {
+func (m *mockAlertStore) DismissAll(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, a := range m.alerts {
-		if environment == "" || a.Environment == environment {
-			a.Dismissed = true
-		}
+		a.Dismissed = true
 	}
 	return nil
 }
 
-func (m *mockAlertStore) CountTotal(ctx context.Context, environment string) (int, error) {
+func (m *mockAlertStore) CountTotal(ctx context.Context) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	count := 0
 	for _, a := range m.alerts {
 		if !a.Dismissed {
-			if environment != "" && a.Environment != environment {
-				continue
-			}
 			count++
 		}
 	}
 	return count, nil
 }
 
-func (m *mockAlertStore) MarkAllRead(ctx context.Context, environment string) error {
+func (m *mockAlertStore) MarkAllRead(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, a := range m.alerts {
 		if !a.Dismissed && !a.Read {
-			if environment != "" && a.Environment != environment {
-				continue
-			}
 			a.Read = true
 		}
 	}
@@ -584,7 +559,7 @@ func (m *mockAlertStore) Prune(ctx context.Context, olderThan time.Duration) (in
 	return 0, nil
 }
 
-func (m *mockAlertStore) CountBySeverity(ctx context.Context, since, until time.Time, environment string) (map[string]int, error) {
+func (m *mockAlertStore) CountBySeverity(ctx context.Context, since, until time.Time) (map[string]int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	result := make(map[string]int)
@@ -593,9 +568,6 @@ func (m *mockAlertStore) CountBySeverity(ctx context.Context, since, until time.
 			continue
 		}
 		if a.CreatedAt.Before(since) || !a.CreatedAt.Before(until) {
-			continue
-		}
-		if environment != "" && a.Environment != environment {
 			continue
 		}
 		result[string(a.Severity)]++
@@ -1087,7 +1059,7 @@ func (m *mockAlertGroupStore) Create(_ context.Context, params store.CreateAlert
 	id := uuid.New().String()
 	g := &store.AlertGroup{
 		ID: id, Title: params.Title, Status: "open",
-		Severity: params.Severity, Environment: params.Environment,
+		Severity: params.Severity,
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		AlertCount: len(params.AlertIDs),
 	}
@@ -1105,15 +1077,12 @@ func (m *mockAlertGroupStore) GetByID(_ context.Context, id string) (*store.Aler
 	return g, nil
 }
 
-func (m *mockAlertGroupStore) List(_ context.Context, status string, environment string) ([]store.AlertGroup, error) {
+func (m *mockAlertGroupStore) List(_ context.Context, status string) ([]store.AlertGroup, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var result []store.AlertGroup
 	for _, g := range m.groups {
 		if status != "" && g.Status != status {
-			continue
-		}
-		if environment != "" && g.Environment != environment {
 			continue
 		}
 		result = append(result, *g)

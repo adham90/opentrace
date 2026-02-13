@@ -47,16 +47,10 @@ func acknowledgeAlertHandler(as store.AlertStore) server.ToolHandlerFunc {
 // acknowledgeAllAlertsHandler returns a handler that marks all alerts as read.
 func acknowledgeAllAlertsHandler(as store.AlertStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
-		environment, _ := args["environment"].(string)
-
-		if err := as.MarkAllRead(ctx, environment); err != nil {
+		if err := as.MarkAllRead(ctx); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to acknowledge alerts: %v", err)), nil
 		}
 
-		if environment != "" {
-			return mcp.NewToolResultText(fmt.Sprintf("All alerts in environment '%s' acknowledged.", environment)), nil
-		}
 		return mcp.NewToolResultText("All alerts acknowledged."), nil
 	}
 }
@@ -98,16 +92,10 @@ func dismissAlertHandler(as store.AlertStore) server.ToolHandlerFunc {
 // dismissAllAlertsHandler returns a handler that dismisses all alerts.
 func dismissAllAlertsHandler(as store.AlertStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
-		environment, _ := args["environment"].(string)
-
-		if err := as.DismissAll(ctx, environment); err != nil {
+		if err := as.DismissAll(ctx); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to dismiss alerts: %v", err)), nil
 		}
 
-		if environment != "" {
-			return mcp.NewToolResultText(fmt.Sprintf("All alerts in environment '%s' dismissed.", environment)), nil
-		}
 		return mcp.NewToolResultText("All alerts dismissed."), nil
 	}
 }

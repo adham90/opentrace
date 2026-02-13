@@ -173,7 +173,6 @@ func (te *TrendEvaluator) logCount(ctx context.Context, cfg *TrendConfig) (float
 		params.Service = cfg.Filter.Service
 		params.Level = cfg.Filter.Level
 		params.Query = cfg.Filter.Query
-		params.Environment = cfg.Filter.Environment
 	}
 
 	logs, err := te.logStore.Search(ctx, params)

@@ -15,10 +15,9 @@ type DeadmanConfig struct {
 
 // LogFilter defines log search criteria (mirrors store.LogFilter for decoupling).
 type LogFilter struct {
-	Service     string `json:"service,omitempty"`
-	Level       string `json:"level,omitempty"`
-	Query       string `json:"query,omitempty"`
-	Environment string `json:"environment,omitempty"`
+	Service string `json:"service,omitempty"`
+	Level   string `json:"level,omitempty"`
+	Query   string `json:"query,omitempty"`
 }
 
 // DiffConfig configures the diff evaluator.

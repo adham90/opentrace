@@ -79,9 +79,6 @@ func (c *LogsConnector) handleLogSearch(ctx context.Context, args map[string]any
 	if v, ok := args["trace_id"].(string); ok {
 		params.TraceID = v
 	}
-	if v, ok := args["environment"].(string); ok {
-		params.Environment = v
-	}
 	if v, ok := args["start"].(string); ok && v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			params.Start = &t

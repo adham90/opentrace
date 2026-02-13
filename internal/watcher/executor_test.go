@@ -421,7 +421,7 @@ func (m *mockAlertStore) List(ctx context.Context, params store.ListAlertParams)
 	return m.alerts, nil
 }
 
-func (m *mockAlertStore) CountUnread(ctx context.Context, environment string) (int, error) {
+func (m *mockAlertStore) CountUnread(ctx context.Context) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	count := 0
@@ -433,16 +433,16 @@ func (m *mockAlertStore) CountUnread(ctx context.Context, environment string) (i
 	return count, nil
 }
 
-func (m *mockAlertStore) CountTotal(ctx context.Context, environment string) (int, error) {
+func (m *mockAlertStore) CountTotal(ctx context.Context) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.alerts), nil
 }
 
 func (m *mockAlertStore) MarkRead(ctx context.Context, id uuid.UUID) error      { return nil }
-func (m *mockAlertStore) MarkAllRead(ctx context.Context, environment string) error { return nil }
+func (m *mockAlertStore) MarkAllRead(ctx context.Context) error                          { return nil }
 func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID, reason string) error { return nil }
-func (m *mockAlertStore) DismissAll(ctx context.Context, environment string) error       { return nil }
+func (m *mockAlertStore) DismissAll(ctx context.Context) error                           { return nil }
 func (m *mockAlertStore) Snooze(ctx context.Context, id uuid.UUID, until time.Time) error { return nil }
 func (m *mockAlertStore) Unsnooze(ctx context.Context, id uuid.UUID) error                { return nil }
 func (m *mockAlertStore) WatcherAlertStats(ctx context.Context, watcherID uuid.UUID, since time.Time) (*store.WatcherEffectiveness, error) {
@@ -452,7 +452,7 @@ func (m *mockAlertStore) Prune(ctx context.Context, olderThan time.Duration) (in
 	return 0, nil
 }
 
-func (m *mockAlertStore) CountBySeverity(ctx context.Context, since, until time.Time, environment string) (map[string]int, error) {
+func (m *mockAlertStore) CountBySeverity(ctx context.Context, since, until time.Time) (map[string]int, error) {
 	return make(map[string]int), nil
 }
 

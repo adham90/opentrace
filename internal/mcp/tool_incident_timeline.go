@@ -14,12 +14,11 @@ import (
 
 // timelineEvent represents a single event in the incident timeline.
 type timelineEvent struct {
-	Time        string `json:"time"`
-	Type        string `json:"type"` // "alert", "log", "metric"
-	Severity    string `json:"severity,omitempty"`
-	Summary     string `json:"summary"`
-	Source      string `json:"source,omitempty"`
-	Environment string `json:"environment,omitempty"`
+	Time     string `json:"time"`
+	Type     string `json:"type"` // "alert", "log", "metric"
+	Severity string `json:"severity,omitempty"`
+	Summary  string `json:"summary"`
+	Source   string `json:"source,omitempty"`
 }
 
 // incidentTimelineHandler returns a handler that builds a chronological incident timeline.
@@ -49,14 +48,11 @@ func incidentTimelineHandler(as store.AlertStore, ls store.LogStore) server.Tool
 			return mcp.NewToolResultError("end must be after start"), nil
 		}
 
-		environment, _ := args["environment"].(string)
-
 		var events []timelineEvent
 
 		// Fetch alerts in the time window.
 		alerts, err := as.List(ctx, store.ListAlertParams{
-			Environment: environment,
-			Limit:       200,
+			Limit: 200,
 		})
 		if err == nil {
 			for _, a := range alerts {
@@ -64,12 +60,11 @@ func incidentTimelineHandler(as store.AlertStore, ls store.LogStore) server.Tool
 					continue
 				}
 				events = append(events, timelineEvent{
-					Time:        a.CreatedAt.Format(time.RFC3339),
-					Type:        "alert",
-					Severity:    string(a.Severity),
-					Summary:     a.Title + ": " + a.Summary,
-					Source:      a.WatcherTitle,
-					Environment: a.Environment,
+					Time:     a.CreatedAt.Format(time.RFC3339),
+					Type:     "alert",
+					Severity: string(a.Severity),
+					Summary:  a.Title + ": " + a.Summary,
+					Source:   a.WatcherTitle,
 				})
 			}
 		}
@@ -77,23 +72,21 @@ func incidentTimelineHandler(as store.AlertStore, ls store.LogStore) server.Tool
 		// Fetch error/fatal logs in the time window.
 		for _, level := range []string{"error", "fatal"} {
 			logs, err := ls.Search(ctx, store.LogSearchParams{
-				Level:       level,
-				Environment: environment,
-				Start:       &start,
-				End:         &end,
-				Limit:       100,
+				Level: level,
+				Start: &start,
+				End:   &end,
+				Limit: 100,
 			})
 			if err != nil {
 				continue
 			}
 			for _, l := range logs {
 				events = append(events, timelineEvent{
-					Time:        l.Timestamp.Format(time.RFC3339),
-					Type:        "log",
-					Severity:    l.Level,
-					Summary:     l.Message,
-					Source:      l.Service,
-					Environment: l.Environment,
+					Time:     l.Timestamp.Format(time.RFC3339),
+					Type:     "log",
+					Severity: l.Level,
+					Summary:  l.Message,
+					Source:   l.Service,
 				})
 			}
 		}

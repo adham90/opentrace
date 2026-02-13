@@ -13,10 +13,9 @@ import (
 )
 
 type createConnectorRequest struct {
-	Type        store.ConnectorType `json:"type"`
-	Name        string              `json:"name"`
-	Environment string              `json:"environment"`
-	Config      map[string]any      `json:"config"`
+	Type   store.ConnectorType `json:"type"`
+	Name   string              `json:"name"`
+	Config map[string]any      `json:"config"`
 }
 
 func isHTMX(r *http.Request) bool {
@@ -37,7 +36,7 @@ func (s *Server) handleCreateConnectorAPI(w http.ResponseWriter, r *http.Request
 		req.Config = map[string]any{}
 	}
 	ds, err := s.dsStore.Create(r.Context(), store.CreateDataSourceParams{
-		Type: req.Type, Name: req.Name, Environment: req.Environment, Config: req.Config,
+		Type: req.Type, Name: req.Name, Config: req.Config,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create connector")
@@ -47,8 +46,7 @@ func (s *Server) handleCreateConnectorAPI(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleListConnectors(w http.ResponseWriter, r *http.Request) {
-	env := r.URL.Query().Get("env")
-	list, err := s.dsStore.List(r.Context(), store.ListDataSourceParams{Environment: env})
+	list, err := s.dsStore.List(r.Context(), store.ListDataSourceParams{})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list connectors")
 		return
@@ -136,9 +134,8 @@ func (s *Server) handleGetConnectorAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateConnectorRequest struct {
-	Name        *string        `json:"name,omitempty"`
-	Environment *string        `json:"environment,omitempty"`
-	Config      map[string]any `json:"config,omitempty"`
+	Name   *string        `json:"name,omitempty"`
+	Config map[string]any `json:"config,omitempty"`
 }
 
 func (s *Server) handleUpdateConnectorAPI(w http.ResponseWriter, r *http.Request) {
@@ -161,9 +158,8 @@ func (s *Server) handleUpdateConnectorAPI(w http.ResponseWriter, r *http.Request
 	}
 
 	params := store.UpdateDataSourceParams{
-		Name:        req.Name,
-		Environment: req.Environment,
-		Config:      req.Config,
+		Name:   req.Name,
+		Config: req.Config,
 	}
 
 	// Unregister old connector from registry when config changes

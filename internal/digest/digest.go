@@ -20,7 +20,6 @@ type Digest struct {
 	GeneratedAt    time.Time      `json:"generated_at"`
 	PeriodStart    time.Time      `json:"period_start"`
 	PeriodEnd      time.Time      `json:"period_end"`
-	Environment    string         `json:"environment,omitempty"`
 	Status         DigestStatus   `json:"status"`
 	AlertSummary   AlertSummary   `json:"alert_summary"`
 	WatcherSummary WatcherSummary `json:"watcher_summary"`

@@ -24,7 +24,6 @@ func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
 		service, _ := args["service"].(string)
 		level, _ := args["level"].(string)
 		traceID, _ := args["trace_id"].(string)
-		environment, _ := args["environment"].(string)
 		eventType, _ := args["event_type"].(string)
 
 		limit := 50
@@ -65,12 +64,11 @@ func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
 		}
 
 		params := store.LogSearchParams{
-			Query:          query,
-			Service:        service,
-			Level:          level,
-			TraceID:        traceID,
-			Environment:    environment,
-			EventType:      eventType,
+			Query:     query,
+			Service:   service,
+			Level:     level,
+			TraceID:   traceID,
+			EventType: eventType,
 			Limit:          limit,
 			Offset:         offset,
 			SortAsc:        sortAsc,
@@ -95,20 +93,13 @@ func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
 		}
 
 		// If FTS query returned nothing, try a fallback LIKE search against
-		// service and environment fields (expanded search scope — improvement D).
-		if len(entries) == 0 && query != "" && service == "" && environment == "" {
+		// the service field (expanded search scope).
+		if len(entries) == 0 && query != "" && service == "" {
 			// Try matching as a service name.
 			fallbackParams := params
 			fallbackParams.Query = ""
 			fallbackParams.Service = query
 			entries, _ = ls.Search(ctx, fallbackParams)
-
-			if len(entries) == 0 {
-				// Try matching as an environment.
-				fallbackParams.Service = ""
-				fallbackParams.Environment = query
-				entries, _ = ls.Search(ctx, fallbackParams)
-			}
 		}
 
 		if len(entries) == 0 {
@@ -148,9 +139,6 @@ func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
 			}
 			if fields == nil || fields["message"] {
 				entry["message"] = msg
-			}
-			if (fields == nil || fields["environment"]) && e.Environment != "" {
-				entry["environment"] = e.Environment
 			}
 			if (fields == nil || fields["event_type"]) && e.EventType != "" {
 				entry["event_type"] = e.EventType

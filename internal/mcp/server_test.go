@@ -332,15 +332,6 @@ func (m *mockWatcherStore) List(ctx context.Context, params store.ListWatcherPar
 	if m.err != nil {
 		return nil, m.err
 	}
-	if params.Environment != "" {
-		var filtered []store.Watcher
-		for _, w := range m.watchers {
-			if w.Environment == params.Environment {
-				filtered = append(filtered, w)
-			}
-		}
-		return filtered, nil
-	}
 	return m.watchers, nil
 }
 
@@ -422,16 +413,16 @@ func (m *mockAlertStore) List(ctx context.Context, params store.ListAlertParams)
 func (m *mockAlertStore) Create(ctx context.Context, params store.CreateAlertParams) (*store.Alert, error) {
 	return nil, nil
 }
-func (m *mockAlertStore) CountUnread(ctx context.Context, environment string) (int, error) {
+func (m *mockAlertStore) CountUnread(ctx context.Context) (int, error) {
 	return 0, nil
 }
-func (m *mockAlertStore) CountTotal(ctx context.Context, environment string) (int, error) {
+func (m *mockAlertStore) CountTotal(ctx context.Context) (int, error) {
 	return 0, nil
 }
 func (m *mockAlertStore) MarkRead(ctx context.Context, id uuid.UUID) error    { return nil }
-func (m *mockAlertStore) MarkAllRead(ctx context.Context, environment string) error { return nil }
+func (m *mockAlertStore) MarkAllRead(ctx context.Context) error                          { return nil }
 func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID, reason string) error { return nil }
-func (m *mockAlertStore) DismissAll(ctx context.Context, environment string) error       { return nil }
+func (m *mockAlertStore) DismissAll(ctx context.Context) error                           { return nil }
 func (m *mockAlertStore) Snooze(ctx context.Context, id uuid.UUID, until time.Time) error { return nil }
 func (m *mockAlertStore) Unsnooze(ctx context.Context, id uuid.UUID) error                { return nil }
 func (m *mockAlertStore) WatcherAlertStats(ctx context.Context, watcherID uuid.UUID, since time.Time) (*store.WatcherEffectiveness, error) {
@@ -449,13 +440,10 @@ func (m *mockAlertStore) GetByID(ctx context.Context, id uuid.UUID) (*store.Aler
 	return nil, store.ErrNotFound
 }
 
-func (m *mockAlertStore) CountBySeverity(ctx context.Context, since, until time.Time, environment string) (map[string]int, error) {
+func (m *mockAlertStore) CountBySeverity(ctx context.Context, since, until time.Time) (map[string]int, error) {
 	result := make(map[string]int)
 	for _, a := range m.alerts {
 		if a.CreatedAt.Before(since) || !a.CreatedAt.Before(until) {
-			continue
-		}
-		if environment != "" && a.Environment != environment {
 			continue
 		}
 		result[string(a.Severity)]++
@@ -649,7 +637,6 @@ func TestCreateWatcherHandler_AISuccess(t *testing.T) {
 		"description": "Watch for error spikes in production",
 		"service":     "api",
 		"level":       "error",
-		"environment": "production",
 		"time_range":  "10m",
 		"severity":    "critical",
 	}))
@@ -1393,48 +1380,3 @@ func TestGetDigestHandler_PeriodYesterday(t *testing.T) {
 	}
 }
 
-func TestGetDigestHandler_EnvironmentFilter(t *testing.T) {
-	now := time.Now().UTC()
-	w1 := uuid.New()
-	w2 := uuid.New()
-
-	as := &mockAlertStore{
-		alerts: []store.Alert{
-			{ID: uuid.New(), WatcherID: &w1, Environment: "production", Severity: store.SeverityCritical, CreatedAt: now.Add(-1 * time.Hour)},
-			{ID: uuid.New(), WatcherID: &w2, Environment: "staging", Severity: store.SeverityWarning, CreatedAt: now.Add(-2 * time.Hour)},
-		},
-	}
-	ws := &mockWatcherStore{
-		watchers: []store.Watcher{
-			{ID: w1, Title: "Prod Watcher", Environment: "production", Status: store.WatcherActive},
-			{ID: w2, Title: "Staging Watcher", Environment: "staging", Status: store.WatcherActive},
-		},
-	}
-	rs := &mockWatcherRunStore{}
-
-	handler := getDigestHandler(as, ws, rs)
-	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"environment": "production",
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	text := resultText(t, result)
-	var resp map[string]any
-	if err := json.Unmarshal([]byte(text), &resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
-	}
-
-	alerts, ok := resp["alerts"].(map[string]any)
-	if !ok {
-		t.Fatal("expected alerts map")
-	}
-	// Only production alert should be counted
-	if alerts["critical"] != float64(1) {
-		t.Errorf("critical = %v, want 1", alerts["critical"])
-	}
-	if alerts["warning"] != float64(0) {
-		t.Errorf("warning = %v, want 0 (staging filtered out)", alerts["warning"])
-	}
-}

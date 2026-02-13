@@ -14,22 +14,6 @@
   </script>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/htmx.min.js"></script>
-  <script nonce="{{.CSPNonce}}">
-  function getGlobalEnv() {
-    return localStorage.getItem('opentrace-env') || '';
-  }
-  function setGlobalEnv(val) {
-    if (val) {
-      localStorage.setItem('opentrace-env', val);
-    } else {
-      localStorage.removeItem('opentrace-env');
-    }
-    if (typeof window.loadPageData === 'function') {
-      window.loadPageData();
-    }
-    if (typeof updateBadge === 'function') updateBadge();
-  }
-  </script>
 </head>
 <body>
   <div hx-get="/api/version/banner" hx-trigger="load" hx-swap="innerHTML" id="version-banner-container"></div>
@@ -92,9 +76,6 @@
       <a href="/settings" class="tmux-tab {{if eq .Nav "settings"}}active{{end}}">4:settings</a>
     </div>
     <div class="tmux-right">
-      <select id="env-selector" class="tmux-env-select" onchange="setGlobalEnv(this.value)" title="environment filter">
-        <option value="">all envs</option>
-      </select>
       {{if .User}}<span class="tmux-info">{{.User.DisplayName}}@opentrace</span>{{end}}
     </div>
   </nav>
@@ -110,32 +91,13 @@
 
   <script nonce="{{.CSPNonce}}">
   function updateBadge() {
-    fetch('/api/alerts/count' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r){return r.json()}).then(function(d){
+    fetch('/api/alerts/count').then(function(r){return r.json()}).then(function(d){
       var b=document.getElementById('alert-badge');
       if(b){b.textContent=d.count;b.style.display=d.count>0?'inline':'none';}
     }).catch(function(){});
   }
   updateBadge();
   setInterval(updateBadge, 30000);
-
-  // Populate environment dropdown
-  (function(){
-    var sel = document.getElementById('env-selector');
-    var current = getGlobalEnv();
-    fetch('/api/environments').then(function(r){return r.json()}).then(function(envs){
-      if (!Array.isArray(envs) || envs.length === 0) {
-        sel.style.display = 'none';
-        return;
-      }
-      envs.forEach(function(e){
-        var opt = document.createElement('option');
-        opt.value = e;
-        opt.textContent = e;
-        if (e === current) opt.selected = true;
-        sel.appendChild(opt);
-      });
-    }).catch(function(){ sel.style.display = 'none'; });
-  })();
 
   (function(){
     var themes = ['system', 'dark', 'light'];

@@ -94,13 +94,13 @@ type AlertStore interface {
 	Create(ctx context.Context, params CreateAlertParams) (*Alert, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*Alert, error)
 	List(ctx context.Context, params ListAlertParams) ([]Alert, error)
-	CountUnread(ctx context.Context, environment string) (int, error)
-	CountTotal(ctx context.Context, environment string) (int, error)
-	CountBySeverity(ctx context.Context, since, until time.Time, environment string) (map[string]int, error)
+	CountUnread(ctx context.Context) (int, error)
+	CountTotal(ctx context.Context) (int, error)
+	CountBySeverity(ctx context.Context, since, until time.Time) (map[string]int, error)
 	MarkRead(ctx context.Context, id uuid.UUID) error
-	MarkAllRead(ctx context.Context, environment string) error
+	MarkAllRead(ctx context.Context) error
 	Dismiss(ctx context.Context, id uuid.UUID, reason string) error
-	DismissAll(ctx context.Context, environment string) error
+	DismissAll(ctx context.Context) error
 	Snooze(ctx context.Context, id uuid.UUID, until time.Time) error
 	Unsnooze(ctx context.Context, id uuid.UUID) error
 	WatcherAlertStats(ctx context.Context, watcherID uuid.UUID, since time.Time) (*WatcherEffectiveness, error)
@@ -181,7 +181,7 @@ type MCPActivityStore interface {
 type AlertGroupStore interface {
 	Create(ctx context.Context, params CreateAlertGroupParams) (*AlertGroup, error)
 	GetByID(ctx context.Context, id string) (*AlertGroup, error)
-	List(ctx context.Context, status string, environment string) ([]AlertGroup, error)
+	List(ctx context.Context, status string) ([]AlertGroup, error)
 	Update(ctx context.Context, id string, params UpdateAlertGroupParams) error
 	AddAlerts(ctx context.Context, groupID string, alertIDs []string) error
 	RemoveAlert(ctx context.Context, groupID string, alertID string) error

@@ -138,7 +138,6 @@ func (se *SequenceEvaluator) evaluateLogStep(ctx context.Context, step SequenceS
 		params.Service = step.Filter.Service
 		params.Level = step.Filter.Level
 		params.Query = step.Filter.Query
-		params.Environment = step.Filter.Environment
 	}
 
 	logs, err := se.logStore.Search(ctx, params)

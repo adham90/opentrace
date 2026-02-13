@@ -16,7 +16,6 @@
         onsubmit="return false;">
     <input type="hidden" name="service" id="f-service" value="{{.LogFilters.Service}}">
     <input type="hidden" name="level" id="f-level" value="{{.LogFilters.Level}}">
-    <input type="hidden" name="environment" id="f-env" value="{{.LogFilters.Environment}}">
     <input type="hidden" name="event_type" id="f-event-type" value="{{.LogFilters.EventType}}">
     <input type="hidden" name="time_range" id="f-time-range" value="{{.LogFilters.TimeRange}}">
     <input type="hidden" name="query" id="f-query" value="{{.LogFilters.Query}}">
@@ -473,7 +472,6 @@
     query: '{{.LogFilters.Query}}',
     service: '{{.LogFilters.Service}}',
     level: '{{.LogFilters.Level}}',
-    environment: '{{.LogFilters.Environment}}',
     event_type: '{{.LogFilters.EventType}}',
     time_range: '{{.LogFilters.TimeRange}}',
     start: '',
@@ -567,7 +565,6 @@
     if (log.span_id) html += dRow('span_id', log.span_id);
     if (log.parent_span_id) html += dRow('parent_span_id', log.parent_span_id);
     if (log.service) html += dRow('service', log.service);
-    if (log.environment) html += dRow('environment', log.environment);
     if (log.event_type) html += dRow('event_type', log.event_type);
     html += '</div>';
 
@@ -752,7 +749,7 @@
   }
 
   function clearAllFilters() {
-    filters = { query: '', service: '', level: '', environment: '', event_type: '', time_range: '', start: '', end: '', metadata: {} };
+    filters = { query: '', service: '', level: '', event_type: '', time_range: '', start: '', end: '', metadata: {} };
     syncHiddenFields();
     renderFilterChips();
     applyFilters();
@@ -761,7 +758,6 @@
   function syncHiddenFields() {
     document.getElementById('f-service').value = filters.service;
     document.getElementById('f-level').value = filters.level;
-    document.getElementById('f-env').value = filters.environment;
     document.getElementById('f-event-type').value = filters.event_type;
     document.getElementById('f-time-range').value = filters.time_range;
     document.getElementById('f-query').value = filters.query;
@@ -790,7 +786,7 @@
 
   function hasActiveFilters() {
     return filters.query || filters.service || filters.level ||
-           filters.environment || filters.event_type || filters.time_range ||
+           filters.event_type || filters.time_range ||
            filters.start || filters.end || Object.keys(filters.metadata).length > 0;
   }
 
@@ -801,9 +797,6 @@
     }
     if (filters.service) {
       html += chip('service', filters.service);
-    }
-    if (filters.environment) {
-      html += chip('env', filters.environment);
     }
     if (filters.event_type) {
       html += chip('type', filters.event_type);
@@ -841,7 +834,6 @@
       el.addEventListener('click', function() {
         var k = el.getAttribute('data-filter-key');
         if (k === 'search') k = 'query';
-        else if (k === 'env') k = 'environment';
         else if (k === 'type') k = 'event_type';
         else if (k === 'time') k = 'time_range';
         else if (k === 'range') {
@@ -895,7 +887,6 @@
     if (filters.query) params.set('query', filters.query);
     if (filters.service) params.set('service', filters.service);
     if (filters.level) params.set('level', filters.level);
-    if (filters.environment) params.set('environment', filters.environment);
     if (filters.event_type) params.set('event_type', filters.event_type);
     if (filters.time_range) params.set('time_range', filters.time_range);
     if (filters.start) params.set('start', filters.start);
@@ -937,7 +928,7 @@
     var changed = false;
 
     parts.forEach(function(part) {
-      var m = part.match(/^(level|l|service|svc|s|env|environment|e|time|t|type|event_type|y):(.+)$/i);
+      var m = part.match(/^(level|l|service|svc|s|time|t|type|event_type|y):(.+)$/i);
       if (m) {
         var key = m[1].toLowerCase();
         var val = m[2].replace(/^"(.*)"$/, '$1');
@@ -949,9 +940,6 @@
             break;
           case 'service': case 'svc': case 's':
             filters.service = val;
-            break;
-          case 'env': case 'environment': case 'e':
-            filters.environment = val;
             break;
           case 'time': case 't':
             filters.time_range = val;
@@ -1024,12 +1012,12 @@
       }
       if (data.filters) {
         // Clear previous filters before applying new ones
-        filters = { query: '', service: '', level: '', environment: '', event_type: '', time_range: '', start: '', end: '', metadata: {} };
+        filters = { query: '', service: '', level: '', event_type: '', time_range: '', start: '', end: '', metadata: {} };
         var f = data.filters;
         Object.keys(f).forEach(function(k) {
           if (k.indexOf('meta.') === 0) {
             filters.metadata[k.substring(5)] = f[k];
-          } else if (k === 'level' || k === 'service' || k === 'environment' || k === 'event_type' || k === 'time_range' || k === 'query' || k === 'start' || k === 'end') {
+          } else if (k === 'level' || k === 'service' || k === 'event_type' || k === 'time_range' || k === 'query' || k === 'start' || k === 'end') {
             filters[k] = f[k];
           }
         });
@@ -1066,7 +1054,7 @@
   }
 
   // ── Active filter order (for backspace removal) ──────────
-  var filterOrder = ['query', 'time_range', 'event_type', 'environment', 'service', 'level'];
+  var filterOrder = ['query', 'time_range', 'event_type', 'service', 'level'];
 
   function removeLastFilter() {
     // Check metadata first
@@ -1340,7 +1328,6 @@
     filters.query = params.get('query') || '';
     filters.service = params.get('service') || '';
     filters.level = params.get('level') || '';
-    filters.environment = params.get('environment') || '';
     filters.event_type = params.get('event_type') || '';
     filters.time_range = params.get('time_range') || '';
     filters.start = params.get('start') || '';
@@ -1362,20 +1349,12 @@
     // When filters change, keep polling but reset
   };
   window.loadPageData = function() {
-    filters.environment = getGlobalEnv();
     syncHiddenFields();
     renderFilterChips();
     applyFilters();
   };
 
   // ── Initial render ────────────────────────────────────────
-  // Sync global env filter if no env was set via URL
-  if (!filters.environment && typeof getGlobalEnv === 'function') {
-    var globalEnv = getGlobalEnv();
-    if (globalEnv) {
-      filters.environment = globalEnv;
-    }
-  }
   syncHiddenFields();
   renderFilterChips();
 })();
@@ -1390,7 +1369,6 @@
   var prefixes = [
     { label: 'level:',   hint: 'filter by log level' },
     { label: 'service:', hint: 'filter by service name' },
-    { label: 'env:',     hint: 'filter by environment' },
     { label: 'time:',    hint: 'filter by time range' },
     { label: 'type:',    hint: 'filter by event type' },
     { label: '?',        hint: 'smart search (natural language)' }
@@ -1407,9 +1385,6 @@
     'service': '/api/services',
     'svc':     '/api/services',
     's':       '/api/services',
-    'env':     '/api/environments',
-    'environment': '/api/environments',
-    'e':       '/api/environments',
     'type':    '/api/event_types',
     'event_type': '/api/event_types',
     'y':       '/api/event_types'

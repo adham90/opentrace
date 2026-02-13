@@ -41,12 +41,11 @@ func (s *Server) handleInvestigateAlert(w http.ResponseWriter, r *http.Request) 
 	// Build investigation prompt
 	prompt := buildInvestigationPrompt(alert)
 
-	// Get original watcher's environment and data_source_id if available
-	var env, dataSourceID string
+	// Get original watcher's data_source_id if available
+	var dataSourceID string
 	if alert.WatcherID != nil && s.watcherStore != nil {
 		origWatcher, err := s.watcherStore.GetByID(r.Context(), *alert.WatcherID)
 		if err == nil {
-			env = origWatcher.Environment
 			if origWatcher.DataSourceID != nil {
 				dataSourceID = *origWatcher.DataSourceID
 			}
@@ -57,7 +56,6 @@ func (s *Server) handleInvestigateAlert(w http.ResponseWriter, r *http.Request) 
 	params := store.CreateWatcherParams{
 		Title:       fmt.Sprintf("Investigation: %s", alert.Title),
 		Description: prompt,
-		Environment: env,
 		Severity:    alert.Severity,
 		Filters:     json.RawMessage(`{}`),
 		TimeRange:   "30m",
@@ -104,7 +102,6 @@ ORIGINAL ALERT:
 Title: %s
 Severity: %s
 Summary: %s
-Environment: %s
 Time: %s
 
 YOUR TASK:
@@ -118,7 +115,6 @@ Use all available tools to gather evidence. Be thorough and systematic.`,
 		alert.Title,
 		alert.Severity,
 		alert.Summary,
-		alert.Environment,
 		alert.CreatedAt.Format("2006-01-02 15:04:05"),
 	)
 }

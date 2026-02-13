@@ -58,12 +58,11 @@ func alertDetailsHandler(as store.AlertStore, ws store.WatcherStore, rs store.Wa
 			watcher, err := ws.GetByID(ctx, *alert.WatcherID)
 			if err == nil && watcher != nil {
 				watcherInfo := map[string]any{
-					"id":          watcher.ID.String(),
-					"title":       watcher.Title,
-					"type":        string(watcher.WatcherType),
-					"environment": watcher.Environment,
-					"schedule":    watcher.Schedule,
-					"time_range":  watcher.TimeRange,
+					"id":         watcher.ID.String(),
+					"title":      watcher.Title,
+					"type":       string(watcher.WatcherType),
+					"schedule":   watcher.Schedule,
+					"time_range": watcher.TimeRange,
 				}
 				if watcher.Description != "" {
 					watcherInfo["description"] = watcher.Description

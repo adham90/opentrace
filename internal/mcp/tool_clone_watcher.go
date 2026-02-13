@@ -15,10 +15,9 @@ import (
 // cloneWatcherTool returns the tool definition for clone_watcher.
 func cloneWatcherTool() mcp.Tool {
 	return mcp.NewTool("clone_watcher",
-		mcp.WithDescription("Duplicate an existing watcher with optional overrides. Useful for creating similar watchers for different environments or with tweaked settings. The clone starts in active status."),
+		mcp.WithDescription("Duplicate an existing watcher with optional overrides. Useful for creating similar watchers with tweaked settings. The clone starts in active status."),
 		mcp.WithString("watcher_id", mcp.Required(), mcp.Description("UUID of the watcher to clone (from list_watchers)")),
 		mcp.WithString("title", mcp.Description("Title for the cloned watcher (default: 'Copy of {original title}')")),
-		mcp.WithString("environment", mcp.Description("Override the environment (e.g. staging, production)")),
 		mcp.WithString("schedule", mcp.Description("Override the schedule (cron expression or interval like '5m', '@hourly')")),
 		mcp.WithString("severity", mcp.Description("Override the severity: info, warning, or critical")),
 	)
@@ -49,7 +48,6 @@ func cloneWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 		params := store.CreateWatcherParams{
 			Title:          fmt.Sprintf("Copy of %s", source.Title),
 			Description:    source.Description,
-			Environment:    source.Environment,
 			Severity:       source.Severity,
 			Filters:        source.Filters,
 			TimeRange:      source.TimeRange,
@@ -67,9 +65,6 @@ func cloneWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 		// Apply overrides.
 		if v, ok := args["title"].(string); ok && v != "" {
 			params.Title = v
-		}
-		if v, ok := args["environment"].(string); ok && v != "" {
-			params.Environment = v
 		}
 		if v, ok := args["schedule"].(string); ok && v != "" {
 			params.Schedule = v

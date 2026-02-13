@@ -32,9 +32,6 @@ func (m *mockLogStore) Search(_ context.Context, params store.LogSearchParams) (
 		if params.Service != "" && e.Service != params.Service {
 			continue
 		}
-		if params.Environment != "" && e.Environment != params.Environment {
-			continue
-		}
 		if params.EventType != "" && e.EventType != params.EventType {
 			continue
 		}
@@ -68,9 +65,6 @@ func (m *mockLogStore) CountByLevel(_ context.Context, params store.LogCountPara
 		if params.Level != "" && e.Level != params.Level {
 			continue
 		}
-		if params.Environment != "" && e.Environment != params.Environment {
-			continue
-		}
 		counts[e.Level]++
 	}
 	return counts, nil
@@ -88,8 +82,6 @@ func (m *mockLogStore) DistinctValues(_ context.Context, field string, params st
 			val = e.Service
 		case "level":
 			val = e.Level
-		case "environment":
-			val = e.Environment
 		case "event_type":
 			val = e.EventType
 		}
@@ -141,9 +133,6 @@ func (m *mockLogStore) CountByService(_ context.Context, params store.LogCountPa
 			continue
 		}
 		if params.Level != "" && e.Level != params.Level {
-			continue
-		}
-		if params.Environment != "" && e.Environment != params.Environment {
 			continue
 		}
 		sc, ok := svcMap[e.Service]

@@ -62,7 +62,6 @@ func disableStaleWatchersHandler(ws store.WatcherStore, as store.AlertStore) ser
 		type staleWatcher struct {
 			ID          string     `json:"id"`
 			Title       string     `json:"title"`
-			Environment string     `json:"environment,omitempty"`
 			LastAlertAt *time.Time `json:"last_alert_at,omitempty"`
 			TotalAlerts int        `json:"total_alerts_in_period"`
 			Paused      bool       `json:"paused"`
@@ -88,7 +87,6 @@ func disableStaleWatchersHandler(ws store.WatcherStore, as store.AlertStore) ser
 			entry := staleWatcher{
 				ID:          w.ID.String(),
 				Title:       w.Title,
-				Environment: w.Environment,
 				LastAlertAt: stats.LastAlertAt,
 				TotalAlerts: stats.TotalAlerts,
 			}

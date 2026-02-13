@@ -21,7 +21,6 @@ type triageItem struct {
 
 // handleTriageAPI returns the triage inbox merging alerts, failed runs, error connectors, and offline servers.
 func (s *Server) handleTriageAPI(w http.ResponseWriter, r *http.Request) {
-	env := r.URL.Query().Get("env")
 	ctx := r.Context()
 
 	var items []triageItem
@@ -29,9 +28,8 @@ func (s *Server) handleTriageAPI(w http.ResponseWriter, r *http.Request) {
 	// 1. Unread alerts
 	if s.alertStore != nil {
 		alerts, err := s.alertStore.List(ctx, store.ListAlertParams{
-			UnreadOnly:  true,
-			Environment: env,
-			Limit:       10,
+			UnreadOnly: true,
+			Limit:      10,
 		})
 		if err == nil {
 			for _, a := range alerts {
@@ -75,7 +73,7 @@ func (s *Server) handleTriageAPI(w http.ResponseWriter, r *http.Request) {
 
 	// 3. Error connectors
 	if s.dsStore != nil {
-		connectors, err := s.dsStore.List(ctx, store.ListDataSourceParams{Environment: env})
+		connectors, err := s.dsStore.List(ctx, store.ListDataSourceParams{})
 		if err == nil {
 			for _, c := range connectors {
 				if c.Status == store.StatusError {

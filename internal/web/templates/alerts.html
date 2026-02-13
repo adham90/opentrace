@@ -252,7 +252,7 @@ document.addEventListener('keydown', function(e){
 
 // ── Load watchers into watcherList ────────────────────────
 function loadWatchers() {
-  fetch('/api/watchers' + (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '')).then(function(r) { return r.json(); }).then(function(watchers) {
+  fetch('/api/watchers').then(function(r) { return r.json(); }).then(function(watchers) {
     watcherList = [{id:'', title:'all'}];
     (watchers || []).forEach(function(w) {
       watcherList.push({id: w.id, title: w.title});
@@ -279,7 +279,6 @@ function loadAlerts() {
   if (status === 'dismissed') url += '&dismissed=true';
   if (severity) url += '&severity=' + encodeURIComponent(severity);
   if (watcherId) url += '&watcher_id=' + encodeURIComponent(watcherId);
-  url += (getGlobalEnv() ? '&env=' + encodeURIComponent(getGlobalEnv()) : '');
 
   syncToUrl();
 
@@ -292,9 +291,7 @@ function loadAlerts() {
 }
 
 function loadCounts() {
-  var url = '/api/alerts/count';
-  url += (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '');
-  fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+  fetch('/api/alerts/count').then(function(r) { return r.json(); }).then(function(data) {
     alertCounts = data;
     updateHeaderCount();
     updateBadge();
@@ -414,9 +411,6 @@ function renderFlat(alerts, expandedIDs, status) {
     }
     html += '    <span class="alert-ts" onclick="toggleAlert(this)">' + formatTimestamp(a.created_at) + '</span>';
     html += '    <span class="badge badge-' + a.severity + '" onclick="toggleAlert(this)">' + sevLabel + '</span>';
-    if (a.environment) {
-      html += '    <span class="alert-env" onclick="toggleAlert(this)">' + escapeHtml(a.environment) + '</span>';
-    }
     html += '    <span class="alert-title-text" onclick="toggleAlert(this)">' + escapeHtml(a.title) + '</span>';
     if (a.watcher_title) {
       html += '    <span class="alert-env" onclick="toggleAlert(this)">' + escapeHtml(a.watcher_title) + '</span>';
@@ -431,9 +425,6 @@ function renderFlat(alerts, expandedIDs, status) {
     html += '    <div class="alert-detail-meta">';
     if (a.watcher_title) {
       html += '      <div class="alert-detail-row"><span class="alert-detail-key">watcher</span><a href="/watchers" class="alert-detail-val alert-link">' + escapeHtml(a.watcher_title) + '</a></div>';
-    }
-    if (a.environment) {
-      html += '      <div class="alert-detail-row"><span class="alert-detail-key">env</span><span class="alert-detail-val">' + escapeHtml(a.environment) + '</span></div>';
     }
     html += '      <div class="alert-detail-row"><span class="alert-detail-key">severity</span><span class="alert-detail-val">' + a.severity + '</span></div>';
     html += '      <div class="alert-detail-row"><span class="alert-detail-key">time</span><span class="alert-detail-val">' + new Date(a.created_at).toLocaleString() + '</span></div>';
@@ -554,9 +545,7 @@ function markRead(id) {
 }
 
 function markAllRead() {
-  var url = '/api/alerts/read-all';
-  url += (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '');
-  fetch(url, { method: 'POST' }).then(function(r) {
+  fetch('/api/alerts/read-all', { method: 'POST' }).then(function(r) {
     if (r.ok) showToast('All alerts marked as read', 'success');
     loadAlerts();
   }).catch(function() { showToast('Failed to mark alerts', 'error'); });
@@ -570,9 +559,7 @@ function dismissAlert(id) {
 }
 
 function dismissAllAlerts() {
-  var url = '/api/alerts/dismiss-all';
-  url += (getGlobalEnv() ? '?env=' + encodeURIComponent(getGlobalEnv()) : '');
-  fetch(url, { method: 'POST' }).then(function(r) {
+  fetch('/api/alerts/dismiss-all', { method: 'POST' }).then(function(r) {
     if (r.ok) showToast('All alerts dismissed', 'success');
     loadAlerts();
   }).catch(function() { showToast('Failed to dismiss alerts', 'error'); });

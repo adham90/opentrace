@@ -17,17 +17,13 @@ import (
 func watcherHealthTool() mcp.Tool {
 	return mcp.NewTool("watcher_health_summary",
 		mcp.WithDescription("Fleet-wide watcher overview: active/paused/error counts, stale watchers, noisiest watchers, most failing, adaptive states, and overall alert volume. Use instead of calling list_watchers + watcher_run_history for each one."),
-		mcp.WithString("environment", mcp.Description("Optional environment filter")),
 	)
 }
 
 // watcherHealthHandler returns a handler that shows fleet-wide watcher health.
 func watcherHealthHandler(ws store.WatcherStore, as store.AlertStore, rs store.WatcherRunStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
-		env, _ := args["environment"].(string)
-
-		watchers, err := ws.List(ctx, store.ListWatcherParams{Environment: env})
+		watchers, err := ws.List(ctx, store.ListWatcherParams{})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to list watchers: %v", err)), nil
 		}

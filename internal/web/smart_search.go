@@ -25,7 +25,6 @@ type smartSearchResponse struct {
 
 type searchContext struct {
 	Services     []string
-	Environments []string
 	EventTypes   []string
 	MetadataKeys []string
 }
@@ -107,9 +106,6 @@ func fetchSearchContext(ctx context.Context, logStore store.LogStore) searchCont
 	if vals, err := logStore.DistinctValues(ctx, "service", params); err == nil {
 		sc.Services = vals
 	}
-	if vals, err := logStore.DistinctValues(ctx, "environment", params); err == nil {
-		sc.Environments = vals
-	}
 	if vals, err := logStore.DistinctValues(ctx, "event_type", params); err == nil {
 		sc.EventTypes = vals
 	}
@@ -132,12 +128,6 @@ func buildAISearchPrompt(ctx searchContext, query string) string {
 	} else {
 		b.WriteString("(none)")
 	}
-	b.WriteString("\nEnvironments: ")
-	if len(ctx.Environments) > 0 {
-		b.WriteString(strings.Join(ctx.Environments, ", "))
-	} else {
-		b.WriteString("(none)")
-	}
 	b.WriteString("\nEvent types: ")
 	if len(ctx.EventTypes) > 0 {
 		b.WriteString(strings.Join(ctx.EventTypes, ", "))
@@ -156,7 +146,6 @@ func buildAISearchPrompt(ctx searchContext, query string) string {
 JSON fields:
 - "level": "ERROR", "WARN", "INFO", or "DEBUG". Words like "errors"/"failures"/"wrong" mean ERROR. "warnings" means WARN.
 - "service": Must be from the services list above. Match typos (e.g. "gatway"→"gateway").
-- "environment": Must be from the environments list above.
 - "event_type": Must be from the event types list above.
 - "time_range": Only use these exact values: "15m", "1h", "6h", "24h", "7d".
 - "start_time": RFC3339 timestamp for custom time ranges (e.g. "45 hours ago", "yesterday", "last 3 days"). Calculate from current time.
@@ -165,7 +154,7 @@ JSON fields:
 - "metadata": Key-value pairs using only the metadata keys listed above.
 - "reasoning": One sentence summary.
 
-Leave fields as "" if not applicable. Only set service/environment if user mentioned them.
+Leave fields as "" if not applicable. Only set service if user mentioned it.
 
 Examples:
 `)
@@ -175,10 +164,6 @@ Examples:
 	if len(ctx.Services) > 0 {
 		svc = ctx.Services[0]
 	}
-	env := "production"
-	if len(ctx.Environments) > 0 {
-		env = ctx.Environments[0]
-	}
 
 	yesterday := now.AddDate(0, 0, -1).Truncate(24 * time.Hour)
 	ago45h := now.Add(-45 * time.Hour)
@@ -187,14 +172,12 @@ Examples:
 "TLS handshake failures" → {"level":"ERROR","query":"TLS handshake","reasoning":"Error logs mentioning TLS handshake"}
 "rate limit exceeded errors" → {"level":"ERROR","query":"rate limit exceeded","reasoning":"Error logs mentioning rate limit exceeded"}
 "cache miss logs from the last 15 minutes" → {"query":"cache miss","time_range":"15m","reasoning":"Logs mentioning cache miss in last 15 minutes"}
-"what went wrong in %s" → {"level":"ERROR","environment":"%s","query":"","reasoning":"Errors in %s"}
 "errors from 45 hours ago until now" → {"level":"ERROR","start_time":"%s","query":"","reasoning":"Errors from the last 45 hours"}
 "errors from yesterday" → {"level":"ERROR","start_time":"%s","end_time":"%s","query":"","reasoning":"Errors from yesterday"}
 "connection pool nearing capacity" → {"query":"connection pool nearing capacity","reasoning":"Logs mentioning connection pool capacity"}
 "memory usage warnings last 3 hours" → {"level":"WARN","start_time":"%s","query":"memory usage","reasoning":"Warning logs about memory usage in last 3 hours"}
 `,
 		svc, svc, svc,
-		env, env, env,
 		ago45h.Format(time.RFC3339),
 		yesterday.Format(time.RFC3339), now.Truncate(24*time.Hour).Format(time.RFC3339),
 		now.Add(-3*time.Hour).Format(time.RFC3339),
@@ -205,16 +188,15 @@ Examples:
 
 // llmSearchResult is the parsed JSON response from the LLM.
 type llmSearchResult struct {
-	Level       string         `json:"level"`
-	Service     string         `json:"service"`
-	Environment string         `json:"environment"`
-	EventType   string         `json:"event_type"`
-	TimeRange   string         `json:"time_range"`
-	StartTime   string         `json:"start_time"`
-	EndTime     string         `json:"end_time"`
-	Query       string         `json:"query"`
-	Metadata    flexibleMeta   `json:"metadata"`
-	Reasoning   string         `json:"reasoning"`
+	Level     string       `json:"level"`
+	Service   string       `json:"service"`
+	EventType string       `json:"event_type"`
+	TimeRange string       `json:"time_range"`
+	StartTime string       `json:"start_time"`
+	EndTime   string       `json:"end_time"`
+	Query     string       `json:"query"`
+	Metadata  flexibleMeta `json:"metadata"`
+	Reasoning string       `json:"reasoning"`
 }
 
 // flexibleMeta handles LLM returning either {} or "" for metadata.
@@ -277,13 +259,6 @@ func normalizeFilters(raw llmSearchResult, ctx searchContext) map[string]string 
 	if raw.Service != "" {
 		if m := bestMatch(raw.Service, ctx.Services); m != "" {
 			filters["service"] = m
-		}
-	}
-
-	// Environment: fuzzy match against DB values
-	if raw.Environment != "" {
-		if m := bestMatch(raw.Environment, ctx.Environments); m != "" {
-			filters["environment"] = m
 		}
 	}
 
@@ -416,14 +391,11 @@ func stripRedundantTerms(query string, filters map[string]string, ctx searchCont
 	filterWords["warning"] = true
 	filterWords["debug"] = true
 	filterWords["info"] = true
-	// Service/environment names from context
+	// Service names from context
 	for _, s := range ctx.Services {
 		for _, w := range strings.Fields(strings.ToLower(s)) {
 			filterWords[w] = true
 		}
-	}
-	for _, s := range ctx.Environments {
-		filterWords[strings.ToLower(s)] = true
 	}
 
 	words := strings.Fields(query)

@@ -13,7 +13,7 @@ import (
 )
 
 // listLogAttributesHandler returns a handler that discovers distinct values
-// for log fields (service, level, environment) or lists metadata keys.
+// for log fields (service, level) or lists metadata keys.
 // This is the bootstrapping tool — Claude calls it first to learn what's
 // available before filtering.
 func listLogAttributesHandler(ls store.LogStore) server.ToolHandlerFunc {
@@ -22,7 +22,7 @@ func listLogAttributesHandler(ls store.LogStore) server.ToolHandlerFunc {
 
 		field, _ := args["field"].(string)
 		if field == "" {
-			return mcp.NewToolResultError("field is required (service, level, environment, event_type, or metadata_key)"), nil
+			return mcp.NewToolResultError("field is required (service, level, event_type, or metadata_key)"), nil
 		}
 
 		// Parse time range (default: 24h).
@@ -41,9 +41,6 @@ func listLogAttributesHandler(ls store.LogStore) server.ToolHandlerFunc {
 		}
 		if v, ok := args["service"].(string); ok && v != "" {
 			params.Service = v
-		}
-		if v, ok := args["environment"].(string); ok && v != "" {
-			params.Environment = v
 		}
 
 		if field == "metadata_key" {

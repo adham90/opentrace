@@ -27,7 +27,6 @@ func anomalyDetectHandler(logStore store.LogStore, alertStore store.AlertStore) 
 			windowStr = v
 		}
 
-		environment, _ := args["environment"].(string)
 		service, _ := args["service"].(string)
 
 		window, err := parseDurationLoose(windowStr)
@@ -46,14 +45,14 @@ func anomalyDetectHandler(logStore store.LogStore, alertStore store.AlertStore) 
 			periodEnd := now.Add(-time.Duration(i) * window)
 			periodStart := periodEnd.Add(-window)
 
-			val, err := measureMetric(ctx, metric, periodStart, periodEnd, environment, service, logStore, alertStore)
+			val, err := measureMetric(ctx, metric, periodStart, periodEnd, service, logStore, alertStore)
 			if err != nil {
 				continue
 			}
 			samples = append(samples, val)
 		}
 
-		currentVal, err := measureMetric(ctx, metric, currentStart, now, environment, service, logStore, alertStore)
+		currentVal, err := measureMetric(ctx, metric, currentStart, now, service, logStore, alertStore)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to measure current value: %v", err)), nil
 		}
@@ -106,14 +105,14 @@ func anomalyDetectHandler(logStore store.LogStore, alertStore store.AlertStore) 
 }
 
 // measureMetric gets the numeric value for a metric in a time window.
-func measureMetric(ctx context.Context, metric string, start, end time.Time, env, service string, ls store.LogStore, as store.AlertStore) (float64, error) {
+func measureMetric(ctx context.Context, metric string, start, end time.Time, service string, ls store.LogStore, as store.AlertStore) (float64, error) {
 	switch metric {
 	case "error_rate":
 		if ls == nil {
 			return 0, fmt.Errorf("log store not available")
 		}
 		counts, err := ls.CountByLevel(ctx, store.LogCountParams{
-			Since: start, Until: end, Environment: env, Service: service, Level: "error",
+			Since: start, Until: end, Service: service, Level: "error",
 		})
 		if err != nil {
 			return 0, err
@@ -129,7 +128,7 @@ func measureMetric(ctx context.Context, metric string, start, end time.Time, env
 			return 0, fmt.Errorf("log store not available")
 		}
 		counts, err := ls.CountByLevel(ctx, store.LogCountParams{
-			Since: start, Until: end, Environment: env, Service: service,
+			Since: start, Until: end, Service: service,
 		})
 		if err != nil {
 			return 0, err
@@ -144,7 +143,7 @@ func measureMetric(ctx context.Context, metric string, start, end time.Time, env
 		if as == nil {
 			return 0, fmt.Errorf("alert store not available")
 		}
-		counts, err := as.CountBySeverity(ctx, start, end, env)
+		counts, err := as.CountBySeverity(ctx, start, end)
 		if err != nil {
 			return 0, err
 		}

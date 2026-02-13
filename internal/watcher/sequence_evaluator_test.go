@@ -61,17 +61,17 @@ func (m *mockAlertStoreForSequence) List(_ context.Context, params store.ListAle
 }
 
 func (m *mockAlertStoreForSequence) Create(_ context.Context, _ store.CreateAlertParams) (*store.Alert, error) { return nil, nil }
-func (m *mockAlertStoreForSequence) CountUnread(_ context.Context, _ string) (int, error) { return 0, nil }
+func (m *mockAlertStoreForSequence) CountUnread(_ context.Context) (int, error) { return 0, nil }
 func (m *mockAlertStoreForSequence) MarkRead(_ context.Context, _ uuid.UUID) error { return nil }
 func (m *mockAlertStoreForSequence) Dismiss(_ context.Context, _ uuid.UUID, _ string) error { return nil }
 func (m *mockAlertStoreForSequence) Snooze(_ context.Context, _ uuid.UUID, _ time.Time) error { return nil }
 func (m *mockAlertStoreForSequence) Unsnooze(_ context.Context, _ uuid.UUID) error { return nil }
 func (m *mockAlertStoreForSequence) WatcherAlertStats(_ context.Context, _ uuid.UUID, _ time.Time) (*store.WatcherEffectiveness, error) { return nil, nil }
-func (m *mockAlertStoreForSequence) DismissAll(_ context.Context, _ string) error { return nil }
-func (m *mockAlertStoreForSequence) CountTotal(_ context.Context, _ string) (int, error) { return 0, nil }
-func (m *mockAlertStoreForSequence) MarkAllRead(_ context.Context, _ string) error { return nil }
+func (m *mockAlertStoreForSequence) DismissAll(_ context.Context) error { return nil }
+func (m *mockAlertStoreForSequence) CountTotal(_ context.Context) (int, error) { return 0, nil }
+func (m *mockAlertStoreForSequence) MarkAllRead(_ context.Context) error { return nil }
 func (m *mockAlertStoreForSequence) Prune(_ context.Context, _ time.Duration) (int64, error) { return 0, nil }
-func (m *mockAlertStoreForSequence) CountBySeverity(_ context.Context, _, _ time.Time, _ string) (map[string]int, error) { return nil, nil }
+func (m *mockAlertStoreForSequence) CountBySeverity(_ context.Context, _, _ time.Time) (map[string]int, error) { return nil, nil }
 func (m *mockAlertStoreForSequence) GetByID(_ context.Context, _ uuid.UUID) (*store.Alert, error) { return nil, store.ErrNotFound }
 
 func makeSequenceWatcher(cfg SequenceConfig) store.Watcher {

@@ -191,7 +191,6 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 	maybeAddTool(s,
 		mcp.NewTool("list_connectors",
 			mcp.WithDescription("List all OpenTrace connectors with their status, config, and available tools. When a DataSourceStore is available, returns full connector details from the database; otherwise lists active registry tools."),
-			mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production, staging)")),
 			mcp.WithString("type", mcp.Description("Filter by connector type: database, logs, monitoring, server_metrics")),
 		),
 		listConnectorsHandler(deps.Registry, deps.DataSourceStore),
@@ -202,7 +201,7 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 	if deps.DataSourceStore != nil {
 		maybeAddTool(s,
 			mcp.NewTool("get_connector",
-				mcp.WithDescription("Get full details for a specific connector: type, status, config, environment, and last test time. Use to inspect a connector's configuration or diagnose connection issues."),
+				mcp.WithDescription("Get full details for a specific connector: type, status, config, and last test time. Use to inspect a connector's configuration or diagnose connection issues."),
 				mcp.WithString("connector_id", mcp.Required(), mcp.Description("Connector UUID (from list_connectors)")),
 			),
 			getConnectorHandler(deps.DataSourceStore),
@@ -215,7 +214,6 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 		maybeAddTool(s,
 			mcp.NewTool("list_watchers",
 				mcp.WithDescription("List all configured watchers with their status, recent run stats, and human summaries"),
-				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production, staging)")),
 				mcp.WithString("watcher_type", mcp.Description("Filter by watcher type: ai or rule")),
 			),
 			listWatchersHandler(deps.WatcherStore, deps.WatcherRunStore, deps.AlertStore),
@@ -230,7 +228,6 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 				mcp.WithDescription("List recent alerts from watchers. Use when the user asks 'are there any alerts?', 'what's wrong?', or to find alert IDs for acknowledge_alert/dismiss_alert."),
 				mcp.WithNumber("limit", mcp.Description("Maximum number of alerts to return (default: 10)")),
 				mcp.WithBoolean("unread_only", mcp.Description("Only show unread alerts (default: false)")),
-				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production, staging)")),
 			),
 			listAlertsHandler(deps.AlertStore),
 		)
@@ -243,7 +240,6 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			mcp.NewTool("get_digest",
 				mcp.WithDescription("Get a health digest summarizing database alerts, watcher status, and trends. Use this when the user asks 'what happened overnight?', 'any issues?', 'daily report', or similar. At the start of a session, consider running this proactively to inform the user of any issues."),
 				mcp.WithString("period", mcp.Description("Time period: 'last_24h' (default), 'last_12h', 'last_7d', 'today', 'yesterday'")),
-				mcp.WithString("environment", mcp.Description("Optional environment filter (e.g. production, staging)")),
 			),
 			getDigestHandler(deps.AlertStore, deps.WatcherStore, deps.WatcherRunStore),
 		)
@@ -325,7 +321,6 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 				mcp.WithString("group_by", mcp.Description("Primary grouping: 'level' (default), 'service', 'pattern' (clusters similar error messages)")),
 				mcp.WithString("service", mcp.Description("Filter to a specific service name")),
 				mcp.WithString("level", mcp.Description("Filter to a specific log level (debug, info, warn, error, fatal)")),
-				mcp.WithString("environment", mcp.Description("Filter to a specific environment")),
 				mcp.WithString("bucket_interval", mcp.Description("Time bucket size for trend data: '1m', '5m' (default), '15m', '1h'")),
 			),
 			logStatsHandler(deps.LogStore),
@@ -366,7 +361,6 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 				mcp.WithString("current_period", mcp.Description("Current period: 'last_1h' (default), 'last_6h', 'last_24h', 'today'")),
 				mcp.WithString("baseline_period", mcp.Description("Baseline to compare against: 'previous' (default), 'yesterday_same_time', 'last_week_same_time'")),
 				mcp.WithString("service", mcp.Description("Filter to a specific service (for error/log_volume metrics)")),
-				mcp.WithString("environment", mcp.Description("Filter to a specific environment")),
 			),
 			comparePeriodsHandler(deps.LogStore, deps.AlertStore),
 		)
@@ -428,12 +422,11 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 	if deps.LogStore != nil {
 		maybeAddTool(s,
 			mcp.NewTool("log_search",
-				mcp.WithDescription("Search log entries with full-text search and filters. Returns individual log entries (unlike log_stats which returns aggregated counts). Use when you need to find specific log messages, investigate errors, or look up events by trace ID. If FTS query returns nothing, automatically falls back to matching against service/environment names."),
-				mcp.WithString("query", mcp.Description("Full-text search query (searches message content). Also tries matching service/environment names if no FTS results found.")),
+				mcp.WithDescription("Search log entries with full-text search and filters. Returns individual log entries (unlike log_stats which returns aggregated counts). Use when you need to find specific log messages, investigate errors, or look up events by trace ID. If FTS query returns nothing, automatically falls back to matching against service names."),
+				mcp.WithString("query", mcp.Description("Full-text search query (searches message content). Also tries matching service names if no FTS results found.")),
 				mcp.WithString("service", mcp.Description("Filter by service name")),
 				mcp.WithString("level", mcp.Description("Filter by log level: debug, info, warn, error, fatal (comma-separated for multiple)")),
 				mcp.WithString("trace_id", mcp.Description("Filter by trace/correlation ID")),
-				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production, staging)")),
 				mcp.WithString("event_type", mcp.Description("Filter by event type (e.g. payment.completed, auth.login, order.shipped). Use list_log_attributes with field=event_type to discover available types.")),
 				mcp.WithString("time_range", mcp.Description("Lookback window: '15m', '1h' (default: all), '6h', '24h', '7d'")),
 				mcp.WithNumber("limit", mcp.Description("Maximum entries to return (default: 50, max: 200)")),
@@ -449,15 +442,14 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 		// Log attribute discovery.
 		maybeAddTool(s,
 			mcp.NewTool("list_log_attributes",
-				mcp.WithDescription("Discover distinct values for log fields. Call this first to learn what services, levels, environments, event types, and metadata keys exist before filtering with log_search. Essential bootstrapping tool for effective log investigation."),
-				mcp.WithString("field", mcp.Required(), mcp.Description("Field to list values for: 'service', 'level', 'environment', 'event_type', or 'metadata_key'")),
+				mcp.WithDescription("Discover distinct values for log fields. Call this first to learn what services, levels, event types, and metadata keys exist before filtering with log_search. Essential bootstrapping tool for effective log investigation."),
+				mcp.WithString("field", mcp.Required(), mcp.Description("Field to list values for: 'service', 'level', 'event_type', or 'metadata_key'")),
 				mcp.WithString("time_range", mcp.Description("Lookback window: '15m', '1h', '6h', '24h' (default), '7d'")),
 				mcp.WithString("service", mcp.Description("Narrow metadata_key discovery to a specific service")),
-				mcp.WithString("environment", mcp.Description("Narrow discovery to a specific environment")),
 			),
 			listLogAttributesHandler(deps.LogStore),
 		)
-		b.Add("list_log_attributes", "Discover distinct values for log fields (services, levels, environments, metadata keys)", "Log Intelligence", "read", "")
+		b.Add("list_log_attributes", "Discover distinct values for log fields (services, levels, event types, metadata keys)", "Log Intelligence", "read", "")
 
 		// Log context (surrounding entries).
 		maybeAddTool(s,
@@ -504,7 +496,6 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 				mcp.WithDescription("Build a chronological incident timeline for a time window, merging alerts and error logs. Use when investigating 'what happened between X and Y?', post-incident reviews, or understanding the sequence of events during an outage."),
 				mcp.WithString("start", mcp.Required(), mcp.Description("Start time in ISO 8601 format (e.g. 2024-01-15T10:00:00Z)")),
 				mcp.WithString("end", mcp.Required(), mcp.Description("End time in ISO 8601 format")),
-				mcp.WithString("environment", mcp.Description("Filter to a specific environment (e.g. production)")),
 			),
 			incidentTimelineHandler(deps.AlertStore, deps.LogStore),
 		)
@@ -631,7 +622,6 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 				mcp.WithDescription("Detect statistical anomalies by comparing a metric's current value against a baseline of 7 previous periods. Uses z-score analysis to flag deviations. Use when you need to know 'is this normal?' for error rates, log volumes, or alert counts."),
 				mcp.WithString("metric", mcp.Required(), mcp.Description("Metric to analyze: error_rate, log_volume, alert_count")),
 				mcp.WithString("window", mcp.Description("Time window per sample: '15m', '1h' (default), '6h', '24h'")),
-				mcp.WithString("environment", mcp.Description("Filter by environment")),
 				mcp.WithString("service", mcp.Description("Filter by service (for error_rate and log_volume)")),
 			),
 			anomalyDetectHandler(deps.LogStore, deps.AlertStore),
@@ -702,14 +692,12 @@ Sequence type_config example:
 				mcp.WithString("data_source_id", mcp.Description("Data source ID for query/health rule watchers")),
 				mcp.WithString("service", mcp.Description("Filter by service name (ai watchers)")),
 				mcp.WithString("level", mcp.Description("Filter by log level (ai watchers)")),
-				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production)")),
 				mcp.WithString("time_range", mcp.Description("Log lookback window (e.g. 5m, 15m, 1h). Also used as run interval if schedule is not set. Default: 15m")),
 			mcp.WithString("schedule", mcp.Description("When to run: cron expression (e.g. '0 9 * * 1-5' for weekdays at 9am), interval (e.g. '5m'), or predefined (@hourly, @daily). If omitted, uses time_range as interval.")),
 				mcp.WithString("query", mcp.Description("Full-text search query for logs (ai watchers)")),
 				mcp.WithString("severity", mcp.Description("Alert severity: info, warning, or critical (default: warning)")),
 				mcp.WithString("model", mcp.Description("LLM model name (ai watchers only)")),
 				mcp.WithString("effort", mcp.Description("Analysis effort: low, medium (default), or high (ai watchers only)")),
-				mcp.WithString("watcher_environment", mcp.Description("Environment to assign to the watcher (e.g. production, staging)")),
 			mcp.WithString("human_summary", mcp.Description(`JSON: {"what_it_monitors":"...","why_it_matters":"...","what_to_do":"..."}. Always provide this for dashboard display.`)),
 			),
 			createWatcherHandler(deps.WatcherStore),
@@ -758,8 +746,7 @@ Tip: Use db_query_stats, db_activity, or db_table_stats first to understand the 
 
 		maybeAddTool(s,
 			mcp.NewTool("acknowledge_all_alerts",
-				mcp.WithDescription("Mark all alerts as read/acknowledged. Optionally filter by environment."),
-				mcp.WithString("environment", mcp.Description("Only acknowledge alerts in this environment (e.g. production)")),
+				mcp.WithDescription("Mark all alerts as read/acknowledged."),
 			),
 			acknowledgeAllAlertsHandler(deps.AlertStore),
 		)
@@ -777,8 +764,7 @@ Tip: Use db_query_stats, db_activity, or db_table_stats first to understand the 
 
 		maybeAddTool(s,
 			mcp.NewTool("dismiss_all_alerts",
-				mcp.WithDescription("Dismiss all alerts. Optionally filter by environment."),
-				mcp.WithString("environment", mcp.Description("Only dismiss alerts in this environment (e.g. production)")),
+				mcp.WithDescription("Dismiss all alerts."),
 			),
 			dismissAllAlertsHandler(deps.AlertStore),
 		)
@@ -793,7 +779,6 @@ Tip: Use db_query_stats, db_activity, or db_table_stats first to understand the 
 				mcp.WithString("watcher_id", mcp.Required(), mcp.Description("Watcher UUID (from list_watchers)")),
 				mcp.WithString("title", mcp.Description("New title")),
 				mcp.WithString("description", mcp.Description("New description/instructions")),
-				mcp.WithString("environment", mcp.Description("New environment assignment")),
 				mcp.WithString("severity", mcp.Description("New severity: info, warning, or critical")),
 				mcp.WithString("time_range", mcp.Description("New log lookback window (e.g. 5m, 15m, 1h)")),
 				mcp.WithString("schedule", mcp.Description("New schedule: cron expression, interval, or @hourly/@daily")),
@@ -902,7 +887,6 @@ Each suggestion includes a watcher_config that can be passed directly to create_
 				mcp.WithString("name", mcp.Required(), mcp.Description("Display name for the connector")),
 				mcp.WithString("type", mcp.Required(), mcp.Description("Connector type: 'database' or 'logs'")),
 				mcp.WithString("connection_string", mcp.Description("PostgreSQL connection string (required for database type)")),
-				mcp.WithString("environment", mcp.Description("Environment label (e.g. production, staging)")),
 			),
 			createConnectorHandler(deps.DataSourceStore),
 		)
@@ -931,15 +915,14 @@ Each suggestion includes a watcher_config that can be passed directly to create_
 
 			maybeAddTool(s,
 				mcp.NewTool("update_connector",
-					mcp.WithDescription("Update a connector's name, environment, or connection config. When the connection string changes, the connector is unregistered — use test_connector afterwards to re-establish the connection."),
+					mcp.WithDescription("Update a connector's name or connection config. When the connection string changes, the connector is unregistered — use test_connector afterwards to re-establish the connection."),
 					mcp.WithString("connector_id", mcp.Required(), mcp.Description("Connector UUID (from list_connectors)")),
 					mcp.WithString("name", mcp.Description("New display name")),
-					mcp.WithString("environment", mcp.Description("New environment label (e.g. production, staging)")),
 					mcp.WithString("connection_string", mcp.Description("New PostgreSQL connection string (triggers re-registration)")),
 				),
 				updateConnectorHandler(deps.DataSourceStore, deps.Registry),
 			)
-			b.Add("update_connector", "Update a connector's name, environment, or connection config", "Connectors", "admin", "")
+			b.Add("update_connector", "Update a connector's name or connection config", "Connectors", "admin", "")
 		}
 	}
 
@@ -1004,7 +987,7 @@ func bridgeHandler(t agent.Tool) server.ToolHandlerFunc {
 
 // listConnectorsHandler returns a handler that lists connectors.
 // When a DataSourceStore is available, returns full connector details from the
-// database with optional environment/type filters. Falls back to listing
+// database with optional type filter. Falls back to listing
 // active registry tools when no store is provided.
 func listConnectorsHandler(registry *connector.Registry, dsStore store.DataSourceStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1013,9 +996,6 @@ func listConnectorsHandler(registry *connector.Registry, dsStore store.DataSourc
 		// When we have a store, return rich connector info.
 		if dsStore != nil {
 			var params store.ListDataSourceParams
-			if v, ok := args["environment"].(string); ok && v != "" {
-				params.Environment = v
-			}
 			if v, ok := args["type"].(string); ok && v != "" {
 				params.Type = store.ConnectorType(v)
 			}
@@ -1033,7 +1013,6 @@ func listConnectorsHandler(registry *connector.Registry, dsStore store.DataSourc
 				ID            string   `json:"id"`
 				Name          string   `json:"name"`
 				Type          string   `json:"type"`
-				Environment   string   `json:"environment,omitempty"`
 				Status        string   `json:"status"`
 				StatusMessage string   `json:"status_message,omitempty"`
 				LastTestedAt  string   `json:"last_tested_at,omitempty"`
@@ -1049,11 +1028,10 @@ func listConnectorsHandler(registry *connector.Registry, dsStore store.DataSourc
 			entries := make([]connectorEntry, 0, len(connectors))
 			for _, c := range connectors {
 				e := connectorEntry{
-					ID:          c.ID.String(),
-					Name:        c.Name,
-					Type:        string(c.Type),
-					Environment: c.Environment,
-					Status:      string(c.Status),
+					ID:     c.ID.String(),
+					Name:   c.Name,
+					Type:   string(c.Type),
+					Status: string(c.Status),
 				}
 				if c.StatusMessage != nil {
 					e.StatusMessage = *c.StatusMessage
@@ -1097,7 +1075,6 @@ type watcherListEntry struct {
 	Title                string     `json:"title"`
 	Status               string     `json:"status"`
 	WatcherType          string     `json:"watcher_type"`
-	Environment          string     `json:"environment,omitempty"`
 	Severity             string     `json:"severity"`
 	TimeRange            string     `json:"time_range"`
 	Schedule             string     `json:"schedule,omitempty"`
@@ -1118,9 +1095,6 @@ func listWatchersHandler(ws store.WatcherStore, rs store.WatcherRunStore, as sto
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 		var params store.ListWatcherParams
-		if v, ok := args["environment"].(string); ok && v != "" {
-			params.Environment = v
-		}
 		if v, ok := args["watcher_type"].(string); ok && v != "" {
 			params.WatcherType = store.WatcherType(v)
 		}
@@ -1140,7 +1114,6 @@ func listWatchersHandler(ws store.WatcherStore, rs store.WatcherRunStore, as sto
 				Title:       w.Title,
 				Status:      string(w.Status),
 				WatcherType: string(w.WatcherType),
-				Environment: w.Environment,
 				Severity:    string(w.Severity),
 				TimeRange:   w.TimeRange,
 				Schedule:    w.Schedule,
@@ -1247,9 +1220,6 @@ func createWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 		if v, ok := args["level"].(string); ok && v != "" {
 			filters["level"] = v
 		}
-		if v, ok := args["environment"].(string); ok && v != "" {
-			filters["environment"] = v
-		}
 		if v, ok := args["query"].(string); ok && v != "" {
 			filters["query"] = v
 		}
@@ -1280,12 +1250,9 @@ func createWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 			effort = store.WatcherEffort(v)
 		}
 
-		watcherEnv, _ := args["watcher_environment"].(string)
-
 		params := store.CreateWatcherParams{
 			Title:       title,
 			Description: description,
-			Environment: watcherEnv,
 			WatcherType: watcherType,
 			Severity:    severity,
 			Filters:     filtersJSON,
@@ -1546,15 +1513,9 @@ func listAlertsHandler(as store.AlertStore) server.ToolHandlerFunc {
 			unreadOnly = v
 		}
 
-		var environment string
-		if v, ok := args["environment"].(string); ok {
-			environment = v
-		}
-
 		alerts, err := as.List(ctx, store.ListAlertParams{
-			UnreadOnly:  unreadOnly,
-			Environment: environment,
-			Limit:       limit,
+			UnreadOnly: unreadOnly,
+			Limit:      limit,
 		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to list alerts: %v. Check that the database is accessible.", err)), nil
@@ -1599,13 +1560,10 @@ func getDigestHandler(as store.AlertStore, ws store.WatcherStore, rs store.Watch
 			}
 		}
 
-		environment, _ := args["environment"].(string)
-
 		builder := digest.NewBuilder(as, ws, rs)
 		d, err := builder.Generate(ctx, digest.DigestOpts{
 			PeriodStart: periodStart,
 			PeriodEnd:   periodEnd,
-			Environment: environment,
 			TopN:        10,
 		})
 		if err != nil {

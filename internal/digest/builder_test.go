@@ -24,7 +24,7 @@ func (m *mockAlertStore) Create(_ context.Context, params store.CreateAlertParam
 	}
 	a := &store.Alert{
 		ID: uuid.New(), WatcherID: params.WatcherID, RunID: params.RunID,
-		Title: params.Title, Summary: params.Summary, Environment: params.Environment,
+		Title: params.Title, Summary: params.Summary,
 		Severity: sev, Details: params.Details, CreatedAt: time.Now(),
 	}
 	m.alerts = append(m.alerts, *a)
@@ -34,9 +34,6 @@ func (m *mockAlertStore) Create(_ context.Context, params store.CreateAlertParam
 func (m *mockAlertStore) List(_ context.Context, params store.ListAlertParams) ([]store.Alert, error) {
 	var result []store.Alert
 	for _, a := range m.alerts {
-		if params.Environment != "" && a.Environment != params.Environment {
-			continue
-		}
 		if params.WatcherID != nil && (a.WatcherID == nil || *a.WatcherID != *params.WatcherID) {
 			continue
 		}
@@ -51,42 +48,33 @@ func (m *mockAlertStore) List(_ context.Context, params store.ListAlertParams) (
 	return result, nil
 }
 
-func (m *mockAlertStore) CountUnread(_ context.Context, environment string) (int, error) {
+func (m *mockAlertStore) CountUnread(_ context.Context) (int, error) {
 	count := 0
 	for _, a := range m.alerts {
 		if !a.Read && !a.Dismissed {
-			if environment != "" && a.Environment != environment {
-				continue
-			}
 			count++
 		}
 	}
 	return count, nil
 }
 
-func (m *mockAlertStore) CountTotal(_ context.Context, environment string) (int, error) {
+func (m *mockAlertStore) CountTotal(_ context.Context) (int, error) {
 	count := 0
 	for _, a := range m.alerts {
 		if !a.Dismissed {
-			if environment != "" && a.Environment != environment {
-				continue
-			}
 			count++
 		}
 	}
 	return count, nil
 }
 
-func (m *mockAlertStore) CountBySeverity(_ context.Context, since, until time.Time, environment string) (map[string]int, error) {
+func (m *mockAlertStore) CountBySeverity(_ context.Context, since, until time.Time) (map[string]int, error) {
 	result := make(map[string]int)
 	for _, a := range m.alerts {
 		if a.Dismissed {
 			continue
 		}
 		if a.CreatedAt.Before(since) || !a.CreatedAt.Before(until) {
-			continue
-		}
-		if environment != "" && a.Environment != environment {
 			continue
 		}
 		result[string(a.Severity)]++
@@ -103,9 +91,9 @@ func (m *mockAlertStore) GetByID(_ context.Context, id uuid.UUID) (*store.Alert,
 	return nil, store.ErrNotFound
 }
 func (m *mockAlertStore) MarkRead(_ context.Context, _ uuid.UUID) error                { return nil }
-func (m *mockAlertStore) MarkAllRead(_ context.Context, _ string) error                 { return nil }
+func (m *mockAlertStore) MarkAllRead(_ context.Context) error                     { return nil }
 func (m *mockAlertStore) Dismiss(_ context.Context, _ uuid.UUID, _ string) error  { return nil }
-func (m *mockAlertStore) DismissAll(_ context.Context, _ string) error            { return nil }
+func (m *mockAlertStore) DismissAll(_ context.Context) error                      { return nil }
 func (m *mockAlertStore) Snooze(_ context.Context, _ uuid.UUID, _ time.Time) error { return nil }
 func (m *mockAlertStore) Unsnooze(_ context.Context, _ uuid.UUID) error            { return nil }
 func (m *mockAlertStore) WatcherAlertStats(_ context.Context, id uuid.UUID, _ time.Time) (*store.WatcherEffectiveness, error) {
@@ -119,7 +107,7 @@ type mockWatcherStore struct {
 
 func (m *mockWatcherStore) Create(_ context.Context, params store.CreateWatcherParams) (*store.Watcher, error) {
 	w := &store.Watcher{
-		ID: uuid.New(), Title: params.Title, Environment: params.Environment,
+		ID: uuid.New(), Title: params.Title,
 		Severity: params.Severity, Status: store.WatcherActive,
 		Filters: json.RawMessage("{}"), Notify: json.RawMessage("{}"),
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
@@ -138,14 +126,7 @@ func (m *mockWatcherStore) GetByID(_ context.Context, id uuid.UUID) (*store.Watc
 }
 
 func (m *mockWatcherStore) List(_ context.Context, params store.ListWatcherParams) ([]store.Watcher, error) {
-	var result []store.Watcher
-	for _, w := range m.watchers {
-		if params.Environment != "" && w.Environment != params.Environment {
-			continue
-		}
-		result = append(result, w)
-	}
-	return result, nil
+	return m.watchers, nil
 }
 
 func (m *mockWatcherStore) Update(_ context.Context, _ uuid.UUID, _ store.UpdateWatcherParams) (*store.Watcher, error) {
@@ -469,43 +450,3 @@ func TestBuilder_Generate_Trends(t *testing.T) {
 	}
 }
 
-func TestBuilder_Generate_EnvironmentFilter(t *testing.T) {
-	now := time.Now().UTC()
-	periodStart := now.Add(-24 * time.Hour)
-
-	w1 := uuid.New()
-	w2 := uuid.New()
-
-	as := &mockAlertStore{
-		alerts: []store.Alert{
-			{ID: uuid.New(), WatcherID: &w1, Environment: "production", Severity: store.SeverityCritical, CreatedAt: now.Add(-1 * time.Hour)},
-			{ID: uuid.New(), WatcherID: &w2, Environment: "staging", Severity: store.SeverityWarning, CreatedAt: now.Add(-2 * time.Hour)},
-		},
-	}
-
-	ws := &mockWatcherStore{
-		watchers: []store.Watcher{
-			{ID: w1, Title: "Prod Watcher", Environment: "production", Status: store.WatcherActive,
-				Filters: json.RawMessage("{}"), Notify: json.RawMessage("{}")},
-			{ID: w2, Title: "Staging Watcher", Environment: "staging", Status: store.WatcherActive,
-				Filters: json.RawMessage("{}"), Notify: json.RawMessage("{}")},
-		},
-	}
-
-	b := NewBuilder(as, ws, &mockRunStore{})
-	d, err := b.Generate(context.Background(), DigestOpts{
-		PeriodStart: periodStart,
-		PeriodEnd:   now,
-		Environment: "production",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if d.AlertSummary.Total != 1 {
-		t.Errorf("total alerts = %d, want 1 (production only)", d.AlertSummary.Total)
-	}
-	if d.WatcherSummary.Total != 1 {
-		t.Errorf("total watchers = %d, want 1 (production only)", d.WatcherSummary.Total)
-	}
-}
