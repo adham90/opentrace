@@ -407,6 +407,32 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*LogEntry, error) {
 			slog.Warn("invalid metadata JSON in log entry", "entry_id", entry.ID, "error", err)
 		}
 	}
+
+	// Load associated request summary if present
+	var rs RequestSummary
+	var nPlusOne int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, log_id, controller, action, method, path, status,
+			duration_ms, db_time_ms, view_time_ms,
+			sql_count, sql_total_ms, sql_slowest_ms, sql_slowest_name, n_plus_one,
+			view_count, view_total_ms, view_slowest_ms, view_slowest_template,
+			cache_reads, cache_hits, cache_writes, cache_hit_ratio,
+			http_external_count, http_external_total_ms, http_slowest_ms, http_slowest_host,
+			memory_before_mb, memory_after_mb, memory_delta_mb, timeline
+		FROM request_summaries WHERE log_id = ?`, id,
+	).Scan(&rs.ID, &rs.LogID, &rs.Controller, &rs.Action, &rs.Method, &rs.Path, &rs.Status,
+		&rs.DurationMs, &rs.DBTimeMs, &rs.ViewTimeMs,
+		&rs.SQLCount, &rs.SQLTotalMs, &rs.SQLSlowestMs, &rs.SQLSlowestName, &nPlusOne,
+		&rs.ViewCount, &rs.ViewTotalMs, &rs.ViewSlowestMs, &rs.ViewSlowestTemplate,
+		&rs.CacheReads, &rs.CacheHits, &rs.CacheWrites, &rs.CacheHitRatio,
+		&rs.HTTPExternalCount, &rs.HTTPExternalTotalMs, &rs.HTTPSlowestMs, &rs.HTTPSlowestHost,
+		&rs.MemoryBeforeMb, &rs.MemoryAfterMb, &rs.MemoryDeltaMb, &rs.Timeline)
+	if err == nil {
+		rs.NPlusOne = nPlusOne == 1
+		entry.RequestSummary = &rs
+	}
+	// sql.ErrNoRows is fine — most logs won't have a request summary
+
 	return &entry, nil
 }
 

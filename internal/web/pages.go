@@ -2,6 +2,7 @@ package web
 
 import (
 	"embed"
+	"errors"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -342,6 +343,23 @@ func (s *Server) handleLogsPoll(w http.ResponseWriter, r *http.Request) {
 
 	ft := s.getTemplate(logsFragmentTmpl, "internal/web/templates/logs.html")
 	ft.ExecuteTemplate(w, "logs-new", pageData{Logs: logs, MaxLogID: maxID})
+}
+
+func (s *Server) handleGetLogDetail(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid log id")
+		return
+	}
+	entry, err := s.logStore.GetByID(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "log not found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get log")
+		return
+	}
+	writeJSON(w, http.StatusOK, entry)
 }
 
 func (s *Server) handleAlertsPage(w http.ResponseWriter, r *http.Request) {

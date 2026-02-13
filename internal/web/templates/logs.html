@@ -57,14 +57,14 @@
 .term-line {
   display: flex;
   align-items: baseline;
-  padding: 1px 12px;
+  padding: 3px 12px;
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
   cursor: pointer;
   border-left: 2px solid transparent;
   transition: background 0.1s;
-  gap: 0;
+  gap: 8px;
 }
 
 .term-line:hover {
@@ -99,15 +99,13 @@
 
 .term-source {
   color: var(--cyan);
-  min-width: 80px;
-  max-width: 140px;
+  width: 120px;
   flex-shrink: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11px;
 }
-.term-source:empty { min-width: 80px; }
 
 .term-msg {
   color: var(--text);
@@ -149,8 +147,27 @@
   color: var(--text);
   word-break: break-all;
 }
-.term-detail-val.trace-link { color: var(--cyan); cursor: pointer; }
-.term-detail-val.trace-link:hover { text-decoration: underline; }
+.term-detail-section {
+  padding: 4px 0;
+}
+.term-detail-section + .term-detail-section {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 6px;
+}
+.term-detail-section-title {
+  color: var(--text-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+.term-detail-status { font-weight: 600; }
+.term-detail-status.status-2xx { color: var(--green); }
+.term-detail-status.status-3xx { color: var(--cyan); }
+.term-detail-status.status-4xx { color: var(--yellow); }
+.term-detail-status.status-5xx { color: var(--red); }
+.term-detail-flag { color: var(--red); font-weight: 600; }
 
 /* ── New entry animation ───────────────────────────────────── */
 .term-entry-new .term-line {
@@ -340,7 +357,7 @@
     padding: 4px 8px;
   }
   .term-ts { min-width: auto; font-size: 10px; }
-  .term-source { max-width: 80px; min-width: auto; }
+  .term-source { width: auto; min-width: 60px; max-width: 80px; }
   .term-msg { flex-basis: 100%; padding-left: 0; margin-top: 1px; }
   .term-detail { padding-left: 12px; }
 }
@@ -495,14 +512,146 @@
   // Initial scroll to bottom
   setTimeout(scrollToBottom, 50);
 
-  // ── Toggle expand/collapse ────────────────────────────────
+  // ── Inline detail expand/collapse ──────────────────────────
   document.addEventListener('click', function(e) {
-    var line = e.target.closest('.term-line');
+    var entry = e.target.closest('.term-entry');
+    if (!entry) return;
+    var line = entry.querySelector('.term-line');
     if (!line) return;
-    // Don't toggle if user is selecting text
     if (window.getSelection().toString()) return;
+
+    var expanding = !line.classList.contains('expanded');
     line.classList.toggle('expanded');
+
+    if (expanding) {
+      var detail = entry.querySelector('.term-detail');
+      if (detail && !entry.getAttribute('data-loaded')) {
+        var logId = entry.getAttribute('data-log-id');
+        detail.innerHTML = '<div class="term-detail-row"><span class="term-detail-val" style="color:var(--text-dim)">Loading...</span></div>';
+
+        fetch('/api/logs/' + logId)
+          .then(function(r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function(data) {
+            if (data.error) {
+              detail.innerHTML = '<div class="term-detail-row"><span class="term-detail-val" style="color:var(--red)">' + escH(data.error) + '</span></div>';
+              return;
+            }
+            entry.setAttribute('data-loaded', '1');
+            renderInlineDetail(detail, data);
+          })
+          .catch(function(err) {
+            detail.innerHTML = '<div class="term-detail-row"><span class="term-detail-val" style="color:var(--red)">' + escH(err.message || 'Failed to load') + '</span></div>';
+          });
+      }
+    }
   });
+
+  function statusClass(s) {
+    if (s >= 200 && s < 300) return 'status-2xx';
+    if (s >= 300 && s < 400) return 'status-3xx';
+    if (s >= 400 && s < 500) return 'status-4xx';
+    if (s >= 500) return 'status-5xx';
+    return '';
+  }
+
+  function renderInlineDetail(el, log) {
+    var html = '';
+
+    // Identity row
+    html += '<div class="term-detail-section">';
+    html += dRow('id', log.id);
+    if (log.trace_id) html += dRow('trace_id', log.trace_id);
+    if (log.span_id) html += dRow('span_id', log.span_id);
+    if (log.parent_span_id) html += dRow('parent_span_id', log.parent_span_id);
+    if (log.service) html += dRow('service', log.service);
+    if (log.environment) html += dRow('environment', log.environment);
+    if (log.event_type) html += dRow('event_type', log.event_type);
+    html += '</div>';
+
+    // Request Summary
+    var rs = log.request_summary;
+    if (rs) {
+      html += '<div class="term-detail-section">';
+      html += '<div class="term-detail-section-title">Request</div>';
+      if (rs.method || rs.path) html += dRow('endpoint', (rs.method || '') + ' ' + (rs.path || ''));
+      if (rs.controller || rs.action) html += dRow('action', (rs.controller || '') + '#' + (rs.action || ''));
+      if (rs.status) {
+        var sc = statusClass(rs.status);
+        html += '<div class="term-detail-row"><span class="term-detail-key">status</span>' +
+          '<span class="term-detail-val term-detail-status ' + sc + '">' + rs.status + '</span></div>';
+      }
+      if (rs.duration_ms) html += dRow('duration', rs.duration_ms.toFixed(1) + ' ms');
+      if (rs.db_time_ms) html += dRow('db_time', rs.db_time_ms.toFixed(1) + ' ms');
+      if (rs.view_time_ms) html += dRow('view_time', rs.view_time_ms.toFixed(1) + ' ms');
+      html += '</div>';
+
+      if (rs.sql_count > 0) {
+        html += '<div class="term-detail-section">';
+        html += '<div class="term-detail-section-title">SQL (' + rs.sql_count + ' queries' + (rs.sql_total_ms ? ', ' + rs.sql_total_ms.toFixed(1) + ' ms' : '') + ')</div>';
+        if (rs.sql_slowest_ms) html += dRow('slowest', rs.sql_slowest_ms.toFixed(1) + ' ms' + (rs.sql_slowest_name ? '  ' + escH(rs.sql_slowest_name) : ''));
+        if (rs.n_plus_one) html += '<div class="term-detail-row"><span class="term-detail-key">N+1</span><span class="term-detail-val term-detail-flag">DETECTED</span></div>';
+        html += '</div>';
+      }
+
+      if (rs.view_count > 0) {
+        html += '<div class="term-detail-section">';
+        html += '<div class="term-detail-section-title">Views (' + rs.view_count + (rs.view_total_ms ? ', ' + rs.view_total_ms.toFixed(1) + ' ms' : '') + ')</div>';
+        if (rs.view_slowest_ms) html += dRow('slowest', rs.view_slowest_ms.toFixed(1) + ' ms');
+        if (rs.view_slowest_template) html += dRow('template', rs.view_slowest_template);
+        html += '</div>';
+      }
+
+      if (rs.cache_reads > 0 || rs.cache_writes > 0) {
+        html += '<div class="term-detail-section">';
+        html += '<div class="term-detail-section-title">Cache</div>';
+        html += dRow('reads', rs.cache_reads);
+        html += dRow('hits', rs.cache_hits);
+        html += dRow('writes', rs.cache_writes);
+        if (rs.cache_hit_ratio) html += dRow('hit_ratio', (rs.cache_hit_ratio * 100).toFixed(0) + '%');
+        html += '</div>';
+      }
+
+      if (rs.http_external_count > 0) {
+        html += '<div class="term-detail-section">';
+        html += '<div class="term-detail-section-title">HTTP External (' + rs.http_external_count + ')</div>';
+        if (rs.http_external_total_ms) html += dRow('total', rs.http_external_total_ms.toFixed(1) + ' ms');
+        if (rs.http_slowest_ms) html += dRow('slowest', rs.http_slowest_ms.toFixed(1) + ' ms');
+        if (rs.http_slowest_host) html += dRow('host', rs.http_slowest_host);
+        html += '</div>';
+      }
+
+      if (rs.memory_delta_mb) {
+        html += '<div class="term-detail-section">';
+        html += '<div class="term-detail-section-title">Memory</div>';
+        if (rs.memory_before_mb) html += dRow('before', rs.memory_before_mb.toFixed(1) + ' MB');
+        if (rs.memory_after_mb) html += dRow('after', rs.memory_after_mb.toFixed(1) + ' MB');
+        html += dRow('delta', rs.memory_delta_mb.toFixed(1) + ' MB');
+        html += '</div>';
+      }
+    }
+
+    // Metadata
+    if (log.metadata && Object.keys(log.metadata).length > 0) {
+      html += '<div class="term-detail-section">';
+      html += '<div class="term-detail-section-title">Metadata</div>';
+      Object.keys(log.metadata).sort().forEach(function(k) {
+        var v = log.metadata[k];
+        if (typeof v === 'object') v = JSON.stringify(v);
+        html += dRow(k, v);
+      });
+      html += '</div>';
+    }
+
+    el.innerHTML = html;
+  }
+
+  function dRow(key, val) {
+    return '<div class="term-detail-row"><span class="term-detail-key">' + escH(key) +
+      '</span><span class="term-detail-val">' + escH(String(val)) + '</span></div>';
+  }
 
   // ── Filter helpers ────────────────────────────────────────
   function setFilter(key, val) {
@@ -677,7 +826,6 @@
   function applyFilters() {
     pushFilterURL();
     htmx.trigger(form, 'submit');
-    // Resume live after filter apply if was live
   }
 
   // ── Command line parsing ──────────────────────────────────
@@ -1131,10 +1279,20 @@
     // When filters change, keep polling but reset
   };
   window.loadPageData = function() {
+    filters.environment = getGlobalEnv();
+    syncHiddenFields();
+    renderFilterChips();
     applyFilters();
   };
 
   // ── Initial render ────────────────────────────────────────
+  // Sync global env filter if no env was set via URL
+  if (!filters.environment && typeof getGlobalEnv === 'function') {
+    var globalEnv = getGlobalEnv();
+    if (globalEnv) {
+      filters.environment = globalEnv;
+    }
+  }
   syncHiddenFields();
   renderFilterChips();
 })();
@@ -1378,23 +1536,14 @@
 {{end}}
 
 {{define "log-entry"}}
-<div class="term-entry">
+<div class="term-entry" data-log-id="{{.ID}}">
   <div class="term-line level-{{.Level}}">
     <span class="term-ts" title="{{.Timestamp.Format "2006-01-02T15:04:05.000Z07:00"}}">{{.Timestamp.Format "15:04:05.000"}}</span>
     <span class="term-level level-{{.Level}}">{{.Level}}</span>
     <span class="term-source" title="{{.Service}}">{{if .Service}}{{.Service}}{{end}}</span>
     <span class="term-msg">{{.Message}}</span>
   </div>
-  <div class="term-detail">
-    <div class="term-detail-row"><span class="term-detail-key">id</span><span class="term-detail-val">{{.ID}}</span></div>
-    {{if .TraceID}}<div class="term-detail-row"><span class="term-detail-key">trace_id</span><span class="term-detail-val trace-link">{{.TraceID}}</span></div>{{end}}
-    {{if .SpanID}}<div class="term-detail-row"><span class="term-detail-key">span_id</span><span class="term-detail-val">{{.SpanID}}</span></div>{{end}}
-    {{if .Service}}<div class="term-detail-row"><span class="term-detail-key">service</span><span class="term-detail-val">{{.Service}}</span></div>{{end}}
-    {{if .Environment}}<div class="term-detail-row"><span class="term-detail-key">environment</span><span class="term-detail-val">{{.Environment}}</span></div>{{end}}
-    {{if .EventType}}<div class="term-detail-row"><span class="term-detail-key">event_type</span><span class="term-detail-val">{{.EventType}}</span></div>{{end}}
-    <div class="term-detail-row"><span class="term-detail-key">level</span><span class="term-detail-val">{{.Level}}</span></div>
-    <div class="term-detail-row"><span class="term-detail-key">timestamp</span><span class="term-detail-val">{{.Timestamp.Format "2006-01-02T15:04:05.000Z07:00"}}</span></div>
-  </div>
+  <div class="term-detail"></div>
 </div>
 {{end}}
 
