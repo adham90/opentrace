@@ -293,26 +293,17 @@ document.addEventListener('keydown', function(e){
   }
 });
 
-function getWatcherTypeBadge(w) {
-  if (w.watcher_type === 'rule' && w.rule_config) {
-    var src = w.rule_config.source;
-    if (src === 'query') return '<span class="badge badge-type badge-query">query</span>';
-    if (src === 'logs') return '<span class="badge badge-type badge-logs">logs</span>';
-    if (src === 'health') return '<span class="badge badge-type badge-health">health</span>';
-    return '<span class="badge badge-type">rule</span>';
-  }
-  if (w.watcher_type === 'deadman') return '<span class="badge badge-type badge-deadman">deadman</span>';
-  if (w.watcher_type === 'diff') return '<span class="badge badge-type badge-diff">diff</span>';
-  if (w.watcher_type === 'composite') return '<span class="badge badge-type badge-composite">composite</span>';
-  if (w.watcher_type === 'trend') return '<span class="badge badge-type badge-trend">trend</span>';
-  if (w.watcher_type === 'sequence') return '<span class="badge badge-type badge-sequence">sequence</span>';
-  return '<span class="badge badge-type badge-ai">AI</span>';
+function getWatcherTypeTag(w) {
+  var type = getWatcherType(w);
+  var colorMap = {query:'var(--blue)',logs:'var(--purple)',health:'var(--green)',ai:'var(--cyan)',deadman:'var(--red)',diff:'var(--yellow)',composite:'var(--purple)',trend:'var(--blue)',sequence:'var(--green)'};
+  var color = colorMap[type] || 'var(--text-dim)';
+  return '<span class="watcher-type-tag" style="color:' + color + '">[' + type + ']</span>';
 }
 
 function getAdaptiveBadge(w) {
   if (!w.adaptive_config || !w.adaptive_config.enabled) return '';
   var s = w.adaptive_state || 'normal';
-  if (s === 'normal') return '<span class="badge badge-adaptive" title="Running on regular schedule">normal</span>';
+  if (s === 'normal') return '<span class="badge badge-adaptive" title="Running on regular schedule" style="opacity:0.5">normal</span>';
   if (s === 'escalated') return '<span class="badge badge-adaptive badge-escalated" title="Anomaly detected \u2014 checking more frequently to track the issue">&#8593; escalated</span>';
   if (s === 'sustained') return '<span class="badge badge-adaptive badge-sustained" title="Alert ongoing \u2014 returned to normal check frequency while issue persists">&#8252; sustained</span>';
   if (s === 'relaxed') return '<span class="badge badge-adaptive badge-relaxed" title="All clear for a while \u2014 checking less often to save resources">&#8595; relaxed</span>';
@@ -451,35 +442,33 @@ function renderWatchers(watchers) {
     var statusClass = w.status === 'active' ? 'status-active' : w.status === 'paused' ? 'status-paused' : 'status-error';
     var statusIcon = w.status === 'active' ? '&#9679;' : w.status === 'paused' ? '&#9208;' : '&#9888;';
     var lastRun = w.last_run_at ? getTimeAgo(w.last_run_at) : 'never';
-
-    html += '<div class="watcher-card" data-id="' + w.id + '">';
-    html += '  <div class="watcher-header" onclick="toggleWatcherDetail(\'' + w.id + '\')" style="cursor:pointer">';
-    html += '    ' + getWatcherTypeBadge(w);
-    html += '    <span class="watcher-title">' + escapeHtml(w.title) + '</span>';
     var schedLabel = w.schedule ? describeSchedule(w.schedule) : ('every ' + (w.time_range || '15m'));
-    html += '    <span class="watcher-meta">' + escapeHtml(schedLabel) + '</span>';
-    if (w.watcher_type !== 'rule' && w.model) {
-      html += '    <span class="watcher-meta">' + escapeHtml(w.model) + '</span>';
+    var pausedClass = w.status === 'paused' ? ' watcher-paused' : '';
+
+    // Summary text for the main row (typed > human > description fallback)
+    var summaryText = getTypedWatcherSummary(w);
+    if (!summaryText && w.human_summary && w.human_summary.what_it_monitors) {
+      summaryText = w.human_summary.what_it_monitors;
     }
+    if (!summaryText && w.description) {
+      summaryText = w.description;
+    }
+
+    html += '<div class="watcher-row severity-' + w.severity + pausedClass + '" data-id="' + w.id + '" onclick="toggleWatcherDetail(\'' + w.id + '\')">';
+    html += '  <div class="watcher-row-main">';
+    html += '    ' + getWatcherTypeTag(w);
+    html += '    <span class="watcher-title">' + escapeHtml(w.title) + '</span>';
+    if (summaryText) {
+      html += '    <span class="watcher-summary-meta" title="' + escapeHtml(summaryText) + '">' + escapeHtml(summaryText) + '</span>';
+    }
+    html += '    <span class="watcher-meta">' + escapeHtml(schedLabel) + '</span>';
     html += '    <span class="watcher-status ' + statusClass + '">' + statusIcon + ' ' + w.status + '</span>';
     html += getAdaptiveBadge(w);
-    if (w.human_summary && w.human_summary.what_it_monitors) {
-        html += '    <span class="badge claude-managed" title="Created and managed by Claude">claude</span>';
-    }
+    html += '    <span class="watcher-meta">' + lastRun + '</span>';
     html += '  </div>';
-    html += '  <div class="watcher-info">';
-    html += '    <span>Last run: ' + lastRun + '</span>';
-    html += '    <span class="severity-badge severity-' + w.severity + '">' + w.severity + '</span>';
-    html += '  </div>';
-    var typedSummary = getTypedWatcherSummary(w);
-    if (typedSummary) {
-        html += '  <div class="watcher-typed-summary">' + escapeHtml(typedSummary) + '</div>';
-    } else if (w.human_summary && w.human_summary.what_it_monitors) {
-        html += '  <div class="watcher-human-summary">' + escapeHtml(w.human_summary.what_it_monitors) + '</div>';
-    }
 
     // Expandable detail section
-    html += '  <div class="watcher-detail" id="watcher-detail-' + w.id + '" style="display:none">';
+    html += '  <div class="watcher-detail" id="watcher-detail-' + w.id + '">';
     html += '    <div class="watcher-detail-meta">';
     html += '      <div class="alert-detail-row"><span class="alert-detail-key">id</span><span class="alert-detail-val dim" style="font-size:10px">' + w.id + '</span></div>';
     html += '      <div class="alert-detail-row"><span class="alert-detail-key">type</span><span class="alert-detail-val">' + (w.watcher_type || 'ai') + '</span></div>';
@@ -496,6 +485,7 @@ function renderWatchers(watchers) {
     if (w.time_range) {
       html += '      <div class="alert-detail-row"><span class="alert-detail-key">lookback</span><span class="alert-detail-val">' + escapeHtml(w.time_range) + '</span></div>';
     }
+    html += '      <div class="alert-detail-row"><span class="alert-detail-key">severity</span><span class="alert-detail-val">' + w.severity + '</span></div>';
     if (w.created_at) {
       html += '      <div class="alert-detail-row"><span class="alert-detail-key">created</span><span class="alert-detail-val">' + new Date(w.created_at).toLocaleString() + '</span></div>';
     }
@@ -525,24 +515,25 @@ function renderWatchers(watchers) {
     // Effectiveness placeholder — loaded on demand
     html += '      <div id="watcher-eff-' + w.id + '"></div>';
     html += '    </div>';
-    html += '  </div>';
 
-    html += '  <div class="watcher-actions">';
+    // Actions in expanded detail only
+    html += '    <div class="watcher-detail-actions">';
     if (isAdmin) {
-      html += '    <button class="btn btn-sm" onclick="openEditModal(\'' + w.id + '\')">Edit</button>';
+      html += '      <button class="btn btn-sm" onclick="event.stopPropagation();openEditModal(\'' + w.id + '\')">Edit</button>';
       if (w.status === 'active') {
-        html += '    <button class="btn btn-sm" onclick="pauseWatcher(\'' + w.id + '\')">Pause</button>';
+        html += '      <button class="btn btn-sm" onclick="event.stopPropagation();pauseWatcher(\'' + w.id + '\')">Pause</button>';
       } else if (w.adaptive_state === 'error') {
-        html += '    <button class="btn btn-sm btn-resume" onclick="resumeWatcher(\'' + w.id + '\')">Resume Watcher</button>';
+        html += '      <button class="btn btn-sm btn-resume" onclick="event.stopPropagation();resumeWatcher(\'' + w.id + '\')">Resume Watcher</button>';
       } else {
-        html += '    <button class="btn btn-sm" onclick="resumeWatcher(\'' + w.id + '\')">Resume</button>';
+        html += '      <button class="btn btn-sm" onclick="event.stopPropagation();resumeWatcher(\'' + w.id + '\')">Resume</button>';
       }
-      html += '    <button class="btn btn-sm" onclick="runNow(\'' + w.id + '\')">Run Now</button>';
+      html += '      <button class="btn btn-sm" onclick="event.stopPropagation();runNow(\'' + w.id + '\')">Run Now</button>';
     }
-    html += '    <a href="/watchers/' + w.id + '/runs" class="btn btn-sm">History</a>';
+    html += '      <a href="/watchers/' + w.id + '/runs" class="btn btn-sm" onclick="event.stopPropagation()">History</a>';
     if (isAdmin) {
-      html += '    <button class="btn btn-sm btn-danger" onclick="deleteWatcher(\'' + w.id + '\')">Delete</button>';
+      html += '      <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteWatcher(\'' + w.id + '\')">Delete</button>';
     }
+    html += '    </div>';
     html += '  </div>';
     html += '</div>';
   });
@@ -640,13 +631,11 @@ function saveEditWatcher(e) {
 
 // --- Toggle watcher detail ---
 function toggleWatcherDetail(id) {
-  var el = document.getElementById('watcher-detail-' + id);
-  if (!el) return;
-  if (el.style.display !== 'none') {
-    el.style.display = 'none';
-    return;
-  }
-  el.style.display = 'block';
+  var row = document.querySelector('.watcher-row[data-id="' + id + '"]');
+  if (!row) return;
+  var wasExpanded = row.classList.contains('expanded');
+  row.classList.toggle('expanded');
+  if (wasExpanded) return;
   // Load effectiveness on first expand
   var effEl = document.getElementById('watcher-eff-' + id);
   if (effEl && !effEl.dataset.loaded) {
