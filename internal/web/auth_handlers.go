@@ -79,7 +79,8 @@ type authPageData struct {
 	Users   []store.User
 }
 
-const sessionDuration = 7 * 24 * time.Hour // 7 days
+const sessionDuration = 24 * time.Hour          // default: 1 day
+const rememberMeDuration = 7 * 24 * time.Hour    // "Remember me": 7 days
 
 // --- Login ---
 
@@ -155,14 +156,19 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	expiresAt := time.Now().Add(sessionDuration)
+	duration := sessionDuration
+	if r.FormValue("remember") == "on" {
+		duration = rememberMeDuration
+	}
+
+	expiresAt := time.Now().Add(duration)
 	_, err = s.sessionStore.Create(r.Context(), user.ID, token, expiresAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create session")
 		return
 	}
 
-	setSessionCookie(w, token, int(sessionDuration.Seconds()), s.secureCookies)
+	setSessionCookie(w, token, int(duration.Seconds()), s.secureCookies)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 

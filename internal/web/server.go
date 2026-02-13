@@ -182,6 +182,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		sseServer := srv.setupMCPSSE()
 		srv.sseServer = sseServer
 		router.Route("/mcp", func(r chi.Router) {
+			r.Use(apiLimiter.Middleware)
 			r.Use(srv.MCPTokenAuth)
 			r.Handle("/sse", sseServer.SSEHandler())
 			r.Handle("/message", sseServer.MessageHandler())

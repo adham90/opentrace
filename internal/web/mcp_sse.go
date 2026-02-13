@@ -35,6 +35,7 @@ func (s *Server) MCPTokenAuth(next http.Handler) http.Handler {
 
 		header := r.Header.Get("Authorization")
 		if !strings.HasPrefix(header, "Bearer ") {
+			time.Sleep(100 * time.Millisecond) // Normalize timing
 			http.Error(w, "missing or invalid Authorization header", http.StatusUnauthorized)
 			return
 		}
@@ -45,6 +46,7 @@ func (s *Server) MCPTokenAuth(next http.Handler) http.Handler {
 
 		user, err := s.userStore.GetByMCPToken(ctx, token)
 		if err != nil || user == nil {
+			time.Sleep(100 * time.Millisecond) // Normalize timing to prevent token enumeration
 			http.Error(w, "invalid or disabled MCP token", http.StatusUnauthorized)
 			return
 		}

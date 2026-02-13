@@ -14,6 +14,11 @@
         <label for="password">Password</label>
         <input type="password" id="password" name="password" required placeholder="your password">
       </div>
+      <div class="form-group form-check">
+        <label class="check-label">
+          <input type="checkbox" name="remember" id="remember"> Remember me for 7 days
+        </label>
+      </div>
       <button type="submit" class="btn btn-primary btn-block">Log in</button>
     </form>
   </div>
@@ -50,6 +55,20 @@
   border: 1px solid var(--border, #333);
   color: var(--fg, #e0e0e0);
   border-radius: 4px;
+}
+.form-check {
+  margin-bottom: 0.5rem;
+}
+.check-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  opacity: 0.8;
+  cursor: pointer;
+}
+.check-label input[type="checkbox"] {
+  width: auto;
 }
 .btn-block {
   width: 100%;
