@@ -28,6 +28,14 @@ func ValidateReadOnly(query string) error {
 			continue
 		}
 		if ex := node.GetExplainStmt(); ex != nil {
+			// Reject EXPLAIN ANALYZE — it actually executes the query.
+			for _, opt := range ex.GetOptions() {
+				if de := opt.GetDefElem(); de != nil {
+					if de.GetDefname() == "analyze" {
+						return fmt.Errorf("EXPLAIN ANALYZE is not allowed (it executes the query)")
+					}
+				}
+			}
 			// Only allow EXPLAIN wrapping a SELECT.
 			inner := ex.GetQuery()
 			if inner != nil && inner.GetSelectStmt() != nil {

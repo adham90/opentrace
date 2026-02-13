@@ -75,9 +75,25 @@ func TestValidateReadOnly_ExplainSelect(t *testing.T) {
 }
 
 func TestValidateReadOnly_ExplainAnalyzeSelect(t *testing.T) {
+	// EXPLAIN ANALYZE actually executes the query, so it must be rejected.
 	err := ValidateReadOnly("EXPLAIN (ANALYZE true, BUFFERS true) SELECT COUNT(*) FROM users")
+	if err == nil {
+		t.Fatal("expected error for EXPLAIN ANALYZE SELECT, got nil")
+	}
+}
+
+func TestValidateReadOnly_ExplainAnalyzeSimple(t *testing.T) {
+	err := ValidateReadOnly("EXPLAIN ANALYZE SELECT 1")
+	if err == nil {
+		t.Fatal("expected error for EXPLAIN ANALYZE SELECT, got nil")
+	}
+}
+
+func TestValidateReadOnly_ExplainFormatJSON(t *testing.T) {
+	// EXPLAIN with non-ANALYZE options should still be allowed.
+	err := ValidateReadOnly("EXPLAIN (FORMAT JSON) SELECT 1")
 	if err != nil {
-		t.Fatalf("expected no error for EXPLAIN ANALYZE SELECT, got: %v", err)
+		t.Fatalf("expected no error for EXPLAIN FORMAT JSON SELECT, got: %v", err)
 	}
 }
 

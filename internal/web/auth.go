@@ -54,18 +54,18 @@ func generateAPIKey() (string, error) {
 
 const sessionCookieName = "opentrace_session"
 
-func setSessionCookie(w http.ResponseWriter, token string, maxAge int) {
+func setSessionCookie(w http.ResponseWriter, token string, maxAge int, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    token,
 		Path:     "/",
 		MaxAge:   maxAge,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
 	})
 }
 
 func clearSessionCookie(w http.ResponseWriter) {
-	setSessionCookie(w, "", -1)
+	setSessionCookie(w, "", -1, true)
 }

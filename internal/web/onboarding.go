@@ -125,7 +125,7 @@ func (s *Server) handleOnboardingSubmit(w http.ResponseWriter, r *http.Request) 
 	if err == nil {
 		expiresAt := time.Now().Add(sessionDuration)
 		s.sessionStore.Create(r.Context(), user.ID, token, expiresAt)
-		setSessionCookie(w, token, int(sessionDuration.Seconds()))
+		setSessionCookie(w, token, int(sessionDuration.Seconds()), s.secureCookies)
 	}
 
 	// PRG: redirect to step 2 so the URL reflects the state

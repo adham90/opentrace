@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -12,6 +13,63 @@ import (
 
 	"github.com/adham90/opentrace/internal/store"
 )
+
+const (
+	maxFailedLogins = 5
+	lockoutDuration = 15 * time.Minute
+)
+
+type loginAttempt struct {
+	failures int
+	lockedAt time.Time
+}
+
+// loginTracker tracks per-email failed login attempts to prevent brute-force attacks.
+type loginTracker struct {
+	mu      sync.Mutex
+	entries map[string]*loginAttempt
+}
+
+func newLoginTracker() *loginTracker {
+	return &loginTracker{entries: make(map[string]*loginAttempt)}
+}
+
+func (lt *loginTracker) recordFailure(email string) {
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+	entry, ok := lt.entries[email]
+	if !ok {
+		entry = &loginAttempt{}
+		lt.entries[email] = entry
+	}
+	entry.failures++
+	if entry.failures >= maxFailedLogins {
+		entry.lockedAt = time.Now()
+	}
+}
+
+func (lt *loginTracker) isLocked(email string) bool {
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+	entry, ok := lt.entries[email]
+	if !ok {
+		return false
+	}
+	if entry.lockedAt.IsZero() {
+		return false
+	}
+	if time.Since(entry.lockedAt) > lockoutDuration {
+		delete(lt.entries, email)
+		return false
+	}
+	return true
+}
+
+func (lt *loginTracker) recordSuccess(email string) {
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+	delete(lt.entries, email)
+}
 
 // authPageData extends pageData with auth-specific fields.
 type authPageData struct {
@@ -62,8 +120,17 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Per-account lockout check
+	if s.loginTracker.isLocked(email) {
+		s.renderLoginError(w, r, "Account temporarily locked due to too many failed attempts. Try again later.")
+		return
+	}
+
 	user, err := s.userStore.GetByEmail(r.Context(), email)
 	if err != nil {
+		// Run a dummy bcrypt to normalize timing (prevents email enumeration)
+		bcrypt.CompareHashAndPassword([]byte("$2a$10$000000000000000000000uPUxFN4W/KAl5RjNmT5FXCVHS1FTqbWO"), []byte(password))
+		s.loginTracker.recordFailure(email)
 		s.renderLoginError(w, r, "Invalid email or password")
 		return
 	}
@@ -74,9 +141,12 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		s.loginTracker.recordFailure(email)
 		s.renderLoginError(w, r, "Invalid email or password")
 		return
 	}
+
+	s.loginTracker.recordSuccess(email)
 
 	// Create session
 	token, err := generateSessionToken()
@@ -92,7 +162,7 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setSessionCookie(w, token, int(sessionDuration.Seconds()))
+	setSessionCookie(w, token, int(sessionDuration.Seconds()), s.secureCookies)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
@@ -209,7 +279,7 @@ func (s *Server) handleRegisterSubmit(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			expiresAt := time.Now().Add(sessionDuration)
 			s.sessionStore.Create(r.Context(), user.ID, token, expiresAt)
-			setSessionCookie(w, token, int(sessionDuration.Seconds()))
+			setSessionCookie(w, token, int(sessionDuration.Seconds()), s.secureCookies)
 		}
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
@@ -303,7 +373,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		token, _ := generateSessionToken()
 		expiresAt := time.Now().Add(sessionDuration)
 		s.sessionStore.Create(r.Context(), user.ID, token, expiresAt)
-		setSessionCookie(w, token, int(sessionDuration.Seconds()))
+		setSessionCookie(w, token, int(sessionDuration.Seconds()), s.secureCookies)
 	}
 
 	http.Redirect(w, r, "/profile?success=Password+changed", http.StatusFound)

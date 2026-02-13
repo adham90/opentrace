@@ -74,6 +74,8 @@ type Server struct {
 	restartCh      chan struct{} // closed when a self-update wants to restart
 	loginLimiter   *RateLimiter
 	apiLimiter     *RateLimiter
+	loginTracker   *loginTracker
+	secureCookies  bool
 	logsConnMu     sync.Mutex
 	metricsConnMu  sync.Mutex
 }
@@ -148,6 +150,15 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	}
 	srv.loginLimiter = NewRateLimiter(10, 1*time.Minute, trustedProxies)
 	srv.apiLimiter = NewRateLimiter(120, 1*time.Minute, trustedProxies)
+	srv.loginTracker = newLoginTracker()
+	// Use secure cookies unless in dev mode or listening on localhost
+	srv.secureCookies = true
+	if cfg != nil {
+		addr := cfg.ListenAddr
+		if cfg.DevMode || strings.HasPrefix(addr, "127.0.0.1:") || strings.HasPrefix(addr, "localhost:") {
+			srv.secureCookies = false
+		}
+	}
 	loginLimiter := srv.loginLimiter
 	apiLimiter := srv.apiLimiter
 
