@@ -488,10 +488,18 @@ func run() error {
 	}()
 
 	go func() {
-		slog.Info("listening", "addr", deps.cfg.ListenAddr)
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("listen error", "error", err)
-			os.Exit(1)
+		if deps.cfg.TLSCert != "" && deps.cfg.TLSKey != "" {
+			slog.Info("listening (HTTPS)", "addr", deps.cfg.ListenAddr)
+			if err := httpServer.ListenAndServeTLS(deps.cfg.TLSCert, deps.cfg.TLSKey); err != nil && err != http.ErrServerClosed {
+				slog.Error("listen error", "error", err)
+				os.Exit(1)
+			}
+		} else {
+			slog.Info("listening", "addr", deps.cfg.ListenAddr)
+			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("listen error", "error", err)
+				os.Exit(1)
+			}
 		}
 	}()
 

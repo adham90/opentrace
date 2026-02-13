@@ -137,9 +137,12 @@ func (rl *RateLimiter) Stop() {
 	}
 }
 
+const maxRateLimitEntries = 10000
+
 // cleanup periodically evicts expired entries to prevent unbounded map growth.
+// Also caps total entries to maxRateLimitEntries to mitigate random-IP DoS.
 func (rl *RateLimiter) cleanup() {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
@@ -151,6 +154,15 @@ func (rl *RateLimiter) cleanup() {
 			for ip, entry := range rl.entries {
 				if now.After(entry.resetAt) {
 					delete(rl.entries, ip)
+				}
+			}
+			// Emergency eviction if still too large (random-IP DoS mitigation)
+			if len(rl.entries) > maxRateLimitEntries {
+				for ip := range rl.entries {
+					delete(rl.entries, ip)
+					if len(rl.entries) <= maxRateLimitEntries/2 {
+						break
+					}
 				}
 			}
 			rl.mu.Unlock()

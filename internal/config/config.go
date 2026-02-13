@@ -3,6 +3,7 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -35,12 +36,27 @@ type Config struct {
 
 	TrustedProxies []string
 
+	TLSCert string
+	TLSKey  string
+
 	DevMode bool
 }
 
 // LoadEnvFile reads a .env file and sets any variables not already in the environment.
-// Missing file is not an error.
+// Missing file is not an error. Warns if the file has world-readable permissions.
 func LoadEnvFile(path string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return // File doesn't exist — that's fine
+	}
+
+	// Warn if .env is readable by group or others (potential credential leak)
+	if perm := info.Mode().Perm(); perm&0o044 != 0 {
+		slog.Warn(".env file has insecure permissions — should be 0600",
+			"path", path,
+			"permissions", fmt.Sprintf("%04o", perm))
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
 		return
@@ -123,6 +139,8 @@ func Load() (*Config, error) {
 		MaxToolCalls:        maxTools,
 		MaxObservationBytes: maxObs,
 		TrustedProxies:      parseTrustedProxies(os.Getenv("OPENTRACE_TRUSTED_PROXIES")),
+		TLSCert:             os.Getenv("OPENTRACE_TLS_CERT"),
+		TLSKey:              os.Getenv("OPENTRACE_TLS_KEY"),
 		DevMode:             os.Getenv("OPENTRACE_DEV") == "true",
 	}, nil
 }
