@@ -110,7 +110,7 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 	var args []any
 	useFTS := false
 
-	if params.Query != "" {
+	if params.Query != "" && params.Query != "*" {
 		useFTS = true
 		conditions = append(conditions, "logs_fts MATCH ?")
 		args = append(args, params.Query)
@@ -163,13 +163,24 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 		         FROM logs l`
 	}
 
+	// Metadata key-value filters using json_extract.
+	// Operators: "~value" → LIKE %value%, "*" → IS NOT NULL, plain → exact match.
+	for k, v := range params.MetadataFilter {
+		path := "$." + k
+		if v == "*" {
+			conditions = append(conditions, "json_extract(l.metadata, ?) IS NOT NULL")
+			args = append(args, path)
+		} else if strings.HasPrefix(v, "~") {
+			conditions = append(conditions, "json_extract(l.metadata, ?) LIKE ?")
+			args = append(args, path, "%"+v[1:]+"%")
+		} else {
+			conditions = append(conditions, "json_extract(l.metadata, ?) = ?")
+			args = append(args, path, v)
+		}
+	}
+
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
-	}
-	// Metadata key-value filters using json_extract.
-	for k, v := range params.MetadataFilter {
-		conditions = append(conditions, "json_extract(l.metadata, ?) = ?")
-		args = append(args, "$."+k, v)
 	}
 
 	if params.SortAsc {
@@ -417,6 +428,118 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*LogEntry, error) {
 	// sql.ErrNoRows is fine — most logs won't have a request summary
 
 	return &entry, nil
+}
+
+func (s *logStore) SearchRequestSummaries(ctx context.Context, params RequestSummarySearchParams) ([]RequestSummaryResult, error) {
+	query := `SELECT rs.id, rs.log_id, rs.controller, rs.action, rs.method, rs.path, rs.status,
+		rs.duration_ms, rs.db_time_ms, rs.view_time_ms,
+		rs.sql_count, rs.sql_total_ms, rs.sql_slowest_ms, rs.sql_slowest_name, rs.n_plus_one,
+		rs.view_count, rs.view_total_ms, rs.view_slowest_ms, rs.view_slowest_template,
+		rs.cache_reads, rs.cache_hits, rs.cache_writes, rs.cache_hit_ratio,
+		rs.http_external_count, rs.http_external_total_ms, rs.http_slowest_ms, rs.http_slowest_host,
+		rs.memory_before_mb, rs.memory_after_mb, rs.memory_delta_mb, rs.timeline,
+		COALESCE(rs.time_breakdown, ''), COALESCE(rs.duplicate_queries, 0),
+		COALESCE(rs.worst_duplicate_count, 0), COALESCE(rs.top_duplicates, ''),
+		l.timestamp, l.service, l.trace_id
+	FROM request_summaries rs
+	JOIN logs l ON l.id = rs.log_id`
+
+	var conditions []string
+	var args []any
+
+	if params.Start != nil {
+		conditions = append(conditions, "l.timestamp >= ?")
+		args = append(args, params.Start.UTC().Format(time.RFC3339Nano))
+	}
+	if params.End != nil {
+		conditions = append(conditions, "l.timestamp <= ?")
+		args = append(args, params.End.UTC().Format(time.RFC3339Nano))
+	}
+	if params.Controller != "" {
+		conditions = append(conditions, "rs.controller LIKE ?")
+		args = append(args, "%"+params.Controller+"%")
+	}
+	if params.Action != "" {
+		conditions = append(conditions, "rs.action = ?")
+		args = append(args, params.Action)
+	}
+	if params.Path != "" {
+		conditions = append(conditions, "rs.path LIKE ?")
+		args = append(args, "%"+params.Path+"%")
+	}
+	if params.NPlusOneOnly {
+		conditions = append(conditions, "rs.n_plus_one = 1")
+	}
+	if params.MinDurationMs > 0 {
+		conditions = append(conditions, "rs.duration_ms >= ?")
+		args = append(args, params.MinDurationMs)
+	}
+	if params.MinSQLCount > 0 {
+		conditions = append(conditions, "rs.sql_count >= ?")
+		args = append(args, params.MinSQLCount)
+	}
+
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	// Sort by (whitelist allowed columns).
+	sortCol := "rs.duration_ms"
+	switch params.SortBy {
+	case "sql_count":
+		sortCol = "rs.sql_count"
+	case "db_time_ms":
+		sortCol = "rs.db_time_ms"
+	case "duplicate_queries":
+		sortCol = "COALESCE(rs.duplicate_queries, 0)"
+	}
+	query += " ORDER BY " + sortCol + " DESC"
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	query += " LIMIT ?"
+	args = append(args, limit)
+
+	if params.Offset > 0 {
+		query += " OFFSET ?"
+		args = append(args, params.Offset)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("searching request summaries: %w", err)
+	}
+	defer rows.Close()
+
+	var results []RequestSummaryResult
+	for rows.Next() {
+		var r RequestSummaryResult
+		var nPlusOne int
+		var tsStr string
+		if err := rows.Scan(
+			&r.ID, &r.LogID, &r.Controller, &r.Action, &r.Method, &r.Path, &r.Status,
+			&r.DurationMs, &r.DBTimeMs, &r.ViewTimeMs,
+			&r.SQLCount, &r.SQLTotalMs, &r.SQLSlowestMs, &r.SQLSlowestName, &nPlusOne,
+			&r.ViewCount, &r.ViewTotalMs, &r.ViewSlowestMs, &r.ViewSlowestTemplate,
+			&r.CacheReads, &r.CacheHits, &r.CacheWrites, &r.CacheHitRatio,
+			&r.HTTPExternalCount, &r.HTTPExternalTotalMs, &r.HTTPSlowestMs, &r.HTTPSlowestHost,
+			&r.MemoryBeforeMb, &r.MemoryAfterMb, &r.MemoryDeltaMb, &r.Timeline,
+			&r.TimeBreakdown, &r.DuplicateQueries, &r.WorstDuplicateCount, &r.TopDuplicates,
+			&tsStr, &r.Service, &r.TraceID,
+		); err != nil {
+			return nil, fmt.Errorf("scanning request summary: %w", err)
+		}
+		r.NPlusOne = nPlusOne == 1
+		r.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
+		results = append(results, r)
+	}
+
+	return results, rows.Err()
 }
 
 func (s *logStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {

@@ -582,6 +582,29 @@ type UpdateAlertGroupParams struct {
 	Resolution *string `json:"resolution,omitempty"`
 }
 
+// RequestSummarySearchParams defines filters for searching request summaries.
+type RequestSummarySearchParams struct {
+	Start         *time.Time
+	End           *time.Time
+	Controller    string
+	Action        string
+	Path          string
+	NPlusOneOnly bool
+	MinDurationMs float64
+	MinSQLCount   int
+	SortBy        string // "duration_ms", "sql_count", "db_time_ms", "duplicate_queries"
+	Limit         int
+	Offset        int
+}
+
+// RequestSummaryResult extends RequestSummary with log-level fields.
+type RequestSummaryResult struct {
+	RequestSummary
+	Timestamp time.Time `json:"timestamp"`
+	Service   string    `json:"service,omitempty"`
+	TraceID   string    `json:"trace_id,omitempty"`
+}
+
 // Session represents an authenticated browser session.
 type Session struct {
 	ID        string    `json:"id"`

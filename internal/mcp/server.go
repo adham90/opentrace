@@ -330,6 +330,26 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 		b.Add("log_stats", "Aggregate log statistics by level, service, or pattern with trend detection", "Log Intelligence", "read", "")
 	}
 
+	// Request performance analysis (N+1 detection, slow endpoints).
+	if deps.LogStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("request_performance",
+				mcp.WithDescription("Analyze HTTP request performance: find N+1 queries, slow endpoints, SQL-heavy requests. Queries the request_summaries table populated by the Ruby gem's RequestCollector. Use when investigating 'why is this endpoint slow?', 'are there N+1 queries?', or 'which requests make the most SQL calls?'."),
+				mcp.WithString("time_range", mcp.Description("Lookback window: '1h', '24h' (default), '7d'")),
+				mcp.WithString("controller", mcp.Description("Filter by controller name (partial match)")),
+				mcp.WithString("action", mcp.Description("Filter by action name (exact match)")),
+				mcp.WithString("path", mcp.Description("Filter by request path (partial match)")),
+				mcp.WithBoolean("n_plus_one_only", mcp.Description("Only show requests with N+1 query issues (default: false)")),
+				mcp.WithNumber("min_duration_ms", mcp.Description("Minimum request duration in milliseconds")),
+				mcp.WithNumber("min_sql_count", mcp.Description("Minimum number of SQL queries in request")),
+				mcp.WithString("sort_by", mcp.Description("Sort by: 'duration_ms' (default), 'sql_count', 'db_time_ms', 'duplicate_queries'")),
+				mcp.WithNumber("limit", mcp.Description("Maximum results to return (default: 20, max: 100)")),
+			),
+			requestPerformanceHandler(deps.LogStore),
+		)
+		b.Add("request_performance", "Analyze request performance: N+1 queries, slow endpoints, SQL-heavy requests", "Log Intelligence", "read", "")
+	}
+
 	// Distributed trace lookup.
 	if deps.LogStore != nil {
 		maybeAddTool(s,
@@ -435,7 +455,7 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 				mcp.WithNumber("offset", mcp.Description("Skip this many entries for pagination (default: 0)")),
 				mcp.WithString("sort", mcp.Description("Sort order: 'desc' (default, newest first) or 'asc' (oldest first, useful for following causal chains)")),
 				mcp.WithString("fields", mcp.Description("Comma-separated list of fields to include (e.g. 'timestamp,level,message'). Omit for all fields. Saves context window on high-volume results.")),
-				mcp.WithObject("metadata_filter", mcp.Description("Key-value filter on metadata fields (e.g. {\"host\": \"server-01\", \"status_code\": \"500\"}). Use list_log_attributes with field=metadata_key to discover available keys.")),
+				mcp.WithObject("metadata_filter", mcp.Description("Key-value filter on metadata fields. Exact match: {\"host\": \"server-01\"}, contains: {\"host\": \"~server\"}, key exists: {\"host\": \"*\"}. Prefix ~ for LIKE match, * for existence check. Use list_log_attributes with field=metadata_key to discover available keys.")),
 			),
 			logSearchHandler(deps.LogStore),
 		)

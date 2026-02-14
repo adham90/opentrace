@@ -46,6 +46,7 @@ func (m *mockLogStoreForTrend) GetByID(_ context.Context, _ int64) (*store.LogEn
 func (m *mockLogStoreForTrend) RecordBatch(_ context.Context, _ string, _ int) error { return nil }
 func (m *mockLogStoreForTrend) GetBatch(_ context.Context, _ string) (*store.BatchRecord, error) { return nil, nil }
 func (m *mockLogStoreForTrend) PruneBatches(_ context.Context, _ time.Duration) (int64, error) { return 0, nil }
+func (m *mockLogStoreForTrend) SearchRequestSummaries(_ context.Context, _ store.RequestSummarySearchParams) ([]store.RequestSummaryResult, error) { return nil, nil }
 
 func makeTrendRuns(values ...float64) []store.WatcherRun {
 	var runs []store.WatcherRun

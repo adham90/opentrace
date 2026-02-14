@@ -141,6 +141,220 @@ func TestLogSearch_NoResults(t *testing.T) {
 	}
 }
 
+func TestSearch_MetadataExact(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewLogStore(db)
+	ctx := context.Background()
+
+	entries := []LogEntry{
+		{Timestamp: time.Now(), Level: "INFO", Service: "api", Message: "req 1", Metadata: map[string]any{"host": "server-01", "status_code": "200"}},
+		{Timestamp: time.Now(), Level: "INFO", Service: "api", Message: "req 2", Metadata: map[string]any{"host": "server-02", "status_code": "500"}},
+		{Timestamp: time.Now(), Level: "INFO", Service: "api", Message: "req 3", Metadata: map[string]any{"host": "server-01", "status_code": "500"}},
+	}
+	s.BatchInsert(ctx, entries)
+
+	results, err := s.Search(ctx, LogSearchParams{MetadataFilter: map[string]string{"host": "server-01"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("len = %d, want 2", len(results))
+	}
+}
+
+func TestSearch_MetadataContains(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewLogStore(db)
+	ctx := context.Background()
+
+	entries := []LogEntry{
+		{Timestamp: time.Now(), Level: "INFO", Service: "api", Message: "req 1", Metadata: map[string]any{"path": "/api/users/123"}},
+		{Timestamp: time.Now(), Level: "INFO", Service: "api", Message: "req 2", Metadata: map[string]any{"path": "/api/posts/456"}},
+		{Timestamp: time.Now(), Level: "INFO", Service: "api", Message: "req 3", Metadata: map[string]any{"path": "/admin/settings"}},
+	}
+	s.BatchInsert(ctx, entries)
+
+	// Use ~ prefix for LIKE match
+	results, err := s.Search(ctx, LogSearchParams{MetadataFilter: map[string]string{"path": "~users"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("len = %d, want 1", len(results))
+	}
+
+	// Broader match
+	results, err = s.Search(ctx, LogSearchParams{MetadataFilter: map[string]string{"path": "~/api"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("len = %d, want 2", len(results))
+	}
+}
+
+func TestSearch_MetadataExists(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewLogStore(db)
+	ctx := context.Background()
+
+	entries := []LogEntry{
+		{Timestamp: time.Now(), Level: "INFO", Service: "api", Message: "req 1", Metadata: map[string]any{"user_id": "42"}},
+		{Timestamp: time.Now(), Level: "INFO", Service: "api", Message: "req 2", Metadata: map[string]any{"host": "server-01"}},
+		{Timestamp: time.Now(), Level: "INFO", Service: "api", Message: "req 3", Metadata: map[string]any{"user_id": "99", "host": "server-02"}},
+	}
+	s.BatchInsert(ctx, entries)
+
+	// Use * for existence check
+	results, err := s.Search(ctx, LogSearchParams{MetadataFilter: map[string]string{"user_id": "*"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("len = %d, want 2", len(results))
+	}
+}
+
+func TestSearchRequestSummaries_NPlusOne(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewLogStore(db)
+	ctx := context.Background()
+
+	now := time.Now()
+	entries := []LogEntry{
+		{
+			Timestamp: now.Add(-1 * time.Hour), Level: "INFO", Service: "web", Message: "GET /users",
+			RequestSummary: &RequestSummary{
+				Controller: "UsersController", Action: "index", Method: "GET", Path: "/users",
+				DurationMs: 250, SQLCount: 20, NPlusOne: true, DuplicateQueries: 3, WorstDuplicateCount: 15,
+			},
+		},
+		{
+			Timestamp: now.Add(-2 * time.Hour), Level: "INFO", Service: "web", Message: "GET /posts",
+			RequestSummary: &RequestSummary{
+				Controller: "PostsController", Action: "index", Method: "GET", Path: "/posts",
+				DurationMs: 50, SQLCount: 3, NPlusOne: false,
+			},
+		},
+		{
+			Timestamp: now.Add(-3 * time.Hour), Level: "INFO", Service: "web", Message: "GET /comments",
+			RequestSummary: &RequestSummary{
+				Controller: "CommentsController", Action: "index", Method: "GET", Path: "/comments",
+				DurationMs: 500, SQLCount: 40, NPlusOne: true, DuplicateQueries: 5, WorstDuplicateCount: 30,
+			},
+		},
+	}
+	_, err := s.BatchInsert(ctx, entries)
+	if err != nil {
+		t.Fatalf("BatchInsert: %v", err)
+	}
+
+	// Query N+1 only
+	start := now.Add(-24 * time.Hour)
+	end := now
+	results, err := s.SearchRequestSummaries(ctx, RequestSummarySearchParams{
+		Start:         &start,
+		End:           &end,
+		NPlusOneOnly:  true,
+	})
+	if err != nil {
+		t.Fatalf("SearchRequestSummaries: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("len = %d, want 2", len(results))
+	}
+	for _, r := range results {
+		if !r.NPlusOne {
+			t.Errorf("expected NPlusOne=true, got false for log_id=%d", r.LogID)
+		}
+	}
+}
+
+func TestSearchRequestSummaries_Filters(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewLogStore(db)
+	ctx := context.Background()
+
+	now := time.Now()
+	entries := []LogEntry{
+		{
+			Timestamp: now.Add(-1 * time.Hour), Level: "INFO", Service: "web", Message: "req 1",
+			RequestSummary: &RequestSummary{
+				Controller: "UsersController", Action: "index", Path: "/users",
+				DurationMs: 200, SQLCount: 10,
+			},
+		},
+		{
+			Timestamp: now.Add(-2 * time.Hour), Level: "INFO", Service: "web", Message: "req 2",
+			RequestSummary: &RequestSummary{
+				Controller: "UsersController", Action: "show", Path: "/users/1",
+				DurationMs: 1500, SQLCount: 25,
+			},
+		},
+		{
+			Timestamp: now.Add(-3 * time.Hour), Level: "INFO", Service: "web", Message: "req 3",
+			RequestSummary: &RequestSummary{
+				Controller: "PostsController", Action: "index", Path: "/posts",
+				DurationMs: 100, SQLCount: 5,
+			},
+		},
+	}
+	_, err := s.BatchInsert(ctx, entries)
+	if err != nil {
+		t.Fatalf("BatchInsert: %v", err)
+	}
+
+	start := now.Add(-24 * time.Hour)
+	end := now
+
+	// Filter by controller (LIKE match)
+	results, err := s.SearchRequestSummaries(ctx, RequestSummarySearchParams{
+		Start: &start, End: &end, Controller: "Users",
+	})
+	if err != nil {
+		t.Fatalf("SearchRequestSummaries: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("controller filter: len = %d, want 2", len(results))
+	}
+
+	// Filter by min duration
+	results, err = s.SearchRequestSummaries(ctx, RequestSummarySearchParams{
+		Start: &start, End: &end, MinDurationMs: 1000,
+	})
+	if err != nil {
+		t.Fatalf("SearchRequestSummaries: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("min_duration filter: len = %d, want 1", len(results))
+	}
+
+	// Filter by min SQL count
+	results, err = s.SearchRequestSummaries(ctx, RequestSummarySearchParams{
+		Start: &start, End: &end, MinSQLCount: 20,
+	})
+	if err != nil {
+		t.Fatalf("SearchRequestSummaries: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("min_sql_count filter: len = %d, want 1", len(results))
+	}
+
+	// Sort by sql_count
+	results, err = s.SearchRequestSummaries(ctx, RequestSummarySearchParams{
+		Start: &start, End: &end, SortBy: "sql_count",
+	})
+	if err != nil {
+		t.Fatalf("SearchRequestSummaries: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("sort_by: len = %d, want 3", len(results))
+	}
+	if results[0].SQLCount < results[1].SQLCount {
+		t.Errorf("expected descending sort by sql_count, got %d then %d", results[0].SQLCount, results[1].SQLCount)
+	}
+}
+
 func TestLogStore_Prune(t *testing.T) {
 	db := setupTestDB(t)
 	s := NewLogStore(db)

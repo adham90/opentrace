@@ -173,6 +173,10 @@ func (m *mockLogStore) GetBatch(_ context.Context, batchID string) (*store.Batch
 
 func (m *mockLogStore) PruneBatches(_ context.Context, _ time.Duration) (int64, error) { return 0, nil }
 
+func (m *mockLogStore) SearchRequestSummaries(_ context.Context, _ store.RequestSummarySearchParams) ([]store.RequestSummaryResult, error) {
+	return nil, nil
+}
+
 // mockWatcherStore implements store.WatcherStore for testing.
 type mockWatcherStore struct {
 	mu       sync.Mutex

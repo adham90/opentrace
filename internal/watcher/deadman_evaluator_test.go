@@ -32,6 +32,7 @@ func (m *mockLogStoreForDeadman) GetByID(_ context.Context, _ int64) (*store.Log
 func (m *mockLogStoreForDeadman) RecordBatch(_ context.Context, _ string, _ int) error { return nil }
 func (m *mockLogStoreForDeadman) GetBatch(_ context.Context, _ string) (*store.BatchRecord, error) { return nil, nil }
 func (m *mockLogStoreForDeadman) PruneBatches(_ context.Context, _ time.Duration) (int64, error) { return 0, nil }
+func (m *mockLogStoreForDeadman) SearchRequestSummaries(_ context.Context, _ store.RequestSummarySearchParams) ([]store.RequestSummaryResult, error) { return nil, nil }
 
 func makeDeadmanWatcher(cfg DeadmanConfig) store.Watcher {
 	tc, _ := json.Marshal(cfg)

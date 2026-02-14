@@ -30,6 +30,8 @@ type LogStore interface {
 	DistinctValues(ctx context.Context, field string, params LogCountParams) ([]string, error)
 	MetadataKeys(ctx context.Context, params LogCountParams) ([]string, error)
 	GetByID(ctx context.Context, id int64) (*LogEntry, error)
+	// Request performance
+	SearchRequestSummaries(ctx context.Context, params RequestSummarySearchParams) ([]RequestSummaryResult, error)
 	// Batch deduplication
 	RecordBatch(ctx context.Context, batchID string, logCount int) error
 	GetBatch(ctx context.Context, batchID string) (*BatchRecord, error)
