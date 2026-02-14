@@ -22,6 +22,7 @@ type Executor struct {
 	providerCache     *llm.ProviderCache
 	agentCfg          agent.RunConfig
 	eventHub          *EventHub
+	NotifyWg          sync.WaitGroup // tracks in-flight notification goroutines
 	ruleEvaluator     *RuleEvaluator
 	deadmanEvaluator  Evaluator
 	diffEvaluator     Evaluator
@@ -157,7 +158,7 @@ func (e *Executor) executeRule(ctx context.Context, w store.Watcher, run *store.
 			slog.Error("failed to create alert", "watcher_id", w.ID, "error", err)
 		} else {
 			notifiers := ParseNotifiers(w.Notify)
-			SendAll(ctx, notifiers, *alert)
+			SendAll(ctx, notifiers, *alert, &e.NotifyWg)
 		}
 	}
 
@@ -207,7 +208,7 @@ func (e *Executor) executeTyped(ctx context.Context, w store.Watcher, run *store
 			slog.Error("failed to create alert", "watcher_id", w.ID, "error", err)
 		} else {
 			notifiers := ParseNotifiers(w.Notify)
-			SendAll(ctx, notifiers, *alert)
+			SendAll(ctx, notifiers, *alert, &e.NotifyWg)
 		}
 	}
 
@@ -311,7 +312,7 @@ func (e *Executor) executeAI(ctx context.Context, w store.Watcher, run *store.Wa
 			slog.Error("failed to create alert", "watcher_id", w.ID, "error", err)
 		} else {
 			notifiers := ParseNotifiers(w.Notify)
-			SendAll(ctx, notifiers, *alert)
+			SendAll(ctx, notifiers, *alert, &e.NotifyWg)
 		}
 	}
 

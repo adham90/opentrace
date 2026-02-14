@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/adham90/opentrace/internal/store"
@@ -127,10 +128,17 @@ func ParseNotifiers(raw json.RawMessage) []Notifier {
 // Each notifier runs in its own goroutine with a 30-second timeout.
 // The parent context's values are inherited but cancellation is decoupled
 // so that server shutdown doesn't abort in-flight notifications.
+// If wg is non-nil, each goroutine is tracked for graceful shutdown.
 // Errors are logged but do not block the caller.
-func SendAll(ctx context.Context, notifiers []Notifier, alert store.Alert) {
+func SendAll(ctx context.Context, notifiers []Notifier, alert store.Alert, wg *sync.WaitGroup) {
 	for _, n := range notifiers {
+		if wg != nil {
+			wg.Add(1)
+		}
 		go func(n Notifier) {
+			if wg != nil {
+				defer wg.Done()
+			}
 			sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 			defer cancel()
 			if err := n.Send(sendCtx, alert); err != nil {

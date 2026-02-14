@@ -40,6 +40,7 @@ type Deps struct {
 	MCPActivityStore store.MCPActivityStore      // MCP activity tracking
 	AlertGroupStore  store.AlertGroupStore       // incident/alert group management
 	EventHub         *watcher.EventHub           // cancel running watcher executions
+	AuditStore       store.AuditStore            // admin audit trail
 }
 
 // NewConfiguredServer creates an MCPServer and registers tools based on the
@@ -682,6 +683,18 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 
 	maybeAddTool(s, watcherTemplatesTool(), watcherTemplatesHandler())
 	b.Add("watcher_templates", "Get pre-built watcher configurations by category", "Metadata", "read", "")
+
+	// User listing (read-only, admin-gated at the server level).
+	if deps.UserStore != nil {
+		maybeAddTool(s, listUsersTool(), listUsersHandler(deps.UserStore))
+		b.Add("list_users", "List all user accounts with roles and status", "Users", "read", "")
+	}
+
+	// Audit log (read-only).
+	if deps.AuditStore != nil {
+		maybeAddTool(s, getAuditLogTool(), getAuditLogHandler(deps.AuditStore))
+		b.Add("get_audit_log", "View recent admin actions for security review", "Audit", "read", "")
+	}
 }
 
 // addWriteTools registers write/admin tools (connector tools, create_watcher, preview_watcher).
@@ -741,8 +754,8 @@ Sequence type_config example:
 				mcp.WithString("title", mcp.Required(), mcp.Description("Title for the watcher")),
 				mcp.WithString("watcher_type", mcp.Description("Watcher type: ai (default), rule, deadman, diff, composite, trend, or sequence")),
 				mcp.WithString("description", mcp.Description("Instructions for the AI agent (required for ai watchers)")),
-				mcp.WithString("rule_config", mcp.Description(`JSON string for rule watchers. Fields: source (query|logs|health), query, metric (value|row_count), operator (gt|lt|gte|lte|eq|neq), threshold.`)),
-				mcp.WithString("type_config", mcp.Description("JSON string for typed watchers (deadman, diff, composite, trend, sequence). See tool description for format.")),
+				mcp.WithString("rule_config", mcp.Description(`JSON config for rule watchers. Example: {"source":"query","query":"SELECT count(*) FROM errors WHERE created_at > now() - interval '5 min'","metric":"value","operator":"gt","threshold":100}. Fields: source (query|logs|health), query (SQL SELECT or log filter), metric (value|row_count), operator (gt|lt|gte|lte|eq|neq), threshold (number). For health: {"source":"health","checks":["replication_lag","connection_pool"],"latency_threshold_ms":200}. For logs: {"source":"logs","filter":{"level":"ERROR","service":"api"}}.`)),
+				mcp.WithString("type_config", mcp.Description(`JSON config for typed watchers. Deadman: {"expected_event":"heartbeat","timeout_minutes":10}. Diff: {"query":"SELECT * FROM config","key_column":"setting_name"}. Composite: {"operator":"and","watcher_ids":["uuid1","uuid2"]}. Trend: {"query":"SELECT avg(duration_ms)...","baseline_window":"7d","threshold_percent":50}. Sequence: {"events":[{"pattern":"login_failed"},{"pattern":"login_success"}],"window_minutes":5}.`)),
 				mcp.WithString("data_source_id", mcp.Description("Data source ID for query/health rule watchers")),
 				mcp.WithString("service", mcp.Description("Filter by service name (ai watchers)")),
 				mcp.WithString("level", mcp.Description("Filter by log level (ai watchers)")),
@@ -752,7 +765,7 @@ Sequence type_config example:
 				mcp.WithString("severity", mcp.Description("Alert severity: info, warning, or critical (default: warning)")),
 				mcp.WithString("model", mcp.Description("LLM model name (ai watchers only)")),
 				mcp.WithString("effort", mcp.Description("Analysis effort: low, medium (default), or high (ai watchers only)")),
-			mcp.WithString("human_summary", mcp.Description(`JSON: {"what_it_monitors":"...","why_it_matters":"...","what_to_do":"..."}. Always provide this for dashboard display.`)),
+			mcp.WithString("human_summary", mcp.Description(`JSON with plain-English explanation for the dashboard. Example: {"what_it_monitors":"Error rate in the checkout API","why_it_matters":"Payment failures impact revenue","what_to_do":"Check payment gateway status and recent deployments"}. All three fields required.`)),
 			mcp.WithString("expires_at", mcp.Description("RFC3339 timestamp when this watcher should auto-expire (e.g. '2025-03-01T00:00:00Z'). Useful for deploy watches, migration monitoring, or time-limited alerts.")),
 			),
 			createWatcherHandler(deps.WatcherStore),
@@ -769,7 +782,7 @@ Sequence type_config example:
 Use this to test a rule_config before creating a watcher. The query in rule_config must be a valid SELECT statement. For example: {"source":"query","query":"SELECT count(*) FROM pg_stat_activity WHERE state='active'","metric":"value","operator":"gt","threshold":80}
 
 Tip: Use db_query_stats, db_activity, or db_table_stats first to understand the database, then preview a watcher rule to verify it works before creating it.`),
-				mcp.WithString("rule_config", mcp.Required(), mcp.Description("JSON object: {source, query, metric, operator, threshold, filter, checks, latency_threshold_ms}")),
+				mcp.WithString("rule_config", mcp.Required(), mcp.Description(`JSON rule config to preview. Example: {"source":"query","query":"SELECT count(*) FROM pg_stat_activity WHERE state='active'","metric":"value","operator":"gt","threshold":80}. Same format as create_watcher rule_config.`)),
 				mcp.WithString("data_source_id", mcp.Description("Data source ID for query/health rule watchers")),
 			),
 			previewWatcherHandler(deps.RuleEvaluator),
@@ -838,8 +851,8 @@ Tip: Use db_query_stats, db_activity, or db_table_stats first to understand the 
 				mcp.WithString("time_range", mcp.Description("New log lookback window (e.g. 5m, 15m, 1h)")),
 				mcp.WithString("schedule", mcp.Description("New schedule: cron expression, interval, or @hourly/@daily")),
 				mcp.WithString("effort", mcp.Description("New analysis effort: low, medium, high (AI watchers only)")),
-				mcp.WithString("rule_config", mcp.Description("New rule configuration JSON (rule watchers only)")),
-				mcp.WithString("human_summary", mcp.Description(`JSON: {"what_it_monitors":"...","why_it_matters":"...","what_to_do":"..."}. Update the plain-English explanation.`)),
+				mcp.WithString("rule_config", mcp.Description(`New rule configuration JSON (rule watchers only). Same format as create_watcher rule_config.`)),
+				mcp.WithString("human_summary", mcp.Description(`Updated plain-English explanation. JSON: {"what_it_monitors":"...","why_it_matters":"...","what_to_do":"..."}.`)),
 			mcp.WithString("expires_at", mcp.Description("RFC3339 timestamp when this watcher should auto-expire, or 'never' to clear an existing expiration.")),
 			),
 			updateWatcherHandler(deps.WatcherStore),
@@ -1034,6 +1047,18 @@ Each suggestion includes a watcher_config that can be passed directly to create_
 	if deps.AlertStore != nil && deps.WatcherStore != nil && deps.Executor != nil {
 		maybeAddTool(s, investigateAlertTool(), investigateAlertHandler(deps.AlertStore, deps.WatcherStore, deps.Executor))
 		b.Add("investigate_alert", "Trigger deep AI investigation of a specific alert", "Incidents", "admin", "")
+	}
+
+	// User management (admin).
+	if deps.UserStore != nil {
+		maybeAddTool(s, updateUserRoleTool(), updateUserRoleHandler(deps.UserStore))
+		b.Add("update_user_role", "Change a user's role to admin or member", "Users", "admin", "")
+
+		maybeAddTool(s, toggleUserActiveTool(), toggleUserActiveHandler(deps.UserStore))
+		b.Add("toggle_user_active", "Enable or disable a user account", "Users", "admin", "")
+
+		maybeAddTool(s, deleteUserTool(), deleteUserHandler(deps.UserStore))
+		b.Add("delete_user", "Permanently delete a user account", "Users", "admin", "")
 	}
 }
 

@@ -96,6 +96,7 @@ func DecompressRequest(maxDecompressedBytes int64) func(http.Handler) http.Handl
 type rateLimitEntry struct {
 	count    int
 	resetAt  time.Time
+	lastSeen time.Time
 }
 
 // RateLimiter provides per-IP rate limiting.
@@ -156,14 +157,17 @@ func (rl *RateLimiter) cleanup() {
 					delete(rl.entries, ip)
 				}
 			}
-			// Emergency eviction if still too large (random-IP DoS mitigation)
-			if len(rl.entries) > maxRateLimitEntries {
-				for ip := range rl.entries {
-					delete(rl.entries, ip)
-					if len(rl.entries) <= maxRateLimitEntries/2 {
-						break
+			// Emergency eviction if still too large — evict oldest entries first.
+			for len(rl.entries) > maxRateLimitEntries {
+				var oldestIP string
+				var oldestTime time.Time
+				for ip, entry := range rl.entries {
+					if oldestIP == "" || entry.lastSeen.Before(oldestTime) {
+						oldestIP = ip
+						oldestTime = entry.lastSeen
 					}
 				}
+				delete(rl.entries, oldestIP)
 			}
 			rl.mu.Unlock()
 		}
@@ -194,12 +198,13 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 		now := time.Now()
 		entry, ok := rl.entries[ip]
 		if !ok || now.After(entry.resetAt) {
-			rl.entries[ip] = &rateLimitEntry{count: 1, resetAt: now.Add(rl.window)}
+			rl.entries[ip] = &rateLimitEntry{count: 1, resetAt: now.Add(rl.window), lastSeen: now}
 			rl.mu.Unlock()
 			next.ServeHTTP(w, r)
 			return
 		}
 		entry.count++
+		entry.lastSeen = now
 		if entry.count > rl.limit {
 			retryAfter := entry.resetAt.Sub(now).Seconds()
 			if retryAfter < 1 {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -141,18 +142,9 @@ func TestSendAll(t *testing.T) {
 		Title: "Test",
 	}
 
-	SendAll(context.Background(), []Notifier{mock, mock, mock}, alert)
-
-	// SendAll is async — wait briefly for goroutines to complete
-	deadline := time.After(2 * time.Second)
-	for called.Load() < 3 {
-		select {
-		case <-deadline:
-			t.Fatalf("called = %d, want 3 (timed out)", called.Load())
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
+	var wg sync.WaitGroup
+	SendAll(context.Background(), []Notifier{mock, mock, mock}, alert, &wg)
+	wg.Wait()
 	if got := called.Load(); got != 3 {
 		t.Errorf("called = %d, want 3", got)
 	}
@@ -174,17 +166,13 @@ func TestSendAll_ParentCancelDoesNotAbortNotifications(t *testing.T) {
 		Title: "Test",
 	}
 
-	SendAll(ctx, []Notifier{slow, slow}, alert)
+	var wg sync.WaitGroup
+	SendAll(ctx, []Notifier{slow, slow}, alert, &wg)
+	wg.Wait()
 
-	// Notifications should still complete despite parent cancellation
-	deadline := time.After(3 * time.Second)
-	for completed.Load() < 2 {
-		select {
-		case <-deadline:
-			t.Fatalf("completed = %d, want 2 (notifications should not be cancelled by parent)", completed.Load())
-		default:
-			time.Sleep(50 * time.Millisecond)
-		}
+	// Notifications should have completed despite parent cancellation
+	if got := completed.Load(); got != 2 {
+		t.Fatalf("completed = %d, want 2 (notifications should not be cancelled by parent)", got)
 	}
 }
 
@@ -201,7 +189,8 @@ func TestSendAll_ContextValuesAreInherited(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), key, "test-value")
 	alert := store.Alert{ID: uuid.New(), Title: "Test"}
-	SendAll(ctx, []Notifier{valueChecker}, alert)
+	var wg sync.WaitGroup
+	SendAll(ctx, []Notifier{valueChecker}, alert, &wg)
 
 	deadline := time.After(2 * time.Second)
 	for {
