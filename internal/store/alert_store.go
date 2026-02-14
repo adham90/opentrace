@@ -387,11 +387,19 @@ func (s *alertStore) WatcherAlertStats(ctx context.Context, watcherID uuid.UUID,
 
 func (s *alertStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
-	result, err := s.db.ExecContext(ctx,
-		`DELETE FROM alerts WHERE created_at < ?`, cutoff,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("pruning alerts: %w", err)
+	var totalDeleted int64
+	for {
+		result, err := s.db.ExecContext(ctx,
+			`DELETE FROM alerts WHERE rowid IN (SELECT rowid FROM alerts WHERE created_at < ? LIMIT 1000)`, cutoff,
+		)
+		if err != nil {
+			return totalDeleted, fmt.Errorf("pruning alerts: %w", err)
+		}
+		n, _ := result.RowsAffected()
+		totalDeleted += n
+		if n < 1000 {
+			break
+		}
 	}
-	return result.RowsAffected()
+	return totalDeleted, nil
 }

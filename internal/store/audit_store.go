@@ -92,11 +92,19 @@ func (s *auditStore) Recent(ctx context.Context, limit int) ([]AuditEntry, error
 
 func (s *auditStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
-	result, err := s.db.ExecContext(ctx,
-		`DELETE FROM audit_log WHERE created_at < ?`, cutoff,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("pruning audit log: %w", err)
+	var totalDeleted int64
+	for {
+		result, err := s.db.ExecContext(ctx,
+			`DELETE FROM audit_log WHERE rowid IN (SELECT rowid FROM audit_log WHERE created_at < ? LIMIT 1000)`, cutoff,
+		)
+		if err != nil {
+			return totalDeleted, fmt.Errorf("pruning audit log: %w", err)
+		}
+		n, _ := result.RowsAffected()
+		totalDeleted += n
+		if n < 1000 {
+			break
+		}
 	}
-	return result.RowsAffected()
+	return totalDeleted, nil
 }

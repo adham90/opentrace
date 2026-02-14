@@ -136,13 +136,21 @@ func (s *metricStore) LatestByServer(ctx context.Context, serverID uuid.UUID) ([
 
 func (s *metricStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
-	result, err := s.db.ExecContext(ctx,
-		`DELETE FROM metrics WHERE created_at < ?`, cutoff,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("pruning metrics: %w", err)
+	var totalDeleted int64
+	for {
+		result, err := s.db.ExecContext(ctx,
+			`DELETE FROM metrics WHERE rowid IN (SELECT rowid FROM metrics WHERE created_at < ? LIMIT 1000)`, cutoff,
+		)
+		if err != nil {
+			return totalDeleted, fmt.Errorf("pruning metrics: %w", err)
+		}
+		n, _ := result.RowsAffected()
+		totalDeleted += n
+		if n < 1000 {
+			break
+		}
 	}
-	return result.RowsAffected()
+	return totalDeleted, nil
 }
 
 func scanMetricRows(rows *sql.Rows) ([]MetricPoint, error) {

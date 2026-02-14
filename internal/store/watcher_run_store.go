@@ -256,13 +256,21 @@ func (s *watcherRunStore) GetByID(ctx context.Context, id uuid.UUID) (*WatcherRu
 
 func (s *watcherRunStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
-	result, err := s.db.ExecContext(ctx,
-		`DELETE FROM watcher_runs WHERE created_at < ?`, cutoff,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("pruning watcher runs: %w", err)
+	var totalDeleted int64
+	for {
+		result, err := s.db.ExecContext(ctx,
+			`DELETE FROM watcher_runs WHERE rowid IN (SELECT rowid FROM watcher_runs WHERE created_at < ? LIMIT 1000)`, cutoff,
+		)
+		if err != nil {
+			return totalDeleted, fmt.Errorf("pruning watcher runs: %w", err)
+		}
+		n, _ := result.RowsAffected()
+		totalDeleted += n
+		if n < 1000 {
+			break
+		}
 	}
-	return result.RowsAffected()
+	return totalDeleted, nil
 }
 
 func (s *watcherRunStore) CountRuns(ctx context.Context, params CountRunParams) (int, error) {

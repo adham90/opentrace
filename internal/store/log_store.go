@@ -544,13 +544,21 @@ func (s *logStore) SearchRequestSummaries(ctx context.Context, params RequestSum
 
 func (s *logStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339Nano)
-	result, err := s.db.ExecContext(ctx,
-		`DELETE FROM logs WHERE timestamp < ?`, cutoff,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("pruning logs: %w", err)
+	var totalDeleted int64
+	for {
+		result, err := s.db.ExecContext(ctx,
+			`DELETE FROM logs WHERE rowid IN (SELECT rowid FROM logs WHERE timestamp < ? LIMIT 1000)`, cutoff,
+		)
+		if err != nil {
+			return totalDeleted, fmt.Errorf("pruning logs: %w", err)
+		}
+		n, _ := result.RowsAffected()
+		totalDeleted += n
+		if n < 1000 {
+			break
+		}
 	}
-	return result.RowsAffected()
+	return totalDeleted, nil
 }
 
 func (s *logStore) RecordBatch(ctx context.Context, batchID string, logCount int) error {

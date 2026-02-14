@@ -151,7 +151,10 @@ func (s *userStore) Update(ctx context.Context, id string, params UpdateUserPara
 	if err != nil {
 		return nil, fmt.Errorf("updating user: %w", err)
 	}
-	n, _ := result.RowsAffected()
+	n, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("checking rows affected: %w", err)
+	}
 	if n == 0 {
 		return nil, ErrNotFound
 	}
@@ -167,7 +170,10 @@ func (s *userStore) UpdatePassword(ctx context.Context, id string, passwordHash 
 	if err != nil {
 		return fmt.Errorf("updating password: %w", err)
 	}
-	n, _ := result.RowsAffected()
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
 	if n == 0 {
 		return ErrNotFound
 	}
@@ -183,7 +189,10 @@ func (s *userStore) UpdateMCPToken(ctx context.Context, id string, token string)
 	if err != nil {
 		return fmt.Errorf("updating mcp token: %w", err)
 	}
-	n, _ := result.RowsAffected()
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
 	if n == 0 {
 		return ErrNotFound
 	}
@@ -199,7 +208,10 @@ func (s *userStore) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("deleting user: %w", err)
 	}
-	n, _ := result.RowsAffected()
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
 	if n == 0 {
 		return ErrNotFound
 	}
