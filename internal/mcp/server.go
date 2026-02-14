@@ -661,6 +661,27 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 		maybeAddTool(s, getIncidentTool(), getIncidentHandler(deps.AlertGroupStore))
 		b.Add("get_incident", "Get full incident details including member alerts", "Incidents", "read", "")
 	}
+
+	// System overview — high-level health dashboard.
+	maybeAddTool(s, systemOverviewTool(), systemOverviewHandler(
+		deps.AlertStore, deps.WatcherStore, deps.LogStore, deps.DataSourceStore, deps.ServerStore,
+	))
+	b.Add("system_overview", "Get high-level system health: alerts, watchers, logs, connectors, servers", "Overview", "read", "")
+
+	// Triage — prioritized inbox of items needing attention.
+	maybeAddTool(s, triageAlertsTool(), triageAlertsHandler(
+		deps.AlertStore, deps.WatcherRunStore, deps.DataSourceStore, deps.ServerStore,
+	))
+	b.Add("triage_alerts", "Get prioritized list of items needing attention", "Overview", "read", "")
+
+	// Metadata discovery.
+	if deps.Config != nil {
+		maybeAddTool(s, listModelsTool(), listModelsHandler(deps.Config))
+		b.Add("list_models", "List available LLM models and providers", "Metadata", "read", "")
+	}
+
+	maybeAddTool(s, watcherTemplatesTool(), watcherTemplatesHandler())
+	b.Add("watcher_templates", "Get pre-built watcher configurations by category", "Metadata", "read", "")
 }
 
 // addWriteTools registers write/admin tools (connector tools, create_watcher, preview_watcher).
@@ -1001,6 +1022,18 @@ Each suggestion includes a watcher_config that can be passed directly to create_
 	if deps.ServerStore != nil {
 		maybeAddTool(s, deleteServerTool(), deleteServerHandler(deps.ServerStore))
 		b.Add("delete_server", "Delete a monitored server", "Server Metrics", "admin", "")
+	}
+
+	// Smart search (admin — uses LLM).
+	if deps.Config != nil {
+		maybeAddTool(s, smartSearchTool(), smartSearchHandler(deps.LogStore, deps.Config))
+		b.Add("smart_search", "Translate natural language to log search filters using AI", "Log Intelligence", "admin", "")
+	}
+
+	// Investigate alert (admin — creates a watcher and executes).
+	if deps.AlertStore != nil && deps.WatcherStore != nil && deps.Executor != nil {
+		maybeAddTool(s, investigateAlertTool(), investigateAlertHandler(deps.AlertStore, deps.WatcherStore, deps.Executor))
+		b.Add("investigate_alert", "Trigger deep AI investigation of a specific alert", "Incidents", "admin", "")
 	}
 }
 
