@@ -25,28 +25,34 @@
 }
 
 /* ===== Theme: Light ===== */
+/* Color contrast ratios tested against WCAG 2.1 AA (4.5:1 normal text, 3:1 large/UI) */
 [data-theme="light"] {
   --bg: #f8f8f8;
   --bg-secondary: #ffffff;
   --bg-tertiary: #eeeeee;
-  --border: #d4d4d4;
+  --border: #b0b0b0;
   --text: #1a1a1a;
   --text-dim: #6b6b6b;
   --text-bright: #000000;
-  --green: #16a34a;
+  --green: #15803d;
   --green-dim: #dcfce7;
-  --red: #dc2626;
+  --red: #b91c1c;
   --red-dim: #fee2e2;
-  --yellow: #ca8a04;
+  --yellow: #a16207;
   --yellow-dim: #fef3c7;
-  --blue: #2563eb;
+  --blue: #1d4ed8;
   --blue-dim: #dbeafe;
-  --cyan: #0891b2;
+  --cyan: #0e7490;
   --purple: #9333ea;
   --overlay: rgba(0, 0, 0, 0.4);
   --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b6b6b'/%3E%3C/svg%3E");
   --bg-row-alt: rgba(0,0,0,0.03);
 }
+/* Light mode: keep bright green for elements using green as background with dark text */
+[data-theme="light"] .tmux-bar,
+[data-theme="light"] .mobile-menu-header,
+[data-theme="light"] .term-new-indicator:hover { background: #16a34a; }
+[data-theme="light"] .tmux-tab.active { color: #16a34a; }
 
 /* System default: respect OS preference */
 @media (prefers-color-scheme: light) {
@@ -54,24 +60,28 @@
     --bg: #f8f8f8;
     --bg-secondary: #ffffff;
     --bg-tertiary: #eeeeee;
-    --border: #d4d4d4;
+    --border: #b0b0b0;
     --text: #1a1a1a;
     --text-dim: #6b6b6b;
     --text-bright: #000000;
-    --green: #16a34a;
+    --green: #15803d;
     --green-dim: #dcfce7;
-    --red: #dc2626;
+    --red: #b91c1c;
     --red-dim: #fee2e2;
-    --yellow: #ca8a04;
+    --yellow: #a16207;
     --yellow-dim: #fef3c7;
-    --blue: #2563eb;
+    --blue: #1d4ed8;
     --blue-dim: #dbeafe;
-    --cyan: #0891b2;
+    --cyan: #0e7490;
     --purple: #9333ea;
     --overlay: rgba(0, 0, 0, 0.4);
     --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b6b6b'/%3E%3C/svg%3E");
     --bg-row-alt: rgba(0,0,0,0.03);
   }
+  :root:not([data-theme="dark"]) .tmux-bar,
+  :root:not([data-theme="dark"]) .mobile-menu-header,
+  :root:not([data-theme="dark"]) .term-new-indicator:hover { background: #16a34a; }
+  :root:not([data-theme="dark"]) .tmux-tab.active { color: #16a34a; }
 }
 
 /* ===== Reset ===== */
