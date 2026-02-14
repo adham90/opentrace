@@ -87,10 +87,11 @@ func (s *alertGroupStore) GetByID(ctx context.Context, id string) (*AlertGroup, 
 
 	// Load member alerts
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT a.id, a.watcher_id, a.run_id, COALESCE(a.watcher_title, ''), a.title, a.summary,
+		`SELECT a.id, a.watcher_id, a.run_id, COALESCE(w.title, ''), a.title, a.summary,
 		        a.severity, a.details, a.read, a.dismissed, a.created_at
 		 FROM alerts a
 		 JOIN alert_group_members m ON m.alert_id = a.id
+		 LEFT JOIN watchers w ON a.watcher_id = w.id
 		 WHERE m.group_id = ?
 		 ORDER BY a.created_at DESC`, id,
 	)

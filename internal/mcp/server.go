@@ -33,11 +33,13 @@ type Deps struct {
 	ServerName      string // OPENTRACE_MCP_NAME — custom server name (default: "opentrace")
 
 	// New deps for additional MCP tools.
-	DataSourceStore store.DataSourceStore       // connector CRUD
-	SettingsStore   store.SettingsStore          // retention/auto-update settings
-	Executor         *watcher.Executor            // on-demand watcher execution
-	Config           *config.Config               // needed by connector.CreateConnector
-	MCPActivityStore store.MCPActivityStore       // MCP activity tracking
+	DataSourceStore  store.DataSourceStore       // connector CRUD
+	SettingsStore    store.SettingsStore          // retention/auto-update settings
+	Executor         *watcher.Executor           // on-demand watcher execution
+	Config           *config.Config              // needed by connector.CreateConnector
+	MCPActivityStore store.MCPActivityStore      // MCP activity tracking
+	AlertGroupStore  store.AlertGroupStore       // incident/alert group management
+	EventHub         *watcher.EventHub           // cancel running watcher executions
 }
 
 // NewConfiguredServer creates an MCPServer and registers tools based on the
@@ -650,6 +652,15 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 		)
 		b.Add("anomaly_detect", "Detect statistical anomalies in error rates, log volumes, or alert counts", "Log Intelligence", "read", "")
 	}
+
+	// Alert group (incident) read tools.
+	if deps.AlertGroupStore != nil {
+		maybeAddTool(s, listIncidentsTool(), listIncidentsHandler(deps.AlertGroupStore))
+		b.Add("list_incidents", "List alert groups (incidents) with status and severity", "Incidents", "read", "")
+
+		maybeAddTool(s, getIncidentTool(), getIncidentHandler(deps.AlertGroupStore))
+		b.Add("get_incident", "Get full incident details including member alerts", "Incidents", "read", "")
+	}
 }
 
 // addWriteTools registers write/admin tools (connector tools, create_watcher, preview_watcher).
@@ -960,6 +971,36 @@ Each suggestion includes a watcher_config that can be passed directly to create_
 			updateRetentionHandler(deps.SettingsStore),
 		)
 		b.Add("update_retention", "Update data retention period", "Settings", "admin", "")
+	}
+
+	// Alert group (incident) write tools.
+	if deps.AlertGroupStore != nil {
+		maybeAddTool(s, createIncidentTool(), createIncidentHandler(deps.AlertGroupStore))
+		b.Add("create_incident", "Create a new incident from related alerts", "Incidents", "admin", "")
+
+		maybeAddTool(s, updateIncidentTool(), updateIncidentHandler(deps.AlertGroupStore))
+		b.Add("update_incident", "Update incident status, root cause, or resolution", "Incidents", "admin", "")
+
+		maybeAddTool(s, addAlertsToIncidentTool(), addAlertsToIncidentHandler(deps.AlertGroupStore))
+		b.Add("add_alerts_to_incident", "Add alerts to an existing incident", "Incidents", "admin", "")
+
+		maybeAddTool(s, autoCorrelateAlertsTool(), autoCorrelateAlertsHandler(deps.AlertGroupStore))
+		b.Add("auto_correlate_alerts", "Auto-group correlated alerts by time proximity", "Incidents", "admin", "")
+
+		maybeAddTool(s, deleteIncidentTool(), deleteIncidentHandler(deps.AlertGroupStore))
+		b.Add("delete_incident", "Delete an incident (alerts preserved)", "Incidents", "admin", "")
+	}
+
+	// Stop a running watcher execution.
+	if deps.EventHub != nil {
+		maybeAddTool(s, stopWatcherRunTool(), stopWatcherRunHandler(deps.EventHub))
+		b.Add("stop_watcher_run", "Cancel an active watcher run", "Watchers", "admin", "")
+	}
+
+	// Delete a monitored server.
+	if deps.ServerStore != nil {
+		maybeAddTool(s, deleteServerTool(), deleteServerHandler(deps.ServerStore))
+		b.Add("delete_server", "Delete a monitored server", "Server Metrics", "admin", "")
 	}
 }
 

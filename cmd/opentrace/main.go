@@ -194,6 +194,8 @@ func runMCP() error {
 		Executor:         executor,
 		Config:           deps.cfg,
 		MCPActivityStore: deps.mcpActivityStore,
+		AlertGroupStore:  deps.alertGroupStore,
+		EventHub:         eventHub,
 	})
 }
 
@@ -283,6 +285,7 @@ func run() error {
 		SettingsStore:   deps.settingsStore,
 		RuleEvaluator:   ruleEvaluator,
 		Config:          deps.cfg,
+		AlertGroupStore: deps.alertGroupStore,
 	})
 
 	// Create server

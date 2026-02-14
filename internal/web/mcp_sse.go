@@ -81,6 +81,8 @@ func (s *Server) setupMCPSSE() *server.SSEServer {
 		Executor:         s.executor,
 		Config:           s.cfg,
 		MCPActivityStore: s.mcpActivityStore,
+		AlertGroupStore:  s.alertGroupStore,
+		EventHub:         s.eventHub,
 	}
 
 	// Create MCP server with all tools (admin level).
