@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"fmt"
@@ -75,25 +76,61 @@ func RunSQLiteMigrations(db *sql.DB) error {
 			return fmt.Errorf("reading migration %s: %w", name, err)
 		}
 
-		tx, err := db.Begin()
-		if err != nil {
-			return fmt.Errorf("begin tx for migration %s: %w", name, err)
-		}
-
-		if _, err := tx.Exec(string(content)); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("executing migration %s: %w", name, err)
-		}
-
-		if _, err := tx.Exec(`INSERT INTO schema_version (version) VALUES (?)`, version); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("recording migration %s: %w", name, err)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("committing migration %s: %w", name, err)
+		if err := applyMigration(db, name, string(content), version); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+// applyMigration runs a single migration in a transaction. If the migration
+// contains "-- pragma:foreign_keys_off", foreign key checks are disabled on a
+// dedicated connection for the duration (required for table-recreation migrations
+// since PRAGMA foreign_keys cannot be changed inside a transaction).
+func applyMigration(db *sql.DB, name, content string, version int) error {
+	needsFKOff := strings.Contains(content, "-- pragma:foreign_keys_off")
+
+	if needsFKOff {
+		conn, err := db.Conn(context.Background())
+		if err != nil {
+			return fmt.Errorf("getting conn for migration %s: %w", name, err)
+		}
+		defer conn.Close()
+
+		if _, err := conn.ExecContext(context.Background(), "PRAGMA foreign_keys=OFF"); err != nil {
+			return fmt.Errorf("disabling FK for migration %s: %w", name, err)
+		}
+		defer conn.ExecContext(context.Background(), "PRAGMA foreign_keys=ON")
+
+		tx, err := conn.BeginTx(context.Background(), nil)
+		if err != nil {
+			return fmt.Errorf("begin tx for migration %s: %w", name, err)
+		}
+
+		if _, err := tx.Exec(content); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("executing migration %s: %w", name, err)
+		}
+		if _, err := tx.Exec(`INSERT INTO schema_version (version) VALUES (?)`, version); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("recording migration %s: %w", name, err)
+		}
+		return tx.Commit()
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx for migration %s: %w", name, err)
+	}
+
+	if _, err := tx.Exec(content); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("executing migration %s: %w", name, err)
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_version (version) VALUES (?)`, version); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("recording migration %s: %w", name, err)
+	}
+	return tx.Commit()
 }

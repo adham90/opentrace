@@ -217,9 +217,10 @@ const (
 type WatcherStatus string
 
 const (
-	WatcherActive WatcherStatus = "active"
-	WatcherPaused WatcherStatus = "paused"
-	WatcherError  WatcherStatus = "error"
+	WatcherActive  WatcherStatus = "active"
+	WatcherPaused  WatcherStatus = "paused"
+	WatcherError   WatcherStatus = "error"
+	WatcherExpired WatcherStatus = "expired"
 )
 
 // AdaptiveState represents the adaptive scheduling state of a watcher.
@@ -282,6 +283,7 @@ type Watcher struct {
 	ConsecutiveErrors    int             `json:"consecutive_errors"`
 	EscalatedAt          *time.Time      `json:"escalated_at,omitempty"`
 	BaseTimeRange        string          `json:"base_time_range,omitempty"`
+	ExpiresAt            *time.Time      `json:"expires_at,omitempty"`
 }
 
 // WatcherHumanSummary provides a Claude-generated plain-English explanation of a watcher.
@@ -329,6 +331,7 @@ type CreateWatcherParams struct {
 	TypeConfig      json.RawMessage      `json:"type_config,omitempty"`
 	AdaptiveConfig  *AdaptiveConfig      `json:"adaptive_config,omitempty"`
 	HumanSummary    *WatcherHumanSummary `json:"human_summary,omitempty"`
+	ExpiresAt       *time.Time           `json:"expires_at,omitempty"`
 }
 
 // UpdateWatcherParams defines the input for updating a watcher.
@@ -348,6 +351,8 @@ type UpdateWatcherParams struct {
 	TypeConfig      json.RawMessage      `json:"type_config,omitempty"`
 	AdaptiveConfig  *AdaptiveConfig      `json:"adaptive_config,omitempty"`
 	HumanSummary    *WatcherHumanSummary `json:"human_summary,omitempty"`
+	ExpiresAt       *time.Time           `json:"expires_at,omitempty"`
+	ClearExpiresAt  bool                 `json:"clear_expires_at,omitempty"`
 }
 
 // ListWatcherParams defines filters for listing watchers.

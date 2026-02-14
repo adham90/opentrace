@@ -721,6 +721,7 @@ Sequence type_config example:
 				mcp.WithString("model", mcp.Description("LLM model name (ai watchers only)")),
 				mcp.WithString("effort", mcp.Description("Analysis effort: low, medium (default), or high (ai watchers only)")),
 			mcp.WithString("human_summary", mcp.Description(`JSON: {"what_it_monitors":"...","why_it_matters":"...","what_to_do":"..."}. Always provide this for dashboard display.`)),
+			mcp.WithString("expires_at", mcp.Description("RFC3339 timestamp when this watcher should auto-expire (e.g. '2025-03-01T00:00:00Z'). Useful for deploy watches, migration monitoring, or time-limited alerts.")),
 			),
 			createWatcherHandler(deps.WatcherStore),
 		)
@@ -807,6 +808,7 @@ Tip: Use db_query_stats, db_activity, or db_table_stats first to understand the 
 				mcp.WithString("effort", mcp.Description("New analysis effort: low, medium, high (AI watchers only)")),
 				mcp.WithString("rule_config", mcp.Description("New rule configuration JSON (rule watchers only)")),
 				mcp.WithString("human_summary", mcp.Description(`JSON: {"what_it_monitors":"...","why_it_matters":"...","what_to_do":"..."}. Update the plain-English explanation.`)),
+			mcp.WithString("expires_at", mcp.Description("RFC3339 timestamp when this watcher should auto-expire, or 'never' to clear an existing expiration.")),
 			),
 			updateWatcherHandler(deps.WatcherStore),
 		)
@@ -1326,6 +1328,15 @@ func createWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 				return mcp.NewToolResultError(fmt.Sprintf("invalid human_summary JSON: %v", err)), nil
 			}
 			params.HumanSummary = &hs
+		}
+
+		// Parse optional expires_at timestamp.
+		if eaStr, ok := args["expires_at"].(string); ok && eaStr != "" {
+			t, err := time.Parse(time.RFC3339, eaStr)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("invalid expires_at — expected RFC3339 format (e.g. '2025-03-01T00:00:00Z'): %v", err)), nil
+			}
+			params.ExpiresAt = &t
 		}
 
 		w, err := ws.Create(ctx, params)

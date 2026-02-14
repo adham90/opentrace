@@ -468,7 +468,7 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 
 	stats := overviewStats{
 		Alerts:     map[string]int{"total": 0, "critical": 0, "warning": 0, "info": 0},
-		Watchers:   map[string]int{"total": 0, "active": 0, "paused": 0, "error": 0},
+		Watchers:   map[string]int{"total": 0, "active": 0, "paused": 0, "error": 0, "expired": 0},
 		Logs:       map[string]int{"last_hour": 0, "errors_last_hour": 0},
 		Connectors: map[string]int{"total": 0, "connected": 0, "error": 0},
 		Servers:    map[string]int{"total": 0, "online": 0, "offline": 0},
@@ -500,6 +500,8 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 					stats.Watchers["paused"]++
 				case store.WatcherError:
 					stats.Watchers["error"]++
+				case store.WatcherExpired:
+					stats.Watchers["expired"]++
 				}
 			}
 		}

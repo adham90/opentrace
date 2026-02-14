@@ -273,6 +273,9 @@ func (m *mockWatcherStore) UpdateAdaptiveState(ctx context.Context, id uuid.UUID
 func (m *mockWatcherStore) ResumeWatcher(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
+func (m *mockWatcherStore) ExpireWatchers(ctx context.Context) (int, error) {
+	return 0, nil
+}
 
 // mockRunStore tracks created runs and their status updates
 type mockRunStore struct {

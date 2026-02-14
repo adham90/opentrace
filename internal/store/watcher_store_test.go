@@ -546,6 +546,230 @@ func TestWatcherStore_ResumeWatcher(t *testing.T) {
 	}
 }
 
+func TestWatcherStore_ExpiresAt(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewWatcherStore(db)
+	ctx := context.Background()
+
+	// Create watcher with expires_at
+	future := time.Now().Add(1 * time.Hour).UTC().Truncate(time.Second)
+	w, err := s.Create(ctx, CreateWatcherParams{
+		Title:       "Expiring Watcher",
+		Description: "Expires in 1 hour",
+		ExpiresAt:   &future,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if w.ExpiresAt == nil {
+		t.Fatal("expected expires_at to be set")
+	}
+	if !w.ExpiresAt.Equal(future) {
+		t.Errorf("expires_at = %v, want %v", w.ExpiresAt, future)
+	}
+
+	// GetByID preserves expires_at
+	got, err := s.GetByID(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.ExpiresAt == nil {
+		t.Fatal("GetByID: expected expires_at to be set")
+	}
+
+	// Create without expires_at — should be nil
+	w2, err := s.Create(ctx, CreateWatcherParams{
+		Title:       "No Expiry",
+		Description: "Runs forever",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if w2.ExpiresAt != nil {
+		t.Errorf("expected nil expires_at, got %v", w2.ExpiresAt)
+	}
+
+	// Update expires_at
+	newExpiry := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	updated, err := s.Update(ctx, w2.ID, UpdateWatcherParams{
+		ExpiresAt: &newExpiry,
+	})
+	if err != nil {
+		t.Fatalf("Update expires_at: %v", err)
+	}
+	if updated.ExpiresAt == nil {
+		t.Fatal("expected updated expires_at to be set")
+	}
+	if !updated.ExpiresAt.Equal(newExpiry) {
+		t.Errorf("updated expires_at = %v, want %v", updated.ExpiresAt, newExpiry)
+	}
+
+	// Clear expires_at
+	cleared, err := s.Update(ctx, w2.ID, UpdateWatcherParams{
+		ClearExpiresAt: true,
+	})
+	if err != nil {
+		t.Fatalf("Clear expires_at: %v", err)
+	}
+	if cleared.ExpiresAt != nil {
+		t.Errorf("expected nil expires_at after clear, got %v", cleared.ExpiresAt)
+	}
+}
+
+func TestWatcherStore_ExpireWatchers(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewWatcherStore(db)
+	ctx := context.Background()
+
+	// Create a watcher with expires_at in the past
+	past := time.Now().Add(-1 * time.Minute).UTC().Truncate(time.Second)
+	w1, err := s.Create(ctx, CreateWatcherParams{
+		Title:       "Past Expiry",
+		Description: "Should be expired",
+		ExpiresAt:   &past,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Create a watcher with expires_at in the future (should NOT expire)
+	future := time.Now().Add(1 * time.Hour).UTC().Truncate(time.Second)
+	w2, err := s.Create(ctx, CreateWatcherParams{
+		Title:       "Future Expiry",
+		Description: "Should stay active",
+		ExpiresAt:   &future,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Create a watcher without expires_at (should NOT expire)
+	w3, err := s.Create(ctx, CreateWatcherParams{
+		Title:       "No Expiry",
+		Description: "Runs forever",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Expire watchers
+	n, err := s.ExpireWatchers(ctx)
+	if err != nil {
+		t.Fatalf("ExpireWatchers: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expired count = %d, want 1", n)
+	}
+
+	// Verify w1 is expired
+	got1, _ := s.GetByID(ctx, w1.ID)
+	if got1.Status != WatcherExpired {
+		t.Errorf("w1 status = %q, want expired", got1.Status)
+	}
+
+	// Verify w2 and w3 are still active
+	got2, _ := s.GetByID(ctx, w2.ID)
+	if got2.Status != WatcherActive {
+		t.Errorf("w2 status = %q, want active", got2.Status)
+	}
+	got3, _ := s.GetByID(ctx, w3.ID)
+	if got3.Status != WatcherActive {
+		t.Errorf("w3 status = %q, want active", got3.Status)
+	}
+
+	// Calling ExpireWatchers again should expire 0 (already expired)
+	n, err = s.ExpireWatchers(ctx)
+	if err != nil {
+		t.Fatalf("ExpireWatchers (2nd): %v", err)
+	}
+	if n != 0 {
+		t.Errorf("second expire count = %d, want 0", n)
+	}
+}
+
+func TestWatcherStore_GetDueWatchers_SkipsExpired(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewWatcherStore(db)
+	ctx := context.Background()
+
+	// Create a due watcher with expires_at in the past
+	past := time.Now().Add(-1 * time.Minute).UTC().Truncate(time.Second)
+	w1, err := s.Create(ctx, CreateWatcherParams{
+		Title:       "Due But Expired",
+		Description: "Should not be fetched",
+		ExpiresAt:   &past,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Set next_run_at in the past so it's "due"
+	pastRun := time.Now().Add(-2 * time.Minute)
+	s.UpdateRunTime(ctx, w1.ID, pastRun, pastRun)
+
+	// Create a due watcher with no expiry
+	w2, err := s.Create(ctx, CreateWatcherParams{
+		Title:       "Due No Expiry",
+		Description: "Should be fetched",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	s.UpdateRunTime(ctx, w2.ID, pastRun, pastRun)
+
+	due, err := s.GetDueWatchers(ctx)
+	if err != nil {
+		t.Fatalf("GetDueWatchers: %v", err)
+	}
+
+	// Only w2 should be returned (w1 has past expires_at)
+	if len(due) != 1 {
+		t.Fatalf("GetDueWatchers len = %d, want 1", len(due))
+	}
+	if due[0].ID != w2.ID {
+		t.Errorf("due watcher ID = %v, want %v", due[0].ID, w2.ID)
+	}
+}
+
+func TestWatcherStore_ResumeExpiredWatcher(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewWatcherStore(db)
+	ctx := context.Background()
+
+	// Create a watcher with past expiry
+	past := time.Now().Add(-1 * time.Minute).UTC().Truncate(time.Second)
+	w, err := s.Create(ctx, CreateWatcherParams{
+		Title:       "Expired Watcher",
+		Description: "Will be resumed",
+		ExpiresAt:   &past,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Expire it
+	n, _ := s.ExpireWatchers(ctx)
+	if n != 1 {
+		t.Fatalf("expected 1 expired, got %d", n)
+	}
+
+	// Resume it
+	err = s.ResumeWatcher(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("ResumeWatcher: %v", err)
+	}
+
+	got, _ := s.GetByID(ctx, w.ID)
+	if got.Status != WatcherActive {
+		t.Errorf("status = %q, want active", got.Status)
+	}
+	if got.ExpiresAt != nil {
+		t.Errorf("expires_at should be nil after resume, got %v", got.ExpiresAt)
+	}
+	if got.AdaptiveState != AdaptiveNormal {
+		t.Errorf("adaptive_state = %q, want normal", got.AdaptiveState)
+	}
+}
+
 func TestWatcherStore_AdaptiveConfig_RoundTrip(t *testing.T) {
 	db := setupTestDB(t)
 	s := NewWatcherStore(db)

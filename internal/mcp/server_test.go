@@ -398,6 +398,10 @@ func (m *mockWatcherStore) ResumeWatcher(ctx context.Context, id uuid.UUID) erro
 	return nil
 }
 
+func (m *mockWatcherStore) ExpireWatchers(ctx context.Context) (int, error) {
+	return 0, nil
+}
+
 type mockAlertStore struct {
 	alerts []store.Alert
 	err    error

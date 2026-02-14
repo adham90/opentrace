@@ -220,7 +220,7 @@ func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatche
 		Severity: sev, Filters: filters, TimeRange: timeRange,
 		Model: params.Model, Effort: effort, Status: store.WatcherActive, Notify: notify,
 		WatcherType: watcherType, RuleConfig: params.RuleConfig, DataSourceID: params.DataSourceID,
-		TypeConfig: params.TypeConfig,
+		TypeConfig: params.TypeConfig, ExpiresAt: params.ExpiresAt,
 		NextRunAt: &now, CreatedAt: now, UpdatedAt: now,
 	}
 	m.watchers[w.ID] = w
@@ -330,15 +330,30 @@ func (m *mockWatcherStore) ResumeWatcher(ctx context.Context, id uuid.UUID) erro
 	if !ok {
 		return store.ErrNotFound
 	}
-	if w.AdaptiveState != store.AdaptiveError {
+	if w.AdaptiveState != store.AdaptiveError && w.Status != store.WatcherExpired {
 		return store.ErrNotFound
 	}
 	w.AdaptiveState = store.AdaptiveNormal
 	w.ConsecutiveErrors = 0
 	w.ConsecutiveCleanRuns = 0
 	w.EscalatedAt = nil
+	w.ExpiresAt = nil
 	w.Status = store.WatcherActive
 	return nil
+}
+
+func (m *mockWatcherStore) ExpireWatchers(ctx context.Context) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	count := 0
+	for _, w := range m.watchers {
+		if w.Status == store.WatcherActive && w.ExpiresAt != nil && !w.ExpiresAt.After(now) {
+			w.Status = store.WatcherExpired
+			count++
+		}
+	}
+	return count, nil
 }
 
 // mockWatcherRunStore implements store.WatcherRunStore for testing.

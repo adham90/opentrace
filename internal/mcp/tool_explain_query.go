@@ -39,7 +39,7 @@ func explainQueryHandler(registry *connector.Registry) server.ToolHandlerFunc {
 			return mcp.NewToolResultError("The active database connector does not support direct queries."), nil
 		}
 
-		analyze := true
+		analyze := false
 		if v, ok := args["analyze"].(bool); ok {
 			analyze = v
 		}

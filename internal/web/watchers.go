@@ -31,6 +31,7 @@ type createWatcherRequest struct {
 	DataSourceID   *string               `json:"data_source_id,omitempty"`
 	TypeConfig     json.RawMessage       `json:"type_config,omitempty"`
 	AdaptiveConfig *store.AdaptiveConfig `json:"adaptive_config,omitempty"`
+	ExpiresAt      *time.Time            `json:"expires_at,omitempty"`
 }
 
 type updateWatcherRequest struct {
@@ -48,6 +49,8 @@ type updateWatcherRequest struct {
 	DataSourceID   *string                `json:"data_source_id,omitempty"`
 	TypeConfig     json.RawMessage        `json:"type_config,omitempty"`
 	AdaptiveConfig *store.AdaptiveConfig  `json:"adaptive_config,omitempty"`
+	ExpiresAt      *time.Time             `json:"expires_at,omitempty"`
+	ClearExpiresAt bool                   `json:"clear_expires_at,omitempty"`
 }
 
 func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +89,7 @@ func (s *Server) handleCreateWatcher(w http.ResponseWriter, r *http.Request) {
 		DataSourceID:   req.DataSourceID,
 		TypeConfig:     req.TypeConfig,
 		AdaptiveConfig: req.AdaptiveConfig,
+		ExpiresAt:      req.ExpiresAt,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create watcher")
@@ -157,6 +161,8 @@ func (s *Server) handleUpdateWatcher(w http.ResponseWriter, r *http.Request) {
 		DataSourceID:   req.DataSourceID,
 		TypeConfig:     req.TypeConfig,
 		AdaptiveConfig: req.AdaptiveConfig,
+		ExpiresAt:      req.ExpiresAt,
+		ClearExpiresAt: req.ClearExpiresAt,
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -209,10 +215,10 @@ func (s *Server) handleResumeWatcher(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if mon.AdaptiveState == store.AdaptiveError {
+	if mon.AdaptiveState == store.AdaptiveError || mon.Status == store.WatcherExpired {
 		if err := s.watcherStore.ResumeWatcher(r.Context(), id); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
-				writeError(w, http.StatusConflict, "watcher is not in error state")
+				writeError(w, http.StatusConflict, "watcher is not in error or expired state")
 				return
 			}
 			writeError(w, http.StatusInternalServerError, "failed to resume watcher")

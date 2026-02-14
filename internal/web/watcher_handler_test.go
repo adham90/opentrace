@@ -328,6 +328,87 @@ func TestHandleWatcherTemplates(t *testing.T) {
 	}
 }
 
+func TestHandleCreateWatcher_WithExpiresAt(t *testing.T) {
+	srv := newTestServerWithWatchers()
+
+	body := `{"title":"Deploy watcher","description":"Monitor deploy","expires_at":"2099-03-01T00:00:00Z"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/watchers", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var watcher store.Watcher
+	json.NewDecoder(w.Body).Decode(&watcher)
+	if watcher.ExpiresAt == nil {
+		t.Fatal("expected expires_at to be set")
+	}
+}
+
+func TestHandleResumeExpiredWatcher(t *testing.T) {
+	srv := newTestServerWithWatchers()
+
+	// Create a watcher
+	body := `{"title":"Expiry test","description":"Will be expired"}`
+	createReq := httptest.NewRequest(http.MethodPost, "/api/watchers", bytes.NewBufferString(body))
+	createReq.Header.Set("Content-Type", "application/json")
+	createW := httptest.NewRecorder()
+	srv.Router.ServeHTTP(createW, createReq)
+
+	var created store.Watcher
+	json.NewDecoder(createW.Body).Decode(&created)
+
+	// Manually set to expired status via the mock
+	ws := srv.watcherStore.(*mockWatcherStore)
+	ws.mu.Lock()
+	ws.watchers[created.ID].Status = store.WatcherExpired
+	ws.mu.Unlock()
+
+	// Resume (should reactivate)
+	resumeReq := httptest.NewRequest(http.MethodPost, "/api/watchers/"+created.ID.String()+"/resume", nil)
+	resumeW := httptest.NewRecorder()
+	srv.Router.ServeHTTP(resumeW, resumeReq)
+
+	if resumeW.Code != http.StatusOK {
+		t.Fatalf("resume status = %d, want %d; body: %s", resumeW.Code, http.StatusOK, resumeW.Body.String())
+	}
+
+	var resumed store.Watcher
+	json.NewDecoder(resumeW.Body).Decode(&resumed)
+	if resumed.Status != store.WatcherActive {
+		t.Errorf("resumed status = %q, want %q", resumed.Status, store.WatcherActive)
+	}
+}
+
+func TestHandleUpdateWatcher_WithExpiresAt(t *testing.T) {
+	srv := newTestServerWithWatchers()
+
+	// Create a watcher
+	createBody := `{"title":"Update expiry test","description":"Will get expiry"}`
+	createReq := httptest.NewRequest(http.MethodPost, "/api/watchers", bytes.NewBufferString(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createW := httptest.NewRecorder()
+	srv.Router.ServeHTTP(createW, createReq)
+
+	var created store.Watcher
+	json.NewDecoder(createW.Body).Decode(&created)
+
+	// Update with expires_at
+	updateBody := `{"expires_at":"2099-06-01T12:00:00Z"}`
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/watchers/"+created.ID.String(), bytes.NewBufferString(updateBody))
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateW := httptest.NewRecorder()
+	srv.Router.ServeHTTP(updateW, updateReq)
+
+	if updateW.Code != http.StatusOK {
+		t.Fatalf("update status = %d, want %d; body: %s", updateW.Code, http.StatusOK, updateW.Body.String())
+	}
+}
+
 func TestHandleCreateWatcher_WithModel(t *testing.T) {
 	srv := newTestServerWithWatchers()
 

@@ -44,6 +44,7 @@ type WatcherSummary struct {
 	Active       int `json:"active"`
 	Paused       int `json:"paused"`
 	InError      int `json:"in_error"`
+	Expired      int `json:"expired"`
 	RunsInPeriod int `json:"runs_in_period"`
 	FailedRuns   int `json:"failed_runs"`
 }

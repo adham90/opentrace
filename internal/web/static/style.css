@@ -1211,6 +1211,7 @@ select:focus { outline: none; border-color: var(--green); }
 .status-active { color: var(--green); }
 .status-paused { color: var(--yellow); }
 .status-error { color: var(--red); }
+.status-expired { color: var(--text-dim); }
 
 /* Expanded detail section (hidden by default) */
 .watcher-detail {

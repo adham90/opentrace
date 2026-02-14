@@ -130,6 +130,13 @@ func (s *Scheduler) Stop() {
 }
 
 func (s *Scheduler) pollAndExecute(ctx context.Context) {
+	// Expire any watchers past their expires_at before fetching due watchers.
+	if n, err := s.watcherStore.ExpireWatchers(ctx); err != nil {
+		slog.Error("expire watchers error", "error", err)
+	} else if n > 0 {
+		slog.Info("expired watchers", "count", n)
+	}
+
 	watchers, err := s.watcherStore.GetDueWatchers(ctx)
 	if err != nil {
 		slog.Error("poll error", "error", err)

@@ -163,6 +163,8 @@ func (b *Builder) buildWatcherData(ctx context.Context, opts DigestOpts) (Watche
 			summary.Paused++
 		case store.WatcherError:
 			summary.InError++
+		case store.WatcherExpired:
+			summary.Expired++
 		}
 
 		// Count runs for this watcher in period

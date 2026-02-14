@@ -67,6 +67,7 @@ type WatcherStore interface {
 	UpdateRunTime(ctx context.Context, id uuid.UUID, lastRun, nextRun time.Time) error
 	UpdateAdaptiveState(ctx context.Context, id uuid.UUID, params UpdateAdaptiveParams) error
 	ResumeWatcher(ctx context.Context, id uuid.UUID) error
+	ExpireWatchers(ctx context.Context) (int, error)
 }
 
 // CountRunParams defines filters for counting watcher runs in a time period.

@@ -85,16 +85,22 @@ func (s *watcherStore) Create(ctx context.Context, params CreateWatcherParams) (
 		typeConfigStr = &s
 	}
 
+	var expiresAtStr *string
+	if params.ExpiresAt != nil {
+		s := params.ExpiresAt.UTC().Format(time.RFC3339)
+		expiresAtStr = &s
+	}
+
 	id := uuid.New()
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO watchers (id, title, description, severity, filters, time_range, schedule, model, effort, notify, watcher_type, rule_config, data_source_id, type_config, adaptive_config, human_summary, next_run_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO watchers (id, title, description, severity, filters, time_range, schedule, model, effort, notify, watcher_type, rule_config, data_source_id, type_config, adaptive_config, human_summary, expires_at, next_run_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id.String(), params.Title, params.Description, string(severity),
 		string(filters), timeRange, params.Schedule, params.Model, string(effort), string(notify),
 		string(watcherType), ruleConfigStr, params.DataSourceID, typeConfigStr, adaptiveConfigStr, humanSummaryStr,
-		now, now, now,
+		expiresAtStr, now, now, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("inserting watcher: %w", err)
@@ -108,7 +114,7 @@ const watcherColumns = `id, title, description, severity, filters, time_range, s
 	watcher_type, rule_config, data_source_id, type_config,
 	last_run_at, next_run_at, last_error, created_at, updated_at,
 	adaptive_config, adaptive_state, consecutive_clean_runs, consecutive_errors, escalated_at, base_time_range,
-	human_summary`
+	human_summary, expires_at`
 
 // scanWatcher scans a watcher row into a Watcher struct.
 func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
@@ -120,6 +126,7 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 	var ruleConfigStr, dataSourceID, typeConfigStr sql.NullString
 	var adaptiveConfigStr, escalatedAt, baseTimeRange sql.NullString
 	var humanSummaryStr sql.NullString
+	var expiresAt sql.NullString
 
 	err := sc.Scan(
 		&w.ID, &w.Title, &w.Description, &w.Severity, &filtersStr,
@@ -130,6 +137,7 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 		&adaptiveConfigStr, &w.AdaptiveState, &w.ConsecutiveCleanRuns, &w.ConsecutiveErrors,
 		&escalatedAt, &baseTimeRange,
 		&humanSummaryStr,
+		&expiresAt,
 	)
 	if err != nil {
 		return nil, err
@@ -185,6 +193,10 @@ func scanWatcher(sc interface{ Scan(...any) error }) (*Watcher, error) {
 		} else {
 			w.HumanSummary = &hs
 		}
+	}
+	if expiresAt.Valid {
+		t, _ := time.Parse(time.RFC3339, expiresAt.String)
+		w.ExpiresAt = &t
 	}
 
 	return w, nil
@@ -315,6 +327,14 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 		typeConfigUpdateStr = &s
 	}
 
+	// Handle expires_at: ClearExpiresAt=true sets NULL; otherwise COALESCE keeps existing.
+	clearExpiresAt := params.ClearExpiresAt
+	var expiresAtStr *string
+	if params.ExpiresAt != nil {
+		s := params.ExpiresAt.UTC().Format(time.RFC3339)
+		expiresAtStr = &s
+	}
+
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE watchers
 		 SET title            = COALESCE(?, title),
@@ -332,10 +352,12 @@ func (s *watcherStore) Update(ctx context.Context, id uuid.UUID, params UpdateWa
 		     type_config      = COALESCE(?, type_config),
 		     adaptive_config  = COALESCE(?, adaptive_config),
 		     human_summary    = COALESCE(?, human_summary),
+		     expires_at       = CASE WHEN ? THEN NULL ELSE COALESCE(?, expires_at) END,
 		     updated_at       = ?
 		 WHERE id = ?`,
 		titleStr, descStr, sevStr, filtersStr, timeRangeStr, scheduleStr, modelStr, effortStr, notifyStr,
 		watcherTypeStr, ruleConfigStr, dataSourceIDStr, typeConfigUpdateStr, adaptiveConfigStr, humanSummaryStr,
+		clearExpiresAt, expiresAtStr,
 		now, id.String(),
 	)
 	if err != nil {
@@ -383,7 +405,8 @@ func (s *watcherStore) GetDueWatchers(ctx context.Context) ([]Watcher, error) {
 		`SELECT `+watcherColumns+`
 		 FROM watchers
 		 WHERE status = 'active' AND next_run_at <= ?
-		 ORDER BY next_run_at ASC`, now,
+		   AND (expires_at IS NULL OR expires_at > ?)
+		 ORDER BY next_run_at ASC`, now, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("querying due watchers: %w", err)
@@ -473,10 +496,11 @@ func (s *watcherStore) ResumeWatcher(ctx context.Context, id uuid.UUID) error {
 		     consecutive_errors = 0,
 		     consecutive_clean_runs = 0,
 		     escalated_at = NULL,
+		     expires_at = NULL,
 		     next_run_at = ?,
 		     status = 'active',
 		     updated_at = ?
-		 WHERE id = ? AND adaptive_state = 'error'`,
+		 WHERE id = ? AND (adaptive_state = 'error' OR status = 'expired')`,
 		now, now, id.String(),
 	)
 	if err != nil {
@@ -487,4 +511,18 @@ func (s *watcherStore) ResumeWatcher(ctx context.Context, id uuid.UUID) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (s *watcherStore) ExpireWatchers(ctx context.Context) (int, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE watchers SET status = 'expired', updated_at = ?
+		 WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at <= ?`,
+		now, now,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("expiring watchers: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	return int(n), nil
 }

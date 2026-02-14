@@ -270,6 +270,151 @@ func TestResumeWatcherHandler_AlreadyActive(t *testing.T) {
 	}
 }
 
+func TestUpdateWatcherHandler_ExpiresAt(t *testing.T) {
+	watcherID := uuid.New()
+	ws := &mockWatcherStoreWithUpdate{
+		mockWatcherStore: mockWatcherStore{
+			watchers: []store.Watcher{
+				{ID: watcherID, Title: "Watcher", Status: store.WatcherActive, WatcherType: store.WatcherTypeAI, CreatedAt: time.Now()},
+			},
+		},
+	}
+	handler := updateWatcherHandler(ws)
+
+	// Set expires_at
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"watcher_id": watcherID.String(),
+		"expires_at": "2099-03-01T00:00:00Z",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+	text := resultText(t, result)
+	if !contains(text, "updated successfully") {
+		t.Errorf("expected 'updated successfully', got: %s", text)
+	}
+}
+
+func TestUpdateWatcherHandler_ExpiresAtNever(t *testing.T) {
+	watcherID := uuid.New()
+	ws := &mockWatcherStoreWithUpdate{
+		mockWatcherStore: mockWatcherStore{
+			watchers: []store.Watcher{
+				{ID: watcherID, Title: "Watcher", Status: store.WatcherActive, WatcherType: store.WatcherTypeAI, CreatedAt: time.Now()},
+			},
+		},
+	}
+	handler := updateWatcherHandler(ws)
+
+	// Clear expires_at with "never"
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"watcher_id": watcherID.String(),
+		"expires_at": "never",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+}
+
+func TestUpdateWatcherHandler_ExpiresAtInvalid(t *testing.T) {
+	watcherID := uuid.New()
+	ws := &mockWatcherStoreWithUpdate{
+		mockWatcherStore: mockWatcherStore{
+			watchers: []store.Watcher{
+				{ID: watcherID, Title: "Watcher", Status: store.WatcherActive, WatcherType: store.WatcherTypeAI, CreatedAt: time.Now()},
+			},
+		},
+	}
+	handler := updateWatcherHandler(ws)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"watcher_id": watcherID.String(),
+		"expires_at": "not-a-date",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for invalid expires_at format")
+	}
+	text := resultText(t, result)
+	if !contains(text, "invalid expires_at") {
+		t.Errorf("expected 'invalid expires_at' error, got: %s", text)
+	}
+}
+
+func TestResumeWatcherHandler_Expired(t *testing.T) {
+	watcherID := uuid.New()
+	ws := &mockWatcherStore{
+		watchers: []store.Watcher{
+			{ID: watcherID, Title: "Expired Watcher", Status: store.WatcherExpired},
+		},
+	}
+	handler := resumeWatcherHandler(ws)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"watcher_id": watcherID.String(),
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+	text := resultText(t, result)
+	if !contains(text, "reactivated") {
+		t.Errorf("expected 'reactivated', got: %s", text)
+	}
+}
+
+func TestCreateWatcherHandler_WithExpiresAt(t *testing.T) {
+	ws := &mockWatcherStore{}
+	handler := createWatcherHandler(ws)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"title":       "Deploy monitor",
+		"description": "Watch the deploy",
+		"expires_at":  "2099-06-01T12:00:00Z",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+	text := resultText(t, result)
+	if !contains(text, "created successfully") {
+		t.Errorf("expected 'created successfully', got: %s", text)
+	}
+}
+
+func TestCreateWatcherHandler_InvalidExpiresAt(t *testing.T) {
+	ws := &mockWatcherStore{}
+	handler := createWatcherHandler(ws)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"title":       "Deploy monitor",
+		"description": "Watch the deploy",
+		"expires_at":  "tomorrow",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for invalid expires_at")
+	}
+	text := resultText(t, result)
+	if !contains(text, "invalid expires_at") {
+		t.Errorf("expected 'invalid expires_at' error, got: %s", text)
+	}
+}
+
 // Verify JSON response structure for update.
 func TestUpdateWatcherHandler_ResponseFormat(t *testing.T) {
 	watcherID := uuid.New()

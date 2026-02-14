@@ -105,8 +105,8 @@
 var isAdmin = {{.IsAdmin}};
 
 // --- Filter state ---
-var STATUS_OPTIONS = ['', 'active', 'paused'];
-var STATUS_LABELS  = ['all', 'active', 'paused'];
+var STATUS_OPTIONS = ['', 'active', 'paused', 'expired'];
+var STATUS_LABELS  = ['all', 'active', 'paused', 'expired'];
 var TYPE_OPTIONS = ['', 'query', 'logs', 'health', 'ai', 'deadman', 'diff', 'composite', 'trend', 'sequence'];
 var TYPE_LABELS  = ['all', 'query', 'logs', 'health', 'ai', 'deadman', 'diff', 'composite', 'trend', 'sequence'];
 var SEV_OPTIONS = ['', 'critical', 'warning', 'info'];
@@ -439,11 +439,11 @@ function renderWatchers(watchers) {
 
   var html = '';
   watchers.forEach(function(w) {
-    var statusClass = w.status === 'active' ? 'status-active' : w.status === 'paused' ? 'status-paused' : 'status-error';
-    var statusIcon = w.status === 'active' ? '&#9679;' : w.status === 'paused' ? '&#9208;' : '&#9888;';
+    var statusClass = w.status === 'active' ? 'status-active' : w.status === 'paused' ? 'status-paused' : w.status === 'expired' ? 'status-expired' : 'status-error';
+    var statusIcon = w.status === 'active' ? '&#9679;' : w.status === 'paused' ? '&#9208;' : w.status === 'expired' ? '&#9203;' : '&#9888;';
     var lastRun = w.last_run_at ? getTimeAgo(w.last_run_at) : 'never';
     var schedLabel = w.schedule ? describeSchedule(w.schedule) : ('every ' + (w.time_range || '15m'));
-    var pausedClass = w.status === 'paused' ? ' watcher-paused' : '';
+    var pausedClass = (w.status === 'paused' || w.status === 'expired') ? ' watcher-paused' : '';
 
     // Summary text for the main row (typed > human > description fallback)
     var summaryText = getTypedWatcherSummary(w);
@@ -489,6 +489,9 @@ function renderWatchers(watchers) {
     if (w.created_at) {
       html += '      <div class="alert-detail-row"><span class="alert-detail-key">created</span><span class="alert-detail-val">' + new Date(w.created_at).toLocaleString() + '</span></div>';
     }
+    if (w.expires_at) {
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key">expires</span><span class="alert-detail-val">' + new Date(w.expires_at).toLocaleString() + (w.status === 'expired' ? ' <span class="dim">(expired)</span>' : '') + '</span></div>';
+    }
     if (w.human_summary) {
       if (w.human_summary.why_it_matters) {
         html += '      <div class="alert-detail-row"><span class="alert-detail-key">why</span><span class="alert-detail-val">' + escapeHtml(w.human_summary.why_it_matters) + '</span></div>';
@@ -522,6 +525,8 @@ function renderWatchers(watchers) {
       html += '      <button class="btn btn-sm" onclick="event.stopPropagation();openEditModal(\'' + w.id + '\')">Edit</button>';
       if (w.status === 'active') {
         html += '      <button class="btn btn-sm" onclick="event.stopPropagation();pauseWatcher(\'' + w.id + '\')">Pause</button>';
+      } else if (w.status === 'expired') {
+        html += '      <button class="btn btn-sm btn-resume" onclick="event.stopPropagation();resumeWatcher(\'' + w.id + '\')">Reactivate</button>';
       } else if (w.adaptive_state === 'error') {
         html += '      <button class="btn btn-sm btn-resume" onclick="event.stopPropagation();resumeWatcher(\'' + w.id + '\')">Resume Watcher</button>';
       } else {

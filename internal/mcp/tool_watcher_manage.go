@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -87,6 +88,20 @@ func updateWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 				return mcp.NewToolResultError(fmt.Sprintf("invalid human_summary JSON: %v", err)), nil
 			}
 			params.HumanSummary = &hs
+			changed = true
+		}
+
+		// Parse expires_at: RFC3339 timestamp or "never" to clear.
+		if eaStr, ok := args["expires_at"].(string); ok && eaStr != "" {
+			if eaStr == "never" {
+				params.ClearExpiresAt = true
+			} else {
+				t, err := time.Parse(time.RFC3339, eaStr)
+				if err != nil {
+					return mcp.NewToolResultError(fmt.Sprintf("invalid expires_at — expected RFC3339 format or 'never': %v", err)), nil
+				}
+				params.ExpiresAt = &t
+			}
 			changed = true
 		}
 
@@ -191,6 +206,13 @@ func resumeWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 
 		if existing.Status == store.WatcherActive {
 			return mcp.NewToolResultText(fmt.Sprintf("Watcher '%s' is already active.", existing.Title)), nil
+		}
+
+		if existing.Status == store.WatcherExpired {
+			if err := ws.ResumeWatcher(ctx, watcherID); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("failed to reactivate expired watcher: %v", err)), nil
+			}
+			return mcp.NewToolResultText(fmt.Sprintf("Watcher '%s' reactivated (expiration cleared). It will run on its next scheduled time.", existing.Title)), nil
 		}
 
 		if err := ws.ResumeWatcher(ctx, watcherID); err != nil {
