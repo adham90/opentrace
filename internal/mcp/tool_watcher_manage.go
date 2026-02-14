@@ -208,14 +208,18 @@ func resumeWatcherHandler(ws store.WatcherStore) server.ToolHandlerFunc {
 			return mcp.NewToolResultText(fmt.Sprintf("Watcher '%s' is already active.", existing.Title)), nil
 		}
 
-		if existing.Status == store.WatcherExpired {
+		if existing.Status == store.WatcherExpired || existing.AdaptiveState == store.AdaptiveError {
 			if err := ws.ResumeWatcher(ctx, watcherID); err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("failed to reactivate expired watcher: %v", err)), nil
+				return mcp.NewToolResultError(fmt.Sprintf("failed to reactivate watcher: %v", err)), nil
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("Watcher '%s' reactivated (expiration cleared). It will run on its next scheduled time.", existing.Title)), nil
+			if existing.Status == store.WatcherExpired {
+				return mcp.NewToolResultText(fmt.Sprintf("Watcher '%s' reactivated (expiration cleared). It will run on its next scheduled time.", existing.Title)), nil
+			}
+			return mcp.NewToolResultText(fmt.Sprintf("Watcher '%s' resumed from error state. It will run on its next scheduled time.", existing.Title)), nil
 		}
 
-		if err := ws.ResumeWatcher(ctx, watcherID); err != nil {
+		// Standard pause → active resume
+		if _, err := ws.UpdateStatus(ctx, watcherID, store.WatcherActive); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to resume watcher: %v", err)), nil
 		}
 

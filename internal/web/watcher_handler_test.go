@@ -2,10 +2,12 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
@@ -328,8 +330,31 @@ func TestHandleWatcherTemplates(t *testing.T) {
 	}
 }
 
+// newTestServerWithRealWatcherStore creates a test server backed by a real
+// SQLite watcher store so tests exercise the full SQL path.
+func newTestServerWithRealWatcherStore(t *testing.T) *Server {
+	t.Helper()
+	db, err := store.OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("opening test db: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := store.RunSQLiteMigrations(db); err != nil {
+		t.Fatalf("running migrations: %v", err)
+	}
+	return NewServerWithDeps(ServerDeps{
+		DSStore:      newMockStore(),
+		LogStore:     newMockLogStore(),
+		WatcherStore: store.NewWatcherStore(db),
+		RunStore:     newMockWatcherRunStore(),
+		AlertStore:   newMockAlertStore(),
+		Registry:     connector.NewRegistry(),
+		Cfg:          &config.Config{OllamaModel: "llama3.2"},
+	})
+}
+
 func TestHandleCreateWatcher_WithExpiresAt(t *testing.T) {
-	srv := newTestServerWithWatchers()
+	srv := newTestServerWithRealWatcherStore(t)
 
 	body := `{"title":"Deploy watcher","description":"Monitor deploy","expires_at":"2099-03-01T00:00:00Z"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/watchers", bytes.NewBufferString(body))
@@ -345,30 +370,47 @@ func TestHandleCreateWatcher_WithExpiresAt(t *testing.T) {
 	var watcher store.Watcher
 	json.NewDecoder(w.Body).Decode(&watcher)
 	if watcher.ExpiresAt == nil {
-		t.Fatal("expected expires_at to be set")
+		t.Fatal("expected expires_at in response")
+	}
+
+	// Verify persisted in real store
+	got, err := srv.watcherStore.GetByID(context.Background(), watcher.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.ExpiresAt == nil {
+		t.Fatal("expected expires_at to be persisted in store")
+	}
+	if got.ExpiresAt.Year() != 2099 {
+		t.Errorf("expires_at year = %d, want 2099", got.ExpiresAt.Year())
 	}
 }
 
 func TestHandleResumeExpiredWatcher(t *testing.T) {
-	srv := newTestServerWithWatchers()
+	srv := newTestServerWithRealWatcherStore(t)
+	ctx := context.Background()
 
-	// Create a watcher
-	body := `{"title":"Expiry test","description":"Will be expired"}`
-	createReq := httptest.NewRequest(http.MethodPost, "/api/watchers", bytes.NewBufferString(body))
-	createReq.Header.Set("Content-Type", "application/json")
-	createW := httptest.NewRecorder()
-	srv.Router.ServeHTTP(createW, createReq)
+	// Create a watcher with expires_at in the past
+	past := time.Now().Add(-1 * time.Hour)
+	created, err := srv.watcherStore.Create(ctx, store.CreateWatcherParams{
+		Title:       "Expiry test",
+		Description: "Will be expired",
+		ExpiresAt:   &past,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
 
-	var created store.Watcher
-	json.NewDecoder(createW.Body).Decode(&created)
+	// Expire it via the real store
+	n, err := srv.watcherStore.ExpireWatchers(ctx)
+	if err != nil {
+		t.Fatalf("ExpireWatchers: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 expired, got %d", n)
+	}
 
-	// Manually set to expired status via the mock
-	ws := srv.watcherStore.(*mockWatcherStore)
-	ws.mu.Lock()
-	ws.watchers[created.ID].Status = store.WatcherExpired
-	ws.mu.Unlock()
-
-	// Resume (should reactivate)
+	// Resume via HTTP
 	resumeReq := httptest.NewRequest(http.MethodPost, "/api/watchers/"+created.ID.String()+"/resume", nil)
 	resumeW := httptest.NewRecorder()
 	srv.Router.ServeHTTP(resumeW, resumeReq)
@@ -377,27 +419,27 @@ func TestHandleResumeExpiredWatcher(t *testing.T) {
 		t.Fatalf("resume status = %d, want %d; body: %s", resumeW.Code, http.StatusOK, resumeW.Body.String())
 	}
 
-	var resumed store.Watcher
-	json.NewDecoder(resumeW.Body).Decode(&resumed)
-	if resumed.Status != store.WatcherActive {
-		t.Errorf("resumed status = %q, want %q", resumed.Status, store.WatcherActive)
+	// Verify reactivated in store
+	got, _ := srv.watcherStore.GetByID(ctx, created.ID)
+	if got.Status != store.WatcherActive {
+		t.Errorf("status after resume = %q, want %q", got.Status, store.WatcherActive)
 	}
 }
 
 func TestHandleUpdateWatcher_WithExpiresAt(t *testing.T) {
-	srv := newTestServerWithWatchers()
+	srv := newTestServerWithRealWatcherStore(t)
+	ctx := context.Background()
 
-	// Create a watcher
-	createBody := `{"title":"Update expiry test","description":"Will get expiry"}`
-	createReq := httptest.NewRequest(http.MethodPost, "/api/watchers", bytes.NewBufferString(createBody))
-	createReq.Header.Set("Content-Type", "application/json")
-	createW := httptest.NewRecorder()
-	srv.Router.ServeHTTP(createW, createReq)
+	// Create a watcher via real store
+	created, err := srv.watcherStore.Create(ctx, store.CreateWatcherParams{
+		Title:       "Update expiry test",
+		Description: "Will get expiry",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
 
-	var created store.Watcher
-	json.NewDecoder(createW.Body).Decode(&created)
-
-	// Update with expires_at
+	// Update with expires_at via HTTP
 	updateBody := `{"expires_at":"2099-06-01T12:00:00Z"}`
 	updateReq := httptest.NewRequest(http.MethodPut, "/api/watchers/"+created.ID.String(), bytes.NewBufferString(updateBody))
 	updateReq.Header.Set("Content-Type", "application/json")
@@ -406,6 +448,15 @@ func TestHandleUpdateWatcher_WithExpiresAt(t *testing.T) {
 
 	if updateW.Code != http.StatusOK {
 		t.Fatalf("update status = %d, want %d; body: %s", updateW.Code, http.StatusOK, updateW.Body.String())
+	}
+
+	// Verify persisted
+	got, _ := srv.watcherStore.GetByID(ctx, created.ID)
+	if got.ExpiresAt == nil {
+		t.Fatal("expected expires_at to be set after update")
+	}
+	if got.ExpiresAt.Year() != 2099 {
+		t.Errorf("expires_at year = %d, want 2099", got.ExpiresAt.Year())
 	}
 }
 
