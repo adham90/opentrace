@@ -353,6 +353,156 @@ func TestLogSearchHandler_Summary(t *testing.T) {
 	}
 }
 
+func TestLogSearchHandler_MetadataReturned(t *testing.T) {
+	now := time.Now().UTC()
+	ls := &mockLogStore{
+		entries: []store.LogEntry{
+			{
+				ID: 1, Timestamp: now.Add(-5 * time.Minute), Level: "info", Service: "web",
+				Message:  "request completed",
+				Metadata: map[string]any{"user_id": float64(42), "tenant": "acme"},
+			},
+			{
+				ID: 2, Timestamp: now.Add(-3 * time.Minute), Level: "error", Service: "api",
+				Message:  "db timeout",
+				Metadata: map[string]any{"user_id": float64(99), "hostname": "api-01"},
+			},
+		},
+	}
+	handler := logSearchHandler(ls)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+
+	text := resultText(t, result)
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	entries := resp["entries"].([]any)
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+
+	// Both entries should have their metadata
+	for _, e := range entries {
+		entry := e.(map[string]any)
+		meta, ok := entry["metadata"].(map[string]any)
+		if !ok {
+			t.Errorf("entry %v: expected metadata field", entry["id"])
+			continue
+		}
+		if _, ok := meta["user_id"]; !ok {
+			t.Errorf("entry %v: expected user_id in metadata", entry["id"])
+		}
+	}
+}
+
+func TestLogSearchHandler_MetadataFilter(t *testing.T) {
+	now := time.Now().UTC()
+	ls := &mockLogStore{
+		entries: []store.LogEntry{
+			{
+				ID: 1, Timestamp: now.Add(-5 * time.Minute), Level: "info", Service: "web",
+				Message:  "user 42 action",
+				Metadata: map[string]any{"user_id": float64(42), "tenant": "acme"},
+			},
+			{
+				ID: 2, Timestamp: now.Add(-3 * time.Minute), Level: "info", Service: "web",
+				Message:  "user 99 action",
+				Metadata: map[string]any{"user_id": float64(99), "tenant": "widgets"},
+			},
+			{
+				ID: 3, Timestamp: now.Add(-1 * time.Minute), Level: "info", Service: "web",
+				Message:  "no metadata entry",
+			},
+		},
+	}
+	handler := logSearchHandler(ls)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"metadata_filter": map[string]any{"user_id": float64(42)},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+
+	text := resultText(t, result)
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	returned := resp["total_returned"].(float64)
+	if returned != 1 {
+		t.Errorf("total_returned = %v, want 1 (only user_id=42)", returned)
+	}
+
+	entries := resp["entries"].([]any)
+	entry := entries[0].(map[string]any)
+	meta := entry["metadata"].(map[string]any)
+	if meta["user_id"].(float64) != 42 {
+		t.Errorf("expected user_id=42, got %v", meta["user_id"])
+	}
+}
+
+func TestLogSearchHandler_RequestSummaryEntries(t *testing.T) {
+	now := time.Now().UTC()
+	ls := &mockLogStore{
+		entries: []store.LogEntry{
+			{
+				ID: 1, Timestamp: now.Add(-5 * time.Minute), Level: "info", Service: "web",
+				Message:   "GET /orders 200 45.2ms",
+				EventType: "request",
+				RequestSummary: &store.RequestSummary{
+					Controller: "OrdersController",
+					Action:     "index",
+					Method:     "GET",
+					Path:       "/orders",
+					Status:     200,
+					DurationMs: 45.2,
+					SQLCount:   5,
+				},
+			},
+			{
+				ID: 2, Timestamp: now.Add(-3 * time.Minute), Level: "info", Service: "web",
+				Message: "plain log",
+			},
+		},
+	}
+	handler := logSearchHandler(ls)
+
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"event_type": "request",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+
+	text := resultText(t, result)
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	returned := resp["total_returned"].(float64)
+	if returned != 1 {
+		t.Errorf("total_returned = %v, want 1 (only request event_type)", returned)
+	}
+}
+
 // --- helper to make CallToolRequest from server_test.go ---
 
 func makeLogSearchRequest(args map[string]any) mcp.CallToolRequest {

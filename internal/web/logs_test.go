@@ -808,3 +808,325 @@ func TestIngestLogs_WithoutTraceContext(t *testing.T) {
 		t.Errorf("parent_span_id should be empty, got %q", entry.ParentSpanID)
 	}
 }
+
+func TestIngestLogs_MetadataContextFields(t *testing.T) {
+	srv, ls := setupTestServerWithLogStore()
+
+	body := `{
+		"timestamp":"2024-01-01T00:00:00Z",
+		"level":"INFO",
+		"service":"web",
+		"message":"GET /dashboard 200 32.1ms",
+		"metadata":{
+			"user_id":42,
+			"tenant":"acme",
+			"hostname":"web-01",
+			"pid":12345,
+			"request_id":"req-abc-123"
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	if len(ls.entries) != 1 {
+		t.Fatalf("stored entries = %d, want 1", len(ls.entries))
+	}
+
+	meta := ls.entries[0].Metadata
+	if meta == nil {
+		t.Fatal("expected metadata to be non-nil")
+	}
+	if meta["user_id"] != float64(42) {
+		t.Errorf("metadata.user_id = %v, want 42", meta["user_id"])
+	}
+	if meta["tenant"] != "acme" {
+		t.Errorf("metadata.tenant = %v, want acme", meta["tenant"])
+	}
+	if meta["hostname"] != "web-01" {
+		t.Errorf("metadata.hostname = %v, want web-01", meta["hostname"])
+	}
+	if meta["pid"] != float64(12345) {
+		t.Errorf("metadata.pid = %v, want 12345", meta["pid"])
+	}
+	if meta["request_id"] != "req-abc-123" {
+		t.Errorf("metadata.request_id = %v, want req-abc-123", meta["request_id"])
+	}
+}
+
+func TestIngestLogs_MetadataWithRequestSummary(t *testing.T) {
+	srv, ls := setupTestServerWithLogStore()
+
+	body := `{
+		"timestamp":"2024-01-01T00:00:00Z",
+		"level":"INFO",
+		"service":"web",
+		"message":"GET /dashboard 200 32.1ms",
+		"metadata":{
+			"user_id":42,
+			"request_id":"req-dash-001"
+		},
+		"request_summary":{
+			"controller":"DashboardController",
+			"action":"show",
+			"method":"GET",
+			"path":"/dashboard",
+			"status":200,
+			"duration_ms":32.1,
+			"sql_count":5,
+			"sql_total_ms":8.3,
+			"view_count":1,
+			"view_total_ms":18.5
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	if len(ls.entries) != 1 {
+		t.Fatalf("stored entries = %d, want 1", len(ls.entries))
+	}
+
+	entry := ls.entries[0]
+
+	// Metadata should be stored independently from request_summary
+	meta := entry.Metadata
+	if meta == nil {
+		t.Fatal("expected metadata to be non-nil")
+	}
+	if meta["user_id"] != float64(42) {
+		t.Errorf("metadata.user_id = %v, want 42", meta["user_id"])
+	}
+	if meta["request_id"] != "req-dash-001" {
+		t.Errorf("metadata.request_id = %v, want req-dash-001", meta["request_id"])
+	}
+
+	// request_summary should be stored separately
+	rs := entry.RequestSummary
+	if rs == nil {
+		t.Fatal("expected request_summary to be set")
+	}
+	if rs.Controller != "DashboardController" {
+		t.Errorf("controller = %q, want %q", rs.Controller, "DashboardController")
+	}
+	if rs.SQLCount != 5 {
+		t.Errorf("sql_count = %d, want 5", rs.SQLCount)
+	}
+	if rs.ViewCount != 1 {
+		t.Errorf("view_count = %d, want 1", rs.ViewCount)
+	}
+}
+
+func TestIngestLogs_MetadataWithTraceContext(t *testing.T) {
+	srv, ls := setupTestServerWithLogStore()
+
+	body := `{
+		"timestamp":"2024-01-01T00:00:00Z",
+		"level":"INFO",
+		"service":"billing-api",
+		"message":"charge completed",
+		"trace_id":"abc123def456",
+		"span_id":"span-001",
+		"parent_span_id":"span-000",
+		"metadata":{
+			"user_id":99,
+			"request_id":"req-billing-1",
+			"amount_cents":5000
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	entry := ls.entries[0]
+
+	// Trace context
+	if entry.TraceID != "abc123def456" {
+		t.Errorf("trace_id = %q, want %q", entry.TraceID, "abc123def456")
+	}
+	if entry.SpanID != "span-001" {
+		t.Errorf("span_id = %q, want %q", entry.SpanID, "span-001")
+	}
+	if entry.ParentSpanID != "span-000" {
+		t.Errorf("parent_span_id = %q, want %q", entry.ParentSpanID, "span-000")
+	}
+
+	// Metadata
+	meta := entry.Metadata
+	if meta["user_id"] != float64(99) {
+		t.Errorf("metadata.user_id = %v, want 99", meta["user_id"])
+	}
+	if meta["request_id"] != "req-billing-1" {
+		t.Errorf("metadata.request_id = %v, want req-billing-1", meta["request_id"])
+	}
+	if meta["amount_cents"] != float64(5000) {
+		t.Errorf("metadata.amount_cents = %v, want 5000", meta["amount_cents"])
+	}
+}
+
+func TestIngestLogs_FullRubyGemPayload(t *testing.T) {
+	srv, ls := setupTestServerWithLogStore()
+
+	// Simulate the exact JSON payload the Ruby gem sends for a request log
+	body := `{
+		"timestamp":"2024-06-15T14:30:00.123456Z",
+		"level":"INFO",
+		"service":"lena-web",
+		"environment":"production",
+		"message":"GET /orders 200 45.2ms",
+		"trace_id":"trace-ruby-001",
+		"span_id":"span-ruby-001",
+		"metadata":{
+			"user_id":42,
+			"hostname":"web-01.prod",
+			"pid":12345,
+			"request_id":"req-ruby-001",
+			"tenant":"acme-corp",
+			"role":"admin"
+		},
+		"request_summary":{
+			"controller":"OrdersController",
+			"action":"index",
+			"method":"GET",
+			"path":"/orders",
+			"status":200,
+			"duration_ms":45.2,
+			"sql_count":8,
+			"sql_total_ms":18.5,
+			"sql_slowest_ms":7.3,
+			"sql_slowest_name":"Order Load",
+			"n_plus_one":false,
+			"view_count":3,
+			"view_total_ms":22.1,
+			"cache_reads":2,
+			"cache_hits":2,
+			"cache_hit_ratio":1.0,
+			"time_breakdown":{
+				"sql_pct":40.9,
+				"view_pct":48.9,
+				"http_pct":0,
+				"other_pct":10.2
+			}
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	if len(ls.entries) != 1 {
+		t.Fatalf("stored entries = %d, want 1", len(ls.entries))
+	}
+
+	entry := ls.entries[0]
+
+	// Verify all top-level fields
+	if entry.Level != "INFO" {
+		t.Errorf("level = %q, want INFO", entry.Level)
+	}
+	if entry.Service != "lena-web" {
+		t.Errorf("service = %q, want lena-web", entry.Service)
+	}
+	if entry.Message != "GET /orders 200 45.2ms" {
+		t.Errorf("message = %q, want 'GET /orders 200 45.2ms'", entry.Message)
+	}
+	if entry.TraceID != "trace-ruby-001" {
+		t.Errorf("trace_id = %q, want trace-ruby-001", entry.TraceID)
+	}
+	if entry.SpanID != "span-ruby-001" {
+		t.Errorf("span_id = %q, want span-ruby-001", entry.SpanID)
+	}
+
+	// Verify metadata round-trip
+	meta := entry.Metadata
+	if meta == nil {
+		t.Fatal("expected metadata to be non-nil")
+	}
+	if meta["user_id"] != float64(42) {
+		t.Errorf("metadata.user_id = %v, want 42", meta["user_id"])
+	}
+	if meta["hostname"] != "web-01.prod" {
+		t.Errorf("metadata.hostname = %v, want web-01.prod", meta["hostname"])
+	}
+	if meta["pid"] != float64(12345) {
+		t.Errorf("metadata.pid = %v, want 12345", meta["pid"])
+	}
+	if meta["tenant"] != "acme-corp" {
+		t.Errorf("metadata.tenant = %v, want acme-corp", meta["tenant"])
+	}
+	if meta["role"] != "admin" {
+		t.Errorf("metadata.role = %v, want admin", meta["role"])
+	}
+
+	// Verify request_summary round-trip
+	rs := entry.RequestSummary
+	if rs == nil {
+		t.Fatal("expected request_summary to be set")
+	}
+	if rs.Controller != "OrdersController" {
+		t.Errorf("rs.controller = %q, want OrdersController", rs.Controller)
+	}
+	if rs.Action != "index" {
+		t.Errorf("rs.action = %q, want index", rs.Action)
+	}
+	if rs.SQLCount != 8 {
+		t.Errorf("rs.sql_count = %d, want 8", rs.SQLCount)
+	}
+	if rs.ViewCount != 3 {
+		t.Errorf("rs.view_count = %d, want 3", rs.ViewCount)
+	}
+	if rs.CacheHitRatio != 1.0 {
+		t.Errorf("rs.cache_hit_ratio = %f, want 1.0", rs.CacheHitRatio)
+	}
+	if rs.DurationMs != 45.2 {
+		t.Errorf("rs.duration_ms = %f, want 45.2", rs.DurationMs)
+	}
+}
+
+func TestIngestLogs_EmptyMetadata(t *testing.T) {
+	srv, ls := setupTestServerWithLogStore()
+
+	body := `{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","message":"no meta"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusCreated)
+	}
+
+	if len(ls.entries) != 1 {
+		t.Fatalf("stored entries = %d, want 1", len(ls.entries))
+	}
+
+	// Metadata should be nil or empty when not provided
+	meta := ls.entries[0].Metadata
+	if meta != nil && len(meta) > 0 {
+		t.Errorf("expected empty metadata, got %v", meta)
+	}
+}

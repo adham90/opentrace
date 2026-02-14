@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -35,11 +36,32 @@ func (m *mockLogStore) Search(_ context.Context, params store.LogSearchParams) (
 		if params.EventType != "" && e.EventType != params.EventType {
 			continue
 		}
+		if params.TraceID != "" && e.TraceID != params.TraceID {
+			continue
+		}
 		if params.Start != nil && e.Timestamp.Before(*params.Start) {
 			continue
 		}
 		if params.End != nil && e.Timestamp.After(*params.End) {
 			continue
+		}
+		// Metadata filter support
+		if len(params.MetadataFilter) > 0 {
+			match := true
+			for k, v := range params.MetadataFilter {
+				if e.Metadata == nil {
+					match = false
+					break
+				}
+				mv := fmt.Sprintf("%v", e.Metadata[k])
+				if mv != v {
+					match = false
+					break
+				}
+			}
+			if !match {
+				continue
+			}
 		}
 		result = append(result, e)
 		if params.Limit > 0 && len(result) >= params.Limit {
@@ -392,6 +414,76 @@ func TestLogStatsHandler_InvalidGroupBy(t *testing.T) {
 	}
 	if !result.IsError {
 		t.Fatal("expected error for invalid group_by")
+	}
+}
+
+func TestLogStatsHandler_GroupByServiceErrorRates(t *testing.T) {
+	now := time.Now().UTC()
+	ls := &mockLogStore{
+		entries: []store.LogEntry{
+			{Level: "info", Service: "api-gateway", Timestamp: now.Add(-10 * time.Minute)},
+			{Level: "info", Service: "api-gateway", Timestamp: now.Add(-9 * time.Minute)},
+			{Level: "info", Service: "api-gateway", Timestamp: now.Add(-8 * time.Minute)},
+			{Level: "error", Service: "user-service", Timestamp: now.Add(-7 * time.Minute)},
+			{Level: "error", Service: "user-service", Timestamp: now.Add(-6 * time.Minute)},
+			{Level: "info", Service: "user-service", Timestamp: now.Add(-5 * time.Minute)},
+			{Level: "fatal", Service: "payment-svc", Timestamp: now.Add(-4 * time.Minute)},
+			{Level: "info", Service: "payment-svc", Timestamp: now.Add(-3 * time.Minute)},
+		},
+	}
+
+	handler := logStatsHandler(ls)
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"time_range": "1h",
+		"group_by":   "service",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+
+	text := resultText(t, result)
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	if resp["total_logs"].(float64) != 8 {
+		t.Errorf("total_logs = %v, want 8", resp["total_logs"])
+	}
+
+	byService, ok := resp["by_service"].([]any)
+	if !ok {
+		t.Fatal("expected by_service field")
+	}
+	if len(byService) != 3 {
+		t.Fatalf("expected 3 services, got %d", len(byService))
+	}
+
+	// Verify each service has expected fields including error_rate_pct
+	totalErrors := 0
+	for _, s := range byService {
+		svc := s.(map[string]any)
+		if _, ok := svc["service"]; !ok {
+			t.Error("expected 'service' field in service entry")
+		}
+		if _, ok := svc["total"]; !ok {
+			t.Error("expected 'total' field in service entry")
+		}
+		if _, ok := svc["errors"]; !ok {
+			t.Error("expected 'errors' field in service entry")
+		}
+		if _, ok := svc["error_rate_pct"]; !ok {
+			t.Error("expected 'error_rate_pct' field in service entry")
+		}
+		totalErrors += int(svc["errors"].(float64))
+	}
+
+	// Verify total error count across services: 2 error + 1 fatal = 3
+	if totalErrors != 3 {
+		t.Errorf("total errors across services = %d, want 3", totalErrors)
 	}
 }
 
