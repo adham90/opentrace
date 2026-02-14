@@ -392,3 +392,51 @@ func TestLogStore_Prune(t *testing.T) {
 		t.Errorf("message = %q, want %q", results[0].Message, "recent msg")
 	}
 }
+
+func TestLogStore_PruneBatches_SubSecondPrecision(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewLogStore(db)
+	ctx := context.Background()
+
+	// Record two batches
+	if err := s.RecordBatch(ctx, "batch-old", 5); err != nil {
+		t.Fatalf("RecordBatch: %v", err)
+	}
+	if err := s.RecordBatch(ctx, "batch-new", 3); err != nil {
+		t.Fatalf("RecordBatch: %v", err)
+	}
+
+	// Backdate the old batch to 10 days ago
+	tenDaysAgo := time.Now().UTC().Add(-10 * 24 * time.Hour).Format(time.RFC3339Nano)
+	_, err := db.ExecContext(ctx, `UPDATE ingest_batches SET received_at = ? WHERE batch_id = ?`, tenDaysAgo, "batch-old")
+	if err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+
+	// Prune batches older than 7 days
+	pruned, err := s.PruneBatches(ctx, 7*24*time.Hour)
+	if err != nil {
+		t.Fatalf("PruneBatches: %v", err)
+	}
+	if pruned != 1 {
+		t.Errorf("pruned = %d, want 1", pruned)
+	}
+
+	// Verify the new batch still exists
+	rec, err := s.GetBatch(ctx, "batch-new")
+	if err != nil {
+		t.Fatalf("GetBatch: %v", err)
+	}
+	if rec == nil {
+		t.Error("batch-new should still exist after pruning")
+	}
+
+	// Verify the old batch is gone
+	rec, err = s.GetBatch(ctx, "batch-old")
+	if err != nil {
+		t.Fatalf("GetBatch: %v", err)
+	}
+	if rec != nil {
+		t.Error("batch-old should have been pruned")
+	}
+}

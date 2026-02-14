@@ -184,6 +184,41 @@ func TestMetricStore_BatchInsertEmpty(t *testing.T) {
 	}
 }
 
+func TestMetricStore_InvalidLabelsJSON(t *testing.T) {
+	db := setupTestDB(t)
+	ss := NewServerStore(db)
+	ms := NewMetricStore(db)
+	ctx := context.Background()
+
+	srv, _ := ss.Register(ctx, RegisterServerParams{Hostname: "invalid-labels-test"})
+
+	ts := time.Now().UTC()
+	ms.BatchInsert(ctx, srv.ID, ts, []MetricSample{
+		{Name: "cpu.usage_percent", Value: 50.0},
+	})
+
+	// Corrupt the labels JSON directly in the database
+	_, err := db.ExecContext(ctx, `UPDATE metrics SET labels = 'not-valid-json' WHERE metric_name = 'cpu.usage_percent'`)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	// Query should succeed despite invalid JSON — labels should be empty map, not nil
+	points, err := ms.Query(ctx, MetricQuery{ServerID: srv.ID})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(points) != 1 {
+		t.Fatalf("results = %d, want 1", len(points))
+	}
+	if points[0].Labels == nil {
+		t.Error("labels should be initialized to empty map, not nil")
+	}
+	if points[0].MetricValue != 50.0 {
+		t.Errorf("value = %f, want 50.0", points[0].MetricValue)
+	}
+}
+
 func TestMetricStore_Labels(t *testing.T) {
 	db := setupTestDB(t)
 	ss := NewServerStore(db)

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -163,8 +164,11 @@ func scanMetricRows(rows *sql.Rows) ([]MetricPoint, error) {
 		if unit.Valid {
 			mp.Unit = unit.String
 		}
-		if labelsStr != "" {
-			json.Unmarshal([]byte(labelsStr), &mp.Labels)
+		if labelsStr != "" && labelsStr != "{}" {
+			if err := json.Unmarshal([]byte(labelsStr), &mp.Labels); err != nil {
+				slog.Warn("invalid labels JSON in metric", "metric", mp.MetricName, "error", err)
+				mp.Labels = make(map[string]string)
+			}
 		}
 
 		result = append(result, mp)

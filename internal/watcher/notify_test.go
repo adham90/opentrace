@@ -158,11 +158,77 @@ func TestSendAll(t *testing.T) {
 	}
 }
 
+func TestSendAll_ParentCancelDoesNotAbortNotifications(t *testing.T) {
+	var completed atomic.Int32
+	slow := &mockNotifier{onSend: func() {
+		time.Sleep(200 * time.Millisecond)
+		completed.Add(1)
+	}}
+
+	// Create a parent context and cancel it immediately
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	alert := store.Alert{
+		ID:    uuid.New(),
+		Title: "Test",
+	}
+
+	SendAll(ctx, []Notifier{slow, slow}, alert)
+
+	// Notifications should still complete despite parent cancellation
+	deadline := time.After(3 * time.Second)
+	for completed.Load() < 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("completed = %d, want 2 (notifications should not be cancelled by parent)", completed.Load())
+		default:
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+}
+
+func TestSendAll_ContextValuesAreInherited(t *testing.T) {
+	type ctxKey string
+	key := ctxKey("test-key")
+
+	var receivedVal atomic.Value
+	valueChecker := &mockNotifier{onSendCtx: func(ctx context.Context) {
+		if v := ctx.Value(key); v != nil {
+			receivedVal.Store(v)
+		}
+	}}
+
+	ctx := context.WithValue(context.Background(), key, "test-value")
+	alert := store.Alert{ID: uuid.New(), Title: "Test"}
+	SendAll(ctx, []Notifier{valueChecker}, alert)
+
+	deadline := time.After(2 * time.Second)
+	for {
+		if v := receivedVal.Load(); v != nil {
+			if v != "test-value" {
+				t.Errorf("context value = %v, want test-value", v)
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("context value was not inherited by notification goroutine")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
 type mockNotifier struct {
-	onSend func()
+	onSend    func()
+	onSendCtx func(ctx context.Context)
 }
 
 func (m *mockNotifier) Send(ctx context.Context, alert store.Alert) error {
+	if m.onSendCtx != nil {
+		m.onSendCtx(ctx)
+	}
 	if m.onSend != nil {
 		m.onSend()
 	}

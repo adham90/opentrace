@@ -579,7 +579,7 @@ func (s *logStore) GetBatch(ctx context.Context, batchID string) (*BatchRecord, 
 }
 
 func (s *logStore) PruneBatches(ctx context.Context, olderThan time.Duration) (int64, error) {
-	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
+	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339Nano)
 	result, err := s.db.ExecContext(ctx,
 		`DELETE FROM ingest_batches WHERE received_at < ?`, cutoff,
 	)

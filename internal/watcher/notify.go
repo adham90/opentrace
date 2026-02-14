@@ -125,11 +125,13 @@ func ParseNotifiers(raw json.RawMessage) []Notifier {
 
 // SendAll dispatches an alert to all configured notifiers asynchronously.
 // Each notifier runs in its own goroutine with a 30-second timeout.
+// The parent context's values are inherited but cancellation is decoupled
+// so that server shutdown doesn't abort in-flight notifications.
 // Errors are logged but do not block the caller.
 func SendAll(ctx context.Context, notifiers []Notifier, alert store.Alert) {
 	for _, n := range notifiers {
 		go func(n Notifier) {
-			sendCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 			defer cancel()
 			if err := n.Send(sendCtx, alert); err != nil {
 				slog.Warn("notification error", "error", err)
