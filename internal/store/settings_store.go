@@ -20,6 +20,7 @@ func NewSettingsStore(db *sql.DB) SettingsStore {
 const retentionKey = "retention"
 const apiKeyKey = "api_key"
 const autoUpdateKey = "auto_update"
+const llmSettingsKey = "llm_settings"
 
 func (s *settingsStore) GetRetention(ctx context.Context) (*RetentionSettings, error) {
 	var raw string
@@ -108,6 +109,41 @@ func (s *settingsStore) SetAutoUpdate(ctx context.Context, enabled bool) error {
 	)
 	if err != nil {
 		return fmt.Errorf("upserting auto_update: %w", err)
+	}
+	return nil
+}
+
+func (s *settingsStore) GetLLMSettings(ctx context.Context) (*LLMSettings, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT value FROM app_config WHERE key = ?`, llmSettingsKey,
+	).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying llm settings: %w", err)
+	}
+
+	var settings LLMSettings
+	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+		return nil, nil
+	}
+	return &settings, nil
+}
+
+func (s *settingsStore) SetLLMSettings(ctx context.Context, settings LLMSettings) error {
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("marshaling llm settings: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO app_config (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		llmSettingsKey, string(raw),
+	)
+	if err != nil {
+		return fmt.Errorf("upserting llm settings: %w", err)
 	}
 	return nil
 }

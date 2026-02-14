@@ -218,7 +218,7 @@ func TestAvailableProviders_AllProviders(t *testing.T) {
 	for _, p := range providers {
 		names[p.Name] = true
 	}
-	for _, want := range []string{"ollama", "anthropic-opus", "anthropic-sonnet", "anthropic-haiku", "openai-o3-mini", "openai-o1", "openai-o1-mini", "openai-gpt4o", "openai-gpt4o-mini", "openai-gpt4-turbo", "gemini-flash", "gemini-pro", "gemini-2.0-flash"} {
+	for _, want := range []string{"ollama", "anthropic-opus", "anthropic-sonnet", "anthropic-haiku", "openai-o3", "openai-o4-mini", "openai-gpt4.1", "openai-gpt4.1-mini", "openai-gpt4.1-nano", "openai-gpt4o", "openai-gpt4o-mini", "gemini-3-pro", "gemini-3-flash", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"} {
 		if !names[want] {
 			t.Errorf("expected provider %q in list", want)
 		}
@@ -343,8 +343,8 @@ func TestNewProviderByName_GeminiFlash(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *GeminiProvider, got %T", p)
 	}
-	if gp.model != "gemini-2.5-flash-preview-04-17" {
-		t.Errorf("model = %q, want %q", gp.model, "gemini-2.5-flash-preview-04-17")
+	if gp.model != "gemini-2.5-flash" {
+		t.Errorf("model = %q, want %q", gp.model, "gemini-2.5-flash")
 	}
 }
 

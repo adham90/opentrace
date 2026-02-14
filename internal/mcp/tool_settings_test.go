@@ -40,6 +40,12 @@ func (m *mockSettingsStore) GetAutoUpdate(_ context.Context) (bool, error) {
 	return m.autoUpdate, m.err
 }
 func (m *mockSettingsStore) SetAutoUpdate(_ context.Context, _ bool) error { return nil }
+func (m *mockSettingsStore) GetLLMSettings(_ context.Context) (*store.LLMSettings, error) {
+	return nil, nil
+}
+func (m *mockSettingsStore) SetLLMSettings(_ context.Context, _ store.LLMSettings) error {
+	return nil
+}
 
 // --- get_settings tests ---
 

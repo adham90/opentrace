@@ -79,8 +79,8 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.OpenAIAPIKey != "" {
 		t.Errorf("OpenAIAPIKey = %q, want empty", cfg.OpenAIAPIKey)
 	}
-	if cfg.OpenAIModel != "gpt-4o" {
-		t.Errorf("OpenAIModel = %q, want %q", cfg.OpenAIModel, "gpt-4o")
+	if cfg.OpenAIModel != "gpt-4.1-mini" {
+		t.Errorf("OpenAIModel = %q, want %q", cfg.OpenAIModel, "gpt-4.1-mini")
 	}
 	if cfg.OpenAIURL != "https://api.openai.com" {
 		t.Errorf("OpenAIURL = %q, want %q", cfg.OpenAIURL, "https://api.openai.com")
@@ -88,8 +88,8 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.GeminiAPIKey != "" {
 		t.Errorf("GeminiAPIKey = %q, want empty", cfg.GeminiAPIKey)
 	}
-	if cfg.GeminiModel != "gemini-2.5-flash-preview-04-17" {
-		t.Errorf("GeminiModel = %q, want %q", cfg.GeminiModel, "gemini-2.5-flash-preview-04-17")
+	if cfg.GeminiModel != "gemini-2.5-flash" {
+		t.Errorf("GeminiModel = %q, want %q", cfg.GeminiModel, "gemini-2.5-flash")
 	}
 	if cfg.GeminiURL != "https://generativelanguage.googleapis.com" {
 		t.Errorf("GeminiURL = %q, want %q", cfg.GeminiURL, "https://generativelanguage.googleapis.com")

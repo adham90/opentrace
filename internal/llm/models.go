@@ -36,6 +36,16 @@ func NewModelRegistry(cfg *config.Config) *ModelRegistry {
 	}
 }
 
+// UpdateConfig replaces the config and invalidates the cache so the next
+// ListModels call re-queries provider APIs with the new API keys/URLs.
+func (mr *ModelRegistry) UpdateConfig(cfg *config.Config) {
+	mr.mu.Lock()
+	defer mr.mu.Unlock()
+	mr.cfg = cfg
+	mr.cache = nil
+	mr.lastFetch = time.Time{}
+}
+
 // ListModels returns all available models across configured providers.
 // Results are cached for the TTL duration.
 func (mr *ModelRegistry) ListModels(ctx context.Context) []ProviderInfo {
@@ -157,7 +167,7 @@ func (mr *ModelRegistry) fetchOllamaModels(ctx context.Context) []ProviderInfo {
 
 // openAIChatModelPrefixes are prefixes for OpenAI models that support chat completions.
 var openAIChatModelPrefixes = []string{
-	"gpt-4", "gpt-3.5", "o1", "o3", "o4", "chatgpt",
+	"gpt-4.1", "gpt-4", "gpt-3.5", "o1", "o3", "o4", "chatgpt",
 }
 
 // fetchOpenAIModels calls GET {baseURL}/v1/models to list available models.

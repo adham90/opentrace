@@ -7,6 +7,7 @@
   <!-- Tab Navigation -->
   <div class="settings-tabs">
     <button class="settings-tab active" data-tab="general" onclick="switchTab('general', this)">general</button>
+    <button class="settings-tab" data-tab="ai" onclick="switchTab('ai', this)">ai</button>
     <button class="settings-tab" data-tab="users" onclick="switchTab('users', this)">users</button>
     <button class="settings-tab" data-tab="setup" onclick="switchTab('setup', this)">setup</button>
     <button class="settings-tab" data-tab="profile" onclick="switchTab('profile', this)">profile</button>
@@ -18,8 +19,8 @@
   <div id="tab-general" class="settings-panel">
 
     <!-- Version & Updates -->
-    <div class="card" style="margin-bottom:1rem">
-      <h3 class="settings-section-title">Version & Updates</h3>
+    <div class="settings-section">
+      <h3 class="settings-section-title"><span class="dim">#</span> Version & Updates</h3>
       <div id="version-info" style="font-size:0.9rem">
         <div style="display:flex;gap:2rem;margin-bottom:0.75rem;flex-wrap:wrap">
           <div><span class="text-dim">current:</span> <strong id="ver-current">loading...</strong></div>
@@ -58,8 +59,8 @@
     </div>
 
     <!-- API Key -->
-    <div class="card" style="margin-bottom:1rem">
-      <h3 class="settings-section-title">API Key</h3>
+    <div class="settings-section">
+      <h3 class="settings-section-title"><span class="dim">#</span> API Key</h3>
       <p class="text-dim" style="font-size:0.85rem;margin-bottom:0.75rem">
         This key authenticates agents sending logs and metrics.
       </p>
@@ -79,8 +80,8 @@
     </div>
 
     <!-- Data Retention -->
-    <div class="card" style="margin-bottom:1rem">
-      <h3 class="settings-section-title">Data Retention</h3>
+    <div class="settings-section">
+      <h3 class="settings-section-title"><span class="dim">#</span> Data Retention</h3>
       <p class="text-dim" style="font-size:0.85rem;margin-bottom:0.75rem">
         How long logs, watcher runs, and alerts are kept. Set to <strong>0</strong> to keep forever. Default: 30 days.
       </p>
@@ -97,12 +98,130 @@
     </div>
 
     <!-- Appearance & Session -->
-    <div class="card">
-      <h3 class="settings-section-title">Appearance & Session</h3>
+    <div class="settings-section">
+      <h3 class="settings-section-title"><span class="dim">#</span> Appearance & Session</h3>
       <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap">
         <button class="btn" onclick="cycleTheme(); updateThemeLabel();" id="theme-toggle-btn">theme: system</button>
         <a href="/logout" class="btn btn-danger" onclick="return confirm('Log out?')">Logout</a>
       </div>
+    </div>
+
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- AI TAB                                                        -->
+  <!-- ============================================================ -->
+  <div id="tab-ai" class="settings-panel" style="display:none">
+
+    <!-- Default Provider & Model -->
+    <div class="settings-section">
+      <h3 class="settings-section-title"><span class="dim">#</span> Default Provider & Model</h3>
+      <p class="text-dim" style="font-size:0.85rem;margin-bottom:0.75rem">
+        Choose the default LLM provider and model used by AI watchers.
+      </p>
+      <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:0.75rem">
+        <div class="form-group" style="flex:1;min-width:180px">
+          <label for="llm-provider">Provider</label>
+          <select id="llm-provider" onchange="llmProviderChanged()" style="width:100%">
+            <option value="ollama">Ollama</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="openai">OpenAI</option>
+            <option value="gemini">Google Gemini</option>
+          </select>
+        </div>
+        <div class="form-group" style="flex:2;min-width:250px">
+          <label for="llm-model">Default Model</label>
+          <select id="llm-model" style="width:100%">
+            <option value="">Loading models...</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="saveLLMDefaults()">Save Default</button>
+      <span id="llm-default-status" style="margin-left:1em;font-size:0.9rem"></span>
+    </div>
+
+    <!-- Anthropic -->
+    <div class="settings-section">
+      <h3 class="settings-section-title"><span class="dim">#</span> Anthropic</h3>
+      <div id="llm-env-anthropic" style="display:none;background:rgba(255,200,50,0.1);border:1px solid rgba(255,200,50,0.3);color:var(--yellow);padding:0.5rem 1rem;border-radius:4px;margin-bottom:0.75rem;font-size:0.85rem">
+        API key is set via <code>OPENTRACE_ANTHROPIC_API_KEY</code> environment variable. You can override it here.
+      </div>
+      <div class="form-group">
+        <label for="llm-anthropic-key">API Key</label>
+        <div style="display:flex;gap:0.5rem">
+          <input type="password" id="llm-anthropic-key" placeholder="sk-ant-..." style="flex:1" onfocus="clearMaskedKey(this)">
+          <button class="btn" onclick="testLLMProvider('anthropic')">Test</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="llm-anthropic-url">Base URL</label>
+        <input type="text" id="llm-anthropic-url" placeholder="https://api.anthropic.com" style="max-width:500px">
+      </div>
+      <button class="btn btn-primary" onclick="saveLLMProvider('anthropic')">Save</button>
+      <span id="llm-anthropic-status" style="margin-left:1em;font-size:0.9rem"></span>
+    </div>
+
+    <!-- OpenAI -->
+    <div class="settings-section">
+      <h3 class="settings-section-title"><span class="dim">#</span> OpenAI</h3>
+      <div id="llm-env-openai" style="display:none;background:rgba(255,200,50,0.1);border:1px solid rgba(255,200,50,0.3);color:var(--yellow);padding:0.5rem 1rem;border-radius:4px;margin-bottom:0.75rem;font-size:0.85rem">
+        API key is set via <code>OPENTRACE_OPENAI_API_KEY</code> environment variable. You can override it here.
+      </div>
+      <div class="form-group">
+        <label for="llm-openai-key">API Key</label>
+        <div style="display:flex;gap:0.5rem">
+          <input type="password" id="llm-openai-key" placeholder="sk-..." style="flex:1" onfocus="clearMaskedKey(this)">
+          <button class="btn" onclick="testLLMProvider('openai')">Test</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="llm-openai-url">Base URL</label>
+        <input type="text" id="llm-openai-url" placeholder="https://api.openai.com" style="max-width:500px">
+      </div>
+      <button class="btn btn-primary" onclick="saveLLMProvider('openai')">Save</button>
+      <span id="llm-openai-status" style="margin-left:1em;font-size:0.9rem"></span>
+    </div>
+
+    <!-- Google Gemini -->
+    <div class="settings-section">
+      <h3 class="settings-section-title"><span class="dim">#</span> Google Gemini</h3>
+      <div id="llm-env-gemini" style="display:none;background:rgba(255,200,50,0.1);border:1px solid rgba(255,200,50,0.3);color:var(--yellow);padding:0.5rem 1rem;border-radius:4px;margin-bottom:0.75rem;font-size:0.85rem">
+        API key is set via <code>OPENTRACE_GEMINI_API_KEY</code> environment variable. You can override it here.
+      </div>
+      <div class="form-group">
+        <label for="llm-gemini-key">API Key</label>
+        <div style="display:flex;gap:0.5rem">
+          <input type="password" id="llm-gemini-key" placeholder="AIza..." style="flex:1" onfocus="clearMaskedKey(this)">
+          <button class="btn" onclick="testLLMProvider('gemini')">Test</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="llm-gemini-url">Base URL</label>
+        <input type="text" id="llm-gemini-url" placeholder="https://generativelanguage.googleapis.com" style="max-width:500px">
+      </div>
+      <button class="btn btn-primary" onclick="saveLLMProvider('gemini')">Save</button>
+      <span id="llm-gemini-status" style="margin-left:1em;font-size:0.9rem"></span>
+    </div>
+
+    <!-- Ollama -->
+    <div class="settings-section">
+      <h3 class="settings-section-title"><span class="dim">#</span> Ollama</h3>
+      <p class="text-dim" style="font-size:0.85rem;margin-bottom:0.75rem">
+        Local LLM via Ollama. No API key needed.
+      </p>
+      <div class="form-group">
+        <label for="llm-ollama-url">URL</label>
+        <div style="display:flex;gap:0.5rem">
+          <input type="text" id="llm-ollama-url" placeholder="http://localhost:11434" style="flex:1;max-width:500px">
+          <button class="btn" onclick="testLLMProvider('ollama')">Test</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="llm-ollama-model">Default Model</label>
+        <input type="text" id="llm-ollama-model" placeholder="llama3.2" style="max-width:300px">
+      </div>
+      <button class="btn btn-primary" onclick="saveLLMProvider('ollama')">Save</button>
+      <span id="llm-ollama-status" style="margin-left:1em;font-size:0.9rem"></span>
     </div>
 
   </div>
@@ -113,7 +232,7 @@
   <div id="tab-users" class="settings-panel" style="display:none">
 
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-      <h3 class="settings-section-title" style="margin:0">User Management</h3>
+      <h3 class="settings-section-title" style="margin:0"><span class="dim">#</span> User Management</h3>
       <a href="/register" class="btn btn-primary">+ Invite User</a>
     </div>
 
@@ -180,7 +299,7 @@
 
     <!-- Quick Start -->
     <div class="setup-section">
-      <h3 class="setup-heading">Quick Start</h3>
+      <h3 class="setup-heading"><span class="dim">#</span>Quick Start</h3>
       <ol class="setup-steps">
         <li>
           <strong>Build the binary</strong>
@@ -200,7 +319,7 @@
 
     <!-- Claude Code -->
     <div class="setup-section">
-      <h3 class="setup-heading">Claude Code</h3>
+      <h3 class="setup-heading"><span class="dim">#</span>Claude Code</h3>
       <p class="setup-desc">Add to your project's <code>.mcp.json</code> or global <code>~/.claude.json</code> under <code>mcpServers</code>:</p>
       <div class="code-block">
         <button class="copy-btn" onclick="copyCode(this)">copy</button>
@@ -217,7 +336,7 @@
 
     <!-- Cursor -->
     <div class="setup-section">
-      <h3 class="setup-heading">Cursor</h3>
+      <h3 class="setup-heading"><span class="dim">#</span>Cursor</h3>
       <p class="setup-desc">Add to <code>.cursor/mcp.json</code> in your project root:</p>
       <div class="code-block">
         <button class="copy-btn" onclick="copyCode(this)">copy</button>
@@ -234,7 +353,7 @@
 
     <!-- Windsurf -->
     <div class="setup-section">
-      <h3 class="setup-heading">Windsurf</h3>
+      <h3 class="setup-heading"><span class="dim">#</span>Windsurf</h3>
       <p class="setup-desc">Add to <code>~/.codeium/windsurf/mcp_config.json</code>:</p>
       <div class="code-block">
         <button class="copy-btn" onclick="copyCode(this)">copy</button>
@@ -251,7 +370,7 @@
 
     <!-- Other MCP Clients -->
     <div class="setup-section">
-      <h3 class="setup-heading">Other MCP Clients</h3>
+      <h3 class="setup-heading"><span class="dim">#</span>Other MCP Clients</h3>
       <p class="setup-desc">Generic stdio transport config for any MCP-compatible client:</p>
       <div class="code-block">
         <button class="copy-btn" onclick="copyCode(this)">copy</button>
@@ -266,7 +385,7 @@
 
     <!-- VM Agent Setup -->
     <div class="setup-section">
-      <h3 class="setup-heading">VM Metrics Agent</h3>
+      <h3 class="setup-heading"><span class="dim">#</span>VM Metrics Agent</h3>
       <p class="setup-desc">OpenTrace includes a lightweight agent that collects system metrics (CPU, memory, disk, network, load) from your servers.</p>
 
       <h4 class="setup-heading" style="font-size:12px;margin-top:1rem">One-line install</h4>
@@ -340,13 +459,13 @@
 
     <!-- Available Tools -->
     <div class="setup-section">
-      <h3 class="setup-heading">Available Tools</h3>
+      <h3 class="setup-heading"><span class="dim">#</span>Available Tools</h3>
       <p class="setup-desc">See all available MCP tools on the <a href="/tools">tools page</a>.</p>
     </div>
 
     <!-- Environment Variables -->
     <div class="setup-section">
-      <h3 class="setup-heading">Environment Variables</h3>
+      <h3 class="setup-heading"><span class="dim">#</span>Environment Variables</h3>
       <p class="setup-desc">Optional environment variables to configure OpenTrace:</p>
       <div class="table-wrap">
         <table class="data-table">
@@ -427,8 +546,8 @@
 
     {{if .User}}
     <!-- Account Info -->
-    <div class="card" style="margin-bottom:1rem">
-      <h3 class="settings-section-title">Account Info</h3>
+    <div class="settings-section">
+      <h3 class="settings-section-title"><span class="dim">#</span> Account Info</h3>
       <div class="profile-info">
         <div class="profile-row">
           <span class="profile-label">email</span>
@@ -446,8 +565,8 @@
     </div>
 
     <!-- MCP Access Token -->
-    <div class="card" style="margin-bottom:1rem">
-      <h3 class="settings-section-title">MCP Access Token</h3>
+    <div class="settings-section">
+      <h3 class="settings-section-title"><span class="dim">#</span> MCP Access Token</h3>
       <div id="mcp-section">
         {{if .User.MCPEnabled}}
         <p class="text-dim" style="font-size:0.85rem;margin:0 0 1rem 0">Your personal MCP token for connecting AI tools to OpenTrace.</p>
@@ -512,8 +631,8 @@
     </div>
 
     <!-- Change Password -->
-    <div class="card">
-      <h3 class="settings-section-title">Change Password</h3>
+    <div class="settings-section">
+      <h3 class="settings-section-title"><span class="dim">#</span> Change Password</h3>
       <form id="password-form" onsubmit="return changePassword(event)">
         <div class="form-group">
           <label for="current_password">Current Password</label>
@@ -569,7 +688,7 @@ function switchTab(name, btn) {
 // Restore tab from hash on load
 (function() {
   var hash = window.location.hash.replace('#', '');
-  var validTabs = ['general', 'users', 'setup', 'profile'];
+  var validTabs = ['general', 'ai', 'users', 'setup', 'profile'];
   if (hash && validTabs.indexOf(hash) !== -1) {
     switchTab(hash);
   }
@@ -931,6 +1050,234 @@ function copyAndFlash(btn, text) {
   });
 }
 
+// ---- AI: LLM Settings ----
+var llmModels = [];
+var llmSettings = {};
+
+function loadLLMSettings() {
+  Promise.all([
+    fetch('/api/settings/llm').then(function(r) { return r.json(); }),
+    fetch('/api/models').then(function(r) { return r.json(); })
+  ]).then(function(results) {
+    llmSettings = results[0];
+    llmModels = results[1] || [];
+    populateLLMForm();
+  }).catch(function(err) {
+    console.error('Failed to load LLM settings:', err);
+  });
+}
+
+function populateLLMForm() {
+  // Provider dropdown
+  var providerEl = document.getElementById('llm-provider');
+  if (providerEl && llmSettings.default_provider) {
+    providerEl.value = llmSettings.default_provider;
+  }
+
+  // Populate model dropdown
+  populateModelDropdown();
+
+  // API keys (masked)
+  var keyFields = {
+    'llm-anthropic-key': llmSettings.anthropic_api_key,
+    'llm-openai-key': llmSettings.openai_api_key,
+    'llm-gemini-key': llmSettings.gemini_api_key
+  };
+  for (var id in keyFields) {
+    var el = document.getElementById(id);
+    if (el && keyFields[id]) {
+      el.value = keyFields[id];
+      el.dataset.masked = 'true';
+    }
+  }
+
+  // URLs
+  document.getElementById('llm-anthropic-url').value = llmSettings.anthropic_url || '';
+  document.getElementById('llm-openai-url').value = llmSettings.openai_url || '';
+  document.getElementById('llm-gemini-url').value = llmSettings.gemini_url || '';
+  document.getElementById('llm-ollama-url').value = llmSettings.ollama_url || '';
+  document.getElementById('llm-ollama-model').value = llmSettings.ollama_model || '';
+
+  // Env override notices
+  var overrides = llmSettings.env_overrides || {};
+  toggleDisplay('llm-env-anthropic', overrides.anthropic_api_key);
+  toggleDisplay('llm-env-openai', overrides.openai_api_key);
+  toggleDisplay('llm-env-gemini', overrides.gemini_api_key);
+}
+
+function toggleDisplay(id, show) {
+  var el = document.getElementById(id);
+  if (el) el.style.display = show ? 'block' : 'none';
+}
+
+function populateModelDropdown() {
+  var providerEl = document.getElementById('llm-provider');
+  var modelEl = document.getElementById('llm-model');
+  if (!providerEl || !modelEl) return;
+
+  var provider = providerEl.value;
+  modelEl.innerHTML = '';
+
+  // Filter models by provider prefix
+  var filtered = [];
+  for (var i = 0; i < llmModels.length; i++) {
+    var m = llmModels[i];
+    var name = m.name || '';
+    if (provider === 'ollama' && (name === 'ollama' || name.indexOf('ollama:') === 0)) {
+      filtered.push(m);
+    } else if (provider === 'anthropic' && name.indexOf('anthropic-') === 0) {
+      filtered.push(m);
+    } else if (provider === 'openai' && name.indexOf('openai-') === 0 && name.indexOf('(legacy)') === -1) {
+      filtered.push(m);
+    } else if (provider === 'openai' && name.indexOf('openai:') === 0) {
+      filtered.push(m);
+    } else if (provider === 'gemini' && name.indexOf('gemini-') === 0 && name.indexOf('(legacy)') === -1) {
+      filtered.push(m);
+    } else if (provider === 'gemini' && name.indexOf('gemini:') === 0) {
+      filtered.push(m);
+    }
+  }
+
+  if (filtered.length === 0) {
+    var opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = provider === 'ollama' ? 'No models found (is Ollama running?)' : 'No models available (add API key first)';
+    modelEl.appendChild(opt);
+  } else {
+    for (var j = 0; j < filtered.length; j++) {
+      var opt = document.createElement('option');
+      opt.value = filtered[j].name;
+      opt.textContent = filtered[j].model;
+      modelEl.appendChild(opt);
+    }
+  }
+
+  // Select saved default model
+  if (llmSettings.default_model) {
+    modelEl.value = llmSettings.default_model;
+  }
+}
+
+function llmProviderChanged() {
+  populateModelDropdown();
+}
+
+function clearMaskedKey(el) {
+  if (el.dataset.masked === 'true') {
+    el.value = '';
+    el.type = 'text';
+    el.dataset.masked = 'false';
+  }
+}
+
+function saveLLMDefaults() {
+  var status = document.getElementById('llm-default-status');
+  var provider = document.getElementById('llm-provider').value;
+  var model = document.getElementById('llm-model').value;
+
+  status.textContent = 'Saving...';
+  status.style.color = '';
+
+  fetch('/api/settings/llm', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({default_provider: provider, default_model: model})
+  }).then(function(r) {
+    if (!r.ok) return r.json().then(function(d) { throw new Error(d.error || 'save failed'); });
+    return r.json();
+  }).then(function() {
+    status.textContent = 'Saved';
+    status.style.color = 'var(--green)';
+    setTimeout(function() { status.textContent = ''; status.style.color = ''; }, 2000);
+    // Refresh models (cache invalidated by save)
+    refreshModels();
+  }).catch(function(err) {
+    status.textContent = 'Error: ' + err.message;
+    status.style.color = 'var(--red)';
+  });
+}
+
+function saveLLMProvider(provider) {
+  var status = document.getElementById('llm-' + provider + '-status');
+  status.textContent = 'Saving...';
+  status.style.color = '';
+
+  var body = {};
+  if (provider === 'ollama') {
+    body.ollama_url = document.getElementById('llm-ollama-url').value;
+    body.ollama_model = document.getElementById('llm-ollama-model').value;
+  } else {
+    var keyEl = document.getElementById('llm-' + provider + '-key');
+    var urlEl = document.getElementById('llm-' + provider + '-url');
+    body[provider + '_api_key'] = keyEl.value;
+    body[provider + '_url'] = urlEl.value;
+  }
+
+  fetch('/api/settings/llm', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  }).then(function(r) {
+    if (!r.ok) return r.json().then(function(d) { throw new Error(d.error || 'save failed'); });
+    return r.json();
+  }).then(function() {
+    status.textContent = 'Saved';
+    status.style.color = 'var(--green)';
+    setTimeout(function() { status.textContent = ''; status.style.color = ''; }, 2000);
+    // Refresh models after saving keys (new keys = new models available)
+    refreshModels();
+  }).catch(function(err) {
+    status.textContent = 'Error: ' + err.message;
+    status.style.color = 'var(--red)';
+  });
+}
+
+function refreshModels() {
+  fetch('/api/models').then(function(r) { return r.json(); }).then(function(models) {
+    llmModels = models || [];
+    populateModelDropdown();
+  });
+}
+
+function testLLMProvider(provider) {
+  var statusId = 'llm-' + provider + '-status';
+  var status = document.getElementById(statusId);
+  status.textContent = 'Testing...';
+  status.style.color = 'var(--yellow)';
+
+  var body = {provider: provider};
+
+  if (provider === 'ollama') {
+    body.base_url = document.getElementById('llm-ollama-url').value;
+    body.model = document.getElementById('llm-ollama-model').value;
+  } else {
+    var keyEl = document.getElementById('llm-' + provider + '-key');
+    var urlEl = document.getElementById('llm-' + provider + '-url');
+    body.api_key = keyEl.value;
+    body.base_url = urlEl.value;
+  }
+
+  fetch('/api/settings/llm/test', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.success) {
+      status.textContent = d.message;
+      status.style.color = 'var(--green)';
+    } else {
+      status.textContent = d.message || 'Test failed';
+      status.style.color = 'var(--red)';
+    }
+    setTimeout(function() { status.textContent = ''; status.style.color = ''; }, 5000);
+  }).catch(function(err) {
+    status.textContent = 'Error: ' + err.message;
+    status.style.color = 'var(--red)';
+  });
+}
+
+loadLLMSettings();
+
 // ---- Profile: MCP Token ----
 var mcpToken = null;
 
@@ -1068,7 +1415,17 @@ function changePassword(e) {
 <!-- ============================================================ -->
 <style nonce="{{.CSPNonce}}">
 .settings-page {
-  max-width: 800px;
+}
+
+/* Flat terminal-style sections (replaces .card wrappers) */
+.settings-section {
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.settings-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
 }
 
 /* Tab bar */
@@ -1105,12 +1462,15 @@ function changePassword(e) {
   border-bottom-color: var(--bg);
 }
 
-/* Section titles inside cards */
+/* Section titles */
 .settings-section-title {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-bright);
   margin: 0 0 0.75rem 0;
+}
+.settings-section-title > .dim {
+  margin-right: 0.4em;
 }
 
 /* Table wrapper for overflow */

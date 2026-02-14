@@ -128,10 +128,10 @@ func Load() (*Config, error) {
 		AnthropicModel:      envOrDefault("OPENTRACE_ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929"),
 		AnthropicURL:        envOrDefault("OPENTRACE_ANTHROPIC_URL", "https://api.anthropic.com"),
 		OpenAIAPIKey:        os.Getenv("OPENTRACE_OPENAI_API_KEY"),
-		OpenAIModel:         envOrDefault("OPENTRACE_OPENAI_MODEL", "gpt-4o"),
+		OpenAIModel:         envOrDefault("OPENTRACE_OPENAI_MODEL", "gpt-4.1-mini"),
 		OpenAIURL:           envOrDefault("OPENTRACE_OPENAI_URL", "https://api.openai.com"),
 		GeminiAPIKey:        os.Getenv("OPENTRACE_GEMINI_API_KEY"),
-		GeminiModel:         envOrDefault("OPENTRACE_GEMINI_MODEL", "gemini-2.5-flash-preview-04-17"),
+		GeminiModel:         envOrDefault("OPENTRACE_GEMINI_MODEL", "gemini-2.5-flash"),
 		GeminiURL:           envOrDefault("OPENTRACE_GEMINI_URL", "https://generativelanguage.googleapis.com"),
 		MaxQueryRows:        maxQueryRows,
 		StatementTimeoutMS:  stmtTimeout,
@@ -148,6 +148,52 @@ func Load() (*Config, error) {
 // DatabasePath returns the full path to the SQLite database file.
 func (c *Config) DatabasePath() string {
 	return filepath.Join(c.DataDir, "opentrace.db")
+}
+
+// LLMOverrides holds LLM settings from the database that override env-var defaults.
+// Empty fields are ignored (env-var value is kept).
+type LLMOverrides struct {
+	DefaultProvider string
+	AnthropicAPIKey string
+	AnthropicURL    string
+	OpenAIAPIKey    string
+	OpenAIURL       string
+	GeminiAPIKey    string
+	GeminiURL       string
+	OllamaURL       string
+	OllamaModel     string
+}
+
+// ApplyLLMOverrides merges database LLM settings over environment defaults.
+// Non-empty override values take precedence; empty fields keep the env-var value.
+func (c *Config) ApplyLLMOverrides(o LLMOverrides) {
+	if o.DefaultProvider != "" {
+		c.LLMProvider = o.DefaultProvider
+	}
+	if o.AnthropicAPIKey != "" {
+		c.AnthropicAPIKey = o.AnthropicAPIKey
+	}
+	if o.AnthropicURL != "" {
+		c.AnthropicURL = o.AnthropicURL
+	}
+	if o.OpenAIAPIKey != "" {
+		c.OpenAIAPIKey = o.OpenAIAPIKey
+	}
+	if o.OpenAIURL != "" {
+		c.OpenAIURL = o.OpenAIURL
+	}
+	if o.GeminiAPIKey != "" {
+		c.GeminiAPIKey = o.GeminiAPIKey
+	}
+	if o.GeminiURL != "" {
+		c.GeminiURL = o.GeminiURL
+	}
+	if o.OllamaURL != "" {
+		c.OllamaURL = o.OllamaURL
+	}
+	if o.OllamaModel != "" {
+		c.OllamaModel = o.OllamaModel
+	}
 }
 
 func envOrDefault(key, defaultVal string) string {

@@ -48,26 +48,37 @@ type ModelVariant struct {
 
 // AnthropicModels lists the Anthropic model variants to register.
 var AnthropicModels = []ModelVariant{
-	{Name: "anthropic-opus", ModelID: "claude-opus-4-20250514", Label: "Opus 4"},
-	{Name: "anthropic-sonnet", ModelID: "claude-sonnet-4-5-20250929", Label: "Sonnet 4.5"},
-	{Name: "anthropic-haiku", ModelID: "claude-haiku-4-5-20251001", Label: "Haiku 4.5"},
+	{Name: "anthropic-opus", ModelID: "claude-opus-4-6", Label: "Claude Opus 4.6"},
+	{Name: "anthropic-sonnet", ModelID: "claude-sonnet-4-5-20250929", Label: "Claude Sonnet 4.5"},
+	{Name: "anthropic-haiku", ModelID: "claude-haiku-4-5-20251001", Label: "Claude Haiku 4.5"},
 }
 
 // OpenAIModels lists the OpenAI model variants to register.
 var OpenAIModels = []ModelVariant{
-	{Name: "openai-o3-mini", ModelID: "o3-mini", Label: "o3-mini"},
-	{Name: "openai-o1", ModelID: "o1", Label: "o1"},
-	{Name: "openai-o1-mini", ModelID: "o1-mini", Label: "o1-mini"},
+	{Name: "openai-o3", ModelID: "o3", Label: "o3"},
+	{Name: "openai-o4-mini", ModelID: "o4-mini", Label: "o4-mini"},
+	{Name: "openai-gpt4.1", ModelID: "gpt-4.1", Label: "GPT-4.1"},
+	{Name: "openai-gpt4.1-mini", ModelID: "gpt-4.1-mini", Label: "GPT-4.1 mini"},
+	{Name: "openai-gpt4.1-nano", ModelID: "gpt-4.1-nano", Label: "GPT-4.1 nano"},
 	{Name: "openai-gpt4o", ModelID: "gpt-4o", Label: "GPT-4o"},
 	{Name: "openai-gpt4o-mini", ModelID: "gpt-4o-mini", Label: "GPT-4o mini"},
-	{Name: "openai-gpt4-turbo", ModelID: "gpt-4-turbo", Label: "GPT-4 Turbo"},
+	// Legacy aliases kept for backward compatibility with existing watchers
+	{Name: "openai-o3-mini", ModelID: "o3-mini", Label: "o3-mini (legacy)"},
+	{Name: "openai-o1", ModelID: "o1", Label: "o1 (legacy)"},
+	{Name: "openai-o1-mini", ModelID: "o1-mini", Label: "o1-mini (legacy)"},
+	{Name: "openai-gpt4-turbo", ModelID: "gpt-4-turbo", Label: "GPT-4 Turbo (legacy)"},
 }
 
 // GeminiModels lists the Google Gemini model variants to register.
 var GeminiModels = []ModelVariant{
-	{Name: "gemini-flash", ModelID: "gemini-2.5-flash-preview-04-17", Label: "Gemini 2.5 Flash"},
-	{Name: "gemini-pro", ModelID: "gemini-2.5-pro-preview-05-06", Label: "Gemini 2.5 Pro"},
-	{Name: "gemini-2.0-flash", ModelID: "gemini-2.0-flash", Label: "Gemini 2.0 Flash"},
+	{Name: "gemini-3-pro", ModelID: "gemini-3-pro-preview", Label: "Gemini 3 Pro"},
+	{Name: "gemini-3-flash", ModelID: "gemini-3-flash-preview", Label: "Gemini 3 Flash"},
+	{Name: "gemini-2.5-pro", ModelID: "gemini-2.5-pro", Label: "Gemini 2.5 Pro"},
+	{Name: "gemini-2.5-flash", ModelID: "gemini-2.5-flash", Label: "Gemini 2.5 Flash"},
+	{Name: "gemini-2.5-flash-lite", ModelID: "gemini-2.5-flash-lite", Label: "Gemini 2.5 Flash-Lite"},
+	// Legacy aliases kept for backward compatibility with existing watchers
+	{Name: "gemini-flash", ModelID: "gemini-2.5-flash", Label: "Gemini Flash (legacy)"},
+	{Name: "gemini-pro", ModelID: "gemini-2.5-pro", Label: "Gemini Pro (legacy)"},
 }
 
 // AvailableProviders returns a list of LLM providers that have valid
@@ -198,6 +209,21 @@ func NewProviderCache(cfg *config.Config, defaultLLM LLMProvider) *ProviderCache
 		defaultLLM: defaultLLM,
 		cache:      make(map[string]LLMProvider),
 	}
+}
+
+// Reload clears the provider cache and re-initializes the default provider
+// with the current config values. Call after LLM settings change.
+func (pc *ProviderCache) Reload(cfg *config.Config) error {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	defaultLLM, err := NewLLMProvider(cfg)
+	if err != nil {
+		return err
+	}
+	pc.cfg = cfg
+	pc.defaultLLM = defaultLLM
+	pc.cache = make(map[string]LLMProvider)
+	return nil
 }
 
 // Get returns the LLMProvider for the given model name.

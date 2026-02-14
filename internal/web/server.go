@@ -64,6 +64,7 @@ type Server struct {
 	executor      *watcher.Executor
 	eventHub      *watcher.EventHub
 	modelRegistry *llm.ModelRegistry
+	providerCache *llm.ProviderCache
 	ruleEvaluator    *watcher.RuleEvaluator
 	toolCatalog      *mcpserver.ToolCatalog
 	mcpActivityStore store.MCPActivityStore
@@ -100,6 +101,7 @@ type ServerDeps struct {
 	Executor      *watcher.Executor
 	EventHub      *watcher.EventHub
 	ModelRegistry *llm.ModelRegistry
+	ProviderCache *llm.ProviderCache
 	RuleEvaluator    *watcher.RuleEvaluator
 	MCPActivityStore store.MCPActivityStore
 	AlertGroupStore  store.AlertGroupStore
@@ -136,6 +138,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		executor:      deps.Executor,
 		eventHub:       deps.EventHub,
 		modelRegistry:  deps.ModelRegistry,
+		providerCache:  deps.ProviderCache,
 		ruleEvaluator:    deps.RuleEvaluator,
 		mcpActivityStore: deps.MCPActivityStore,
 		alertGroupStore:  deps.AlertGroupStore,
@@ -364,6 +367,9 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Post("/settings/api-key", srv.handleRegenerateAPIKey)
 			r.Get("/settings/auto-update", srv.handleGetAutoUpdate)
 			r.Put("/settings/auto-update", srv.handleSetAutoUpdate)
+			r.Get("/settings/llm", srv.handleGetLLMSettings)
+			r.Put("/settings/llm", srv.handleUpdateLLMSettings)
+			r.Post("/settings/llm/test", srv.handleTestLLMConnection)
 			r.Post("/version/update", srv.handleSelfUpdate)
 			if srv.auditStore != nil {
 				r.Get("/audit-log", srv.handleAuditLog)

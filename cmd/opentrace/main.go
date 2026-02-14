@@ -156,6 +156,9 @@ func runMCP() error {
 	defer deps.db.Close()
 	defer deps.registry.CloseAll()
 
+	// Apply LLM settings from database (overrides env-var defaults)
+	applyLLMOverrides(ctx, deps.settingsStore, deps.cfg)
+
 	// Create LLM provider + executor for on-demand watcher execution.
 	defaultLLM, _ := llm.NewLLMProvider(deps.cfg)
 	providerCache := llm.NewProviderCache(deps.cfg, defaultLLM)
@@ -230,6 +233,9 @@ func run() error {
 	}
 	defer deps.db.Close()
 
+	// Apply LLM settings from database (overrides env-var defaults)
+	applyLLMOverrides(ctx, deps.settingsStore, deps.cfg)
+
 	// Create LLM provider cache for per-watcher model selection
 	defaultLLM, err := llm.NewLLMProvider(deps.cfg)
 	if err != nil {
@@ -298,6 +304,7 @@ func run() error {
 		Executor:         executor,
 		EventHub:         eventHub,
 		ModelRegistry:    modelRegistry,
+		ProviderCache:    providerCache,
 		RuleEvaluator:    ruleEvaluator,
 		MCPActivityStore: deps.mcpActivityStore,
 		AlertGroupStore:  deps.alertGroupStore,
@@ -597,4 +604,32 @@ func reconnectConnectors(ctx context.Context, dsStore store.DataSourceStore, log
 		registry.Register(c)
 		slog.Info("reconnected connector", "connector", ds.Name, "type", string(ds.Type))
 	}
+}
+
+// applyLLMOverrides reads LLM settings from the database and applies them
+// over the environment-variable defaults in cfg.
+func applyLLMOverrides(ctx context.Context, ss store.SettingsStore, cfg *config.Config) {
+	if ss == nil {
+		return
+	}
+	settings, err := ss.GetLLMSettings(ctx)
+	if err != nil {
+		slog.Warn("failed to load LLM settings from database", "error", err)
+		return
+	}
+	if settings == nil {
+		return
+	}
+	cfg.ApplyLLMOverrides(config.LLMOverrides{
+		DefaultProvider: settings.DefaultProvider,
+		AnthropicAPIKey: settings.AnthropicAPIKey,
+		AnthropicURL:    settings.AnthropicURL,
+		OpenAIAPIKey:    settings.OpenAIAPIKey,
+		OpenAIURL:       settings.OpenAIURL,
+		GeminiAPIKey:    settings.GeminiAPIKey,
+		GeminiURL:       settings.GeminiURL,
+		OllamaURL:       settings.OllamaURL,
+		OllamaModel:     settings.OllamaModel,
+	})
+	slog.Info("applied LLM settings from database", "provider", cfg.LLMProvider)
 }
