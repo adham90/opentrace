@@ -2681,9 +2681,20 @@ th.sortable.sort-desc::after { content: '\25BC'; opacity: 0.8; }
   /* Prevent body scroll when menu is open */
   body.mobile-menu-open { overflow: hidden; }
 
-  /* Nav bar adjustments */
-  .tmux-bar { padding: 0 4px; }
-  .tmux-info { font-size: 11px; }
+  /* Nav bar: taller for mobile touch targets */
+  :root {
+    --tmux-height: 44px;
+  }
+  .tmux-bar {
+    padding: 0 6px;
+  }
+  .mobile-menu-btn {
+    font-size: 22px;
+    padding: 0 12px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .tmux-info { font-size: 12px; }
 
   /* Main content */
   .main-content { padding: 10px; }
@@ -2996,6 +3007,27 @@ th.sortable.sort-desc::after { content: '\25BC'; opacity: 0.8; }
   .dismiss-reason-select {
     font-size: 12px;
   }
+
+  /* Filter bar: wrap tags */
+  .filter-bar {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .filter-tag {
+    font-size: 12px;
+  }
+
+  /* Filter dropdowns: constrain to viewport */
+  .filter-dropdown {
+    max-width: calc(100vw - 20px);
+  }
+
+  /* Page actions: full width */
+  .page-actions {
+    width: 100%;
+    display: flex;
+    gap: 6px;
+  }
 }
 
 /* --- Small phones (< 380px) --- */
@@ -3003,6 +3035,11 @@ th.sortable.sort-desc::after { content: '\25BC'; opacity: 0.8; }
   body { font-size: 12px; }
 
   .tmux-bar { font-size: 11px; }
+  .tmux-info { font-size: 10px; }
+  .mobile-menu-btn {
+    font-size: 20px;
+    padding: 0 10px;
+  }
 
   .term-ts { display: none; }
   .term-src { max-width: 80px; }
@@ -3017,4 +3054,9 @@ th.sortable.sort-desc::after { content: '\25BC'; opacity: 0.8; }
   .watcher-row { padding: 8px 8px 8px 10px; }
 
   .filter-tag { padding: 6px 8px; min-width: 100%; }
+
+  /* Logs page: hide source column on very small screens */
+  .term-source {
+    display: none;
+  }
 }

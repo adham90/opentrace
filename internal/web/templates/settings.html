@@ -1221,17 +1221,98 @@ function changePassword(e) {
 }
 
 /* Responsive */
-@media (max-width: 640px) {
+@media (max-width: 699px) {
+  /* Settings tabs: horizontal scroll with better touch targets */
   .settings-tabs {
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
   .settings-tab {
-    padding: 6px 12px;
-    font-size: 11px;
+    padding: 10px 12px;
+    font-size: 12px;
     white-space: nowrap;
   }
+
+  /* User management header: allow wrapping */
+  #tab-users > div:first-child {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  /* Data table: tighter on mobile */
+  .data-table th, .data-table td {
+    padding: 0.4rem 0.5rem;
+    font-size: 11px;
+  }
+  .data-table th {
+    font-size: 9px;
+  }
+
+  /* Actions cell: stack buttons */
   .actions-cell {
     flex-direction: column;
+    gap: 4px;
+  }
+
+  /* Profile rows: allow wrapping */
+  .profile-row {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  /* MCP config tabs: touchable */
+  .mcp-config-tabs {
+    flex-wrap: wrap;
+  }
+  .mcp-tab {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+  .mcp-tab:first-child {
+    border-radius: 4px 4px 0 0;
+  }
+  .mcp-tab:last-child {
+    border-radius: 0 0 4px 4px;
+    border-left: 1px solid var(--border);
+    border-top: none;
+  }
+
+  /* Form inputs: full width */
+  #retention-days {
+    max-width: 100% !important;
+  }
+  #current_password,
+  #new_password {
+    max-width: 100% !important;
+  }
+
+  /* Version info: tighter gap (overrides inline style gap:2rem) */
+  #version-info > div:first-child {
+    gap: 0.75rem !important;
+  }
+
+  /* Section spacing */
+  .settings-section {
+    padding-bottom: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+}
+
+@media (max-width: 379px) {
+  .settings-tab {
+    padding: 8px 10px;
+    font-size: 11px;
+  }
+  .mcp-tab {
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+  .profile-row {
+    font-size: 11px;
+  }
+  .data-table th, .data-table td {
+    padding: 0.3rem 0.4rem;
+    font-size: 10px;
   }
 }
 </style>

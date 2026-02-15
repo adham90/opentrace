@@ -110,6 +110,24 @@
   margin-bottom: 1rem;
   font-size: 0.9rem;
 }
+
+@media (max-width: 699px) {
+  .auth-card {
+    padding: 1rem;
+  }
+  /* Stack code + copy button rows vertically */
+  .auth-card .card div[style*="display:flex"] {
+    flex-wrap: wrap;
+  }
+  .auth-card .card div[style*="display:flex"] code,
+  .auth-card .card div[style*="display:flex"] pre {
+    width: 100%;
+    font-size: 0.75rem;
+  }
+  .auth-card .card div[style*="display:flex"] button {
+    width: 100%;
+  }
+}
 </style>
 
 <script nonce="{{.CSPNonce}}">
