@@ -73,11 +73,17 @@ func init() {
 }
 
 type LogFilters struct {
-	Query     string
-	Service   string
-	Level     string
-	EventType string
-	TimeRange string // preset: 15m, 1h, 6h, 24h, 7d, or empty (all)
+	Query            string
+	Service          string
+	Level            string
+	EventType        string
+	TimeRange        string // preset: 15m, 1h, 6h, 24h, 7d, or empty (all)
+	Environment      string
+	CommitHash       string
+	RequestID        string
+	ExceptionClass   string
+	ErrorFingerprint string
+	SourceFile       string
 }
 
 // parseTimeRange converts a time range preset string to a Start time pointer.
@@ -184,11 +190,17 @@ func (s *Server) getTemplate(fallback *template.Template, files ...string) *temp
 
 func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 	filters := LogFilters{
-		Query:     r.URL.Query().Get("query"),
-		Service:   r.URL.Query().Get("service"),
-		Level:     r.URL.Query().Get("level"),
-		EventType: r.URL.Query().Get("event_type"),
-		TimeRange: r.URL.Query().Get("time_range"),
+		Query:            r.URL.Query().Get("query"),
+		Service:          r.URL.Query().Get("service"),
+		Level:            r.URL.Query().Get("level"),
+		EventType:        r.URL.Query().Get("event_type"),
+		TimeRange:        r.URL.Query().Get("time_range"),
+		Environment:      r.URL.Query().Get("environment"),
+		CommitHash:       r.URL.Query().Get("commit_hash"),
+		RequestID:        r.URL.Query().Get("request_id"),
+		ExceptionClass:   r.URL.Query().Get("exception_class"),
+		ErrorFingerprint: r.URL.Query().Get("error_fingerprint"),
+		SourceFile:       r.URL.Query().Get("source_file"),
 	}
 
 	limit := 50
@@ -209,14 +221,20 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	searchParams := store.LogSearchParams{
-		Query:          filters.Query,
-		Service:        filters.Service,
-		Level:          filters.Level,
-		EventType:      filters.EventType,
-		Start:          parseTimeRange(filters.TimeRange),
-		Limit:          limit + 1, // fetch one extra to detect if there are more
-		Offset:         offset,
-		MetadataFilter: parseMetadataParams(r.URL.Query()),
+		Query:            filters.Query,
+		Service:          filters.Service,
+		Level:            filters.Level,
+		EventType:        filters.EventType,
+		Start:            parseTimeRange(filters.TimeRange),
+		Limit:            limit + 1, // fetch one extra to detect if there are more
+		Offset:           offset,
+		MetadataFilter:   parseMetadataParams(r.URL.Query()),
+		Environment:      filters.Environment,
+		CommitHash:       filters.CommitHash,
+		RequestID:        filters.RequestID,
+		ExceptionClass:   filters.ExceptionClass,
+		ErrorFingerprint: filters.ErrorFingerprint,
+		SourceFile:       filters.SourceFile,
 	}
 	// Explicit start/end override time_range preset
 	if s := r.URL.Query().Get("start"); s != "" {
@@ -290,22 +308,34 @@ func (s *Server) handleLogsPoll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filters := LogFilters{
-		Query:     r.URL.Query().Get("query"),
-		Service:   r.URL.Query().Get("service"),
-		Level:     r.URL.Query().Get("level"),
-		EventType: r.URL.Query().Get("event_type"),
-		TimeRange: r.URL.Query().Get("time_range"),
+		Query:            r.URL.Query().Get("query"),
+		Service:          r.URL.Query().Get("service"),
+		Level:            r.URL.Query().Get("level"),
+		EventType:        r.URL.Query().Get("event_type"),
+		TimeRange:        r.URL.Query().Get("time_range"),
+		Environment:      r.URL.Query().Get("environment"),
+		CommitHash:       r.URL.Query().Get("commit_hash"),
+		RequestID:        r.URL.Query().Get("request_id"),
+		ExceptionClass:   r.URL.Query().Get("exception_class"),
+		ErrorFingerprint: r.URL.Query().Get("error_fingerprint"),
+		SourceFile:       r.URL.Query().Get("source_file"),
 	}
 
 	pollParams := store.LogSearchParams{
-		Query:          filters.Query,
-		Service:        filters.Service,
-		Level:          filters.Level,
-		EventType:      filters.EventType,
-		Start:          parseTimeRange(filters.TimeRange),
-		SinceID:        sinceID,
-		Limit:          200,
-		MetadataFilter: parseMetadataParams(r.URL.Query()),
+		Query:            filters.Query,
+		Service:          filters.Service,
+		Level:            filters.Level,
+		EventType:        filters.EventType,
+		Start:            parseTimeRange(filters.TimeRange),
+		SinceID:          sinceID,
+		Limit:            200,
+		MetadataFilter:   parseMetadataParams(r.URL.Query()),
+		Environment:      filters.Environment,
+		CommitHash:       filters.CommitHash,
+		RequestID:        filters.RequestID,
+		ExceptionClass:   filters.ExceptionClass,
+		ErrorFingerprint: filters.ErrorFingerprint,
+		SourceFile:       filters.SourceFile,
 	}
 	if s := r.URL.Query().Get("start"); s != "" {
 		if t, err := time.Parse(time.RFC3339, s); err == nil {

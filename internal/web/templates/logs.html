@@ -19,6 +19,12 @@
     <input type="hidden" name="event_type" id="f-event-type" value="{{.LogFilters.EventType}}">
     <input type="hidden" name="time_range" id="f-time-range" value="{{.LogFilters.TimeRange}}">
     <input type="hidden" name="query" id="f-query" value="{{.LogFilters.Query}}">
+    <input type="hidden" name="environment" id="f-environment" value="{{.LogFilters.Environment}}">
+    <input type="hidden" name="commit_hash" id="f-commit-hash" value="{{.LogFilters.CommitHash}}">
+    <input type="hidden" name="request_id" id="f-request-id" value="{{.LogFilters.RequestID}}">
+    <input type="hidden" name="exception_class" id="f-exception-class" value="{{.LogFilters.ExceptionClass}}">
+    <input type="hidden" name="error_fingerprint" id="f-error-fingerprint" value="{{.LogFilters.ErrorFingerprint}}">
+    <input type="hidden" name="source_file" id="f-source-file" value="{{.LogFilters.SourceFile}}">
 
     <div class="term-cmdline-inner">
       <span class="term-prompt-symbol">$</span>
@@ -116,6 +122,14 @@
 }
 .term-line.level-DEBUG .term-msg { color: var(--text-dim); }
 .term-line.level-ERROR .term-msg { color: var(--red); }
+
+.term-exc {
+  color: var(--red);
+  opacity: 0.6;
+  font-size: 10px;
+  margin-left: 6px;
+  flex-shrink: 0;
+}
 
 /* ── Expanded detail ───────────────────────────────────────── */
 .term-detail {
@@ -474,6 +488,12 @@
     level: '{{.LogFilters.Level}}',
     event_type: '{{.LogFilters.EventType}}',
     time_range: '{{.LogFilters.TimeRange}}',
+    environment: '{{.LogFilters.Environment}}',
+    commit_hash: '{{.LogFilters.CommitHash}}',
+    request_id: '{{.LogFilters.RequestID}}',
+    exception_class: '{{.LogFilters.ExceptionClass}}',
+    error_fingerprint: '{{.LogFilters.ErrorFingerprint}}',
+    source_file: '{{.LogFilters.SourceFile}}',
     start: '',
     end: '',
     metadata: {}  // key-value pairs for metadata filters
@@ -566,6 +586,16 @@
     if (log.parent_span_id) html += dRow('parent_span_id', log.parent_span_id);
     if (log.service) html += dRow('service', log.service);
     if (log.event_type) html += dRow('event_type', log.event_type);
+    if (log.request_id) html += dRow('request_id', log.request_id);
+    if (log.environment) html += dRow('environment', log.environment);
+    if (log.commit_hash) html += dRow('commit_hash', log.commit_hash);
+    if (log.exception_class) html += dRow('exception_class', log.exception_class);
+    if (log.error_fingerprint) html += dRow('error_fingerprint', log.error_fingerprint);
+    if (log.source_file) {
+      var src = log.source_file;
+      if (log.source_line > 0) src += ':' + log.source_line;
+      html += dRow('source', src);
+    }
     html += '</div>';
 
     // Request Summary
@@ -749,7 +779,7 @@
   }
 
   function clearAllFilters() {
-    filters = { query: '', service: '', level: '', event_type: '', time_range: '', start: '', end: '', metadata: {} };
+    filters = { query: '', service: '', level: '', event_type: '', time_range: '', environment: '', commit_hash: '', request_id: '', exception_class: '', error_fingerprint: '', source_file: '', start: '', end: '', metadata: {} };
     syncHiddenFields();
     renderFilterChips();
     applyFilters();
@@ -761,6 +791,12 @@
     document.getElementById('f-event-type').value = filters.event_type;
     document.getElementById('f-time-range').value = filters.time_range;
     document.getElementById('f-query').value = filters.query;
+    document.getElementById('f-environment').value = filters.environment;
+    document.getElementById('f-commit-hash').value = filters.commit_hash;
+    document.getElementById('f-request-id').value = filters.request_id;
+    document.getElementById('f-exception-class').value = filters.exception_class;
+    document.getElementById('f-error-fingerprint').value = filters.error_fingerprint;
+    document.getElementById('f-source-file').value = filters.source_file;
 
     // Remove old dynamic fields
     form.querySelectorAll('.dynamic-field').forEach(function(el) { el.remove(); });
@@ -787,6 +823,8 @@
   function hasActiveFilters() {
     return filters.query || filters.service || filters.level ||
            filters.event_type || filters.time_range ||
+           filters.environment || filters.commit_hash || filters.request_id ||
+           filters.exception_class || filters.error_fingerprint || filters.source_file ||
            filters.start || filters.end || Object.keys(filters.metadata).length > 0;
   }
 
@@ -815,6 +853,24 @@
       }
       html += chip('range', timeLabel);
     }
+    if (filters.environment) {
+      html += chip('env', filters.environment);
+    }
+    if (filters.commit_hash) {
+      html += chip('commit', filters.commit_hash);
+    }
+    if (filters.request_id) {
+      html += chip('rid', filters.request_id);
+    }
+    if (filters.exception_class) {
+      html += chip('error', filters.exception_class);
+    }
+    if (filters.error_fingerprint) {
+      html += chip('fingerprint', filters.error_fingerprint);
+    }
+    if (filters.source_file) {
+      html += chip('file', filters.source_file);
+    }
     if (filters.query) {
       html += chip('search', filters.query);
     }
@@ -836,6 +892,12 @@
         if (k === 'search') k = 'query';
         else if (k === 'type') k = 'event_type';
         else if (k === 'time') k = 'time_range';
+        else if (k === 'env') k = 'environment';
+        else if (k === 'commit') k = 'commit_hash';
+        else if (k === 'rid') k = 'request_id';
+        else if (k === 'error') k = 'exception_class';
+        else if (k === 'fingerprint') k = 'error_fingerprint';
+        else if (k === 'file') k = 'source_file';
         else if (k === 'range') {
           filters.start = '';
           filters.end = '';
@@ -889,6 +951,12 @@
     if (filters.level) params.set('level', filters.level);
     if (filters.event_type) params.set('event_type', filters.event_type);
     if (filters.time_range) params.set('time_range', filters.time_range);
+    if (filters.environment) params.set('environment', filters.environment);
+    if (filters.commit_hash) params.set('commit_hash', filters.commit_hash);
+    if (filters.request_id) params.set('request_id', filters.request_id);
+    if (filters.exception_class) params.set('exception_class', filters.exception_class);
+    if (filters.error_fingerprint) params.set('error_fingerprint', filters.error_fingerprint);
+    if (filters.source_file) params.set('source_file', filters.source_file);
     if (filters.start) params.set('start', filters.start);
     if (filters.end) params.set('end', filters.end);
     Object.keys(filters.metadata).forEach(function(k) {
@@ -928,7 +996,7 @@
     var changed = false;
 
     parts.forEach(function(part) {
-      var m = part.match(/^(level|l|service|svc|s|time|t|type|event_type|y):(.+)$/i);
+      var m = part.match(/^(level|l|service|svc|s|time|t|type|event_type|y|env|environment|e|commit|commit_hash|c|request_id|rid|r|error|exception_class|x|fingerprint|fp|error_fingerprint|file|source_file|f):(.+)$/i);
       if (m) {
         var key = m[1].toLowerCase();
         var val = m[2].replace(/^"(.*)"$/, '$1');
@@ -946,6 +1014,24 @@
             break;
           case 'type': case 'event_type': case 'y':
             filters.event_type = val;
+            break;
+          case 'env': case 'environment': case 'e':
+            filters.environment = val;
+            break;
+          case 'commit': case 'commit_hash': case 'c':
+            filters.commit_hash = val;
+            break;
+          case 'request_id': case 'rid': case 'r':
+            filters.request_id = val;
+            break;
+          case 'error': case 'exception_class': case 'x':
+            filters.exception_class = val;
+            break;
+          case 'fingerprint': case 'fp': case 'error_fingerprint':
+            filters.error_fingerprint = val;
+            break;
+          case 'file': case 'source_file': case 'f':
+            filters.source_file = val;
             break;
         }
       } else {
@@ -1012,12 +1098,12 @@
       }
       if (data.filters) {
         // Clear previous filters before applying new ones
-        filters = { query: '', service: '', level: '', event_type: '', time_range: '', start: '', end: '', metadata: {} };
+        filters = { query: '', service: '', level: '', event_type: '', time_range: '', environment: '', commit_hash: '', request_id: '', exception_class: '', error_fingerprint: '', source_file: '', start: '', end: '', metadata: {} };
         var f = data.filters;
         Object.keys(f).forEach(function(k) {
           if (k.indexOf('meta.') === 0) {
             filters.metadata[k.substring(5)] = f[k];
-          } else if (k === 'level' || k === 'service' || k === 'event_type' || k === 'time_range' || k === 'query' || k === 'start' || k === 'end') {
+          } else if (k === 'level' || k === 'service' || k === 'event_type' || k === 'time_range' || k === 'query' || k === 'start' || k === 'end' || k === 'environment' || k === 'commit_hash' || k === 'request_id' || k === 'exception_class' || k === 'error_fingerprint' || k === 'source_file') {
             filters[k] = f[k];
           }
         });
@@ -1054,7 +1140,7 @@
   }
 
   // ── Active filter order (for backspace removal) ──────────
-  var filterOrder = ['query', 'time_range', 'event_type', 'service', 'level'];
+  var filterOrder = ['query', 'time_range', 'event_type', 'service', 'level', 'environment', 'commit_hash', 'request_id', 'exception_class', 'error_fingerprint', 'source_file'];
 
   function removeLastFilter() {
     // Check metadata first
@@ -1330,6 +1416,12 @@
     filters.level = params.get('level') || '';
     filters.event_type = params.get('event_type') || '';
     filters.time_range = params.get('time_range') || '';
+    filters.environment = params.get('environment') || '';
+    filters.commit_hash = params.get('commit_hash') || '';
+    filters.request_id = params.get('request_id') || '';
+    filters.exception_class = params.get('exception_class') || '';
+    filters.error_fingerprint = params.get('error_fingerprint') || '';
+    filters.source_file = params.get('source_file') || '';
     filters.start = params.get('start') || '';
     filters.end = params.get('end') || '';
     filters.metadata = {};
@@ -1367,11 +1459,17 @@
   var items     = [];
 
   var prefixes = [
-    { label: 'level:',   hint: 'filter by log level' },
-    { label: 'service:', hint: 'filter by service name' },
-    { label: 'time:',    hint: 'filter by time range' },
-    { label: 'type:',    hint: 'filter by event type' },
-    { label: '?',        hint: 'smart search (natural language)' }
+    { label: 'level:',       hint: 'filter by log level' },
+    { label: 'service:',     hint: 'filter by service name' },
+    { label: 'time:',        hint: 'filter by time range' },
+    { label: 'type:',        hint: 'filter by event type' },
+    { label: 'env:',         hint: 'filter by environment' },
+    { label: 'commit:',      hint: 'filter by commit hash' },
+    { label: 'request_id:',  hint: 'filter by request ID' },
+    { label: 'error:',       hint: 'filter by exception class' },
+    { label: 'fingerprint:', hint: 'filter by error fingerprint' },
+    { label: 'file:',        hint: 'filter by source file' },
+    { label: '?',            hint: 'smart search (natural language)' }
   ];
 
   var staticValues = {
@@ -1600,6 +1698,7 @@
     <span class="term-level level-{{.Level}}">{{.Level}}</span>
     <span class="term-source" title="{{.Service}}">{{if .Service}}{{.Service}}{{end}}</span>
     <span class="term-msg">{{.Message}}</span>
+    {{if .ExceptionClass}}<span class="term-exc">{{.ExceptionClass}}</span>{{end}}
   </div>
   <div class="term-detail"></div>
 </div>
