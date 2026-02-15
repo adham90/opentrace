@@ -654,6 +654,7 @@ select:focus { outline: none; border-color: var(--green); }
 .btn-resume:hover { background: rgba(74, 222, 128, 0.15); }
 
 .btn-sm { padding: 3px 8px; font-size: 11px; }
+.btn-block { width: 100%; margin-top: 1rem; }
 
 .btn-close {
   background: none; border: none; color: var(--text-dim);
