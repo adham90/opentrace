@@ -57,18 +57,25 @@ type ListDataSourceParams struct {
 
 // LogEntry represents an ingested log line.
 type LogEntry struct {
-	ID             int64           `json:"id"`
-	Timestamp      time.Time       `json:"timestamp"`
-	Level          string          `json:"level"`
-	Service        string          `json:"service,omitempty"`
-	TraceID        string          `json:"trace_id,omitempty"`
-	SpanID         string          `json:"span_id,omitempty"`
-	ParentSpanID   string          `json:"parent_span_id,omitempty"`
-	Message        string          `json:"message"`
-	EventType      string          `json:"event_type,omitempty"`
-	Metadata       map[string]any  `json:"metadata,omitempty"`
-	RequestSummary *RequestSummary `json:"request_summary,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
+	ID               int64           `json:"id"`
+	Timestamp        time.Time       `json:"timestamp"`
+	Level            string          `json:"level"`
+	Service          string          `json:"service,omitempty"`
+	Environment      string          `json:"environment,omitempty"`
+	CommitHash       string          `json:"commit_hash,omitempty"`
+	TraceID          string          `json:"trace_id,omitempty"`
+	SpanID           string          `json:"span_id,omitempty"`
+	ParentSpanID     string          `json:"parent_span_id,omitempty"`
+	RequestID        string          `json:"request_id,omitempty"`
+	Message          string          `json:"message"`
+	EventType        string          `json:"event_type,omitempty"`
+	ExceptionClass   string          `json:"exception_class,omitempty"`
+	ErrorFingerprint string          `json:"error_fingerprint,omitempty"`
+	SourceFile       string          `json:"source_file,omitempty"`
+	SourceLine       int             `json:"source_line,omitempty"`
+	Metadata         map[string]any  `json:"metadata,omitempty"`
+	RequestSummary   *RequestSummary `json:"request_summary,omitempty"`
+	CreatedAt        time.Time       `json:"created_at"`
 }
 
 // RequestSummary holds structured performance metrics for an HTTP request.
@@ -112,18 +119,24 @@ type RequestSummary struct {
 
 // LogSearchParams defines filters for log search.
 type LogSearchParams struct {
-	Query          string            `json:"query,omitempty"`
-	Service        string            `json:"service,omitempty"`
-	Level          string            `json:"level,omitempty"`
-	TraceID        string            `json:"trace_id,omitempty"`
-	EventType      string            `json:"event_type,omitempty"`
-	Start          *time.Time        `json:"start,omitempty"`
-	End            *time.Time        `json:"end,omitempty"`
-	Limit          int               `json:"limit,omitempty"`
-	Offset         int               `json:"offset,omitempty"`
-	SinceID        int64             `json:"since_id,omitempty"`
-	MetadataFilter map[string]string `json:"metadata_filter,omitempty"` // key-value filters on metadata JSON
-	SortAsc        bool              `json:"sort_asc,omitempty"`        // true for oldest-first (default: newest-first)
+	Query            string            `json:"query,omitempty"`
+	Service          string            `json:"service,omitempty"`
+	Level            string            `json:"level,omitempty"`
+	Environment      string            `json:"environment,omitempty"`
+	CommitHash       string            `json:"commit_hash,omitempty"`
+	TraceID          string            `json:"trace_id,omitempty"`
+	RequestID        string            `json:"request_id,omitempty"`
+	EventType        string            `json:"event_type,omitempty"`
+	ExceptionClass   string            `json:"exception_class,omitempty"`
+	ErrorFingerprint string            `json:"error_fingerprint,omitempty"`
+	SourceFile       string            `json:"source_file,omitempty"`
+	Start            *time.Time        `json:"start,omitempty"`
+	End              *time.Time        `json:"end,omitempty"`
+	Limit            int               `json:"limit,omitempty"`
+	Offset           int               `json:"offset,omitempty"`
+	SinceID          int64             `json:"since_id,omitempty"`
+	MetadataFilter   map[string]string `json:"metadata_filter,omitempty"` // key-value filters on metadata JSON
+	SortAsc          bool              `json:"sort_asc,omitempty"`        // true for oldest-first (default: newest-first)
 }
 
 // LogCountParams defines filters for log aggregation queries.

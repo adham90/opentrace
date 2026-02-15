@@ -16,16 +16,23 @@ import (
 )
 
 type ingestLogEntry struct {
-	Timestamp      time.Time              `json:"timestamp"`
-	Level          string                 `json:"level"`
-	Service        string                 `json:"service"`
-	TraceID        string                 `json:"trace_id"`
-	SpanID         string                 `json:"span_id"`
-	ParentSpanID   string                 `json:"parent_span_id"`
-	Message        string                 `json:"message"`
-	EventType      string                 `json:"event_type"`
-	Metadata       map[string]any         `json:"metadata"`
-	RequestSummary *ingestRequestSummary  `json:"request_summary,omitempty"`
+	Timestamp        time.Time              `json:"timestamp"`
+	Level            string                 `json:"level"`
+	Service          string                 `json:"service"`
+	Environment      string                 `json:"environment"`
+	CommitHash       string                 `json:"commit_hash"`
+	TraceID          string                 `json:"trace_id"`
+	SpanID           string                 `json:"span_id"`
+	ParentSpanID     string                 `json:"parent_span_id"`
+	RequestID        string                 `json:"request_id"`
+	Message          string                 `json:"message"`
+	EventType        string                 `json:"event_type"`
+	ExceptionClass   string                 `json:"exception_class"`
+	ErrorFingerprint string                 `json:"error_fingerprint"`
+	SourceFile       string                 `json:"source_file"`
+	SourceLine       int                    `json:"source_line"`
+	Metadata         map[string]any         `json:"metadata"`
+	RequestSummary   *ingestRequestSummary  `json:"request_summary,omitempty"`
 }
 
 type ingestRequestSummary struct {
@@ -127,15 +134,22 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 	logEntries := make([]store.LogEntry, len(entries))
 	for i, e := range entries {
 		logEntries[i] = store.LogEntry{
-			Timestamp:    e.Timestamp,
-			Level:        e.Level,
-			Service:      e.Service,
-			TraceID:      e.TraceID,
-			SpanID:       e.SpanID,
-			ParentSpanID: e.ParentSpanID,
-			Message:      e.Message,
-			EventType:    e.EventType,
-			Metadata:     e.Metadata,
+			Timestamp:        e.Timestamp,
+			Level:            e.Level,
+			Service:          e.Service,
+			Environment:      e.Environment,
+			CommitHash:       e.CommitHash,
+			TraceID:          e.TraceID,
+			SpanID:           e.SpanID,
+			ParentSpanID:     e.ParentSpanID,
+			RequestID:        e.RequestID,
+			Message:          e.Message,
+			EventType:        e.EventType,
+			ExceptionClass:   e.ExceptionClass,
+			ErrorFingerprint: e.ErrorFingerprint,
+			SourceFile:       e.SourceFile,
+			SourceLine:       e.SourceLine,
+			Metadata:         e.Metadata,
 		}
 		if e.RequestSummary != nil {
 			rs := e.RequestSummary

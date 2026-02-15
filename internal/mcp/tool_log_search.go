@@ -25,6 +25,12 @@ func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
 		level, _ := args["level"].(string)
 		traceID, _ := args["trace_id"].(string)
 		eventType, _ := args["event_type"].(string)
+		commitHash, _ := args["commit_hash"].(string)
+		requestID, _ := args["request_id"].(string)
+		environment, _ := args["environment"].(string)
+		exceptionClass, _ := args["exception_class"].(string)
+		errorFingerprint, _ := args["error_fingerprint"].(string)
+		sourceFile, _ := args["source_file"].(string)
 
 		limit := 50
 		if v, ok := args["limit"].(float64); ok && v > 0 {
@@ -64,15 +70,21 @@ func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
 		}
 
 		params := store.LogSearchParams{
-			Query:     query,
-			Service:   service,
-			Level:     level,
-			TraceID:   traceID,
-			EventType: eventType,
-			Limit:          limit,
-			Offset:         offset,
-			SortAsc:        sortAsc,
-			MetadataFilter: metadataFilter,
+			Query:            query,
+			Service:          service,
+			Level:            level,
+			Environment:      environment,
+			CommitHash:       commitHash,
+			TraceID:          traceID,
+			RequestID:        requestID,
+			EventType:        eventType,
+			ExceptionClass:   exceptionClass,
+			ErrorFingerprint: errorFingerprint,
+			SourceFile:       sourceFile,
+			Limit:            limit,
+			Offset:           offset,
+			SortAsc:          sortAsc,
+			MetadataFilter:   metadataFilter,
 		}
 
 		// Parse time range.
@@ -134,14 +146,35 @@ func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
 			if (fields == nil || fields["service"]) && e.Service != "" {
 				entry["service"] = e.Service
 			}
+			if (fields == nil || fields["environment"]) && e.Environment != "" {
+				entry["environment"] = e.Environment
+			}
+			if (fields == nil || fields["commit_hash"]) && e.CommitHash != "" {
+				entry["commit_hash"] = e.CommitHash
+			}
 			if (fields == nil || fields["trace_id"]) && e.TraceID != "" {
 				entry["trace_id"] = e.TraceID
+			}
+			if (fields == nil || fields["request_id"]) && e.RequestID != "" {
+				entry["request_id"] = e.RequestID
 			}
 			if fields == nil || fields["message"] {
 				entry["message"] = msg
 			}
 			if (fields == nil || fields["event_type"]) && e.EventType != "" {
 				entry["event_type"] = e.EventType
+			}
+			if (fields == nil || fields["exception_class"]) && e.ExceptionClass != "" {
+				entry["exception_class"] = e.ExceptionClass
+			}
+			if (fields == nil || fields["error_fingerprint"]) && e.ErrorFingerprint != "" {
+				entry["error_fingerprint"] = e.ErrorFingerprint
+			}
+			if (fields == nil || fields["source_file"]) && e.SourceFile != "" {
+				entry["source_file"] = e.SourceFile
+				if e.SourceLine > 0 {
+					entry["source_line"] = e.SourceLine
+				}
 			}
 			if (fields == nil || fields["metadata"]) && len(e.Metadata) > 0 {
 				entry["metadata"] = e.Metadata

@@ -39,6 +39,24 @@ func (m *mockLogStore) Search(_ context.Context, params store.LogSearchParams) (
 		if params.TraceID != "" && e.TraceID != params.TraceID {
 			continue
 		}
+		if params.Environment != "" && e.Environment != params.Environment {
+			continue
+		}
+		if params.CommitHash != "" && !strings.HasPrefix(e.CommitHash, params.CommitHash) {
+			continue
+		}
+		if params.RequestID != "" && e.RequestID != params.RequestID {
+			continue
+		}
+		if params.ExceptionClass != "" && e.ExceptionClass != params.ExceptionClass {
+			continue
+		}
+		if params.ErrorFingerprint != "" && e.ErrorFingerprint != params.ErrorFingerprint {
+			continue
+		}
+		if params.SourceFile != "" && e.SourceFile != params.SourceFile {
+			continue
+		}
 		if params.Start != nil && e.Timestamp.Before(*params.Start) {
 			continue
 		}
@@ -106,6 +124,18 @@ func (m *mockLogStore) DistinctValues(_ context.Context, field string, params st
 			val = e.Level
 		case "event_type":
 			val = e.EventType
+		case "environment":
+			val = e.Environment
+		case "commit_hash":
+			val = e.CommitHash
+		case "request_id":
+			val = e.RequestID
+		case "exception_class":
+			val = e.ExceptionClass
+		case "error_fingerprint":
+			val = e.ErrorFingerprint
+		case "source_file":
+			val = e.SourceFile
 		}
 		if val != "" {
 			seen[val] = true

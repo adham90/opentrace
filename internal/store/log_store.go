@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -32,8 +33,11 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []LogEntry) (int, er
 	defer tx.Rollback()
 
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO logs (timestamp, level, service, trace_id, span_id, parent_span_id, message, event_type, metadata)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		`INSERT INTO logs (timestamp, level, service, environment, commit_hash,
+		                   trace_id, span_id, parent_span_id, request_id,
+		                   message, event_type, exception_class, error_fingerprint,
+		                   source_file, source_line, metadata)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return 0, fmt.Errorf("prepare insert: %w", err)
 	}
@@ -43,12 +47,18 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []LogEntry) (int, er
 	var summaryStmt *sql.Stmt
 
 	for _, e := range entries {
+		// Extract promoted fields from metadata as fallback
+		promoteFromMetadata(&e)
+
 		meta, err := json.Marshal(e.Metadata)
 		if err != nil {
 			return 0, fmt.Errorf("marshaling metadata: %w", err)
 		}
 		ts := e.Timestamp.UTC().Format(time.RFC3339Nano)
-		res, err := stmt.ExecContext(ctx, ts, e.Level, e.Service, e.TraceID, e.SpanID, e.ParentSpanID, e.Message, e.EventType, string(meta))
+		res, err := stmt.ExecContext(ctx, ts, e.Level, e.Service, e.Environment, e.CommitHash,
+			e.TraceID, e.SpanID, e.ParentSpanID, e.RequestID,
+			e.Message, e.EventType, e.ExceptionClass, e.ErrorFingerprint,
+			e.SourceFile, e.SourceLine, string(meta))
 		if err != nil {
 			return 0, fmt.Errorf("inserting log entry: %w", err)
 		}
@@ -105,6 +115,57 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []LogEntry) (int, er
 	return len(entries), nil
 }
 
+// promoteFromMetadata extracts promoted fields from the metadata map when
+// the corresponding top-level field is empty. This provides backward
+// compatibility with older gem versions that send everything in metadata.
+func promoteFromMetadata(e *LogEntry) {
+	if e.Metadata == nil {
+		return
+	}
+	if e.CommitHash == "" {
+		if v, ok := e.Metadata["git_sha"].(string); ok && v != "" {
+			e.CommitHash = v
+		}
+	}
+	if e.RequestID == "" {
+		if v, ok := e.Metadata["request_id"].(string); ok && v != "" {
+			e.RequestID = v
+		}
+	}
+	if e.ExceptionClass == "" {
+		if v, ok := e.Metadata["exception_class"].(string); ok && v != "" {
+			e.ExceptionClass = v
+		}
+	}
+	if e.ErrorFingerprint == "" {
+		if v, ok := e.Metadata["error_fingerprint"].(string); ok && v != "" {
+			e.ErrorFingerprint = v
+		}
+	}
+	if e.SourceFile == "" {
+		if bt, ok := e.Metadata["backtrace"].([]any); ok && len(bt) > 0 {
+			if line, ok := bt[0].(string); ok {
+				e.SourceFile, e.SourceLine = parseBacktraceLine(line)
+			}
+		}
+	}
+}
+
+// parseBacktraceLine extracts file path and line number from a Ruby backtrace line.
+// Format: "app/controllers/users_controller.rb:42:in `show'"
+func parseBacktraceLine(line string) (string, int) {
+	parts := strings.SplitN(line, ":", 3)
+	if len(parts) < 2 {
+		return "", 0
+	}
+	file := parts[0]
+	lineNum, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return file, 0
+	}
+	return file, lineNum
+}
+
 func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEntry, error) {
 	var conditions []string
 	var args []any
@@ -137,9 +198,38 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 		conditions = append(conditions, "l.trace_id = ?")
 		args = append(args, params.TraceID)
 	}
+	if params.Environment != "" {
+		conditions = append(conditions, "l.environment = ?")
+		args = append(args, params.Environment)
+	}
+	if params.CommitHash != "" {
+		if len(params.CommitHash) < 40 {
+			conditions = append(conditions, "l.commit_hash LIKE ?")
+			args = append(args, params.CommitHash+"%")
+		} else {
+			conditions = append(conditions, "l.commit_hash = ?")
+			args = append(args, params.CommitHash)
+		}
+	}
+	if params.RequestID != "" {
+		conditions = append(conditions, "l.request_id = ?")
+		args = append(args, params.RequestID)
+	}
 	if params.EventType != "" {
 		conditions = append(conditions, "l.event_type = ?")
 		args = append(args, params.EventType)
+	}
+	if params.ExceptionClass != "" {
+		conditions = append(conditions, "l.exception_class = ?")
+		args = append(args, params.ExceptionClass)
+	}
+	if params.ErrorFingerprint != "" {
+		conditions = append(conditions, "l.error_fingerprint = ?")
+		args = append(args, params.ErrorFingerprint)
+	}
+	if params.SourceFile != "" {
+		conditions = append(conditions, "l.source_file = ?")
+		args = append(args, params.SourceFile)
 	}
 	if params.SinceID > 0 {
 		conditions = append(conditions, "l.id > ?")
@@ -154,12 +244,17 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 		args = append(args, params.End.UTC().Format(time.RFC3339Nano))
 	}
 
+	const selectCols = `l.id, l.timestamp, l.level, l.service, l.environment, l.commit_hash,
+		l.trace_id, l.span_id, l.parent_span_id, l.request_id,
+		l.message, l.event_type, l.exception_class, l.error_fingerprint,
+		l.source_file, l.source_line, l.metadata`
+
 	var query string
 	if useFTS {
-		query = `SELECT l.id, l.timestamp, l.level, l.service, l.trace_id, l.span_id, l.parent_span_id, l.message, l.event_type, l.metadata
+		query = `SELECT ` + selectCols + `
 		         FROM logs l JOIN logs_fts ON l.id = logs_fts.rowid`
 	} else {
-		query = `SELECT l.id, l.timestamp, l.level, l.service, l.trace_id, l.span_id, l.parent_span_id, l.message, l.event_type, l.metadata
+		query = `SELECT ` + selectCols + `
 		         FROM logs l`
 	}
 
@@ -212,19 +307,47 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 		var entry LogEntry
 		var tsStr string
 		var metaJSON sql.NullString
-		var spanID, parentSpanID sql.NullString
+		var environment, commitHash, spanID, parentSpanID, requestID sql.NullString
+		var eventType, exceptionClass, errorFingerprint, sourceFile sql.NullString
+		var sourceLine sql.NullInt64
 		if err := rows.Scan(
-			&entry.ID, &tsStr, &entry.Level, &entry.Service,
-			&entry.TraceID, &spanID, &parentSpanID, &entry.Message, &entry.EventType, &metaJSON,
+			&entry.ID, &tsStr, &entry.Level, &entry.Service, &environment, &commitHash,
+			&entry.TraceID, &spanID, &parentSpanID, &requestID,
+			&entry.Message, &eventType, &exceptionClass, &errorFingerprint,
+			&sourceFile, &sourceLine, &metaJSON,
 		); err != nil {
 			return nil, fmt.Errorf("scanning log entry: %w", err)
 		}
 		entry.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
+		if environment.Valid {
+			entry.Environment = environment.String
+		}
+		if commitHash.Valid {
+			entry.CommitHash = commitHash.String
+		}
 		if spanID.Valid {
 			entry.SpanID = spanID.String
 		}
 		if parentSpanID.Valid {
 			entry.ParentSpanID = parentSpanID.String
+		}
+		if requestID.Valid {
+			entry.RequestID = requestID.String
+		}
+		if eventType.Valid {
+			entry.EventType = eventType.String
+		}
+		if exceptionClass.Valid {
+			entry.ExceptionClass = exceptionClass.String
+		}
+		if errorFingerprint.Valid {
+			entry.ErrorFingerprint = errorFingerprint.String
+		}
+		if sourceFile.Valid {
+			entry.SourceFile = sourceFile.String
+		}
+		if sourceLine.Valid {
+			entry.SourceLine = int(sourceLine.Int64)
 		}
 		if metaJSON.Valid && metaJSON.String != "" {
 			if err := json.Unmarshal([]byte(metaJSON.String), &entry.Metadata); err != nil {
@@ -313,8 +436,20 @@ func (s *logStore) DistinctValues(ctx context.Context, field string, params LogC
 		col = "level"
 	case "event_type":
 		col = "event_type"
+	case "environment":
+		col = "environment"
+	case "commit_hash":
+		col = "commit_hash"
+	case "request_id":
+		col = "request_id"
+	case "exception_class":
+		col = "exception_class"
+	case "error_fingerprint":
+		col = "error_fingerprint"
+	case "source_file":
+		col = "source_file"
 	default:
-		return nil, fmt.Errorf("unsupported field %q (use service, level, or event_type)", field)
+		return nil, fmt.Errorf("unsupported field %q", field)
 	}
 
 	query := fmt.Sprintf(`SELECT DISTINCT %s FROM logs WHERE %s != '' AND timestamp >= ? AND timestamp < ?`, col, col)
@@ -373,25 +508,57 @@ func (s *logStore) MetadataKeys(ctx context.Context, params LogCountParams) ([]s
 
 func (s *logStore) GetByID(ctx context.Context, id int64) (*LogEntry, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, timestamp, level, service, trace_id, span_id, parent_span_id, message, event_type, metadata FROM logs WHERE id = ?`, id)
+		`SELECT id, timestamp, level, service, environment, commit_hash,
+			trace_id, span_id, parent_span_id, request_id,
+			message, event_type, exception_class, error_fingerprint,
+			source_file, source_line, metadata
+		FROM logs WHERE id = ?`, id)
 
 	var entry LogEntry
 	var tsStr string
 	var metaJSON sql.NullString
-	var spanID, parentSpanID sql.NullString
-	if err := row.Scan(&entry.ID, &tsStr, &entry.Level, &entry.Service,
-		&entry.TraceID, &spanID, &parentSpanID, &entry.Message, &entry.EventType, &metaJSON); err != nil {
+	var environment, commitHash, spanID, parentSpanID, requestID sql.NullString
+	var eventType, exceptionClass, errorFingerprint, sourceFile sql.NullString
+	var sourceLine sql.NullInt64
+	if err := row.Scan(&entry.ID, &tsStr, &entry.Level, &entry.Service, &environment, &commitHash,
+		&entry.TraceID, &spanID, &parentSpanID, &requestID,
+		&entry.Message, &eventType, &exceptionClass, &errorFingerprint,
+		&sourceFile, &sourceLine, &metaJSON); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("getting log by id: %w", err)
 	}
 	entry.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
+	if environment.Valid {
+		entry.Environment = environment.String
+	}
+	if commitHash.Valid {
+		entry.CommitHash = commitHash.String
+	}
 	if spanID.Valid {
 		entry.SpanID = spanID.String
 	}
 	if parentSpanID.Valid {
 		entry.ParentSpanID = parentSpanID.String
+	}
+	if requestID.Valid {
+		entry.RequestID = requestID.String
+	}
+	if eventType.Valid {
+		entry.EventType = eventType.String
+	}
+	if exceptionClass.Valid {
+		entry.ExceptionClass = exceptionClass.String
+	}
+	if errorFingerprint.Valid {
+		entry.ErrorFingerprint = errorFingerprint.String
+	}
+	if sourceFile.Valid {
+		entry.SourceFile = sourceFile.String
+	}
+	if sourceLine.Valid {
+		entry.SourceLine = int(sourceLine.Int64)
 	}
 	if metaJSON.Valid && metaJSON.String != "" {
 		if err := json.Unmarshal([]byte(metaJSON.String), &entry.Metadata); err != nil {

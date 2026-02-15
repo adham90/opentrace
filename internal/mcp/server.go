@@ -451,8 +451,14 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 				mcp.WithString("query", mcp.Description("Full-text search query (searches message content). Also tries matching service names if no FTS results found.")),
 				mcp.WithString("service", mcp.Description("Filter by service name")),
 				mcp.WithString("level", mcp.Description("Filter by log level: debug, info, warn, error, fatal (comma-separated for multiple)")),
+				mcp.WithString("environment", mcp.Description("Filter by deployment environment (e.g. production, staging, development)")),
+				mcp.WithString("commit_hash", mcp.Description("Filter by git commit hash. Supports short hashes (prefix match) and full 40-char SHA. Use to find all logs from a specific deploy.")),
 				mcp.WithString("trace_id", mcp.Description("Filter by trace/correlation ID")),
+				mcp.WithString("request_id", mcp.Description("Filter by request ID to see all logs from a single HTTP request")),
 				mcp.WithString("event_type", mcp.Description("Filter by event type (e.g. payment.completed, auth.login, order.shipped). Use list_log_attributes with field=event_type to discover available types.")),
+				mcp.WithString("exception_class", mcp.Description("Filter by exception class name (e.g. NoMethodError, ActiveRecord::RecordNotFound)")),
+				mcp.WithString("error_fingerprint", mcp.Description("Filter by error fingerprint to find all occurrences of the same error")),
+				mcp.WithString("source_file", mcp.Description("Filter by source file path (e.g. app/models/user.rb). Partial match supported.")),
 				mcp.WithString("time_range", mcp.Description("Lookback window: '15m', '1h' (default: all), '6h', '24h', '7d'")),
 				mcp.WithNumber("limit", mcp.Description("Maximum entries to return (default: 50, max: 200)")),
 				mcp.WithNumber("offset", mcp.Description("Skip this many entries for pagination (default: 0)")),
@@ -462,19 +468,19 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			),
 			logSearchHandler(deps.LogStore),
 		)
-		b.Add("log_search", "Search log entries with full-text search, metadata filters, field projection, and time histogram", "Log Intelligence", "read", "")
+		b.Add("log_search", "Search log entries by commit hash, environment, request ID, exception class, source file, and more with full-text search", "Log Intelligence", "read", "")
 
 		// Log attribute discovery.
 		maybeAddTool(s,
 			mcp.NewTool("list_log_attributes",
-				mcp.WithDescription("Discover distinct values for log fields. Call this first to learn what services, levels, event types, and metadata keys exist before filtering with log_search. Essential bootstrapping tool for effective log investigation."),
-				mcp.WithString("field", mcp.Required(), mcp.Description("Field to list values for: 'service', 'level', 'event_type', or 'metadata_key'")),
+				mcp.WithDescription("Discover distinct values for log fields. Call this first to learn what services, levels, event types, environments, commit hashes, and metadata keys exist before filtering with log_search. Essential bootstrapping tool for effective log investigation."),
+				mcp.WithString("field", mcp.Required(), mcp.Description("Field to list values for: 'service', 'level', 'event_type', 'environment', 'commit_hash', 'request_id', 'exception_class', 'error_fingerprint', 'source_file', or 'metadata_key'")),
 				mcp.WithString("time_range", mcp.Description("Lookback window: '15m', '1h', '6h', '24h' (default), '7d'")),
 				mcp.WithString("service", mcp.Description("Narrow metadata_key discovery to a specific service")),
 			),
 			listLogAttributesHandler(deps.LogStore),
 		)
-		b.Add("list_log_attributes", "Discover distinct values for log fields (services, levels, event types, metadata keys)", "Log Intelligence", "read", "")
+		b.Add("list_log_attributes", "Discover distinct values for log fields (services, levels, environments, commit hashes, exception classes, and more)", "Log Intelligence", "read", "")
 
 		// Log context (surrounding entries).
 		maybeAddTool(s,
@@ -488,6 +494,19 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			logContextHandler(deps.LogStore),
 		)
 		b.Add("log_context", "Get surrounding log entries around a specific log ID for focused investigation", "Log Intelligence", "read", "")
+
+		// Debugging overview — one call gives Claude the full picture.
+		maybeAddTool(s,
+			mcp.NewTool("log_summary",
+				mcp.WithDescription("Get a debugging-oriented overview: error rates, active deployments (by commit hash), top unique errors with source file:line locations, and slowest endpoints. Use this as the FIRST tool call when investigating issues — it gives the full picture in one call."),
+				mcp.WithString("time_range", mcp.Description("Lookback window: '15m', '1h' (default), '6h', '24h', '7d'")),
+				mcp.WithString("service", mcp.Description("Filter to a specific service name")),
+				mcp.WithString("environment", mcp.Description("Filter by deployment environment (e.g. production, staging)")),
+				mcp.WithString("commit_hash", mcp.Description("Filter to a specific deployment by commit hash")),
+			),
+			logSummaryHandler(deps.LogStore),
+		)
+		b.Add("log_summary", "Debugging overview: error rates, active deploys, top errors with source locations, slowest endpoints", "Log Intelligence", "read", "")
 	}
 
 	// Run ad-hoc read-only SQL queries.

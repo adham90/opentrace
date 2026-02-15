@@ -22,7 +22,7 @@ func listLogAttributesHandler(ls store.LogStore) server.ToolHandlerFunc {
 
 		field, _ := args["field"].(string)
 		if field == "" {
-			return mcp.NewToolResultError("field is required (service, level, event_type, or metadata_key)"), nil
+			return mcp.NewToolResultError("field is required (service, level, event_type, environment, commit_hash, request_id, exception_class, error_fingerprint, source_file, or metadata_key)"), nil
 		}
 
 		// Parse time range (default: 24h).
