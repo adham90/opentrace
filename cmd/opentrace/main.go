@@ -38,6 +38,7 @@ type appDeps struct {
 	mcpActivityStore store.MCPActivityStore
 	alertGroupStore  store.AlertGroupStore
 	auditStore       store.AuditStore
+	watchStore       store.WatchStore
 	registry         *connector.Registry
 	cfg              *config.Config
 }
@@ -119,6 +120,7 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	mcpActivityStore := store.NewMCPActivityStore(db)
 	alertGroupStore := store.NewAlertGroupStore(db)
 	auditStore := store.NewAuditStore(db)
+	watchStore := store.NewWatchStore(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
@@ -138,6 +140,7 @@ func initApp(ctx context.Context) (*appDeps, error) {
 		mcpActivityStore: mcpActivityStore,
 		alertGroupStore:  alertGroupStore,
 		auditStore:       auditStore,
+		watchStore:       watchStore,
 		registry:         registry,
 		cfg:              cfg,
 	}, nil
@@ -178,6 +181,8 @@ func runMCP() error {
 		eventHub,
 	)
 
+	watchMetrics := watcher.NewWatchMetrics(deps.logStore)
+
 	return mcpserver.Serve(mcpserver.Deps{
 		Registry:         deps.registry,
 		WatcherStore:     deps.watcherStore,
@@ -197,6 +202,8 @@ func runMCP() error {
 		AlertGroupStore:  deps.alertGroupStore,
 		EventHub:         eventHub,
 		AuditStore:       deps.auditStore,
+		WatchStore:       deps.watchStore,
+		WatchMetrics:     watchMetrics,
 	})
 }
 
@@ -273,6 +280,9 @@ func run() error {
 	// Create rule evaluator for watcher preview and MCP SSE.
 	ruleEvaluator := watcher.NewRuleEvaluator(deps.registry, deps.logStore, deps.dsStore)
 
+	// Agent-first watch components
+	watchMetrics := watcher.NewWatchMetrics(deps.logStore)
+
 	// Build MCP tool catalog for the /tools page (auto-detected from MCP registrations).
 	toolCatalog := mcpserver.BuildCatalog(mcpserver.Deps{
 		Registry:        deps.registry,
@@ -288,7 +298,14 @@ func run() error {
 		Config:          deps.cfg,
 		AlertGroupStore: deps.alertGroupStore,
 		AuditStore:      deps.auditStore,
+		WatchStore:      deps.watchStore,
+		WatchMetrics:    watchMetrics,
 	})
+
+	// Agent-first watch stream evaluator (reactive on log ingestion)
+	watchEvaluator := watcher.NewWatchEvaluator(watchMetrics, deps.watchStore)
+	watchEvidenceBuilder := watcher.NewWatchEvidenceBuilder(deps.logStore, watchMetrics)
+	watchStream := watcher.NewWatchStreamEvaluator(deps.watchStore, watchEvaluator, watchEvidenceBuilder)
 
 	// Create server
 	srv := web.NewServerWithDeps(web.ServerDeps{
@@ -314,6 +331,9 @@ func run() error {
 		MCPActivityStore: deps.mcpActivityStore,
 		AlertGroupStore:  deps.alertGroupStore,
 		AuditStore:       deps.auditStore,
+		WatchStreamEvaluator: watchStream,
+		WatchStore:           deps.watchStore,
+		WatchMetrics:         watchMetrics,
 	})
 
 	httpServer := &http.Server{
@@ -356,6 +376,17 @@ func run() error {
 		SequenceEvaluator:  sequenceEval,
 	})
 	sched.Start(ctx)
+
+	// Start agent-first watch scheduler
+	watchSessionMgr := watcher.NewWatchSessionManager(deps.watchStore, watchMetrics)
+	watchSched := watcher.NewWatchScheduler(watcher.WatchSchedulerOpts{
+		WatchStore:      deps.watchStore,
+		LogStore:        deps.logStore,
+		Evaluator:       watchEvaluator,
+		EvidenceBuilder: watchEvidenceBuilder,
+		SessionManager:  watchSessionMgr,
+	})
+	watchSched.Start(ctx)
 
 	// Background: clean expired sessions every 15 minutes
 	go func() {
@@ -540,6 +571,7 @@ func run() error {
 	cancelCtx()
 
 	sched.Stop()
+	watchSched.Stop()
 	deps.registry.CloseAll()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)

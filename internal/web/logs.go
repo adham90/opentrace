@@ -204,6 +204,9 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 
 	if count > 0 {
 		s.ensureLogsConnector(r.Context())
+		if s.watchStream != nil {
+			go s.watchStream.OnLogsReceived(logEntries)
+		}
 	}
 
 	status := http.StatusCreated

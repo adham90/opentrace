@@ -41,6 +41,10 @@ type Deps struct {
 	AlertGroupStore  store.AlertGroupStore       // incident/alert group management
 	EventHub         *watcher.EventHub           // cancel running watcher executions
 	AuditStore       store.AuditStore            // admin audit trail
+
+	// Agent-first watches (Phase 1)
+	WatchStore    store.WatchStore
+	WatchMetrics  *watcher.WatchMetrics
 }
 
 // NewConfiguredServer creates an MCPServer and registers tools based on the
@@ -714,6 +718,17 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 		maybeAddTool(s, getAuditLogTool(), getAuditLogHandler(deps.AuditStore))
 		b.Add("get_audit_log", "View recent admin actions for security review", "Audit", "read", "")
 	}
+
+	// Agent-first watch tools (read-only).
+	if deps.WatchStore != nil {
+		maybeAddTool(s, watchStatusTool(), watchStatusHandler(deps.WatchStore))
+		b.Add("watch_status", "List active watches with current values and pending alerts", "Watches", "read", "")
+
+		if deps.LogStore != nil && deps.WatchMetrics != nil {
+			maybeAddTool(s, investigateTool(), investigateHandler(deps.WatchStore, deps.LogStore, deps.WatchMetrics))
+			b.Add("investigate", "Investigate an alert or collect data about a service", "Watches", "read", "")
+		}
+	}
 }
 
 // addWriteTools registers write/admin tools (connector tools, create_watcher, preview_watcher).
@@ -1078,6 +1093,15 @@ Each suggestion includes a watcher_config that can be passed directly to create_
 
 		maybeAddTool(s, deleteUserTool(), deleteUserHandler(deps.UserStore))
 		b.Add("delete_user", "Permanently delete a user account", "Users", "admin", "")
+	}
+
+	// Agent-first watch tools (write).
+	if deps.WatchStore != nil && deps.LogStore != nil && deps.WatchMetrics != nil {
+		maybeAddTool(s, watchTool(), watchHandler(deps.WatchStore, deps.LogStore, deps.WatchMetrics))
+		b.Add("watch", "Create a metric watch that monitors a service and alerts on threshold breach", "Watches", "admin", "")
+
+		maybeAddTool(s, dismissWatchTool(), dismissWatchHandler(deps.WatchStore))
+		b.Add("dismiss_watch", "Stop a watch or dismiss/acknowledge an alert", "Watches", "admin", "")
 	}
 }
 

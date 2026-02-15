@@ -70,6 +70,9 @@ type Server struct {
 	mcpActivityStore store.MCPActivityStore
 	alertGroupStore  store.AlertGroupStore
 	auditStore       store.AuditStore
+	watchStream      *watcher.WatchStreamEvaluator
+	watchStore       store.WatchStore
+	watchMetrics     *watcher.WatchMetrics
 	versionChecker   *versionChecker
 	selfUpdater    *selfUpdater
 	sseServer      *mcpgoserver.SSEServer
@@ -106,6 +109,9 @@ type ServerDeps struct {
 	MCPActivityStore store.MCPActivityStore
 	AlertGroupStore  store.AlertGroupStore
 	AuditStore       store.AuditStore
+	WatchStreamEvaluator *watcher.WatchStreamEvaluator
+	WatchStore           store.WatchStore
+	WatchMetrics         *watcher.WatchMetrics
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
@@ -143,6 +149,9 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		mcpActivityStore: deps.MCPActivityStore,
 		alertGroupStore:  deps.AlertGroupStore,
 		auditStore:       deps.AuditStore,
+		watchStream:      deps.WatchStreamEvaluator,
+		watchStore:       deps.WatchStore,
+		watchMetrics:     deps.WatchMetrics,
 		versionChecker:   newVersionChecker("adham90", "opentrace"),
 		selfUpdater:    newSelfUpdater("adham90", "opentrace"),
 		restartCh:      make(chan struct{}),
