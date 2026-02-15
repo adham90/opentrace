@@ -214,6 +214,9 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Get("/logs", srv.handleLogsPage)
 		r.Get("/sources", srv.handleSourcesPage)
 		r.Get("/watches", srv.handleWatchesPage)
+		r.Get("/alerts", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/watches", http.StatusMovedPermanently)
+		})
 		r.Get("/tools", srv.handleToolsPage)
 		r.Get("/profile", srv.handleProfilePage)
 	})

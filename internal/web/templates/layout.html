@@ -40,16 +40,6 @@
         <div class="shortcut-row"><kbd>p</kbd><span>Toggle live/paused</span></div>
       </div>
       {{end}}
-      {{if eq .Nav "alerts"}}
-      <div class="shortcut-section">
-        <div class="shortcut-section-label">Alert Filters</div>
-        <div class="shortcut-row"><kbd>s</kbd> / <kbd>S</kbd><span>Cycle status</span></div>
-        <div class="shortcut-row"><kbd>v</kbd> / <kbd>V</kbd><span>Cycle severity</span></div>
-        <div class="shortcut-row"><kbd>m</kbd> / <kbd>M</kbd><span>Cycle watcher</span></div>
-        <div class="shortcut-row"><kbd>g</kbd><span>Toggle grouping</span></div>
-        <div class="shortcut-row"><kbd>c</kbd><span>Clear all filters</span></div>
-      </div>
-      {{end}}
       {{if eq .Nav "watches"}}
       <div class="shortcut-section">
         <div class="shortcut-section-label">Watch Filters</div>
@@ -72,9 +62,8 @@
       <button class="mobile-menu-btn" onclick="toggleMobileMenu()" aria-label="Menu">&#9776;</button>
       <a href="/" class="tmux-tab {{if eq .Nav "logs"}}active{{end}}">[0:logs]</a>
       <a href="/watches" class="tmux-tab {{if eq .Nav "watches"}}active{{end}}">1:watches</a>
-      <a href="/alerts" class="tmux-tab {{if eq .Nav "alerts"}}active{{end}}">2:alerts<span id="alert-badge" class="nav-badge" style="display:none">0</span></a>
-      <a href="/sources" class="tmux-tab {{if eq .Nav "sources"}}active{{end}}">3:sources</a>
-      <a href="/settings" class="tmux-tab {{if eq .Nav "settings"}}active{{end}}">4:settings</a>
+      <a href="/sources" class="tmux-tab {{if eq .Nav "sources"}}active{{end}}">2:sources</a>
+      <a href="/settings" class="tmux-tab {{if eq .Nav "settings"}}active{{end}}">3:settings</a>
     </div>
     <div class="tmux-right">
       {{if .User}}<span class="tmux-info">{{.User.DisplayName}}@opentrace</span>{{end}}
@@ -90,7 +79,6 @@
     </div>
     <a href="/" class="mobile-menu-item {{if eq .Nav "logs"}}active{{end}}">logs</a>
     <a href="/watches" class="mobile-menu-item {{if eq .Nav "watches"}}active{{end}}">watches</a>
-    <a href="/alerts" class="mobile-menu-item {{if eq .Nav "alerts"}}active{{end}}">alerts<span id="alert-badge-mobile" class="nav-badge" style="display:none">0</span></a>
     <a href="/sources" class="mobile-menu-item {{if eq .Nav "sources"}}active{{end}}">sources</a>
     <a href="/settings" class="mobile-menu-item {{if eq .Nav "settings"}}active{{end}}">settings</a>
     {{if .User}}<div class="mobile-menu-user">{{.User.DisplayName}}@opentrace</div>{{end}}
@@ -106,17 +94,6 @@
   </main>
 
   <script nonce="{{.CSPNonce}}">
-  function updateBadge() {
-    fetch('/api/alerts/count').then(function(r){return r.json()}).then(function(d){
-      var b=document.getElementById('alert-badge');
-      if(b){b.textContent=d.count;b.style.display=d.count>0?'inline':'none';}
-      var bm=document.getElementById('alert-badge-mobile');
-      if(bm){bm.textContent=d.count;bm.style.display=d.count>0?'inline':'none';}
-    }).catch(function(){});
-  }
-  updateBadge();
-  setInterval(updateBadge, 30000);
-
   (function(){
     var themes = ['system', 'dark', 'light'];
 
@@ -233,7 +210,7 @@
 
   // Keyboard navigation + shortcut overlay
   (function(){
-    var tabs = {0:'/', 1:'/watches', 2:'/alerts', 3:'/sources', 4:'/settings'};
+    var tabs = {0:'/', 1:'/watches', 2:'/sources', 3:'/settings'};
 
     window.toggleShortcuts = function() {
       var overlay = document.getElementById('shortcut-overlay');
