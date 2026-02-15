@@ -162,21 +162,6 @@ type RetentionSettings struct {
 	RetentionDays int `json:"retention_days"`
 }
 
-// LLMSettings holds LLM provider configuration stored in app_config.
-type LLMSettings struct {
-	DefaultProvider string `json:"default_provider,omitempty"` // "ollama", "anthropic", "openai", "gemini"
-	DefaultModel    string `json:"default_model,omitempty"`    // model name key, e.g. "anthropic-sonnet"
-
-	AnthropicAPIKey string `json:"anthropic_api_key,omitempty"`
-	AnthropicURL    string `json:"anthropic_url,omitempty"`
-	OpenAIAPIKey    string `json:"openai_api_key,omitempty"`
-	OpenAIURL       string `json:"openai_url,omitempty"`
-	GeminiAPIKey    string `json:"gemini_api_key,omitempty"`
-	GeminiURL       string `json:"gemini_url,omitempty"`
-	OllamaURL       string `json:"ollama_url,omitempty"`
-	OllamaModel     string `json:"ollama_model,omitempty"`
-}
-
 // SettingsStore manages application settings stored in app_config.
 type SettingsStore interface {
 	GetRetention(ctx context.Context) (*RetentionSettings, error)
@@ -185,8 +170,6 @@ type SettingsStore interface {
 	SetAPIKey(ctx context.Context, key string) error
 	GetAutoUpdate(ctx context.Context) (bool, error)
 	SetAutoUpdate(ctx context.Context, enabled bool) error
-	GetLLMSettings(ctx context.Context) (*LLMSettings, error)
-	SetLLMSettings(ctx context.Context, settings LLMSettings) error
 }
 
 // MCPActivityStore tracks MCP tool calls and connection events.

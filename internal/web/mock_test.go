@@ -973,7 +973,6 @@ type mockSettingsStore struct {
 	retention   *store.RetentionSettings
 	apiKey      string
 	autoUpdate  bool
-	llmSettings *store.LLMSettings
 }
 
 func newMockSettingsStore() *mockSettingsStore {
@@ -1019,19 +1018,6 @@ func (m *mockSettingsStore) SetAutoUpdate(ctx context.Context, enabled bool) err
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.autoUpdate = enabled
-	return nil
-}
-
-func (m *mockSettingsStore) GetLLMSettings(ctx context.Context) (*store.LLMSettings, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.llmSettings, nil
-}
-
-func (m *mockSettingsStore) SetLLMSettings(ctx context.Context, settings store.LLMSettings) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.llmSettings = &settings
 	return nil
 }
 
