@@ -1,0 +1,668 @@
+{{define "content"}}
+<div class="page-header">
+  <h1><span class="prompt">$</span> watches</h1>
+  <div class="page-actions">
+    <button class="btn btn-primary btn-sm" onclick="openCreateModal()">+ new watch</button>
+  </div>
+</div>
+
+<div class="filter-bar">
+  <span class="filter-tag" id="tag-status" onclick="toggleWatchDrop('drop-status')">
+    status:<span id="tag-status-val">all</span>
+  </span>
+  <div class="filter-dropdown" id="drop-status"></div>
+
+  <span class="filter-tag" id="tag-metric" onclick="toggleWatchDrop('drop-metric')">
+    metric:<span id="tag-metric-val">all</span>
+  </span>
+  <div class="filter-dropdown" id="drop-metric"></div>
+
+  <span class="filter-tag" id="tag-urgency" onclick="toggleWatchDrop('drop-urgency')">
+    urgency:<span id="tag-urgency-val">all</span>
+  </span>
+  <div class="filter-dropdown" id="drop-urgency"></div>
+</div>
+
+<div id="watches-list" class="watches-list">
+  <div class="loading-state">loading watches...</div>
+</div>
+
+<!-- Pending alerts section -->
+<div id="watch-alerts-section" style="display:none">
+  <div class="page-header" style="margin-top:2rem">
+    <h2><span class="prompt">$</span> pending alerts</h2>
+  </div>
+  <div id="watch-alerts-list" class="watches-list"></div>
+</div>
+
+<!-- Create modal -->
+<div class="modal" id="create-modal" style="display:none" onclick="if(event.target===this)hideCreateModal()">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-title">Create Watch</span>
+      <button class="modal-close" onclick="hideCreateModal()">&times;</button>
+    </div>
+    <form id="create-form" onsubmit="submitCreateWatch(event)">
+      <div class="form-row">
+        <label>Metric *</label>
+        <select id="create-metric" required>
+          <option value="error_rate">error_rate</option>
+          <option value="response_time">response_time</option>
+          <option value="p95_response">p95_response</option>
+          <option value="log_count">log_count</option>
+          <option value="error_count">error_count</option>
+          <option value="heartbeat">heartbeat</option>
+          <option value="sql_count">sql_count</option>
+          <option value="cache_hit_rate">cache_hit_rate</option>
+        </select>
+      </div>
+      <div class="form-row form-row-pair">
+        <div>
+          <label>Operator</label>
+          <select id="create-operator">
+            <option value="gt">gt (&gt;)</option>
+            <option value="gte">gte (&ge;)</option>
+            <option value="lt">lt (&lt;)</option>
+            <option value="lte">lte (&le;)</option>
+            <option value="eq">eq (=)</option>
+            <option value="neq">neq (&ne;)</option>
+          </select>
+        </div>
+        <div>
+          <label>Threshold</label>
+          <input type="number" id="create-threshold" step="any" placeholder="0.01">
+        </div>
+      </div>
+      <div class="form-row form-row-pair">
+        <div>
+          <label>Service</label>
+          <input type="text" id="create-service" placeholder="payments">
+        </div>
+        <div>
+          <label>Endpoint</label>
+          <input type="text" id="create-endpoint" placeholder="GET /api/users">
+        </div>
+      </div>
+      <div class="form-row form-row-pair">
+        <div>
+          <label>Duration</label>
+          <select id="create-duration">
+            <option value="1h">1 hour</option>
+            <option value="2h" selected>2 hours</option>
+            <option value="4h">4 hours</option>
+            <option value="8h">8 hours</option>
+            <option value="24h">24 hours</option>
+            <option value="permanent">permanent</option>
+          </select>
+        </div>
+        <div>
+          <label>Check Interval</label>
+          <select id="create-interval">
+            <option value="1m">every 1m</option>
+            <option value="2m" selected>every 2m</option>
+            <option value="5m">every 5m</option>
+            <option value="10m">every 10m</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row form-row-pair">
+        <div>
+          <label>Urgency</label>
+          <select id="create-urgency">
+            <option value="low">low</option>
+            <option value="normal" selected>normal</option>
+            <option value="high">high</option>
+            <option value="critical">critical</option>
+          </select>
+        </div>
+        <div>
+          <label>Min Consecutive</label>
+          <input type="number" id="create-min-consecutive" value="1" min="1" max="10">
+        </div>
+      </div>
+      <div class="form-row">
+        <label>Commit Hash</label>
+        <input type="text" id="create-commit" placeholder="abc123">
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-sm" onclick="hideCreateModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-sm" id="create-btn">Create Watch</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Evidence modal -->
+<div class="modal" id="evidence-modal" style="display:none" onclick="if(event.target===this)hideEvidenceModal()">
+  <div class="modal-content modal-wide">
+    <div class="modal-header">
+      <span class="modal-title">Alert Evidence</span>
+      <button class="modal-close" onclick="hideEvidenceModal()">&times;</button>
+    </div>
+    <div id="evidence-content">loading...</div>
+  </div>
+</div>
+
+<script nonce="{{.CSPNonce}}">
+(function(){
+  var allWatches = [];
+  var allAlerts = [];
+
+  // Filter state
+  var STATUS_OPTIONS = ['', 'active', 'triggered', 'resolved', 'expired'];
+  var STATUS_LABELS  = ['all', 'active', 'triggered', 'resolved', 'expired'];
+  var currentStatusIdx = 0;
+
+  var METRIC_OPTIONS = ['', 'error_rate', 'response_time', 'p95_response', 'log_count', 'error_count', 'heartbeat', 'sql_count', 'cache_hit_rate'];
+  var METRIC_LABELS  = ['all', 'error_rate', 'response_time', 'p95_response', 'log_count', 'error_count', 'heartbeat', 'sql_count', 'cache_hit_rate'];
+  var currentMetricIdx = 0;
+
+  var URGENCY_OPTIONS = ['', 'low', 'normal', 'high', 'critical'];
+  var URGENCY_LABELS  = ['all', 'low', 'normal', 'high', 'critical'];
+  var currentUrgencyIdx = 0;
+
+  function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+  function selectStatus(idx) {
+    currentStatusIdx = idx;
+    updateTagDisplay('tag-status-val', STATUS_LABELS[idx], idx !== 0);
+    applyFilters();
+  }
+  function selectMetric(idx) {
+    currentMetricIdx = idx;
+    updateTagDisplay('tag-metric-val', METRIC_LABELS[idx], idx !== 0);
+    applyFilters();
+  }
+  function selectUrgency(idx) {
+    currentUrgencyIdx = idx;
+    updateTagDisplay('tag-urgency-val', URGENCY_LABELS[idx], idx !== 0);
+    applyFilters();
+  }
+  function updateTagDisplay(elId, label, active) {
+    var el = document.getElementById(elId);
+    if (el) el.textContent = label;
+    var tag = el ? el.parentElement : null;
+    if (tag) { if (active) tag.classList.add('tag-active'); else tag.classList.remove('tag-active'); }
+  }
+
+  function toggleWatchDrop(id) {
+    var drop = document.getElementById(id);
+    var wasOpen = drop.classList.contains('show');
+    closeAllDropdowns();
+    if (!wasOpen) {
+      if (id === 'drop-status') renderDropdown(id, STATUS_OPTIONS, STATUS_LABELS, currentStatusIdx, selectStatus);
+      if (id === 'drop-metric') renderDropdown(id, METRIC_OPTIONS, METRIC_LABELS, currentMetricIdx, selectMetric);
+      if (id === 'drop-urgency') renderDropdown(id, URGENCY_OPTIONS, URGENCY_LABELS, currentUrgencyIdx, selectUrgency);
+      drop.classList.add('show');
+    }
+  }
+  window.toggleWatchDrop = toggleWatchDrop;
+
+  function closeAllDropdowns() {
+    document.querySelectorAll('.filter-dropdown').forEach(function(d) { d.classList.remove('show'); });
+  }
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('.filter-tag') && !e.target.closest('.filter-dropdown')) closeAllDropdowns();
+  });
+
+  function renderDropdown(dropId, options, labels, currentIdx, selectFn) {
+    var drop = document.getElementById(dropId);
+    var html = '';
+    for (var i = 0; i < options.length; i++) {
+      var cls = i === currentIdx ? 'filter-drop-item drop-active' : 'filter-drop-item';
+      html += '<button type="button" class="' + cls + '" data-idx="' + i + '">' + escapeHtml(labels[i]) + '</button>';
+    }
+    drop.innerHTML = html;
+    drop.querySelectorAll('.filter-drop-item').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        selectFn(parseInt(btn.getAttribute('data-idx')));
+        closeAllDropdowns();
+      });
+    });
+  }
+
+  function applyFilters() {
+    var filtered = allWatches.filter(function(w) {
+      if (STATUS_OPTIONS[currentStatusIdx] && w.status !== STATUS_OPTIONS[currentStatusIdx]) return false;
+      if (METRIC_OPTIONS[currentMetricIdx] && w.metric !== METRIC_OPTIONS[currentMetricIdx]) return false;
+      if (URGENCY_OPTIONS[currentUrgencyIdx] && w.urgency !== URGENCY_OPTIONS[currentUrgencyIdx]) return false;
+      return true;
+    });
+    renderWatches(filtered);
+  }
+
+  function getTimeAgo(dateStr) {
+    if (!dateStr) return 'never';
+    var now = new Date();
+    var date = new Date(dateStr);
+    var diff = Math.floor((now - date) / 1000);
+    if (diff < 0) return 'just now';
+    if (diff < 60) return diff + 's ago';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+  }
+
+  function formatMetricValue(metric, value) {
+    if (value === undefined || value === null) return '-';
+    if (metric === 'error_rate' || metric === 'cache_hit_rate') return (value * 100).toFixed(2) + '%';
+    if (metric === 'response_time' || metric === 'p95_response') return value.toFixed(0) + 'ms';
+    return value.toFixed(2);
+  }
+
+  function statusClass(status) {
+    switch(status) {
+      case 'active': return 'status-active';
+      case 'triggered': return 'status-error';
+      case 'resolved': return 'status-ok';
+      case 'expired': return 'status-muted';
+      default: return '';
+    }
+  }
+
+  function urgencyClass(urgency) {
+    switch(urgency) {
+      case 'critical': return 'severity-critical';
+      case 'high': return 'severity-warning';
+      default: return '';
+    }
+  }
+
+  function renderWatches(watches) {
+    var container = document.getElementById('watches-list');
+    if (!watches || watches.length === 0) {
+      container.innerHTML = '<div class="empty-state">No watches found. Create one to start monitoring.</div>';
+      return;
+    }
+    var html = '';
+    watches.forEach(function(w) {
+      var thresholdDisplay = w.metric === 'heartbeat' ? 'heartbeat' : w.operator + ' ' + formatMetricValue(w.metric, w.threshold);
+      html += '<div class="watch-row ' + urgencyClass(w.urgency) + '" data-id="' + w.id + '" onclick="toggleWatchDetail(\'' + w.id + '\')">';
+      html += '<div class="watch-row-main">';
+      html += '<span class="watch-status ' + statusClass(w.status) + '">' + escapeHtml(w.status) + '</span>';
+      html += '<span class="watch-metric">' + escapeHtml(w.metric) + '</span>';
+      html += '<span class="watch-threshold">' + escapeHtml(thresholdDisplay) + '</span>';
+      if (w.service) html += '<span class="watch-service">' + escapeHtml(w.service) + '</span>';
+      if (w.current_value !== undefined && w.current_value !== null) {
+        html += '<span class="watch-current">current: ' + formatMetricValue(w.metric, w.current_value) + '</span>';
+      }
+      html += '<span class="watch-meta">';
+      if (w.expires_in) html += 'expires: ' + escapeHtml(w.expires_in) + ' · ';
+      html += 'created ' + getTimeAgo(w.created_at);
+      html += '</span>';
+      html += '</div>';
+      html += '<div class="watch-detail" id="watch-detail-' + w.id + '" style="display:none">';
+      html += '<div class="watch-detail-grid">';
+      html += '<div class="detail-item"><span class="detail-label">ID</span><span class="detail-value mono">' + escapeHtml(w.id) + '</span></div>';
+      html += '<div class="detail-item"><span class="detail-label">Urgency</span><span class="detail-value">' + escapeHtml(w.urgency || 'normal') + '</span></div>';
+      html += '<div class="detail-item"><span class="detail-label">Interval</span><span class="detail-value">' + escapeHtml(w.check_interval || '2m') + '</span></div>';
+      html += '<div class="detail-item"><span class="detail-label">Consecutive</span><span class="detail-value">' + (w.consecutive_breaches || 0) + ' / ' + (w.min_consecutive || 1) + '</span></div>';
+      if (w.endpoint) html += '<div class="detail-item"><span class="detail-label">Endpoint</span><span class="detail-value">' + escapeHtml(w.endpoint) + '</span></div>';
+      if (w.commit_hash) html += '<div class="detail-item"><span class="detail-label">Commit</span><span class="detail-value mono">' + escapeHtml(w.commit_hash) + '</span></div>';
+      if (w.created_by) html += '<div class="detail-item"><span class="detail-label">Created by</span><span class="detail-value">' + escapeHtml(w.created_by) + '</span></div>';
+      if (w.baseline_json) {
+        html += '<div class="detail-item detail-wide"><span class="detail-label">Baseline</span><span class="detail-value">error_rate=' + (w.baseline_json.error_rate * 100).toFixed(2) + '% log_count=' + (w.baseline_json.log_count || 0) + '</span></div>';
+      }
+      html += '</div>';
+      html += '<div class="watch-detail-actions">';
+      if (w.status === 'active' || w.status === 'triggered') {
+        html += '<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteWatch(\'' + w.id + '\')">Stop</button>';
+      }
+      html += '<button class="btn btn-sm" onclick="event.stopPropagation();loadWatchRuns(\'' + w.id + '\')">Runs</button>';
+      html += '<button class="btn btn-sm" onclick="event.stopPropagation();loadWatchAlerts(\'' + w.id + '\')">Alerts</button>';
+      html += '</div>';
+      html += '</div>';
+      html += '</div>';
+    });
+    container.innerHTML = html;
+  }
+
+  window.toggleWatchDetail = function(id) {
+    var detail = document.getElementById('watch-detail-' + id);
+    if (detail) detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+  };
+
+  function loadWatches() {
+    fetch('/api/watches').then(function(r) { return r.json(); }).then(function(data) {
+      allWatches = data || [];
+      applyFilters();
+    }).catch(function() {
+      document.getElementById('watches-list').innerHTML = '<div class="empty-state">Failed to load watches.</div>';
+    });
+    // Load pending alerts
+    fetch('/api/watches/alerts/count').then(function(r) { return r.json(); }).then(function(d) {
+      if (d.count > 0) {
+        document.getElementById('watch-alerts-section').style.display = 'block';
+        loadPendingAlerts();
+      }
+    }).catch(function(){});
+  }
+
+  function loadPendingAlerts() {
+    // We iterate watches to find ones with pending alerts
+    var triggered = allWatches.filter(function(w) { return w.status === 'triggered'; });
+    if (triggered.length === 0) {
+      document.getElementById('watch-alerts-section').style.display = 'none';
+      return;
+    }
+    var container = document.getElementById('watch-alerts-list');
+    var promises = triggered.map(function(w) {
+      return fetch('/api/watches/' + w.id + '/alerts?status=pending&limit=5').then(function(r) { return r.json(); });
+    });
+    Promise.all(promises).then(function(results) {
+      allAlerts = [];
+      results.forEach(function(alerts) { allAlerts = allAlerts.concat(alerts || []); });
+      renderAlerts(allAlerts);
+    });
+  }
+
+  function renderAlerts(alerts) {
+    var container = document.getElementById('watch-alerts-list');
+    if (!alerts || alerts.length === 0) {
+      container.innerHTML = '<div class="empty-state">No pending alerts.</div>';
+      return;
+    }
+    var html = '';
+    alerts.forEach(function(a) {
+      html += '<div class="watch-row severity-' + escapeHtml(a.urgency || 'normal') + '">';
+      html += '<div class="watch-row-main">';
+      html += '<span class="watch-status status-error">alert</span>';
+      html += '<span class="watch-metric">' + escapeHtml(a.trigger_metric) + '</span>';
+      html += '<span class="watch-threshold">value=' + (a.trigger_value !== undefined ? a.trigger_value.toFixed(4) : '?') + ' threshold=' + (a.threshold_value !== undefined ? a.threshold_value.toFixed(4) : '?') + '</span>';
+      html += '<span class="watch-meta">' + getTimeAgo(a.created_at) + '</span>';
+      html += '</div>';
+      html += '<div class="watch-detail-actions" style="display:flex;gap:0.5rem;padding:0.5rem 1rem">';
+      html += '<button class="btn btn-sm" onclick="showEvidence(\'' + a.id + '\')">Evidence</button>';
+      html += '<button class="btn btn-sm" onclick="ackAlert(\'' + a.id + '\')">Acknowledge</button>';
+      html += '<button class="btn btn-danger btn-sm" onclick="dismissAlert(\'' + a.id + '\')">Dismiss</button>';
+      html += '</div>';
+      html += '</div>';
+    });
+    container.innerHTML = html;
+  }
+
+  window.showEvidence = function(alertId) {
+    document.getElementById('evidence-modal').style.display = 'flex';
+    document.getElementById('evidence-content').innerHTML = 'loading...';
+    // Find alert from local cache first, then fetch
+    var found = allAlerts.find(function(a) { return a.id === alertId; });
+    if (found && found.evidence_json) {
+      renderEvidence(found.evidence_json, found);
+      return;
+    }
+    // Fetch full alert
+    fetch('/api/watches/alerts/' + alertId).then(function(r) { return r.json(); }).then(function(alert) {
+      renderEvidence(alert.evidence_json, alert);
+    }).catch(function() {
+      document.getElementById('evidence-content').innerHTML = '<div class="empty-state">Failed to load evidence.</div>';
+    });
+  };
+
+  function renderEvidence(evidence, alert) {
+    var el = document.getElementById('evidence-content');
+    if (!evidence) {
+      el.innerHTML = '<div class="empty-state">No evidence collected for this alert.</div>';
+      return;
+    }
+    var html = '<div class="evidence-summary">';
+    html += '<div class="detail-item"><span class="detail-label">Summary</span><span class="detail-value">' + escapeHtml(alert.summary) + '</span></div>';
+    html += '<div class="detail-item"><span class="detail-label">Trigger</span><span class="detail-value">' + escapeHtml(alert.trigger_metric) + ' = ' + (alert.trigger_value || 0).toFixed(4) + ' (threshold: ' + (alert.threshold_value || 0).toFixed(4) + ')</span></div>';
+    html += '</div>';
+
+    if (evidence.recent_errors && evidence.recent_errors.length > 0) {
+      html += '<h3 class="evidence-section-title">Recent Errors</h3>';
+      html += '<div class="evidence-list">';
+      evidence.recent_errors.forEach(function(e) {
+        html += '<div class="evidence-item">';
+        html += '<span class="evidence-error-class">' + escapeHtml(e.exception_class || 'Error') + '</span>';
+        html += '<span class="evidence-error-msg">' + escapeHtml(e.message) + '</span>';
+        html += '<span class="evidence-error-count">count: ' + (e.count || 1) + '</span>';
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+
+    if (evidence.new_errors && evidence.new_errors.length > 0) {
+      html += '<h3 class="evidence-section-title">New Errors (not in baseline)</h3>';
+      html += '<div class="evidence-list">';
+      evidence.new_errors.forEach(function(e) {
+        html += '<div class="evidence-item evidence-new">';
+        html += '<span class="evidence-error-class">' + escapeHtml(e.exception_class || 'Error') + '</span>';
+        html += '<span class="evidence-error-msg">' + escapeHtml(e.message) + '</span>';
+        if (e.is_new) html += '<span class="tag tag-new">NEW</span>';
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+
+    if (evidence.source_files && evidence.source_files.length > 0) {
+      html += '<h3 class="evidence-section-title">Source Files</h3>';
+      html += '<div class="evidence-list">';
+      evidence.source_files.forEach(function(f) {
+        html += '<div class="evidence-item mono">' + escapeHtml(f) + '</div>';
+      });
+      html += '</div>';
+    }
+
+    if (evidence.trace_ids && evidence.trace_ids.length > 0) {
+      html += '<h3 class="evidence-section-title">Trace IDs</h3>';
+      html += '<div class="evidence-list">';
+      evidence.trace_ids.forEach(function(t) {
+        html += '<div class="evidence-item mono">' + escapeHtml(t) + '</div>';
+      });
+      html += '</div>';
+    }
+
+    if (evidence.baseline_diff) {
+      html += '<h3 class="evidence-section-title">Baseline Diff</h3>';
+      html += '<div class="watch-detail-grid">';
+      if (evidence.baseline_diff.error_rate_change !== undefined)
+        html += '<div class="detail-item"><span class="detail-label">Error Rate Change</span><span class="detail-value">' + evidence.baseline_diff.error_rate_change.toFixed(1) + '%</span></div>';
+      if (evidence.baseline_diff.new_exception_types && evidence.baseline_diff.new_exception_types.length > 0)
+        html += '<div class="detail-item detail-wide"><span class="detail-label">New Exceptions</span><span class="detail-value">' + evidence.baseline_diff.new_exception_types.map(escapeHtml).join(', ') + '</span></div>';
+      html += '</div>';
+    }
+
+    if (evidence.relevant_logs && evidence.relevant_logs.length > 0) {
+      html += '<h3 class="evidence-section-title">Relevant Logs (' + evidence.relevant_logs.length + ')</h3>';
+      html += '<div class="evidence-logs">';
+      evidence.relevant_logs.forEach(function(l) {
+        html += '<div class="evidence-log-entry">';
+        html += '<span class="log-level log-level-' + (l.level || 'info').toLowerCase() + '">' + escapeHtml(l.level || 'info') + '</span>';
+        html += '<span class="log-message">' + escapeHtml(l.message) + '</span>';
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+
+    el.innerHTML = html;
+  }
+
+  window.ackAlert = function(alertId) {
+    fetch('/api/watches/alerts/' + alertId + '/acknowledge', { method: 'POST' }).then(function(r) {
+      if (r.ok) { showToast('Alert acknowledged', 'success'); loadWatches(); }
+      else r.json().then(function(d) { showToast(d.error || 'Failed', 'error'); });
+    });
+  };
+
+  window.dismissAlert = function(alertId) {
+    var reason = prompt('Dismiss reason (optional):');
+    fetch('/api/watches/alerts/' + alertId + '/dismiss', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({reason: reason || ''})
+    }).then(function(r) {
+      if (r.ok) { showToast('Alert dismissed', 'success'); loadWatches(); }
+      else r.json().then(function(d) { showToast(d.error || 'Failed', 'error'); });
+    });
+  };
+
+  window.deleteWatch = function(id) {
+    if (!confirm('Stop this watch?')) return;
+    fetch('/api/watches/' + id, { method: 'DELETE' }).then(function(r) {
+      if (r.ok) { showToast('Watch stopped', 'success'); loadWatches(); }
+      else r.json().then(function(d) { showToast(d.error || 'Failed', 'error'); });
+    });
+  };
+
+  window.loadWatchRuns = function(id) {
+    // Simple inline display
+    var detail = document.getElementById('watch-detail-' + id);
+    if (!detail) return;
+    var existing = detail.querySelector('.watch-runs-inline');
+    if (existing) { existing.remove(); return; }
+    var div = document.createElement('div');
+    div.className = 'watch-runs-inline';
+    div.innerHTML = 'loading runs...';
+    detail.appendChild(div);
+    fetch('/api/watches/' + id + '/runs?limit=10').then(function(r) { return r.json(); }).then(function(runs) {
+      if (!runs || runs.length === 0) { div.innerHTML = '<div class="empty-state">No runs yet.</div>'; return; }
+      var html = '<table class="runs-table"><tr><th>Status</th><th>Value</th><th>Breached</th><th>Started</th></tr>';
+      runs.forEach(function(run) {
+        html += '<tr>';
+        html += '<td>' + escapeHtml(run.status) + '</td>';
+        html += '<td>' + (run.metric_value !== undefined ? run.metric_value.toFixed(4) : '-') + '</td>';
+        html += '<td>' + (run.breached ? 'yes' : 'no') + '</td>';
+        html += '<td>' + getTimeAgo(run.started_at) + '</td>';
+        html += '</tr>';
+      });
+      html += '</table>';
+      div.innerHTML = html;
+    });
+  };
+
+  window.loadWatchAlerts = function(id) {
+    var detail = document.getElementById('watch-detail-' + id);
+    if (!detail) return;
+    var existing = detail.querySelector('.watch-alerts-inline');
+    if (existing) { existing.remove(); return; }
+    var div = document.createElement('div');
+    div.className = 'watch-alerts-inline';
+    div.innerHTML = 'loading alerts...';
+    detail.appendChild(div);
+    fetch('/api/watches/' + id + '/alerts?limit=10').then(function(r) { return r.json(); }).then(function(alerts) {
+      if (!alerts || alerts.length === 0) { div.innerHTML = '<div class="empty-state">No alerts.</div>'; return; }
+      var html = '<table class="runs-table"><tr><th>Status</th><th>Value</th><th>Urgency</th><th>Created</th><th></th></tr>';
+      alerts.forEach(function(a) {
+        html += '<tr>';
+        html += '<td>' + escapeHtml(a.status) + '</td>';
+        html += '<td>' + (a.trigger_value !== undefined ? a.trigger_value.toFixed(4) : '-') + '</td>';
+        html += '<td>' + escapeHtml(a.urgency || 'normal') + '</td>';
+        html += '<td>' + getTimeAgo(a.created_at) + '</td>';
+        html += '<td><button class="btn btn-sm" onclick="event.stopPropagation();showEvidence(\'' + a.id + '\')">Evidence</button></td>';
+        html += '</tr>';
+      });
+      html += '</table>';
+      div.innerHTML = html;
+    });
+  };
+
+  // Create modal
+  window.openCreateModal = function() { document.getElementById('create-modal').style.display = 'flex'; };
+  window.hideCreateModal = function() { document.getElementById('create-modal').style.display = 'none'; };
+  window.hideEvidenceModal = function() { document.getElementById('evidence-modal').style.display = 'none'; };
+
+  window.submitCreateWatch = function(e) {
+    e.preventDefault();
+    var btn = document.getElementById('create-btn');
+    setButtonLoading(btn, true, 'creating...');
+    var body = {
+      metric: document.getElementById('create-metric').value,
+      operator: document.getElementById('create-operator').value,
+      threshold: parseFloat(document.getElementById('create-threshold').value) || 0,
+      service: document.getElementById('create-service').value,
+      endpoint: document.getElementById('create-endpoint').value,
+      duration: document.getElementById('create-duration').value,
+      check_interval: document.getElementById('create-interval').value,
+      urgency: document.getElementById('create-urgency').value,
+      min_consecutive: parseInt(document.getElementById('create-min-consecutive').value) || 1,
+      commit_hash: document.getElementById('create-commit').value
+    };
+    fetch('/api/watches', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    }).then(function(r) {
+      setButtonLoading(btn, false, 'Create Watch');
+      if (!r.ok) return r.json().then(function(d) { showToast(d.error || 'Failed to create', 'error'); });
+      showToast('Watch created', 'success');
+      hideCreateModal();
+      document.getElementById('create-form').reset();
+      loadWatches();
+    }).catch(function() {
+      setButtonLoading(btn, false, 'Create Watch');
+      showToast('Failed to create watch', 'error');
+    });
+  };
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', function(e) {
+    var tag = document.activeElement.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    switch(e.key) {
+      case 's': e.preventDefault(); currentStatusIdx = (currentStatusIdx + 1) % STATUS_OPTIONS.length; selectStatus(currentStatusIdx); break;
+      case 'S': e.preventDefault(); currentStatusIdx = (currentStatusIdx - 1 + STATUS_OPTIONS.length) % STATUS_OPTIONS.length; selectStatus(currentStatusIdx); break;
+      case 'c': e.preventDefault(); selectStatus(0); selectMetric(0); selectUrgency(0); break;
+      case 'n': e.preventDefault(); openCreateModal(); break;
+    }
+  });
+
+  // Initial load
+  loadWatches();
+  // Refresh every 30 seconds
+  setInterval(loadWatches, 30000);
+})();
+</script>
+
+<style nonce="{{.CSPNonce}}">
+.watches-list { display: flex; flex-direction: column; gap: 1px; }
+.watch-row { background: var(--bg-secondary, #1a1a2e); border-left: 3px solid transparent; cursor: pointer; transition: background 0.15s; }
+.watch-row:hover { background: var(--bg-hover, #222240); }
+.watch-row.severity-critical { border-left-color: var(--red); }
+.watch-row.severity-warning { border-left-color: var(--yellow); }
+.watch-row-main { display: flex; align-items: center; gap: 1rem; padding: 0.6rem 1rem; flex-wrap: wrap; }
+.watch-status { font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 3px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+.status-active { background: rgba(80,200,120,0.15); color: var(--green); }
+.status-error { background: rgba(255,85,85,0.15); color: var(--red); }
+.status-ok { background: rgba(80,200,120,0.1); color: var(--green); opacity: 0.7; }
+.status-muted { background: rgba(128,128,128,0.1); color: var(--text-muted, #666); }
+.watch-metric { font-weight: 600; color: var(--cyan); font-family: var(--font-mono); }
+.watch-threshold { color: var(--text-muted, #999); font-family: var(--font-mono); font-size: 0.85rem; }
+.watch-service { background: rgba(128,128,255,0.1); padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.8rem; color: var(--blue); }
+.watch-current { font-family: var(--font-mono); font-size: 0.85rem; color: var(--yellow); }
+.watch-meta { margin-left: auto; font-size: 0.75rem; color: var(--text-muted, #666); }
+.watch-detail { padding: 0.5rem 1rem 0.75rem; border-top: 1px solid var(--border, #333); }
+.watch-detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.5rem; }
+.detail-item { display: flex; flex-direction: column; gap: 0.15rem; }
+.detail-wide { grid-column: 1 / -1; }
+.detail-label { font-size: 0.7rem; text-transform: uppercase; color: var(--text-muted, #666); letter-spacing: 0.05em; }
+.detail-value { font-size: 0.85rem; }
+.mono { font-family: var(--font-mono); }
+.watch-detail-actions { display: flex; gap: 0.5rem; padding: 0.5rem 0; margin-top: 0.5rem; border-top: 1px solid var(--border, #333); }
+.watch-runs-inline, .watch-alerts-inline { margin-top: 0.75rem; padding-top: 0.5rem; border-top: 1px dashed var(--border, #333); }
+.runs-table { width: 100%; font-size: 0.8rem; border-collapse: collapse; }
+.runs-table th { text-align: left; padding: 0.3rem 0.5rem; color: var(--text-muted, #666); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; }
+.runs-table td { padding: 0.3rem 0.5rem; border-top: 1px solid var(--border, #222); }
+
+/* Evidence modal */
+.modal-wide { max-width: 800px; }
+.evidence-summary { margin-bottom: 1rem; }
+.evidence-section-title { font-size: 0.85rem; color: var(--cyan); margin: 1rem 0 0.5rem; padding-bottom: 0.25rem; border-bottom: 1px solid var(--border, #333); }
+.evidence-list { display: flex; flex-direction: column; gap: 0.25rem; }
+.evidence-item { padding: 0.4rem 0.6rem; background: var(--bg-tertiary, #111); border-radius: 3px; font-size: 0.8rem; display: flex; gap: 0.75rem; align-items: center; }
+.evidence-new { border-left: 2px solid var(--red); }
+.evidence-error-class { font-weight: 600; color: var(--red); white-space: nowrap; }
+.evidence-error-msg { flex: 1; color: var(--text, #ccc); }
+.evidence-error-count { color: var(--text-muted, #666); font-size: 0.75rem; white-space: nowrap; }
+.tag-new { background: var(--red); color: #fff; font-size: 0.65rem; padding: 0.1rem 0.3rem; border-radius: 2px; font-weight: 700; }
+.evidence-logs { max-height: 300px; overflow-y: auto; }
+.evidence-log-entry { display: flex; gap: 0.5rem; padding: 0.25rem 0.5rem; font-size: 0.8rem; border-bottom: 1px solid var(--border, #222); }
+.log-level { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; min-width: 4rem; }
+.log-level-error { color: var(--red); }
+.log-level-warn { color: var(--yellow); }
+.log-level-info { color: var(--green); }
+.log-message { flex: 1; font-family: var(--font-mono); word-break: break-all; }
+</style>
+{{end}}

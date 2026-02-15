@@ -235,6 +235,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Get("/watchers", srv.handleWatchersPage)
 		r.Get("/watchers/{id}/runs", srv.handleWatcherRunsPage)
 		r.Get("/sources", srv.handleSourcesPage)
+		r.Get("/watches", srv.handleWatchesPage)
 		r.Get("/tools", srv.handleToolsPage)
 		r.Get("/profile", srv.handleProfilePage)
 	})
@@ -311,6 +312,16 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Get("/logs/{id}", srv.handleGetLogDetail)
 			r.Post("/logs/smart-search", srv.handleSmartSearch)
 
+			// Watches (agent-first)
+			if srv.watchStore != nil {
+				r.Get("/watches", srv.handleListWatches)
+				r.Get("/watches/{id}", srv.handleGetWatch)
+				r.Get("/watches/{id}/runs", srv.handleListWatchRuns)
+				r.Get("/watches/{id}/alerts", srv.handleListWatchAlerts)
+				r.Get("/watches/alerts/{alertId}", srv.handleGetWatchAlert)
+				r.Get("/watches/alerts/count", srv.handleWatchAlertCount)
+			}
+
 			// MCP activity
 			if srv.mcpActivityStore != nil {
 				r.Get("/mcp/activity/stats", srv.handleMCPActivityStats)
@@ -345,6 +356,14 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Post("/watchers/{id}/run", srv.handleRunWatcherNow)
 			r.Post("/watchers/{id}/runs/{runId}/stop", srv.handleStopRun)
 			r.Post("/watchers/preview", srv.handleWatcherPreview)
+			// Watches (agent-first) — write
+			if srv.watchStore != nil {
+				r.Post("/watches", srv.handleCreateWatch)
+				r.Delete("/watches/{id}", srv.handleDeleteWatch)
+				r.Post("/watches/alerts/{alertId}/dismiss", srv.handleDismissWatchAlert)
+				r.Post("/watches/alerts/{alertId}/acknowledge", srv.handleAcknowledgeWatchAlert)
+			}
+
 			r.Post("/alerts/read-all", srv.handleMarkAllAlertsRead)
 			r.Post("/alerts/dismiss-all", srv.handleDismissAllAlerts)
 			r.Post("/alerts/{id}/read", srv.handleMarkAlertRead)

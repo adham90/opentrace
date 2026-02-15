@@ -30,6 +30,7 @@ var (
 	alertsTmpl         *template.Template
 	watchersTmpl       *template.Template
 	watcherRunsTmpl    *template.Template
+	watchesTmpl        *template.Template
 	sourcesTmpl        *template.Template
 	loginTmpl          *template.Template
 	registerTmpl       *template.Template
@@ -63,6 +64,8 @@ func init() {
 		"templates/layout.html", "templates/tools.html"))
 	onboardingTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout_minimal.html", "templates/onboarding.html"))
+	watchesTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/watches.html"))
 }
 
 // logsFragmentTmpl is used for rendering HTMX fragment responses for logs-list
