@@ -16,6 +16,7 @@ type WatchSchedulerOpts struct {
 	Evaluator       *WatchEvaluator
 	EvidenceBuilder *WatchEvidenceBuilder
 	SessionManager  *WatchSessionManager
+	Notifiers       []WatchAlertNotifier
 	PollInterval    time.Duration
 }
 
@@ -25,6 +26,7 @@ type WatchScheduler struct {
 	evaluator       *WatchEvaluator
 	evidenceBuilder *WatchEvidenceBuilder
 	sessionManager  *WatchSessionManager
+	notifiers       []WatchAlertNotifier
 	poll            time.Duration
 	cancel          context.CancelFunc
 	wg              sync.WaitGroup
@@ -36,11 +38,16 @@ func NewWatchScheduler(opts WatchSchedulerOpts) *WatchScheduler {
 	if poll <= 0 {
 		poll = 15 * time.Second
 	}
+	notifiers := opts.Notifiers
+	if len(notifiers) == 0 {
+		notifiers = []WatchAlertNotifier{&WatchLogNotifier{}}
+	}
 	return &WatchScheduler{
 		watchStore:      opts.WatchStore,
 		evaluator:       opts.Evaluator,
 		evidenceBuilder: opts.EvidenceBuilder,
 		sessionManager:  opts.SessionManager,
+		notifiers:       notifiers,
 		poll:            poll,
 	}
 }
@@ -159,7 +166,7 @@ func (s *WatchScheduler) createAlert(ctx context.Context, w *store.Watch, run *s
 		}
 	}
 
-	_, err := s.watchStore.CreateAlert(ctx, store.CreateWatchAlertParams{
+	alert, err := s.watchStore.CreateAlert(ctx, store.CreateWatchAlertParams{
 		WatchID:        w.ID,
 		RunID:          run.ID,
 		Urgency:        w.Urgency,
@@ -171,7 +178,13 @@ func (s *WatchScheduler) createAlert(ctx context.Context, w *store.Watch, run *s
 	})
 	if err != nil {
 		slog.Error("watch scheduler: creating alert", "watch_id", w.ID, "error", err)
-	} else {
-		slog.Info("watch alert created", "watch_id", w.ID, "metric", w.Metric, "value", result.Value)
+		return
+	}
+
+	slog.Info("watch alert created", "watch_id", w.ID, "metric", w.Metric, "value", result.Value)
+
+	// Dispatch notifications asynchronously
+	if len(s.notifiers) > 0 {
+		NotifyAllWatchAlert(ctx, s.notifiers, alert, w)
 	}
 }
