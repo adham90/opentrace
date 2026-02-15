@@ -43,88 +43,90 @@
       <button class="modal-close" onclick="hideCreateModal()">&times;</button>
     </div>
     <form id="create-form" onsubmit="submitCreateWatch(event)">
-      <div class="form-row">
-        <label>Metric *</label>
-        <select id="create-metric" required>
-          <option value="error_rate">error_rate</option>
-          <option value="response_time">response_time</option>
-          <option value="p95_response">p95_response</option>
-          <option value="log_count">log_count</option>
-          <option value="error_count">error_count</option>
-          <option value="heartbeat">heartbeat</option>
-          <option value="sql_count">sql_count</option>
-          <option value="cache_hit_rate">cache_hit_rate</option>
-        </select>
-      </div>
-      <div class="form-row form-row-pair">
-        <div>
-          <label>Operator</label>
-          <select id="create-operator">
-            <option value="gt">gt (&gt;)</option>
-            <option value="gte">gte (&ge;)</option>
-            <option value="lt">lt (&lt;)</option>
-            <option value="lte">lte (&le;)</option>
-            <option value="eq">eq (=)</option>
-            <option value="neq">neq (&ne;)</option>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Metric *</label>
+          <select id="create-metric" required>
+            <option value="error_rate">error_rate</option>
+            <option value="response_time">response_time</option>
+            <option value="p95_response">p95_response</option>
+            <option value="log_count">log_count</option>
+            <option value="error_count">error_count</option>
+            <option value="heartbeat">heartbeat</option>
+            <option value="sql_count">sql_count</option>
+            <option value="cache_hit_rate">cache_hit_rate</option>
           </select>
         </div>
-        <div>
-          <label>Threshold</label>
-          <input type="number" id="create-threshold" step="any" placeholder="0.01">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Operator</label>
+            <select id="create-operator">
+              <option value="gt">gt (&gt;)</option>
+              <option value="gte">gte (&ge;)</option>
+              <option value="lt">lt (&lt;)</option>
+              <option value="lte">lte (&le;)</option>
+              <option value="eq">eq (=)</option>
+              <option value="neq">neq (&ne;)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Threshold *</label>
+            <input type="number" id="create-threshold" step="any" placeholder="0.01">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Service</label>
+            <input type="text" id="create-service" placeholder="payments">
+          </div>
+          <div class="form-group">
+            <label>Endpoint</label>
+            <input type="text" id="create-endpoint" placeholder="GET /api/users">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Duration</label>
+            <select id="create-duration">
+              <option value="1h">1 hour</option>
+              <option value="2h" selected>2 hours</option>
+              <option value="4h">4 hours</option>
+              <option value="8h">8 hours</option>
+              <option value="24h">24 hours</option>
+              <option value="permanent">permanent</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Check Interval</label>
+            <select id="create-interval">
+              <option value="1m">every 1m</option>
+              <option value="2m" selected>every 2m</option>
+              <option value="5m">every 5m</option>
+              <option value="10m">every 10m</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Urgency</label>
+            <select id="create-urgency">
+              <option value="low">low</option>
+              <option value="normal" selected>normal</option>
+              <option value="high">high</option>
+              <option value="critical">critical</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Min Consecutive</label>
+            <input type="number" id="create-min-consecutive" value="1" min="1" max="10">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Commit Hash</label>
+          <input type="text" id="create-commit" placeholder="abc123">
         </div>
       </div>
-      <div class="form-row form-row-pair">
-        <div>
-          <label>Service</label>
-          <input type="text" id="create-service" placeholder="payments">
-        </div>
-        <div>
-          <label>Endpoint</label>
-          <input type="text" id="create-endpoint" placeholder="GET /api/users">
-        </div>
-      </div>
-      <div class="form-row form-row-pair">
-        <div>
-          <label>Duration</label>
-          <select id="create-duration">
-            <option value="1h">1 hour</option>
-            <option value="2h" selected>2 hours</option>
-            <option value="4h">4 hours</option>
-            <option value="8h">8 hours</option>
-            <option value="24h">24 hours</option>
-            <option value="permanent">permanent</option>
-          </select>
-        </div>
-        <div>
-          <label>Check Interval</label>
-          <select id="create-interval">
-            <option value="1m">every 1m</option>
-            <option value="2m" selected>every 2m</option>
-            <option value="5m">every 5m</option>
-            <option value="10m">every 10m</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-row form-row-pair">
-        <div>
-          <label>Urgency</label>
-          <select id="create-urgency">
-            <option value="low">low</option>
-            <option value="normal" selected>normal</option>
-            <option value="high">high</option>
-            <option value="critical">critical</option>
-          </select>
-        </div>
-        <div>
-          <label>Min Consecutive</label>
-          <input type="number" id="create-min-consecutive" value="1" min="1" max="10">
-        </div>
-      </div>
-      <div class="form-row">
-        <label>Commit Hash</label>
-        <input type="text" id="create-commit" placeholder="abc123">
-      </div>
-      <div class="form-actions">
+      <div class="modal-footer">
         <button type="button" class="btn btn-sm" onclick="hideCreateModal()">Cancel</button>
         <button type="submit" class="btn btn-primary btn-sm" id="create-btn">Create Watch</button>
       </div>
@@ -139,7 +141,7 @@
       <span class="modal-title">Alert Evidence</span>
       <button class="modal-close" onclick="hideEvidenceModal()">&times;</button>
     </div>
-    <div id="evidence-content">loading...</div>
+    <div class="modal-body" id="evidence-content">loading...</div>
   </div>
 </div>
 
