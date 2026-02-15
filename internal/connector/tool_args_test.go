@@ -9,13 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adham90/opentrace/internal/agent"
 	"github.com/adham90/opentrace/internal/store"
 )
 
 // callTool simulates the agent loop: validate+coerce args, then call handler.
-func callTool(ctx context.Context, tool agent.Tool, args map[string]any) (string, error) {
-	if err := agent.ValidateArgs(tool.Params, args); err != nil {
+func callTool(ctx context.Context, tool Tool, args map[string]any) (string, error) {
+	if err := ValidateArgs(tool.Params, args); err != nil {
 		return "", err
 	}
 	return tool.Handler(ctx, args)
@@ -136,8 +135,22 @@ func TestLogSearch_WithTraceID(t *testing.T) {
 
 // ---------- echo ----------
 
+// echoTool returns a simple echo tool for testing coercion.
+func echoTool() Tool {
+	return Tool{
+		Name:        "echo",
+		Description: "Echo back the message",
+		Params: []ToolParam{
+			{Name: "message", Type: "string", Required: true},
+		},
+		Handler: func(ctx context.Context, args map[string]any) (string, error) {
+			return args["message"].(string), nil
+		},
+	}
+}
+
 func TestEcho_NormalArgs(t *testing.T) {
-	tool := agent.EchoTool()
+	tool := echoTool()
 	result, err := callTool(context.Background(), tool, map[string]any{
 		"message": "hello world",
 	})
@@ -150,7 +163,7 @@ func TestEcho_NormalArgs(t *testing.T) {
 }
 
 func TestEcho_NumberCoercedToString(t *testing.T) {
-	tool := agent.EchoTool()
+	tool := echoTool()
 
 	// LLM sends 42 instead of "42"
 	result, err := callTool(context.Background(), tool, map[string]any{
@@ -165,7 +178,7 @@ func TestEcho_NumberCoercedToString(t *testing.T) {
 }
 
 func TestEcho_MissingRequired(t *testing.T) {
-	tool := agent.EchoTool()
+	tool := echoTool()
 
 	_, err := callTool(context.Background(), tool, map[string]any{})
 	if err == nil {
@@ -177,7 +190,7 @@ func TestEcho_MissingRequired(t *testing.T) {
 }
 
 func TestEcho_BoolNotCoercible(t *testing.T) {
-	tool := agent.EchoTool()
+	tool := echoTool()
 
 	_, err := callTool(context.Background(), tool, map[string]any{
 		"message": true,
@@ -226,11 +239,11 @@ func TestCoercionMatrix(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			params := []agent.ToolParam{
+			params := []ToolParam{
 				{Name: "val", Type: tt.paramType, Required: true},
 			}
 			args := map[string]any{"val": tt.value}
-			err := agent.ValidateArgs(params, args)
+			err := ValidateArgs(params, args)
 			if tt.wantErr && err == nil {
 				t.Errorf("expected error for %T → %s", tt.value, tt.paramType)
 			}
@@ -243,7 +256,7 @@ func TestCoercionMatrix(t *testing.T) {
 
 // ---------- helpers ----------
 
-func findTool(t *testing.T, tools []agent.Tool, name string) agent.Tool {
+func findTool(t *testing.T, tools []Tool, name string) Tool {
 	t.Helper()
 	for _, tool := range tools {
 		if tool.Name == name {
@@ -251,7 +264,7 @@ func findTool(t *testing.T, tools []agent.Tool, name string) agent.Tool {
 		}
 	}
 	t.Fatalf("tool %q not found", name)
-	return agent.Tool{}
+	return Tool{}
 }
 
 func sampleLogs() []store.LogEntry {

@@ -157,8 +157,6 @@ LEFT JOIN pg_statio_user_tables io
 			"hint":         "Tables with high dead tuple ratios, low index usage, or low cache hit ratios are good candidates for watchers.",
 		}
 
-		appendExistingWatchers(resp, fetchExistingWatchers(ctx, ws))
-
 		data, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil

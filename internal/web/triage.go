@@ -46,32 +46,7 @@ func (s *Server) handleTriageAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 2. Recent failed runs
-	if s.runStore != nil {
-		runs, err := s.runStore.ListRecentFailed(ctx, 5)
-		if err == nil {
-			for _, r := range runs {
-				errDetail := ""
-				if r.Error != nil {
-					errDetail = *r.Error
-					if len(errDetail) > 100 {
-						errDetail = errDetail[:100]
-					}
-				}
-				items = append(items, triageItem{
-					Type:     "run",
-					Severity: "warning",
-					Title:    "Watcher run failed",
-					Detail:   errDetail,
-					Time:     r.CreatedAt.Format(time.RFC3339),
-					Link:     "/watchers/" + r.WatcherID.String() + "/runs",
-					ID:       r.ID.String(),
-				})
-			}
-		}
-	}
-
-	// 3. Error connectors
+	// 2. Error connectors
 	if s.dsStore != nil {
 		connectors, err := s.dsStore.List(ctx, store.ListDataSourceParams{})
 		if err == nil {

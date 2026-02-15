@@ -20,7 +20,6 @@ import (
 
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
-	"github.com/adham90/opentrace/internal/llm"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	mcpgoserver "github.com/mark3labs/mcp-go/server"
 	"github.com/adham90/opentrace/internal/store"
@@ -52,7 +51,6 @@ type Server struct {
 	dsStore       store.DataSourceStore
 	logStore      store.LogStore
 	watcherStore  store.WatcherStore
-	runStore      store.WatcherRunStore
 	alertStore    store.AlertStore
 	serverStore   store.ServerStore
 	metricStore   store.MetricStore
@@ -61,11 +59,6 @@ type Server struct {
 	settingsStore store.SettingsStore
 	registry      *connector.Registry
 	cfg           *config.Config
-	executor      *watcher.Executor
-	eventHub      *watcher.EventHub
-	modelRegistry *llm.ModelRegistry
-	providerCache *llm.ProviderCache
-	ruleEvaluator    *watcher.RuleEvaluator
 	toolCatalog      *mcpserver.ToolCatalog
 	mcpActivityStore store.MCPActivityStore
 	alertGroupStore  store.AlertGroupStore
@@ -91,7 +84,6 @@ type ServerDeps struct {
 	DSStore       store.DataSourceStore
 	LogStore      store.LogStore
 	WatcherStore  store.WatcherStore
-	RunStore      store.WatcherRunStore
 	AlertStore    store.AlertStore
 	ServerStore   store.ServerStore
 	MetricStore   store.MetricStore
@@ -101,11 +93,6 @@ type ServerDeps struct {
 	Registry      *connector.Registry
 	ToolCatalog   *mcpserver.ToolCatalog
 	Cfg           *config.Config
-	Executor      *watcher.Executor
-	EventHub      *watcher.EventHub
-	ModelRegistry *llm.ModelRegistry
-	ProviderCache *llm.ProviderCache
-	RuleEvaluator    *watcher.RuleEvaluator
 	MCPActivityStore store.MCPActivityStore
 	AlertGroupStore  store.AlertGroupStore
 	AuditStore       store.AuditStore
@@ -131,7 +118,6 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		dsStore:       deps.DSStore,
 		logStore:      deps.LogStore,
 		watcherStore:  deps.WatcherStore,
-		runStore:      deps.RunStore,
 		alertStore:    deps.AlertStore,
 		serverStore:   deps.ServerStore,
 		metricStore:   deps.MetricStore,
@@ -141,11 +127,6 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		registry:      deps.Registry,
 		toolCatalog:   deps.ToolCatalog,
 		cfg:           deps.Cfg,
-		executor:      deps.Executor,
-		eventHub:       deps.EventHub,
-		modelRegistry:  deps.ModelRegistry,
-		providerCache:  deps.ProviderCache,
-		ruleEvaluator:    deps.RuleEvaluator,
 		mcpActivityStore: deps.MCPActivityStore,
 		alertGroupStore:  deps.AlertGroupStore,
 		auditStore:       deps.AuditStore,
@@ -231,9 +212,6 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Use(srv.RedirectToOnboardingIfNeeded)
 		r.Get("/", srv.handleLogsPage)
 		r.Get("/logs", srv.handleLogsPage)
-		r.Get("/alerts", srv.handleAlertsPage)
-		r.Get("/watchers", srv.handleWatchersPage)
-		r.Get("/watchers/{id}/runs", srv.handleWatcherRunsPage)
 		r.Get("/sources", srv.handleSourcesPage)
 		r.Get("/watches", srv.handleWatchesPage)
 		r.Get("/tools", srv.handleToolsPage)
@@ -294,24 +272,11 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Get("/event_types", srv.handleListEventTypes)
 			r.Get("/connectors", srv.handleListConnectors)
 			r.Get("/connectors/{id}", srv.handleGetConnectorAPI)
-			r.Get("/models", srv.handleListModels)
-			r.Get("/watchers", srv.handleListWatchers)
-			r.Get("/watchers/{id}", srv.handleGetWatcher)
-			r.Get("/watchers/{id}/runs", srv.handleListWatcherRuns)
-			r.Get("/watchers/{id}/runs/{runId}", srv.handleGetWatcherRun)
-			r.Get("/watchers/{id}/runs/{runId}/events", srv.handleRunEvents)
-			r.Get("/watchers/{id}/effectiveness", srv.handleWatcherEffectiveness)
-			r.Get("/watchers/templates", srv.handleWatcherTemplates)
-			r.Get("/alerts", srv.handleListAlerts)
-			r.Get("/alerts/count", srv.handleAlertCount)
-			r.Get("/alerts/{id}/trace", srv.handleAlertTrace)
 			r.Get("/overview", srv.handleOverviewAPI)
 			r.Get("/overview/triage", srv.handleTriageAPI)
 			r.Get("/tools", srv.handleToolsAPI)
 			r.Get("/logs/poll", srv.handleLogsPoll)
 			r.Get("/logs/{id}", srv.handleGetLogDetail)
-			r.Post("/logs/smart-search", srv.handleSmartSearch)
-
 			// Watches (agent-first)
 			if srv.watchStore != nil {
 				r.Get("/watches", srv.handleListWatches)
@@ -348,14 +313,6 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Put("/connectors/{id}", srv.handleUpdateConnectorAPI)
 			r.Post("/connectors/{id}/test", srv.handleTestConnectorAPI)
 			r.Delete("/connectors/{id}", srv.handleDeleteConnectorAPI)
-			r.Post("/watchers", srv.handleCreateWatcher)
-			r.Put("/watchers/{id}", srv.handleUpdateWatcher)
-			r.Delete("/watchers/{id}", srv.handleDeleteWatcher)
-			r.Post("/watchers/{id}/pause", srv.handlePauseWatcher)
-			r.Post("/watchers/{id}/resume", srv.handleResumeWatcher)
-			r.Post("/watchers/{id}/run", srv.handleRunWatcherNow)
-			r.Post("/watchers/{id}/runs/{runId}/stop", srv.handleStopRun)
-			r.Post("/watchers/preview", srv.handleWatcherPreview)
 			// Watches (agent-first) — write
 			if srv.watchStore != nil {
 				r.Post("/watches", srv.handleCreateWatch)
@@ -363,14 +320,6 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 				r.Post("/watches/alerts/{alertId}/dismiss", srv.handleDismissWatchAlert)
 				r.Post("/watches/alerts/{alertId}/acknowledge", srv.handleAcknowledgeWatchAlert)
 			}
-
-			r.Post("/alerts/read-all", srv.handleMarkAllAlertsRead)
-			r.Post("/alerts/dismiss-all", srv.handleDismissAllAlerts)
-			r.Post("/alerts/{id}/read", srv.handleMarkAlertRead)
-			r.Post("/alerts/{id}/dismiss", srv.handleDismissAlert)
-			r.Post("/alerts/{id}/snooze", srv.handleSnoozeAlert)
-			r.Delete("/alerts/{id}/snooze", srv.handleUnsnoozeAlert)
-			r.Post("/alerts/{id}/investigate", srv.handleInvestigateAlert)
 
 			// Alert groups (incidents) — write operations
 			if srv.alertGroupStore != nil {
@@ -395,9 +344,6 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Post("/settings/api-key", srv.handleRegenerateAPIKey)
 			r.Get("/settings/auto-update", srv.handleGetAutoUpdate)
 			r.Put("/settings/auto-update", srv.handleSetAutoUpdate)
-			r.Get("/settings/llm", srv.handleGetLLMSettings)
-			r.Put("/settings/llm", srv.handleUpdateLLMSettings)
-			r.Post("/settings/llm/test", srv.handleTestLLMConnection)
 			r.Post("/version/update", srv.handleSelfUpdate)
 			if srv.auditStore != nil {
 				r.Get("/audit-log", srv.handleAuditLog)

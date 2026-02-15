@@ -6,18 +6,17 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/adham90/opentrace/internal/agent"
 )
 
 type mockDataSource struct {
 	connType ConnectorType
-	tools    []agent.Tool
+	tools    []Tool
 	closed   atomic.Bool
 }
 
 func (m *mockDataSource) Type() ConnectorType                      { return m.connType }
 func (m *mockDataSource) TestConnection(ctx context.Context) error { return nil }
-func (m *mockDataSource) Tools() []agent.Tool                     { return m.tools }
+func (m *mockDataSource) Tools() []Tool                     { return m.tools }
 func (m *mockDataSource) Close() error {
 	m.closed.Store(true)
 	return nil
@@ -84,16 +83,16 @@ func TestUnregister_NonExistent(t *testing.T) {
 func TestRegistry_AllTools(t *testing.T) {
 	r := NewRegistry()
 
-	logsTool := agent.Tool{Name: "log_search", Description: "Search logs"}
-	dbTool := agent.Tool{Name: "db_search", Description: "Search database"}
+	logsTool := Tool{Name: "log_search", Description: "Search logs"}
+	dbTool := Tool{Name: "db_search", Description: "Search database"}
 
 	r.Register(&mockDataSource{
 		connType: ConnectorLogs,
-		tools:    []agent.Tool{logsTool},
+		tools:    []Tool{logsTool},
 	})
 	r.Register(&mockDataSource{
 		connType: ConnectorDatabase,
-		tools:    []agent.Tool{dbTool},
+		tools:    []Tool{dbTool},
 	})
 
 	tools := r.AllTools()
@@ -133,7 +132,7 @@ func TestRegistry_ConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			r.Register(&mockDataSource{
 				connType: ConnectorLogs,
-				tools:    []agent.Tool{{Name: "log_search"}},
+				tools:    []Tool{{Name: "log_search"}},
 			})
 		}()
 	}

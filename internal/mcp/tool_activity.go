@@ -180,8 +180,6 @@ LIMIT 20`
 			resp["utilization_percent"] = float64(totalConns) / float64(maxConns) * 100
 		}
 
-		appendExistingWatchers(resp, fetchExistingWatchers(ctx, ws))
-
 		data, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil

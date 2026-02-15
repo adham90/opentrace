@@ -2,18 +2,12 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
-	"github.com/adham90/opentrace/internal/agent"
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/store"
-	"github.com/adham90/opentrace/internal/watcher"
 )
 
 // --- helpers ---
@@ -43,10 +37,10 @@ func makeRequest(args map[string]any) mcp.CallToolRequest {
 // --- convertTool tests ---
 
 func TestConvertTool_StringParam(t *testing.T) {
-	tool := convertTool(agent.Tool{
+	tool := convertTool(connector.Tool{
 		Name:        "search_logs",
 		Description: "Search through logs",
-		Params: []agent.ToolParam{
+		Params: []connector.ToolParam{
 			{Name: "query", Type: "string", Required: true},
 		},
 	})
@@ -69,10 +63,10 @@ func TestConvertTool_StringParam(t *testing.T) {
 }
 
 func TestConvertTool_IntParam(t *testing.T) {
-	tool := convertTool(agent.Tool{
+	tool := convertTool(connector.Tool{
 		Name:        "get_logs",
 		Description: "Get logs with limit",
-		Params: []agent.ToolParam{
+		Params: []connector.ToolParam{
 			{Name: "limit", Type: "int", Required: false},
 		},
 	})
@@ -88,10 +82,10 @@ func TestConvertTool_IntParam(t *testing.T) {
 }
 
 func TestConvertTool_BoolParam(t *testing.T) {
-	tool := convertTool(agent.Tool{
+	tool := convertTool(connector.Tool{
 		Name:        "run_query",
 		Description: "Run a query",
-		Params: []agent.ToolParam{
+		Params: []connector.ToolParam{
 			{Name: "verbose", Type: "bool", Required: true},
 		},
 	})
@@ -106,10 +100,10 @@ func TestConvertTool_BoolParam(t *testing.T) {
 }
 
 func TestConvertTool_MultipleParams(t *testing.T) {
-	tool := convertTool(agent.Tool{
+	tool := convertTool(connector.Tool{
 		Name:        "search",
 		Description: "Search",
-		Params: []agent.ToolParam{
+		Params: []connector.ToolParam{
 			{Name: "query", Type: "string", Required: true},
 			{Name: "limit", Type: "int", Required: false},
 			{Name: "exact", Type: "bool", Required: true},
@@ -140,7 +134,7 @@ func TestConvertTool_MultipleParams(t *testing.T) {
 }
 
 func TestConvertTool_NoParams(t *testing.T) {
-	tool := convertTool(agent.Tool{
+	tool := convertTool(connector.Tool{
 		Name:        "list_tables",
 		Description: "List all tables",
 		Params:      nil,
@@ -158,7 +152,7 @@ func TestConvertTool_NoParams(t *testing.T) {
 // --- bridgeHandler tests ---
 
 func TestBridgeHandler_Success(t *testing.T) {
-	tool := agent.Tool{
+	tool := connector.Tool{
 		Name:        "echo",
 		Description: "Echo input",
 		Handler: func(ctx context.Context, args map[string]any) (string, error) {
@@ -183,7 +177,7 @@ func TestBridgeHandler_Success(t *testing.T) {
 }
 
 func TestBridgeHandler_Error(t *testing.T) {
-	tool := agent.Tool{
+	tool := connector.Tool{
 		Name:        "fail",
 		Description: "Always fails",
 		Handler: func(ctx context.Context, args map[string]any) (string, error) {
@@ -210,7 +204,7 @@ func TestBridgeHandler_Error(t *testing.T) {
 
 func TestBridgeHandler_NilArgs(t *testing.T) {
 	var receivedArgs map[string]any
-	tool := agent.Tool{
+	tool := connector.Tool{
 		Name:        "check_args",
 		Description: "Check args",
 		Handler: func(ctx context.Context, args map[string]any) (string, error) {
@@ -246,12 +240,12 @@ func TestBridgeHandler_NilArgs(t *testing.T) {
 // mockDataSource implements connector.DataSource for testing.
 type mockDataSource struct {
 	connType connector.ConnectorType
-	tools    []agent.Tool
+	tools    []connector.Tool
 }
 
 func (m *mockDataSource) Type() connector.ConnectorType                      { return m.connType }
 func (m *mockDataSource) TestConnection(ctx context.Context) error           { return nil }
-func (m *mockDataSource) Tools() []agent.Tool                               { return m.tools }
+func (m *mockDataSource) Tools() []connector.Tool                               { return m.tools }
 func (m *mockDataSource) Close() error                                      { return nil }
 
 func TestListConnectorsHandler_Empty(t *testing.T) {
@@ -273,13 +267,13 @@ func TestListConnectorsHandler_WithTools(t *testing.T) {
 	registry := connector.NewRegistry()
 	registry.Register(&mockDataSource{
 		connType: connector.ConnectorLogs,
-		tools: []agent.Tool{
+		tools: []connector.Tool{
 			{Name: "search_logs", Description: "Search through log entries"},
 		},
 	})
 	registry.Register(&mockDataSource{
 		connType: connector.ConnectorDatabase,
-		tools: []agent.Tool{
+		tools: []connector.Tool{
 			{Name: "run_query", Description: "Run a SQL query"},
 		},
 	})
@@ -322,596 +316,41 @@ func searchString(s, sub string) bool {
 
 // --- Mock stores for watcher/alert tests ---
 
-type mockWatcherStore struct {
-	watchers []store.Watcher
-	created  *store.Watcher
-	err      error
-}
 
-func (m *mockWatcherStore) List(ctx context.Context, params store.ListWatcherParams) ([]store.Watcher, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	return m.watchers, nil
-}
 
-func (m *mockWatcherStore) Create(ctx context.Context, params store.CreateWatcherParams) (*store.Watcher, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	effort := params.Effort
-	if effort == "" {
-		effort = store.EffortMedium
-	}
-	mt := params.WatcherType
-	if mt == "" {
-		mt = store.WatcherTypeAI
-	}
-	w := &store.Watcher{
-		ID:           uuid.New(),
-		Title:        params.Title,
-		Description:  params.Description,
-		WatcherType:  mt,
-		RuleConfig:   params.RuleConfig,
-		DataSourceID: params.DataSourceID,
-		TypeConfig:   params.TypeConfig,
-		Severity:     params.Severity,
-		Filters:      params.Filters,
-		TimeRange:    params.TimeRange,
-		Effort:       effort,
-		Status:       store.WatcherActive,
-		Notify:       params.Notify,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-	m.created = w
-	return w, nil
-}
 
-func (m *mockWatcherStore) GetByID(ctx context.Context, id uuid.UUID) (*store.Watcher, error) {
-	for i := range m.watchers {
-		if m.watchers[i].ID == id {
-			return &m.watchers[i], nil
-		}
-	}
-	return nil, store.ErrNotFound
-}
-func (m *mockWatcherStore) Update(ctx context.Context, id uuid.UUID, params store.UpdateWatcherParams) (*store.Watcher, error) {
-	return nil, nil
-}
-func (m *mockWatcherStore) UpdateStatus(ctx context.Context, id uuid.UUID, status store.WatcherStatus) (*store.Watcher, error) {
-	return nil, nil
-}
-func (m *mockWatcherStore) Delete(ctx context.Context, id uuid.UUID) error { return nil }
-func (m *mockWatcherStore) GetDueWatchers(ctx context.Context) ([]store.Watcher, error) {
-	return nil, nil
-}
-func (m *mockWatcherStore) UpdateRunTime(ctx context.Context, id uuid.UUID, lastRun, nextRun time.Time) error {
-	return nil
-}
 
-func (m *mockWatcherStore) UpdateAdaptiveState(ctx context.Context, id uuid.UUID, params store.UpdateAdaptiveParams) error {
-	return nil
-}
 
-func (m *mockWatcherStore) ResumeWatcher(ctx context.Context, id uuid.UUID) error {
-	return nil
-}
 
-func (m *mockWatcherStore) ExpireWatchers(ctx context.Context) (int, error) {
-	return 0, nil
-}
 
-type mockAlertStore struct {
-	alerts []store.Alert
-	err    error
-}
 
-func (m *mockAlertStore) List(ctx context.Context, params store.ListAlertParams) ([]store.Alert, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	return m.alerts, nil
-}
 
-func (m *mockAlertStore) Create(ctx context.Context, params store.CreateAlertParams) (*store.Alert, error) {
-	return nil, nil
-}
-func (m *mockAlertStore) CountUnread(ctx context.Context) (int, error) {
-	return 0, nil
-}
-func (m *mockAlertStore) CountTotal(ctx context.Context) (int, error) {
-	return 0, nil
-}
-func (m *mockAlertStore) MarkRead(ctx context.Context, id uuid.UUID) error    { return nil }
-func (m *mockAlertStore) MarkAllRead(ctx context.Context) error                          { return nil }
-func (m *mockAlertStore) Dismiss(ctx context.Context, id uuid.UUID, reason string) error { return nil }
-func (m *mockAlertStore) DismissAll(ctx context.Context) error                           { return nil }
-func (m *mockAlertStore) Snooze(ctx context.Context, id uuid.UUID, until time.Time) error { return nil }
-func (m *mockAlertStore) Unsnooze(ctx context.Context, id uuid.UUID) error                { return nil }
-func (m *mockAlertStore) WatcherAlertStats(ctx context.Context, watcherID uuid.UUID, since time.Time) (*store.WatcherEffectiveness, error) {
-	return &store.WatcherEffectiveness{WatcherID: watcherID.String()}, nil
-}
-func (m *mockAlertStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
-	return 0, nil
-}
-func (m *mockAlertStore) GetByID(ctx context.Context, id uuid.UUID) (*store.Alert, error) {
-	for i := range m.alerts {
-		if m.alerts[i].ID == id {
-			return &m.alerts[i], nil
-		}
-	}
-	return nil, store.ErrNotFound
-}
 
-func (m *mockAlertStore) CountBySeverity(ctx context.Context, since, until time.Time) (map[string]int, error) {
-	result := make(map[string]int)
-	for _, a := range m.alerts {
-		if a.CreatedAt.Before(since) || !a.CreatedAt.Before(until) {
-			continue
-		}
-		result[string(a.Severity)]++
-	}
-	return result, nil
-}
 
 // mockWatcherRunStore implements store.WatcherRunStore for MCP tests.
-type mockWatcherRunStore struct {
-	runs []store.WatcherRun
-}
 
-func (m *mockWatcherRunStore) Create(_ context.Context, watcherID uuid.UUID) (*store.WatcherRun, error) {
-	return nil, nil
-}
-func (m *mockWatcherRunStore) Complete(_ context.Context, _ uuid.UUID, _ string, _ any, _ bool) error {
-	return nil
-}
-func (m *mockWatcherRunStore) Fail(_ context.Context, _ uuid.UUID, _ string) error { return nil }
-func (m *mockWatcherRunStore) FailStaleRuns(_ context.Context, _ time.Duration) (int, error) {
-	return 0, nil
-}
-func (m *mockWatcherRunStore) List(_ context.Context, watcherID uuid.UUID, limit int) ([]store.WatcherRun, error) {
-	var result []store.WatcherRun
-	for _, r := range m.runs {
-		if r.WatcherID == watcherID {
-			result = append(result, r)
-		}
-	}
-	if limit > 0 && len(result) > limit {
-		result = result[:limit]
-	}
-	return result, nil
-}
-func (m *mockWatcherRunStore) GetByID(_ context.Context, id uuid.UUID) (*store.WatcherRun, error) {
-	for i := range m.runs {
-		if m.runs[i].ID == id {
-			return &m.runs[i], nil
-		}
-	}
-	return nil, store.ErrNotFound
-}
-func (m *mockWatcherRunStore) Prune(_ context.Context, _ time.Duration) (int64, error) {
-	return 0, nil
-}
-func (m *mockWatcherRunStore) ListWithFilter(_ context.Context, watcherID uuid.UUID, limit int, status string) ([]store.WatcherRun, error) {
-	var result []store.WatcherRun
-	for _, r := range m.runs {
-		if r.WatcherID != watcherID {
-			continue
-		}
-		switch status {
-		case "completed":
-			if r.Status != "completed" {
-				continue
-			}
-		case "failed", "error":
-			if r.Status != "failed" && r.Status != "error" {
-				continue
-			}
-		case "alerted":
-			if r.Status != "completed" || !r.HasAlert {
-				continue
-			}
-		}
-		result = append(result, r)
-	}
-	if limit > 0 && len(result) > limit {
-		result = result[:limit]
-	}
-	return result, nil
-}
 
-func (m *mockWatcherRunStore) ListRecentFailed(_ context.Context, limit int) ([]store.WatcherRun, error) {
-	var result []store.WatcherRun
-	for _, r := range m.runs {
-		if r.Status == "failed" || r.Status == "error" {
-			result = append(result, r)
-		}
-	}
-	if limit > 0 && len(result) > limit {
-		result = result[:limit]
-	}
-	return result, nil
-}
 
-func (m *mockWatcherRunStore) CountRuns(_ context.Context, params store.CountRunParams) (int, error) {
-	count := 0
-	for _, r := range m.runs {
-		if r.StartedAt.Before(params.Since) || !r.StartedAt.Before(params.Until) {
-			continue
-		}
-		if params.Status != "" && r.Status != params.Status {
-			continue
-		}
-		if params.WatcherID != nil && r.WatcherID != *params.WatcherID {
-			continue
-		}
-		count++
-	}
-	return count, nil
-}
 
 // --- listWatchersHandler tests ---
 
-func TestListWatchersHandler_Empty(t *testing.T) {
-	ws := &mockWatcherStore{}
-	handler := listWatchersHandler(ws, nil, nil)
 
-	result, err := handler(context.Background(), makeRequest(nil))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 
-	text := resultText(t, result)
-	if text != "No watchers configured." {
-		t.Errorf("text = %q, want %q", text, "No watchers configured.")
-	}
-}
 
-func TestListWatchersHandler_WithWatchers(t *testing.T) {
-	ws := &mockWatcherStore{
-		watchers: []store.Watcher{
-			{ID: uuid.New(), Title: "Error Watcher", Status: store.WatcherActive, WatcherType: store.WatcherTypeAI},
-			{ID: uuid.New(), Title: "Connection Check", Status: store.WatcherActive, WatcherType: store.WatcherTypeRule},
-		},
-	}
-	handler := listWatchersHandler(ws, nil, nil)
-
-	result, err := handler(context.Background(), makeRequest(nil))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.IsError {
-		t.Fatal("expected success result")
-	}
-
-	text := resultText(t, result)
-	if !contains(text, "Error Watcher") {
-		t.Error("expected output to contain 'Error Watcher'")
-	}
-	if !contains(text, "Connection Check") {
-		t.Error("expected output to contain 'Connection Check'")
-	}
-}
-
-func TestListWatchersHandler_FilterByType(t *testing.T) {
-	ws := &mockWatcherStore{
-		watchers: []store.Watcher{
-			{ID: uuid.New(), Title: "AI Watcher", Status: store.WatcherActive, WatcherType: store.WatcherTypeAI},
-			{ID: uuid.New(), Title: "Rule Watcher", Status: store.WatcherActive, WatcherType: store.WatcherTypeRule},
-		},
-	}
-	// Override List to check the filter is passed.
-	handler := listWatchersHandler(ws, nil, nil)
-
-	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"watcher_type": "rule",
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.IsError {
-		t.Fatal("expected success result")
-	}
-	// The mock doesn't filter by type — just verify the call doesn't error.
-	// The real store filters by type via the SQL query.
-}
-
-func TestListWatchersHandler_Error(t *testing.T) {
-	ws := &mockWatcherStore{err: errors.New("db error")}
-	handler := listWatchersHandler(ws, nil, nil)
-
-	result, err := handler(context.Background(), makeRequest(nil))
-	if err != nil {
-		t.Fatalf("unexpected transport error: %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("expected error result")
-	}
-}
 
 // --- createWatcherHandler tests ---
 
-func TestCreateWatcherHandler_AISuccess(t *testing.T) {
-	ws := &mockWatcherStore{}
-	handler := createWatcherHandler(ws)
 
-	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"title":       "Error Watcher",
-		"description": "Watch for error spikes in production",
-		"service":     "api",
-		"level":       "error",
-		"time_range":  "10m",
-		"severity":    "critical",
-	}))
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(t, result))
-	}
 
-	text := resultText(t, result)
-	if !contains(text, "Watcher created successfully") {
-		t.Errorf("text = %q, want it to contain 'Watcher created successfully'", text)
-	}
 
-	if ws.created == nil {
-		t.Fatal("watcher was not created")
-	}
-	if ws.created.Title != "Error Watcher" {
-		t.Errorf("title = %q, want %q", ws.created.Title, "Error Watcher")
-	}
-	if ws.created.WatcherType != store.WatcherTypeAI {
-		t.Errorf("watcher_type = %q, want %q", ws.created.WatcherType, store.WatcherTypeAI)
-	}
-	if ws.created.TimeRange != "10m" {
-		t.Errorf("time_range = %q, want %q", ws.created.TimeRange, "10m")
-	}
-	if ws.created.Severity != store.SeverityCritical {
-		t.Errorf("severity = %q, want %q", ws.created.Severity, store.SeverityCritical)
-	}
 
-	var filters map[string]string
-	json.Unmarshal(ws.created.Filters, &filters)
-	if filters["service"] != "api" {
-		t.Errorf("filter service = %q, want %q", filters["service"], "api")
-	}
-}
-
-func TestCreateWatcherHandler_RuleSuccess(t *testing.T) {
-	ws := &mockWatcherStore{}
-	handler := createWatcherHandler(ws)
-
-	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"title":          "Connection count",
-		"watcher_type":   "rule",
-		"rule_config":    `{"source":"query","query":"SELECT count(*) FROM pg_stat_activity","metric":"value","operator":"gt","threshold":100}`,
-		"data_source_id": "ds-123",
-		"severity":       "warning",
-		"time_range":     "5m",
-	}))
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(t, result))
-	}
-
-	if ws.created == nil {
-		t.Fatal("watcher was not created")
-	}
-	if ws.created.WatcherType != store.WatcherTypeRule {
-		t.Errorf("watcher_type = %q, want %q", ws.created.WatcherType, store.WatcherTypeRule)
-	}
-	if ws.created.RuleConfig == nil {
-		t.Fatal("expected rule_config to be set")
-	}
-	if ws.created.RuleConfig.Source != store.RuleSourceQuery {
-		t.Errorf("rule_config.source = %q, want %q", ws.created.RuleConfig.Source, store.RuleSourceQuery)
-	}
-	if ws.created.DataSourceID == nil || *ws.created.DataSourceID != "ds-123" {
-		t.Errorf("data_source_id = %v, want ds-123", ws.created.DataSourceID)
-	}
-}
-
-func TestCreateWatcherHandler_RuleMissingConfig(t *testing.T) {
-	ws := &mockWatcherStore{}
-	handler := createWatcherHandler(ws)
-
-	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"title":        "Rule without config",
-		"watcher_type": "rule",
-	}))
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("expected error for rule watcher without rule_config")
-	}
-}
-
-func TestCreateWatcherHandler_MissingTitle(t *testing.T) {
-	ws := &mockWatcherStore{}
-	handler := createWatcherHandler(ws)
-
-	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"description": "some description",
-	}))
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("expected error for missing title")
-	}
-}
-
-func TestCreateWatcherHandler_AIMissingDescription(t *testing.T) {
-	ws := &mockWatcherStore{}
-	handler := createWatcherHandler(ws)
-
-	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"title": "No description AI watcher",
-	}))
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("expected error for AI watcher without description")
-	}
-}
-
-func TestCreateWatcherHandler_Defaults(t *testing.T) {
-	ws := &mockWatcherStore{}
-	handler := createWatcherHandler(ws)
-
-	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"title":       "Simple Watcher",
-		"description": "Just watch",
-	}))
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(t, result))
-	}
-
-	if ws.created.TimeRange != "15m" {
-		t.Errorf("default time_range = %q, want %q", ws.created.TimeRange, "15m")
-	}
-	if ws.created.Severity != store.SeverityWarning {
-		t.Errorf("default severity = %q, want %q", ws.created.Severity, store.SeverityWarning)
-	}
-	if ws.created.WatcherType != store.WatcherTypeAI {
-		t.Errorf("default watcher_type = %q, want %q", ws.created.WatcherType, store.WatcherTypeAI)
-	}
-}
 
 // --- previewWatcherHandler tests ---
 
-func TestPreviewWatcherHandler_MissingConfig(t *testing.T) {
-	re := watcher.NewRuleEvaluator(connector.NewRegistry(), nil, nil)
-	handler := previewWatcherHandler(re)
 
-	result, err := handler(context.Background(), makeRequest(map[string]any{}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("expected error for missing rule_config")
-	}
-}
 
-func TestPreviewWatcherHandler_InvalidJSON(t *testing.T) {
-	re := watcher.NewRuleEvaluator(connector.NewRegistry(), nil, nil)
-	handler := previewWatcherHandler(re)
 
-	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"rule_config": "not-json",
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("expected error for invalid JSON")
-	}
-}
-
-func TestPreviewWatcherHandler_EnhancedResponse(t *testing.T) {
-	// Set up a registry with a mock QueryExecutor that returns a value.
-	registry := connector.NewRegistry()
-	registry.Register(&previewMockQE{
-		mockDataSource: mockDataSource{connType: connector.ConnectorDatabase},
-		result: &connector.QueryResult{
-			Columns:  []string{"count"},
-			Rows:     [][]any{{int64(42)}},
-			RowCount: 1,
-		},
-	})
-
-	re := watcher.NewRuleEvaluator(registry, nil, nil)
-	handler := previewWatcherHandler(re)
-
-	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"rule_config": `{"source":"query","query":"SELECT count(*) FROM pg_stat_activity","metric":"value","operator":"gt","threshold":100}`,
-	}))
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(t, result))
-	}
-
-	text := resultText(t, result)
-	var resp map[string]any
-	if err := json.Unmarshal([]byte(text), &resp); err != nil {
-		t.Fatalf("failed to parse JSON: %v", err)
-	}
-
-	// Check new fields exist.
-	if resp["threshold"] != float64(100) {
-		t.Errorf("threshold = %v, want 100", resp["threshold"])
-	}
-	if resp["operator"] != "gt" {
-		t.Errorf("operator = %v, want gt", resp["operator"])
-	}
-	if _, ok := resp["recommendation"]; !ok {
-		t.Error("expected recommendation field")
-	}
-	if _, ok := resp["query_result_sample"]; !ok {
-		t.Error("expected query_result_sample field")
-	}
-	// 42 < 100, so should NOT trigger.
-	if resp["would_alert"] != false {
-		t.Errorf("would_alert = %v, want false", resp["would_alert"])
-	}
-	if !contains(resp["recommendation"].(string), "would NOT trigger") {
-		t.Errorf("expected NOT-trigger recommendation, got: %s", resp["recommendation"])
-	}
-}
-
-func TestPreviewWatcherHandler_WouldAlert(t *testing.T) {
-	registry := connector.NewRegistry()
-	registry.Register(&previewMockQE{
-		mockDataSource: mockDataSource{connType: connector.ConnectorDatabase},
-		result: &connector.QueryResult{
-			Columns:  []string{"count"},
-			Rows:     [][]any{{int64(150)}},
-			RowCount: 1,
-		},
-	})
-
-	re := watcher.NewRuleEvaluator(registry, nil, nil)
-	handler := previewWatcherHandler(re)
-
-	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"rule_config": `{"source":"query","query":"SELECT count(*) FROM pg_stat_activity","metric":"value","operator":"gt","threshold":100}`,
-	}))
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	text := resultText(t, result)
-	var resp map[string]any
-	if err := json.Unmarshal([]byte(text), &resp); err != nil {
-		t.Fatalf("failed to parse JSON: %v", err)
-	}
-
-	if resp["would_alert"] != true {
-		t.Errorf("would_alert = %v, want true", resp["would_alert"])
-	}
-	if !contains(resp["recommendation"].(string), "WOULD trigger") {
-		t.Errorf("expected WOULD-trigger recommendation, got: %s", resp["recommendation"])
-	}
-}
 
 // previewMockQE implements DataSource + QueryExecutor for preview tests.
 type previewMockQE struct {
@@ -925,62 +364,8 @@ func (m *previewMockQE) ExecuteReadQuery(ctx context.Context, query string) (*co
 
 // --- listAlertsHandler tests ---
 
-func TestListAlertsHandler_Empty(t *testing.T) {
-	as := &mockAlertStore{}
-	handler := listAlertsHandler(as)
 
-	result, err := handler(context.Background(), makeRequest(nil))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 
-	text := resultText(t, result)
-	if text != "No alerts found." {
-		t.Errorf("text = %q, want %q", text, "No alerts found.")
-	}
-}
-
-func TestListAlertsHandler_WithAlerts(t *testing.T) {
-	as := &mockAlertStore{
-		alerts: []store.Alert{
-			{ID: uuid.New(), Title: "Error spike detected", Severity: store.SeverityCritical},
-			{ID: uuid.New(), Title: "High latency", Severity: store.SeverityWarning},
-		},
-	}
-	handler := listAlertsHandler(as)
-
-	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"limit": float64(5),
-	}))
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.IsError {
-		t.Fatal("expected success result")
-	}
-
-	text := resultText(t, result)
-	if !contains(text, "Error spike detected") {
-		t.Error("expected output to contain 'Error spike detected'")
-	}
-	if !contains(text, "High latency") {
-		t.Error("expected output to contain 'High latency'")
-	}
-}
-
-func TestListAlertsHandler_Error(t *testing.T) {
-	as := &mockAlertStore{err: errors.New("db error")}
-	handler := listAlertsHandler(as)
-
-	result, err := handler(context.Background(), makeRequest(nil))
-	if err != nil {
-		t.Fatalf("unexpected transport error: %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("expected error result")
-	}
-}
 
 // --- Mock UserStore for auth tests ---
 
@@ -1166,221 +551,10 @@ func TestAccessControl_EmptyToken(t *testing.T) {
 
 // --- Tool registration tests ---
 
-func TestAddReadOnlyTools_RegistersExpectedTools(t *testing.T) {
-	registry := connector.NewRegistry()
-	ws := &mockWatcherStore{}
-	as := &mockAlertStore{}
-	rs := &mockWatcherRunStore{}
 
-	ls := &mockLogStore{}
-
-	s := server.NewMCPServer("opentrace-test", "0.1.0")
-	deps := Deps{
-		Registry:        registry,
-		WatcherStore:    ws,
-		AlertStore:      as,
-		WatcherRunStore: rs,
-		LogStore:        ls,
-	}
-	addReadOnlyTools(s, deps, &CatalogBuilder{})
-
-	tools := s.ListTools()
-	expectedTools := []string{"list_connectors", "list_watchers", "list_alerts", "get_digest", "db_locks", "log_stats", "trace_lookup", "db_index_analysis", "compare_periods", "connection_pool_stats", "replication_status", "log_search"}
-	for _, name := range expectedTools {
-		if _, ok := tools[name]; !ok {
-			t.Errorf("expected read-only tool %q to be registered", name)
-		}
-	}
-
-	// Verify write tools are NOT registered by addReadOnlyTools.
-	if _, ok := tools["create_watcher"]; ok {
-		t.Error("create_watcher should not be registered by addReadOnlyTools")
-	}
-	if _, ok := tools["explain_query"]; ok {
-		t.Error("explain_query should not be registered by addReadOnlyTools")
-	}
-}
-
-func TestAddWriteTools_RegistersConnectorTools(t *testing.T) {
-	registry := connector.NewRegistry()
-	registry.Register(&mockDataSource{
-		connType: connector.ConnectorDatabase,
-		tools: []agent.Tool{
-			{
-				Name:        "run_query",
-				Description: "Run a SQL query",
-				Handler: func(ctx context.Context, args map[string]any) (string, error) {
-					return "ok", nil
-				},
-			},
-		},
-	})
-
-	ws := &mockWatcherStore{}
-	as := &mockAlertStore{}
-	re := watcher.NewRuleEvaluator(registry, nil, nil)
-
-	s := server.NewMCPServer("opentrace-test", "0.1.0")
-	deps := Deps{
-		Registry:      registry,
-		WatcherStore:  ws,
-		AlertStore:    as,
-		RuleEvaluator: re,
-	}
-	addWriteTools(s, deps, &CatalogBuilder{})
-
-	tools := s.ListTools()
-
-	expectedWriteTools := []string{
-		"run_query",        // connector tool
-		"create_watcher",   // watcher lifecycle
-		"update_watcher",
-		"delete_watcher",
-		"pause_watcher",
-		"resume_watcher",
-		"preview_watcher",  // rule preview
-		"suggest_watchers", // suggestions
-		"kill_query",       // query management
-		"acknowledge_alert",     // alert management
-		"acknowledge_all_alerts",
-		"dismiss_alert",
-		"dismiss_all_alerts",
-	}
-	for _, name := range expectedWriteTools {
-		if _, ok := tools[name]; !ok {
-			t.Errorf("expected write tool %q to be registered by addWriteTools", name)
-		}
-	}
-}
 
 // --- getDigestHandler tests ---
 
-func TestGetDigestHandler_Empty(t *testing.T) {
-	as := &mockAlertStore{}
-	ws := &mockWatcherStore{}
-	rs := &mockWatcherRunStore{}
 
-	handler := getDigestHandler(as, ws, rs)
-	result, err := handler(context.Background(), makeRequest(nil))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.IsError {
-		t.Fatal("expected success result")
-	}
 
-	text := resultText(t, result)
-
-	// Parse the JSON response
-	var resp map[string]any
-	if err := json.Unmarshal([]byte(text), &resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
-	}
-
-	if resp["status"] != "healthy" {
-		t.Errorf("status = %v, want healthy", resp["status"])
-	}
-
-	// Should contain summary
-	if _, ok := resp["summary"].(string); !ok {
-		t.Error("expected summary string in response")
-	}
-}
-
-func TestGetDigestHandler_WithAlerts(t *testing.T) {
-	now := time.Now().UTC()
-	wID := uuid.New()
-
-	as := &mockAlertStore{
-		alerts: []store.Alert{
-			{ID: uuid.New(), WatcherID: &wID, WatcherTitle: "Connection Watcher", Title: "High connections",
-				Summary: "92/100 connections", Severity: store.SeverityCritical, CreatedAt: now.Add(-2 * time.Hour)},
-			{ID: uuid.New(), WatcherID: &wID, WatcherTitle: "Connection Watcher", Title: "Warning level",
-				Summary: "75/100 connections", Severity: store.SeverityWarning, CreatedAt: now.Add(-4 * time.Hour)},
-		},
-	}
-	ws := &mockWatcherStore{
-		watchers: []store.Watcher{
-			{ID: wID, Title: "Connection Watcher", Status: store.WatcherActive},
-		},
-	}
-	rs := &mockWatcherRunStore{
-		runs: []store.WatcherRun{
-			{ID: uuid.New(), WatcherID: wID, StartedAt: now.Add(-1 * time.Hour), Status: "completed"},
-		},
-	}
-
-	handler := getDigestHandler(as, ws, rs)
-	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"period": "last_24h",
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.IsError {
-		t.Fatal("expected success result")
-	}
-
-	text := resultText(t, result)
-
-	var resp map[string]any
-	if err := json.Unmarshal([]byte(text), &resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
-	}
-
-	if resp["status"] != "critical" {
-		t.Errorf("status = %v, want critical", resp["status"])
-	}
-
-	alerts, ok := resp["alerts"].(map[string]any)
-	if !ok {
-		t.Fatal("expected alerts map in response")
-	}
-	if alerts["critical"] != float64(1) {
-		t.Errorf("critical = %v, want 1", alerts["critical"])
-	}
-	if alerts["warning"] != float64(1) {
-		t.Errorf("warning = %v, want 1", alerts["warning"])
-	}
-}
-
-func TestGetDigestHandler_PeriodYesterday(t *testing.T) {
-	as := &mockAlertStore{}
-	ws := &mockWatcherStore{}
-	rs := &mockWatcherRunStore{}
-
-	handler := getDigestHandler(as, ws, rs)
-	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"period": "yesterday",
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.IsError {
-		t.Fatal("expected success result")
-	}
-
-	text := resultText(t, result)
-
-	var resp map[string]any
-	if err := json.Unmarshal([]byte(text), &resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
-	}
-
-	// Verify period is set to yesterday
-	period, ok := resp["period"].(map[string]any)
-	if !ok {
-		t.Fatal("expected period map")
-	}
-
-	startStr, _ := period["start"].(string)
-	endStr, _ := period["end"].(string)
-
-	start, _ := time.Parse(time.RFC3339, startStr)
-	end, _ := time.Parse(time.RFC3339, endStr)
-
-	if end.Sub(start) != 24*time.Hour {
-		t.Errorf("yesterday period duration = %v, want 24h", end.Sub(start))
-	}
-}
 

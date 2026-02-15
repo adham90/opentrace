@@ -92,15 +92,13 @@ func TestBuildCatalog_WithDeps(t *testing.T) {
 	registry := connector.NewRegistry()
 	ws := &mockWatcherStore{}
 	as := &mockAlertStore{}
-	rs := &mockWatcherRunStore{}
 	ls := &mockLogStore{}
 
 	cat := BuildCatalog(Deps{
-		Registry:        registry,
-		WatcherStore:    ws,
-		AlertStore:      as,
-		WatcherRunStore: rs,
-		LogStore:        ls,
+		Registry:     registry,
+		WatcherStore: ws,
+		AlertStore:   as,
+		LogStore:     ls,
 	})
 
 	categories := cat.Categories()
@@ -118,12 +116,11 @@ func TestBuildCatalog_WithDeps(t *testing.T) {
 
 	// Verify key tools are present.
 	expected := []string{
-		"list_connectors", "list_watchers", "list_alerts", "get_digest",
+		"list_connectors",
 		"db_query_stats", "db_table_stats", "db_activity", "db_locks",
 		"log_stats", "trace_lookup", "compare_periods",
 		"db_index_analysis", "connection_pool_stats",
-		"explain_query", "create_watcher", "suggest_watchers",
-		"watcher_run_history", "alert_details",
+		"explain_query",
 	}
 	for _, name := range expected {
 		if !toolNames[name] {
@@ -146,12 +143,12 @@ func TestBuildCatalog_MinimalDeps(t *testing.T) {
 		}
 	}
 
-	// Tools that require WatcherStore should be absent.
-	if toolNames["list_watchers"] {
-		t.Error("list_watchers should not be in catalog without WatcherStore")
+	// Tools that require LogStore should be absent.
+	if toolNames["log_stats"] {
+		t.Error("log_stats should not be in catalog without LogStore")
 	}
-	if toolNames["create_watcher"] {
-		t.Error("create_watcher should not be in catalog without WatcherStore")
+	if toolNames["compare_periods"] {
+		t.Error("compare_periods should not be in catalog without LogStore")
 	}
 
 	// Tools that don't require optional deps should be present.

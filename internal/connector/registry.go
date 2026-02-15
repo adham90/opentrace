@@ -3,7 +3,6 @@ package connector
 import (
 	"sync"
 
-	"github.com/adham90/opentrace/internal/agent"
 )
 
 // Registry manages active data source connectors.
@@ -73,11 +72,11 @@ func (r *Registry) HasDataConnectors() bool {
 
 // AllTools aggregates tools from all registered connectors.
 // Returns an empty slice (not nil) if no connectors are registered.
-func (r *Registry) AllTools() []agent.Tool {
+func (r *Registry) AllTools() []Tool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	tools := make([]agent.Tool, 0)
+	tools := make([]Tool, 0)
 	for _, ds := range r.connectors {
 		tools = append(tools, ds.Tools()...)
 	}

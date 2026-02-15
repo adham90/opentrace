@@ -1,4 +1,4 @@
-package agent
+package connector
 
 import (
 	"fmt"
@@ -27,9 +27,6 @@ func ValidateArgs(params []ToolParam, args map[string]any) error {
 	return nil
 }
 
-// coerceType validates and coerces v to the expected type, returning the
-// coerced value. LLMs frequently send ints as strings or floats, so we
-// handle those conversions gracefully.
 func coerceType(name, typ string, v any) (any, error) {
 	switch typ {
 	case "string":
@@ -37,7 +34,6 @@ func coerceType(name, typ string, v any) (any, error) {
 		case string:
 			return val, nil
 		case float64:
-			// Accept numbers as strings (e.g., 42 → "42")
 			if val == float64(int64(val)) {
 				return strconv.FormatInt(int64(val), 10), nil
 			}
@@ -52,7 +48,6 @@ func coerceType(name, typ string, v any) (any, error) {
 		case int:
 			return float64(val), nil
 		case string:
-			// LLMs often send "10" instead of 10
 			f, err := strconv.ParseFloat(val, 64)
 			if err != nil {
 				return nil, fmt.Errorf("parameter %q: expected int, got string %q", name, val)
@@ -66,7 +61,6 @@ func coerceType(name, typ string, v any) (any, error) {
 		case bool:
 			return val, nil
 		case string:
-			// LLMs sometimes send "true"/"false" as strings
 			b, err := strconv.ParseBool(val)
 			if err != nil {
 				return nil, fmt.Errorf("parameter %q: expected bool, got string %q", name, val)

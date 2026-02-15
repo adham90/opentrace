@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/adham90/opentrace/internal/agent"
 	"github.com/adham90/opentrace/internal/guardrail"
 )
 
@@ -65,8 +64,8 @@ func (c *DatabaseConnector) TestConnection(ctx context.Context) error {
 	return c.pool.Ping(ctx)
 }
 
-func (c *DatabaseConnector) Tools() []agent.Tool {
-	return []agent.Tool{
+func (c *DatabaseConnector) Tools() []Tool {
+	return []Tool{
 		{
 			Name: "db_search",
 			Description: `Execute a read-only SQL SELECT query against the PostgreSQL database.
@@ -79,7 +78,7 @@ Tips:
 - For aggregation: SELECT col, COUNT(*) FROM table GROUP BY col
 - For date filtering: WHERE created_at >= '2024-01-01'
 - If a query errors, check column names against db_schema output`,
-			Params: []agent.ToolParam{
+			Params: []ToolParam{
 				{Name: "query", Type: "string", Required: true},
 			},
 			Handler: c.handleDbSearch,
@@ -95,7 +94,7 @@ Tips:
 - Foreign keys show as -> target_table(column) so you know how to JOIN
 - Sample values help you understand what data looks like
 - Row count estimates help you gauge table size`,
-			Params: []agent.ToolParam{
+			Params: []ToolParam{
 				{Name: "table", Type: "string", Required: false},
 			},
 			Handler: c.handleDbSchema,

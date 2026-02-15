@@ -6,9 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/adham90/opentrace/internal/connector"
-	"github.com/adham90/opentrace/internal/store"
 )
 
 // mockQueryExecutor implements both connector.DataSource and connector.QueryExecutor.
@@ -161,52 +159,3 @@ func TestQueryStatsHandler_NotQueryExecutor(t *testing.T) {
 	}
 }
 
-func TestQueryStatsHandler_WithExistingWatchers(t *testing.T) {
-	registry := connector.NewRegistry()
-	registry.Register(&mockQueryExecutor{
-		mockDataSource: mockDataSource{connType: connector.ConnectorDatabase},
-		result: &connector.QueryResult{
-			Columns: []string{"queryid", "query_preview", "calls", "total_exec_time", "mean_exec_time", "rows", "shared_blks_hit", "shared_blks_read"},
-			Rows: [][]any{
-				{int64(123), "SELECT * FROM users", int64(500), 1234.5, 2.469, int64(5000), int64(9000), int64(100)},
-			},
-			RowCount: 1,
-		},
-	})
-
-	ws := &mockWatcherStore{
-		watchers: []store.Watcher{
-			{ID: uuid.New(), Title: "Slow query watcher", Status: store.WatcherActive, WatcherType: store.WatcherTypeRule,
-				RuleConfig: &store.RuleConfig{Source: store.RuleSourceQuery, Query: "SELECT count(*) FROM pg_stat_activity"}},
-			{ID: uuid.New(), Title: "Error log watcher", Status: store.WatcherActive, WatcherType: store.WatcherTypeAI},
-		},
-	}
-
-	handler := queryStatsHandler(registry, ws)
-	result, err := handler(context.Background(), makeRequest(nil))
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(t, result))
-	}
-
-	text := resultText(t, result)
-	var resp map[string]any
-	if err := json.Unmarshal([]byte(text), &resp); err != nil {
-		t.Fatalf("failed to parse JSON: %v", err)
-	}
-
-	watchers, ok := resp["existing_watchers"].([]any)
-	if !ok {
-		t.Fatal("expected existing_watchers array in response")
-	}
-	if len(watchers) != 2 {
-		t.Errorf("len(existing_watchers) = %d, want 2", len(watchers))
-	}
-
-	if _, ok := resp["existing_watchers_hint"]; !ok {
-		t.Error("expected existing_watchers_hint in response")
-	}
-}

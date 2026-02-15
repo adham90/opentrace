@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/adham90/opentrace/internal/agent"
 	"github.com/adham90/opentrace/internal/store"
 	"github.com/google/uuid"
 )
@@ -30,14 +29,14 @@ func (c *MetricsConnector) TestConnection(ctx context.Context) error {
 	return err
 }
 
-func (c *MetricsConnector) Tools() []agent.Tool {
-	return []agent.Tool{
+func (c *MetricsConnector) Tools() []Tool {
+	return []Tool{
 		{
 			Name: "list_servers",
 			Description: `List all monitored servers with their current status.
 Returns hostname, IP, OS, architecture, status (online/offline/unknown), and last seen time.
 Use this to see which servers are being monitored and their health status.`,
-			Params:  []agent.ToolParam{},
+			Params:  []ToolParam{},
 			Handler: c.handleListServers,
 		},
 		{
@@ -49,7 +48,7 @@ Metrics include: cpu.usage_percent, memory.usage_percent, disk.usage_percent, lo
 - start: only metrics after this time (ISO 8601)
 - end: only metrics before this time (ISO 8601)
 - limit: max results (default 100)`,
-			Params: []agent.ToolParam{
+			Params: []ToolParam{
 				{Name: "server_id", Type: "string", Required: true},
 				{Name: "metric_name", Type: "string", Required: false},
 				{Name: "start", Type: "string", Required: false},
@@ -63,7 +62,7 @@ Metrics include: cpu.usage_percent, memory.usage_percent, disk.usage_percent, lo
 			Description: `Get a current health snapshot for a server — latest value for every metric.
 Useful for quickly assessing server health without specifying individual metric names.
 - server_id: UUID of the server (from list_servers)`,
-			Params: []agent.ToolParam{
+			Params: []ToolParam{
 				{Name: "server_id", Type: "string", Required: true},
 			},
 			Handler: c.handleHealthSummary,

@@ -11,10 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/adham90/opentrace/internal/agent"
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
-	"github.com/adham90/opentrace/internal/llm"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/store"
 	"github.com/adham90/opentrace/internal/version"
@@ -25,15 +23,15 @@ import (
 
 // appDeps holds shared application dependencies initialized by initApp.
 type appDeps struct {
-	db            *sql.DB
-	dsStore       store.DataSourceStore
-	logStore      store.LogStore
-	watcherStore  store.WatcherStore
-	alertStore    store.AlertStore
-	serverStore   store.ServerStore
-	metricStore   store.MetricStore
-	userStore     store.UserStore
-	sessionStore  store.SessionStore
+	db               *sql.DB
+	dsStore          store.DataSourceStore
+	logStore         store.LogStore
+	watcherStore     store.WatcherStore
+	alertStore       store.AlertStore
+	serverStore      store.ServerStore
+	metricStore      store.MetricStore
+	userStore        store.UserStore
+	sessionStore     store.SessionStore
 	settingsStore    store.SettingsStore
 	mcpActivityStore store.MCPActivityStore
 	alertGroupStore  store.AlertGroupStore
@@ -159,35 +157,12 @@ func runMCP() error {
 	defer deps.db.Close()
 	defer deps.registry.CloseAll()
 
-	// Apply LLM settings from database (overrides env-var defaults)
-	applyLLMOverrides(ctx, deps.settingsStore, deps.cfg)
-
-	// Create LLM provider + executor for on-demand watcher execution.
-	defaultLLM, _ := llm.NewLLMProvider(deps.cfg)
-	providerCache := llm.NewProviderCache(deps.cfg, defaultLLM)
-	runStore := store.NewWatcherRunStore(deps.db)
-	eventHub := watcher.NewEventHub()
-	executor := watcher.NewExecutor(
-		deps.watcherStore,
-		runStore,
-		deps.alertStore,
-		deps.registry,
-		providerCache,
-		agent.RunConfig{
-			MaxSteps:            deps.cfg.MaxAgentSteps,
-			MaxToolCalls:        deps.cfg.MaxToolCalls,
-			MaxObservationBytes: deps.cfg.MaxObservationBytes,
-		},
-		eventHub,
-	)
-
 	watchMetrics := watcher.NewWatchMetrics(deps.logStore)
 
 	return mcpserver.Serve(mcpserver.Deps{
 		Registry:         deps.registry,
 		WatcherStore:     deps.watcherStore,
 		AlertStore:       deps.alertStore,
-		WatcherRunStore:  runStore,
 		LogStore:         deps.logStore,
 		ServerStore:      deps.serverStore,
 		MetricStore:      deps.metricStore,
@@ -196,11 +171,9 @@ func runMCP() error {
 		ServerName:       os.Getenv("OPENTRACE_MCP_NAME"),
 		DataSourceStore:  deps.dsStore,
 		SettingsStore:    deps.settingsStore,
-		Executor:         executor,
 		Config:           deps.cfg,
 		MCPActivityStore: deps.mcpActivityStore,
 		AlertGroupStore:  deps.alertGroupStore,
-		EventHub:         eventHub,
 		AuditStore:       deps.auditStore,
 		WatchStore:       deps.watchStore,
 		WatchMetrics:     watchMetrics,
@@ -243,43 +216,6 @@ func run() error {
 	}
 	defer deps.db.Close()
 
-	// Apply LLM settings from database (overrides env-var defaults)
-	applyLLMOverrides(ctx, deps.settingsStore, deps.cfg)
-
-	// Create LLM provider cache for per-watcher model selection
-	defaultLLM, err := llm.NewLLMProvider(deps.cfg)
-	if err != nil {
-		slog.Warn("default LLM provider unavailable", "error", err)
-	}
-	providerCache := llm.NewProviderCache(deps.cfg, defaultLLM)
-	modelRegistry := llm.NewModelRegistry(deps.cfg)
-
-	// Create watcher run store and clean up stale runs from previous crashes
-	runStore := store.NewWatcherRunStore(deps.db)
-	if n, err := runStore.FailStaleRuns(ctx, 10*time.Minute); err != nil {
-		slog.Warn("failed to clean stale runs", "error", err)
-	} else if n > 0 {
-		slog.Info("cleaned up stale watcher runs", "count", n)
-	}
-
-	eventHub := watcher.NewEventHub()
-	executor := watcher.NewExecutor(
-		deps.watcherStore,
-		runStore,
-		deps.alertStore,
-		deps.registry,
-		providerCache,
-		agent.RunConfig{
-			MaxSteps:            deps.cfg.MaxAgentSteps,
-			MaxToolCalls:        deps.cfg.MaxToolCalls,
-			MaxObservationBytes: deps.cfg.MaxObservationBytes,
-		},
-		eventHub,
-	)
-
-	// Create rule evaluator for watcher preview and MCP SSE.
-	ruleEvaluator := watcher.NewRuleEvaluator(deps.registry, deps.logStore, deps.dsStore)
-
 	// Agent-first watch components
 	watchMetrics := watcher.NewWatchMetrics(deps.logStore)
 
@@ -288,13 +224,11 @@ func run() error {
 		Registry:        deps.registry,
 		WatcherStore:    deps.watcherStore,
 		AlertStore:      deps.alertStore,
-		WatcherRunStore: runStore,
 		LogStore:        deps.logStore,
 		ServerStore:     deps.serverStore,
 		MetricStore:     deps.metricStore,
 		DataSourceStore: deps.dsStore,
 		SettingsStore:   deps.settingsStore,
-		RuleEvaluator:   ruleEvaluator,
 		Config:          deps.cfg,
 		AlertGroupStore: deps.alertGroupStore,
 		AuditStore:      deps.auditStore,
@@ -302,7 +236,7 @@ func run() error {
 		WatchMetrics:    watchMetrics,
 	})
 
-	// Agent-first watch stream evaluator (reactive on log ingestion)
+	// Agent-first watch evaluator + stream (reactive on log ingestion)
 	watchEvaluator := watcher.NewWatchEvaluator(watchMetrics, deps.watchStore)
 	watchEvidenceBuilder := watcher.NewWatchEvidenceBuilder(deps.logStore, watchMetrics)
 	watchStream := watcher.NewWatchStreamEvaluator(deps.watchStore, watchEvaluator, watchEvidenceBuilder)
@@ -313,7 +247,6 @@ func run() error {
 		DSStore:          deps.dsStore,
 		LogStore:         deps.logStore,
 		WatcherStore:     deps.watcherStore,
-		RunStore:         runStore,
 		AlertStore:       deps.alertStore,
 		ServerStore:      deps.serverStore,
 		MetricStore:      deps.metricStore,
@@ -323,11 +256,6 @@ func run() error {
 		Registry:         deps.registry,
 		ToolCatalog:      toolCatalog,
 		Cfg:              deps.cfg,
-		Executor:         executor,
-		EventHub:         eventHub,
-		ModelRegistry:    modelRegistry,
-		ProviderCache:    providerCache,
-		RuleEvaluator:    ruleEvaluator,
 		MCPActivityStore: deps.mcpActivityStore,
 		AlertGroupStore:  deps.alertGroupStore,
 		AuditStore:       deps.auditStore,
@@ -347,35 +275,6 @@ func run() error {
 	// Graceful shutdown
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
-
-	// Create evaluators for typed watchers
-	deadmanEval := watcher.NewDeadmanEvaluator(deps.registry, deps.logStore)
-	diffEval := watcher.NewDiffEvaluator(deps.registry, runStore)
-	compositeEval := watcher.NewCompositeEvaluator(deps.watcherStore, runStore, ruleEvaluator)
-	trendEval := watcher.NewTrendEvaluator(deps.registry, deps.logStore, runStore)
-	sequenceEval := watcher.NewSequenceEvaluator(deps.logStore, deps.alertStore)
-
-	// Start watcher scheduler for automatic scheduled runs
-	sched := watcher.NewScheduler(watcher.SchedulerOpts{
-		WatcherStore:  deps.watcherStore,
-		RunStore:      runStore,
-		AlertStore:    deps.alertStore,
-		Registry:      deps.registry,
-		ProviderCache: providerCache,
-		AgentCfg: agent.RunConfig{
-			MaxSteps:            deps.cfg.MaxAgentSteps,
-			MaxToolCalls:        deps.cfg.MaxToolCalls,
-			MaxObservationBytes: deps.cfg.MaxObservationBytes,
-		},
-		EventHub:           eventHub,
-		RuleEvaluator:      ruleEvaluator,
-		DeadmanEvaluator:   deadmanEval,
-		DiffEvaluator:      diffEval,
-		CompositeEvaluator: compositeEval,
-		TrendEvaluator:     trendEval,
-		SequenceEvaluator:  sequenceEval,
-	})
-	sched.Start(ctx)
 
 	// Start agent-first watch scheduler
 	watchSessionMgr := watcher.NewWatchSessionManager(deps.watchStore, watchMetrics)
@@ -426,8 +325,7 @@ func run() error {
 
 	// Background: unified data retention job every hour
 	go func() {
-		// Preserve OPENTRACE_METRIC_RETENTION_DAYS as metric-specific override
-		metricRetentionDays := 0 // 0 means use global setting
+		metricRetentionDays := 0
 		if v := os.Getenv("OPENTRACE_METRIC_RETENTION_DAYS"); v != "" {
 			var d int
 			if _, err := fmt.Sscanf(v, "%d", &d); err == nil && d > 0 {
@@ -444,7 +342,6 @@ func run() error {
 			case <-ticker.C:
 			}
 
-			// Read global retention setting from DB each tick
 			settings, err := deps.settingsStore.GetRetention(ctx)
 			if err != nil {
 				slog.Warn("reading retention settings failed", "error", err)
@@ -453,18 +350,12 @@ func run() error {
 
 			globalDays := settings.RetentionDays
 
-			// Prune logs, watcher runs, alerts (skip if 0 = keep forever)
 			if globalDays > 0 {
 				retention := time.Duration(globalDays) * 24 * time.Hour
 				if n, err := deps.logStore.Prune(ctx, retention); err != nil {
 					slog.Warn("log prune failed", "error", err)
 				} else if n > 0 {
 					slog.Info("pruned old logs", "count", n)
-				}
-				if n, err := runStore.Prune(ctx, retention); err != nil {
-					slog.Warn("watcher run prune failed", "error", err)
-				} else if n > 0 {
-					slog.Info("pruned old watcher runs", "count", n)
 				}
 				if n, err := deps.alertStore.Prune(ctx, retention); err != nil {
 					slog.Warn("alert prune failed", "error", err)
@@ -485,7 +376,6 @@ func run() error {
 				}
 			}
 
-			// Prune metrics: use env var override if set, else global setting
 			metricDays := metricRetentionDays
 			if metricDays == 0 {
 				metricDays = globalDays
@@ -527,13 +417,9 @@ func run() error {
 					continue
 				}
 				slog.Info("auto-update succeeded, restarting", "old_version", result.OldVersion, "new_version", result.NewVersion)
-				// Trigger restart via the server's restart channel
 				select {
 				case <-srv.RestartCh():
-					// Already closing
 				default:
-					// Signal restart (close is done by the server when it gets RestartCh)
-					// We need to trigger shutdown; send signal to self
 					p, _ := os.FindProcess(os.Getpid())
 					p.Signal(os.Interrupt)
 				}
@@ -567,17 +453,13 @@ func run() error {
 		shouldRestart = true
 	}
 
-	// Cancel the root context to signal all background goroutines to stop
 	cancelCtx()
-
-	sched.Stop()
 	watchSched.Stop()
 	deps.registry.CloseAll()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
-	// Shutdown SSE sessions before the HTTP server.
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("SSE shutdown error", "error", err)
 	}
@@ -641,32 +523,4 @@ func reconnectConnectors(ctx context.Context, dsStore store.DataSourceStore, log
 		registry.Register(c)
 		slog.Info("reconnected connector", "connector", ds.Name, "type", string(ds.Type))
 	}
-}
-
-// applyLLMOverrides reads LLM settings from the database and applies them
-// over the environment-variable defaults in cfg.
-func applyLLMOverrides(ctx context.Context, ss store.SettingsStore, cfg *config.Config) {
-	if ss == nil {
-		return
-	}
-	settings, err := ss.GetLLMSettings(ctx)
-	if err != nil {
-		slog.Warn("failed to load LLM settings from database", "error", err)
-		return
-	}
-	if settings == nil {
-		return
-	}
-	cfg.ApplyLLMOverrides(config.LLMOverrides{
-		DefaultProvider: settings.DefaultProvider,
-		AnthropicAPIKey: settings.AnthropicAPIKey,
-		AnthropicURL:    settings.AnthropicURL,
-		OpenAIAPIKey:    settings.OpenAIAPIKey,
-		OpenAIURL:       settings.OpenAIURL,
-		GeminiAPIKey:    settings.GeminiAPIKey,
-		GeminiURL:       settings.GeminiURL,
-		OllamaURL:       settings.OllamaURL,
-		OllamaModel:     settings.OllamaModel,
-	})
-	slog.Info("applied LLM settings from database", "provider", cfg.LLMProvider)
 }

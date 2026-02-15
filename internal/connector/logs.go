@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/adham90/opentrace/internal/agent"
 	"github.com/adham90/opentrace/internal/store"
 )
 
@@ -28,8 +27,8 @@ func (c *LogsConnector) TestConnection(ctx context.Context) error {
 	return err
 }
 
-func (c *LogsConnector) Tools() []agent.Tool {
-	return []agent.Tool{
+func (c *LogsConnector) Tools() []Tool {
+	return []Tool{
 		{
 			Name: "log_search",
 			Description: `Search ingested logs. Supports filtering by:
@@ -47,7 +46,7 @@ Tips:
 - Use trace_id to follow a single request across services
 - Combine service + level to narrow down (e.g. service="payments" level="error")
 - Results are sorted by timestamp descending (newest first)`,
-			Params: []agent.ToolParam{
+			Params: []ToolParam{
 				{Name: "query", Type: "string", Required: false},
 				{Name: "service", Type: "string", Required: false},
 				{Name: "level", Type: "string", Required: false},

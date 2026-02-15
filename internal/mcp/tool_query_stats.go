@@ -127,8 +127,6 @@ LIMIT %d`, whereClause, orderBy, limit)
 			"hint":        "Use these stats to identify slow queries, high-frequency queries, or queries with poor cache hit ratios. Consider creating watchers for the most impactful ones.",
 		}
 
-		appendExistingWatchers(resp, fetchExistingWatchers(ctx, ws))
-
 		data, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil

@@ -113,18 +113,3 @@ func TestTriageAlerts_WithAlerts(t *testing.T) {
 	}
 }
 
-func TestWatcherTemplates(t *testing.T) {
-	handler := watcherTemplatesHandler()
-	res, err := handler(t.Context(), makeRequest(map[string]any{}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := resultText(t, res)
-	// Should return a non-empty JSON array
-	if text == "No watcher templates available." {
-		t.Skip("no builtin templates available")
-	}
-	if !strings.HasPrefix(text, "[") {
-		t.Errorf("expected JSON array, got: %s", text[:50])
-	}
-}

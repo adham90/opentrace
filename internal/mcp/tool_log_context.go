@@ -149,4 +149,10 @@ func logContextHandler(ls store.LogStore) server.ToolHandlerFunc {
 	}
 }
 
-// truncate is defined in tool_suggest_watchers.go
+// truncate returns the first n characters of s, appending "..." if truncated.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
