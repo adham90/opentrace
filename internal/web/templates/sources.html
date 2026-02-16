@@ -70,6 +70,19 @@
     </div>
     {{end}}
   </div>
+
+  <!-- ── Health Checks ─────────────────────────────────────── -->
+  <div class="src-section">
+    <div class="src-section-header">
+      <span class="dim"># health checks</span>
+      {{if .IsAdmin}}
+      <button class="btn btn-sm" onclick="showAddHealthCheckModal()">+ health check</button>
+      {{end}}
+    </div>
+    <div id="hc-list">
+      <div class="loading-state">loading health checks</div>
+    </div>
+  </div>
 </div>
 
 <!-- ── Connector Modal ───────────────────────────────────── -->
@@ -152,10 +165,61 @@
 </div>
 {{end}}
 
+<!-- ── Health Check Modal ──────────────────────────────────── -->
+{{if .IsAdmin}}
+<div id="healthcheck-modal" class="modal" role="dialog" aria-modal="true" style="display:none" onclick="if(event.target===this)hideHealthCheckModal()">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3><span class="prompt">$</span> add-health-check</h3>
+      <button class="btn-close" onclick="hideHealthCheckModal()">&times;</button>
+    </div>
+    <form id="healthcheck-form" onsubmit="saveHealthCheck(event)">
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" id="hc-name" placeholder="e.g. production-api" required>
+        </div>
+        <div class="form-group">
+          <label>URL</label>
+          <input type="url" id="hc-url" placeholder="https://example.com/healthz" required>
+        </div>
+        <div class="form-group">
+          <label>Method</label>
+          <select id="hc-method">
+            <option value="GET">GET</option>
+            <option value="HEAD">HEAD</option>
+          </select>
+        </div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Interval (seconds)</label>
+            <input type="number" id="hc-interval" value="60" min="10" max="3600">
+          </div>
+          <div class="form-group">
+            <label>Timeout (seconds)</label>
+            <input type="number" id="hc-timeout" value="10" min="1" max="60">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Expected Status</label>
+          <input type="number" id="hc-expected-status" value="200" min="100" max="599">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn" onclick="hideHealthCheckModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="hc-save-btn">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+{{end}}
+
 <script nonce="{{.CSPNonce}}">
 var isAdmin = {{.IsAdmin}};
 var allConnectors = [];
 var allServers = [];
+var allHealthChecks = [];
+var allUptimeSummaries = [];
 var expandedSources = {};
 var connMode = 'string';
 
@@ -182,12 +246,17 @@ function getTimeAgo(dateStr) {
 function loadSources() {
   Promise.all([
     fetch('/api/connectors').then(function(r) { return r.json(); }),
-    fetch('/api/servers').then(function(r) { return r.json(); })
+    fetch('/api/servers').then(function(r) { return r.json(); }),
+    fetch('/api/healthchecks').then(function(r) { return r.json(); }),
+    fetch('/api/healthchecks/uptime?hours=24').then(function(r) { return r.json(); })
   ]).then(function(results) {
     allConnectors = results[0] || [];
     allServers = results[1] || [];
+    allHealthChecks = results[2] || [];
+    allUptimeSummaries = results[3] || [];
     renderDatabases();
     renderServers();
+    renderHealthChecks();
   }).catch(function() {
     document.getElementById('db-list').innerHTML =
       '<div class="empty-state"><div class="empty-icon">!!</div><p>Failed to load sources</p></div>';
@@ -235,6 +304,82 @@ function renderServers() {
     html += renderServerRow(allServers[i]);
   }
   container.innerHTML = html;
+}
+
+function renderHealthChecks() {
+  var container = document.getElementById('hc-list');
+  if (allHealthChecks.length === 0) {
+    var msg = isAdmin
+      ? 'No health checks configured. Click + health check to add one.'
+      : 'No health checks configured. Ask an admin to add one.';
+    container.innerHTML = '<div class="src-empty">' + escapeHtml(msg) + '</div>';
+    return;
+  }
+  // Build lookup from uptime summaries
+  var uptimeMap = {};
+  for (var i = 0; i < allUptimeSummaries.length; i++) {
+    uptimeMap[allUptimeSummaries[i].healthcheck_id] = allUptimeSummaries[i];
+  }
+  var html = '';
+  for (var i = 0; i < allHealthChecks.length; i++) {
+    var uptime = uptimeMap[allHealthChecks[i].id] || null;
+    html += renderHealthCheckRow(allHealthChecks[i], uptime);
+  }
+  container.innerHTML = html;
+}
+
+function getHCStatusClass(status) {
+  if (status === 'up') return 'status-online';
+  if (status === 'down') return 'status-error';
+  return 'status-offline';
+}
+
+function renderHealthCheckRow(hc, uptime) {
+  var currentStatus = uptime ? uptime.current_status : 'unknown';
+  var statusClass = getHCStatusClass(currentStatus);
+  var statusDot = currentStatus === 'up' ? '&#9679;' : currentStatus === 'down' ? '&#9888;' : '&#9675;';
+  var uptimePct = uptime ? uptime.uptime_pct.toFixed(1) + '%' : '--';
+  var avgMs = uptime ? uptime.avg_response_ms.toFixed(0) + 'ms' : '--';
+  var expanded = expandedSources['hc-' + hc.id] ? true : false;
+
+  // Truncate URL for display
+  var displayUrl = hc.url;
+  if (displayUrl.length > 50) displayUrl = displayUrl.substring(0, 50) + '...';
+
+  var html = '<div class="source-row" data-source-id="hc-' + hc.id + '">';
+  html += '  <div class="source-row-main" onclick="toggleSourceDetail(\'hc-' + hc.id + '\')" style="cursor:pointer">';
+  html += '    <span class="source-type-tag source-type-hc">[health]</span>';
+  html += '    <span class="source-name">' + escapeHtml(hc.name) + '</span>';
+  html += '    <span class="source-status ' + statusClass + '">' + statusDot + ' ' + escapeHtml(currentStatus) + '</span>';
+  html += '    <span class="source-hc-stat">' + uptimePct + '</span>';
+  html += '    <span class="source-time-ago">' + avgMs + '</span>';
+  html += '  </div>';
+
+  html += '  <div class="source-detail" id="source-detail-hc-' + hc.id + '" style="display:' + (expanded ? 'block' : 'none') + '">';
+  html += '    <div class="source-detail-meta">';
+  html += '      <div class="alert-detail-row"><span class="alert-detail-key">id</span><span class="alert-detail-val dim" style="font-size:10px">' + hc.id + '</span></div>';
+  html += '      <div class="alert-detail-row"><span class="alert-detail-key">url</span><span class="alert-detail-val" style="word-break:break-all;font-size:11px">' + escapeHtml(hc.url) + '</span></div>';
+  html += '      <div class="alert-detail-row"><span class="alert-detail-key">method</span><span class="alert-detail-val">' + escapeHtml(hc.method) + '</span></div>';
+  html += '      <div class="alert-detail-row"><span class="alert-detail-key">interval</span><span class="alert-detail-val">' + hc.interval_secs + 's</span></div>';
+  html += '      <div class="alert-detail-row"><span class="alert-detail-key">timeout</span><span class="alert-detail-val">' + hc.timeout_secs + 's</span></div>';
+  html += '      <div class="alert-detail-row"><span class="alert-detail-key">expected</span><span class="alert-detail-val">' + hc.expected_status + '</span></div>';
+  if (uptime) {
+    html += '      <div class="alert-detail-row"><span class="alert-detail-key">total checks</span><span class="alert-detail-val">' + uptime.total_checks + '</span></div>';
+    html += '      <div class="alert-detail-row"><span class="alert-detail-key">down checks</span><span class="alert-detail-val">' + uptime.down_checks + '</span></div>';
+  }
+  if (hc.created_at) {
+    html += '      <div class="alert-detail-row"><span class="alert-detail-key">created</span><span class="alert-detail-val">' + new Date(hc.created_at).toLocaleString() + '</span></div>';
+  }
+  html += '    </div>';
+
+  if (isAdmin) {
+    html += '    <div class="source-detail-actions">';
+    html += '      <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteHealthCheck(\'' + hc.id + '\')">Delete</button>';
+    html += '    </div>';
+  }
+  html += '  </div>';
+  html += '</div>';
+  return html;
 }
 
 function renderConnectorRow(c) {
@@ -677,6 +822,72 @@ function renameServer(id, currentName) {
 }
 window.renameServer = renameServer;
 
+// ── Health Check CRUD ─────────────────────────────────
+
+function showAddHealthCheckModal() {
+  document.getElementById('healthcheck-form').reset();
+  document.getElementById('hc-interval').value = '60';
+  document.getElementById('hc-timeout').value = '10';
+  document.getElementById('hc-expected-status').value = '200';
+  document.getElementById('healthcheck-modal').style.display = 'flex';
+}
+window.showAddHealthCheckModal = showAddHealthCheckModal;
+
+function hideHealthCheckModal() {
+  document.getElementById('healthcheck-modal').style.display = 'none';
+}
+window.hideHealthCheckModal = hideHealthCheckModal;
+
+function saveHealthCheck(e) {
+  e.preventDefault();
+  var btn = document.getElementById('hc-save-btn');
+  var name = document.getElementById('hc-name').value.trim();
+  var url = document.getElementById('hc-url').value.trim();
+  if (!name || !url) {
+    showToast('Name and URL are required', 'error');
+    return;
+  }
+  var payload = {
+    name: name,
+    url: url,
+    method: document.getElementById('hc-method').value,
+    interval_secs: parseInt(document.getElementById('hc-interval').value, 10) || 60,
+    timeout_secs: parseInt(document.getElementById('hc-timeout').value, 10) || 10,
+    expected_status: parseInt(document.getElementById('hc-expected-status').value, 10) || 200
+  };
+  setButtonLoading(btn, true, 'saving...');
+  fetch('/api/healthchecks', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  }).then(function(r) {
+    setButtonLoading(btn, false, 'Save');
+    if (!r.ok) return r.json().then(function(d) { showToast(d.error || 'Failed to create health check', 'error'); });
+    showToast('Health check created', 'success');
+    hideHealthCheckModal();
+    loadSources();
+  }).catch(function() {
+    setButtonLoading(btn, false, 'Save');
+    showToast('Network error', 'error');
+  });
+}
+window.saveHealthCheck = saveHealthCheck;
+
+function deleteHealthCheck(id) {
+  if (!confirm('Delete this health check? This cannot be undone.')) return;
+  fetch('/api/healthchecks/' + id, { method: 'DELETE' }).then(function(r) {
+    if (r.ok || r.status === 204) {
+      showToast('Health check deleted', 'success');
+    } else {
+      showToast('Failed to delete health check', 'error');
+    }
+    loadSources();
+  }).catch(function() {
+    showToast('Network error', 'error');
+  });
+}
+window.deleteHealthCheck = deleteHealthCheck;
+
 // ── Install commands ──────────────────────────────────────
 
 function initInstallCmds() {
@@ -821,6 +1032,7 @@ setInterval(loadSources, 30000);
 
 .source-type-db { color: var(--blue); }
 .source-type-srv { color: var(--purple); }
+.source-type-hc { color: var(--green); }
 
 .source-name {
   flex: 1;
@@ -838,6 +1050,14 @@ setInterval(loadSources, 30000);
 .status-online { color: var(--green); }
 .status-error { color: var(--red); }
 .status-offline { color: var(--text-dim); }
+
+.source-hc-stat {
+  font-size: 11px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  min-width: 50px;
+  text-align: right;
+}
 
 .source-time-ago {
   font-size: 11px;
