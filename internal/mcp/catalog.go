@@ -41,6 +41,8 @@ var categoryDescriptions = map[string]string{
 	"Errors":                "Track and manage application errors grouped by fingerprint",
 	"Incidents":              "Investigate incidents with chronological event timelines",
 	"Uptime":                "Monitor HTTP endpoint availability, response times, and uptime percentage",
+	"Overview":              "High-level system health summaries and multi-source investigation",
+	"Agent Memory":          "Persistent notes for the AI agent to carry context across sessions",
 }
 
 // CatalogBuilder accumulates tool entries and builds a ToolCatalog.

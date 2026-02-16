@@ -65,6 +65,7 @@ type Server struct {
 	watchMetrics     *watcher.WatchMetrics
 	errorGroupStore    store.ErrorGroupStore
 	healthCheckStore   store.HealthCheckStore
+	agentNoteStore     store.AgentNoteStore
 	versionChecker     *versionChecker
 	sseServer      *mcpgoserver.SSEServer
 	loginLimiter   *RateLimiter
@@ -95,6 +96,7 @@ type ServerDeps struct {
 	WatchMetrics         *watcher.WatchMetrics
 	ErrorGroupStore      store.ErrorGroupStore
 	HealthCheckStore     store.HealthCheckStore
+	AgentNoteStore       store.AgentNoteStore
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
@@ -128,6 +130,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		watchMetrics:     deps.WatchMetrics,
 		errorGroupStore:    deps.ErrorGroupStore,
 		healthCheckStore:   deps.HealthCheckStore,
+		agentNoteStore:     deps.AgentNoteStore,
 		versionChecker:     newVersionChecker("adham90", "opentrace"),
 	}
 

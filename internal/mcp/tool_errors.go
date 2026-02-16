@@ -90,6 +90,16 @@ func errorGroupsHandler(egs store.ErrorGroupStore) server.ToolHandlerFunc {
 			"error_groups":     summaries,
 		}
 
+		// Suggest investigating the top error.
+		var suggestions []ToolSuggestion
+		if len(summaries) > 0 {
+			suggestions = append(suggestions, suggest("error_detail", "Investigate the most frequent error", map[string]any{"fingerprint": summaries[0].Fingerprint}))
+		}
+		if unresolvedCount > 5 {
+			suggestions = append(suggestions, suggest("diagnose", "Get full system health overview", nil))
+		}
+		withSuggestions(resp, suggestions...)
+
 		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}

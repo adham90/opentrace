@@ -16,7 +16,7 @@ import (
 // logSearchHandler returns a handler that searches log entries with full-text
 // search and filters. Returns individual log entries (unlike log_stats which
 // returns aggregated counts).
-func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
+func logSearchHandler(ls store.LogStore, egs store.ErrorGroupStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 
@@ -125,6 +125,20 @@ func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
 			return mcp.NewToolResultText(hint), nil
 		}
 
+		// Pre-fetch error group info for entries with fingerprints.
+		errorGroupCache := make(map[string]*store.ErrorGroup)
+		if egs != nil {
+			seen := make(map[string]bool)
+			for _, e := range entries {
+				if e.ErrorFingerprint != "" && !seen[e.ErrorFingerprint] {
+					seen[e.ErrorFingerprint] = true
+					if eg, err := egs.Get(ctx, e.ErrorFingerprint); err == nil {
+						errorGroupCache[e.ErrorFingerprint] = eg
+					}
+				}
+			}
+		}
+
 		// Build response entries with optional field projection.
 		results := make([]map[string]any, 0, len(entries))
 		for _, e := range entries {
@@ -178,6 +192,17 @@ func logSearchHandler(ls store.LogStore) server.ToolHandlerFunc {
 			}
 			if (fields == nil || fields["metadata"]) && len(e.Metadata) > 0 {
 				entry["metadata"] = e.Metadata
+			}
+			// Enrich with error group context when available.
+			if e.ErrorFingerprint != "" {
+				if eg, ok := errorGroupCache[e.ErrorFingerprint]; ok {
+					entry["error_group"] = map[string]any{
+						"status":           string(eg.Status),
+						"occurrence_count": eg.OccurrenceCount,
+						"reopened_count":   eg.ReopenedCount,
+						"last_seen_at":     eg.LastSeenAt.Format(time.RFC3339),
+					}
+				}
 			}
 			results = append(results, entry)
 		}

@@ -16,23 +16,29 @@ import (
 // systemOverviewTool returns the tool definition for system_overview.
 func systemOverviewTool() mcp.Tool {
 	return mcp.NewTool("system_overview",
-		mcp.WithDescription("Get a high-level dashboard of system health: alert counts by severity, watcher status, log error rates, connector and server status. Use proactively at the start of a session to understand the current state of the system."),
+		mcp.WithDescription("Get a high-level dashboard of system health: unresolved error groups, active watch alerts, healthcheck status, log error rates, connector and server status. Use proactively at the start of a session to understand the current state of the system."),
 	)
 }
 
+// overviewDeps holds the stores needed by both overview and triage handlers.
+type overviewDeps struct {
+	logStore         store.LogStore
+	dsStore          store.DataSourceStore
+	serverStore      store.ServerStore
+	errorGroupStore  store.ErrorGroupStore
+	watchStore       store.WatchStore
+	healthCheckStore store.HealthCheckStore
+}
+
 // systemOverviewHandler returns a handler that builds a system overview.
-func systemOverviewHandler(
-	logStore store.LogStore,
-	dsStore store.DataSourceStore,
-	serverStore store.ServerStore,
-) server.ToolHandlerFunc {
+func systemOverviewHandler(d overviewDeps) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		overview := map[string]any{}
 
 		// Logs (last hour)
-		if logStore != nil {
+		if d.logStore != nil {
 			now := time.Now()
-			counts, err := logStore.CountByLevel(ctx, store.LogCountParams{
+			counts, err := d.logStore.CountByLevel(ctx, store.LogCountParams{
 				Since: now.Add(-1 * time.Hour),
 				Until: now,
 			})
@@ -41,8 +47,8 @@ func systemOverviewHandler(
 				errCount := 0
 				for level, count := range counts {
 					total += count
-					if level == "ERROR" {
-						errCount = count
+					if level == "ERROR" || level == "error" || level == "fatal" || level == "FATAL" {
+						errCount += count
 					}
 				}
 				overview["logs"] = map[string]int{
@@ -52,9 +58,52 @@ func systemOverviewHandler(
 			}
 		}
 
+		// Unresolved error groups
+		if d.errorGroupStore != nil {
+			unresolvedCount, err := d.errorGroupStore.Count(ctx, store.ErrorGroupUnresolved)
+			if err == nil && unresolvedCount > 0 {
+				overview["error_groups"] = map[string]any{
+					"unresolved": unresolvedCount,
+				}
+			}
+		}
+
+		// Active watch alerts
+		if d.watchStore != nil {
+			pendingCount, err := d.watchStore.CountPendingAlerts(ctx)
+			if err == nil && pendingCount > 0 {
+				overview["watch_alerts"] = map[string]any{
+					"pending": pendingCount,
+				}
+			}
+		}
+
+		// Health checks
+		if d.healthCheckStore != nil {
+			summaries, err := d.healthCheckStore.UptimeSummaries(ctx, time.Now().Add(-1*time.Hour))
+			if err == nil && len(summaries) > 0 {
+				total := len(summaries)
+				down := 0
+				degraded := 0
+				for _, s := range summaries {
+					switch store.HealthCheckStatus(s.CurrentStatus) {
+					case store.HealthCheckDown:
+						down++
+					case store.HealthCheckDegraded:
+						degraded++
+					}
+				}
+				hc := map[string]int{"total": total, "down": down}
+				if degraded > 0 {
+					hc["degraded"] = degraded
+				}
+				overview["healthchecks"] = hc
+			}
+		}
+
 		// Connectors
-		if dsStore != nil {
-			connectors, err := dsStore.List(ctx, store.ListDataSourceParams{})
+		if d.dsStore != nil {
+			connectors, err := d.dsStore.List(ctx, store.ListDataSourceParams{})
 			if err == nil {
 				cStats := map[string]int{"total": len(connectors), "connected": 0, "error": 0}
 				for _, c := range connectors {
@@ -70,8 +119,8 @@ func systemOverviewHandler(
 		}
 
 		// Servers
-		if serverStore != nil {
-			servers, err := serverStore.List(ctx)
+		if d.serverStore != nil {
+			servers, err := d.serverStore.List(ctx)
 			if err == nil {
 				sStats := map[string]int{"total": len(servers), "online": 0, "offline": 0}
 				for _, srv := range servers {
@@ -86,6 +135,26 @@ func systemOverviewHandler(
 			}
 		}
 
+		// Suggested next tools based on findings.
+		var suggestions []ToolSuggestion
+		if eg, ok := overview["error_groups"].(map[string]any); ok {
+			if u, _ := eg["unresolved"].(int); u > 0 {
+				suggestions = append(suggestions, suggest("error_groups", fmt.Sprintf("%d unresolved errors", u), map[string]any{"status": "unresolved"}))
+			}
+		}
+		if logs, ok := overview["logs"].(map[string]int); ok {
+			if logs["errors_last_hour"] > 0 {
+				suggestions = append(suggestions, suggest("log_summary", "Investigate errors in last hour", nil))
+			}
+		}
+		if hc, ok := overview["healthchecks"].(map[string]int); ok {
+			if hc["down"] > 0 {
+				suggestions = append(suggestions, suggest("uptime_status", fmt.Sprintf("%d endpoints down", hc["down"]), nil))
+			}
+		}
+		suggestions = append(suggestions, suggest("diagnose", "Deep dive into a specific service", nil))
+		withSuggestions(overview, suggestions...)
+
 		data, err := json.MarshalIndent(overview, "", "  ")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal overview: %v", err)), nil
@@ -97,7 +166,7 @@ func systemOverviewHandler(
 // triageAlertsTool returns the tool definition for triage_alerts.
 func triageAlertsTool() mcp.Tool {
 	return mcp.NewTool("triage_alerts",
-		mcp.WithDescription("Get a prioritized list of items needing attention: unread alerts, failed watcher runs, error connectors, offline servers. Sorted by severity then recency. Use when the user asks 'what needs attention?' or 'what's broken?'."),
+		mcp.WithDescription("Get a prioritized list of items needing attention: unresolved error groups, active watch alerts, down healthchecks, error connectors, offline servers. Sorted by severity then recency. Use when the user asks 'what needs attention?' or 'what's broken?'."),
 	)
 }
 
@@ -112,16 +181,78 @@ type triageEntry struct {
 }
 
 // triageAlertsHandler returns a handler that builds the triage inbox.
-func triageAlertsHandler(
-	dsStore store.DataSourceStore,
-	serverStore store.ServerStore,
-) server.ToolHandlerFunc {
+func triageAlertsHandler(d overviewDeps) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var items []triageEntry
 
+		// Unresolved error groups (highest priority)
+		if d.errorGroupStore != nil {
+			groups, err := d.errorGroupStore.List(ctx, store.ListErrorGroupParams{
+				Status: store.ErrorGroupUnresolved,
+				SortBy: "occurrence_count",
+				Limit:  10,
+			})
+			if err == nil {
+				for _, eg := range groups {
+					msg := eg.Message
+					if len(msg) > 80 {
+						msg = msg[:80] + "..."
+					}
+					title := msg
+					if eg.ExceptionClass != "" {
+						title = eg.ExceptionClass + ": " + msg
+					}
+					items = append(items, triageEntry{
+						Type:     "error_group",
+						Severity: "critical",
+						Title:    title,
+						Detail:   fmt.Sprintf("%d occurrences, last seen %s", eg.OccurrenceCount, eg.LastSeenAt.Format(time.RFC3339)),
+						Time:     eg.LastSeenAt.Format(time.RFC3339),
+						ID:       eg.Fingerprint,
+					})
+				}
+			}
+		}
+
+		// Active watch alerts
+		if d.watchStore != nil {
+			alerts, err := d.watchStore.ListAlerts(ctx, "", "pending", 10)
+			if err == nil {
+				for _, a := range alerts {
+					items = append(items, triageEntry{
+						Type:     "watch_alert",
+						Severity: "warning",
+						Title:    a.Summary,
+						Detail:   fmt.Sprintf("%s: %.2f (threshold: %.2f)", a.TriggerMetric, a.TriggerValue, a.ThresholdValue),
+						Time:     a.CreatedAt.Format(time.RFC3339),
+						ID:       a.ID,
+					})
+				}
+			}
+		}
+
+		// Down healthchecks
+		if d.healthCheckStore != nil {
+			summaries, err := d.healthCheckStore.UptimeSummaries(ctx, time.Now().Add(-1*time.Hour))
+			if err == nil {
+				for _, s := range summaries {
+					if store.HealthCheckStatus(s.CurrentStatus) == store.HealthCheckDown {
+						items = append(items, triageEntry{
+							Type:     "healthcheck",
+							Severity: "critical",
+							Title:    fmt.Sprintf("Endpoint '%s' is DOWN", s.Name),
+							Detail:   s.URL,
+							Time:     time.Now().Format(time.RFC3339),
+							ID:       s.HealthCheckID,
+						})
+					}
+				}
+			}
+		}
+
 		// Error connectors
-		if dsStore != nil {
-			connectors, err := dsStore.List(ctx, store.ListDataSourceParams{})
+		if d.dsStore != nil {
+			connectors, err := d.dsStore.List(ctx, store.ListDataSourceParams{})
 			if err == nil {
 				for _, c := range connectors {
 					if c.Status == store.StatusError {
@@ -146,8 +277,8 @@ func triageAlertsHandler(
 		}
 
 		// Offline servers
-		if serverStore != nil {
-			servers, err := serverStore.List(ctx)
+		if d.serverStore != nil {
+			servers, err := d.serverStore.List(ctx)
 			if err == nil {
 				for _, srv := range servers {
 					if srv.Status == store.ServerOffline {

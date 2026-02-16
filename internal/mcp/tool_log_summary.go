@@ -16,7 +16,7 @@ import (
 // logSummaryHandler returns a handler that produces a debugging-oriented
 // overview in a single MCP call: error rates, active deployments (by commit),
 // top unique errors with source locations, and slowest endpoints.
-func logSummaryHandler(ls store.LogStore) server.ToolHandlerFunc {
+func logSummaryHandler(ls store.LogStore, egs store.ErrorGroupStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 
@@ -271,6 +271,43 @@ func logSummaryHandler(ls store.LogStore) server.ToolHandlerFunc {
 			resp["slowest_endpoints"] = slowestEndpoints
 		}
 
+		// 6. Unresolved error groups (from ErrorGroupStore).
+		if egs != nil {
+			unresolvedCount, _ := egs.Count(ctx, store.ErrorGroupUnresolved)
+			if unresolvedCount > 0 {
+				resp["unresolved_error_groups"] = unresolvedCount
+				topErrors, _ := egs.List(ctx, store.ListErrorGroupParams{
+					Status: store.ErrorGroupUnresolved,
+					SortBy: "occurrence_count",
+					Limit:  3,
+				})
+				if len(topErrors) > 0 {
+					var top []map[string]any
+					for _, eg := range topErrors {
+						entry := map[string]any{
+							"fingerprint":      eg.Fingerprint,
+							"occurrence_count": eg.OccurrenceCount,
+							"last_seen_at":     eg.LastSeenAt.Format(time.RFC3339),
+							"status":           string(eg.Status),
+						}
+						if eg.ExceptionClass != "" {
+							entry["exception_class"] = eg.ExceptionClass
+						}
+						msg := eg.Message
+						if len(msg) > 120 {
+							msg = msg[:120] + "..."
+						}
+						entry["message"] = msg
+						if eg.Service != "" {
+							entry["service"] = eg.Service
+						}
+						top = append(top, entry)
+					}
+					resp["top_error_groups"] = top
+				}
+			}
+		}
+
 		// Warnings to draw attention.
 		var warnings []string
 		if errorRatePct > 5 {
@@ -282,6 +319,25 @@ func logSummaryHandler(ls store.LogStore) server.ToolHandlerFunc {
 		if len(warnings) > 0 {
 			resp["warnings"] = warnings
 		}
+
+		// Suggested next tools based on findings.
+		var suggestions []ToolSuggestion
+		if errorRatePct > 5 {
+			sugArgs := map[string]any{"status": "unresolved"}
+			if serviceFilter != "" {
+				sugArgs["service"] = serviceFilter
+			}
+			suggestions = append(suggestions, suggest("error_groups", "High error rate — check unresolved errors", sugArgs))
+		}
+		if len(uniqueErrors) > 0 {
+			if fp, ok := uniqueErrors[0]["fingerprint"].(string); ok && fp != "" {
+				suggestions = append(suggestions, suggest("error_detail", "Investigate the most frequent error", map[string]any{"fingerprint": fp}))
+			}
+		}
+		if len(slowestEndpoints) > 0 {
+			suggestions = append(suggestions, suggest("request_performance", "Investigate slow endpoints", map[string]any{"sort_by": "duration_ms"}))
+		}
+		withSuggestions(resp, suggestions...)
 
 		data, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {

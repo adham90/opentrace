@@ -24,7 +24,7 @@ func TestIncidentTimelineHandler_Success(t *testing.T) {
 		},
 	}
 
-	handler := incidentTimelineHandler(ls)
+	handler := incidentTimelineHandler(timelineDeps{logStore: ls})
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"start": now.Add(-1 * time.Hour).Format(time.RFC3339),
 		"end":   now.Format(time.RFC3339),
@@ -47,11 +47,16 @@ func TestIncidentTimelineHandler_Success(t *testing.T) {
 	if !ok || totalEvents < 1 {
 		t.Errorf("expected at least 1 event, got: %v", resp["total_events"])
 	}
+
+	// Check event_types has "error"
+	eventTypes, _ := resp["event_types"].(map[string]any)
+	if eventTypes["error"] == nil {
+		t.Error("expected error type in event_types")
+	}
 }
 
 func TestIncidentTimelineHandler_MissingStart(t *testing.T) {
-	ls := &mockLogStore{}
-	handler := incidentTimelineHandler(ls)
+	handler := incidentTimelineHandler(timelineDeps{})
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"end": time.Now().Format(time.RFC3339),
@@ -66,8 +71,7 @@ func TestIncidentTimelineHandler_MissingStart(t *testing.T) {
 }
 
 func TestIncidentTimelineHandler_MissingEnd(t *testing.T) {
-	ls := &mockLogStore{}
-	handler := incidentTimelineHandler(ls)
+	handler := incidentTimelineHandler(timelineDeps{})
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"start": time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
@@ -82,8 +86,7 @@ func TestIncidentTimelineHandler_MissingEnd(t *testing.T) {
 }
 
 func TestIncidentTimelineHandler_EndBeforeStart(t *testing.T) {
-	ls := &mockLogStore{}
-	handler := incidentTimelineHandler(ls)
+	handler := incidentTimelineHandler(timelineDeps{})
 
 	now := time.Now()
 	result, err := handler(context.Background(), makeRequest(map[string]any{
@@ -101,7 +104,7 @@ func TestIncidentTimelineHandler_EndBeforeStart(t *testing.T) {
 
 func TestIncidentTimelineHandler_Empty(t *testing.T) {
 	ls := &mockLogStore{}
-	handler := incidentTimelineHandler(ls)
+	handler := incidentTimelineHandler(timelineDeps{logStore: ls})
 
 	now := time.Now()
 	result, err := handler(context.Background(), makeRequest(map[string]any{
@@ -124,5 +127,23 @@ func TestIncidentTimelineHandler_Empty(t *testing.T) {
 
 	if resp["total_events"] != float64(0) {
 		t.Errorf("expected 0 events, got: %v", resp["total_events"])
+	}
+}
+
+func TestIncidentTimelineHandler_NilDeps(t *testing.T) {
+	// All deps nil — should still work (0 events).
+	handler := incidentTimelineHandler(timelineDeps{})
+
+	now := time.Now()
+	result, err := handler(context.Background(), makeRequest(map[string]any{
+		"start": now.Add(-1 * time.Hour).Format(time.RFC3339),
+		"end":   now.Format(time.RFC3339),
+	}))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success with nil deps, got error: %s", resultText(t, result))
 	}
 }

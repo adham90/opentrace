@@ -37,6 +37,7 @@ type appDeps struct {
 	watchStore       store.WatchStore
 	errorGroupStore    store.ErrorGroupStore
 	healthCheckStore   store.HealthCheckStore
+	agentNoteStore     store.AgentNoteStore
 	registry           *connector.Registry
 	cfg              *config.Config
 }
@@ -118,6 +119,7 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	watchStore := store.NewWatchStore(db)
 	errorGroupStore := store.NewErrorGroupStore(db)
 	healthCheckStore := store.NewHealthCheckStore(db)
+	agentNoteStore := store.NewAgentNoteStore(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
@@ -137,6 +139,7 @@ func initApp(ctx context.Context) (*appDeps, error) {
 		watchStore:       watchStore,
 		errorGroupStore:    errorGroupStore,
 		healthCheckStore:   healthCheckStore,
+		agentNoteStore:     agentNoteStore,
 		registry:           registry,
 		cfg:                cfg,
 	}, nil
@@ -174,6 +177,7 @@ func runMCP() error {
 		WatchMetrics:     watchMetrics,
 		ErrorGroupStore:    deps.errorGroupStore,
 		HealthCheckStore:   deps.healthCheckStore,
+		AgentNoteStore:     deps.agentNoteStore,
 	})
 }
 
@@ -230,6 +234,7 @@ func run() error {
 		WatchMetrics:    watchMetrics,
 		ErrorGroupStore:  deps.errorGroupStore,
 		HealthCheckStore: deps.healthCheckStore,
+		AgentNoteStore:  deps.agentNoteStore,
 	})
 
 	// Agent-first watch evaluator + stream (reactive on log ingestion)
@@ -257,6 +262,7 @@ func run() error {
 		WatchMetrics:         watchMetrics,
 		ErrorGroupStore:      deps.errorGroupStore,
 		HealthCheckStore:     deps.healthCheckStore,
+		AgentNoteStore:       deps.agentNoteStore,
 	})
 
 	httpServer := &http.Server{
@@ -380,6 +386,13 @@ func run() error {
 						slog.Warn("healthcheck results prune failed", "error", err)
 					} else if n > 0 {
 						slog.Info("pruned old healthcheck results", "count", n)
+					}
+				}
+				if deps.agentNoteStore != nil {
+					if n, err := deps.agentNoteStore.Prune(ctx, retention); err != nil {
+						slog.Warn("agent note prune failed", "error", err)
+					} else if n > 0 {
+						slog.Info("pruned old agent notes", "count", n)
 					}
 				}
 			}

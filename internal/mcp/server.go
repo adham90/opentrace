@@ -37,6 +37,9 @@ type Deps struct {
 	// Uptime / Health Check monitoring
 	HealthCheckStore store.HealthCheckStore
 
+	// Agent notes — persistent memory
+	AgentNoteStore store.AgentNoteStore
+
 	// Agent-first watches (Phase 1)
 	WatchStore    store.WatchStore
 	WatchMetrics  *watcher.WatchMetrics
@@ -401,7 +404,7 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 				mcp.WithString("fields", mcp.Description("Comma-separated list of fields to include (e.g. 'timestamp,level,message'). Omit for all fields. Saves context window on high-volume results.")),
 				mcp.WithObject("metadata_filter", mcp.Description("Key-value filter on metadata fields. Exact match: {\"host\": \"server-01\"}, contains: {\"host\": \"~server\"}, key exists: {\"host\": \"*\"}. Prefix ~ for LIKE match, * for existence check. Use list_log_attributes with field=metadata_key to discover available keys.")),
 			),
-			logSearchHandler(deps.LogStore),
+			logSearchHandler(deps.LogStore, deps.ErrorGroupStore),
 		)
 		b.Add("log_search", "Search log entries by commit hash, environment, request ID, exception class, source file, and more with full-text search", "Log Intelligence", "read", "")
 
@@ -439,7 +442,7 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 				mcp.WithString("environment", mcp.Description("Filter by deployment environment (e.g. production, staging)")),
 				mcp.WithString("commit_hash", mcp.Description("Filter to a specific deployment by commit hash")),
 			),
-			logSummaryHandler(deps.LogStore),
+			logSummaryHandler(deps.LogStore, deps.ErrorGroupStore),
 		)
 		b.Add("log_summary", "Debugging overview: error rates, active deploys, top errors with source locations, slowest endpoints", "Log Intelligence", "read", "")
 	}
@@ -489,6 +492,24 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 		b.Add("uptime_status", "Uptime summary: up/down status, response times, uptime % over a time window", "Uptime", "read", "")
 	}
 
+	// Diagnose meta-tool (read-only, aggregates multiple data sources).
+	{
+		maybeAddTool(s,
+			mcp.NewTool("diagnose",
+				mcp.WithDescription("All-in-one investigation tool. Returns error summary, log volume, request performance, watch alerts, and health check status in a single call. Saves 4-5 round trips compared to calling individual tools. Start here when investigating an issue."),
+				mcp.WithString("service", mcp.Description("Filter to a specific service name")),
+				mcp.WithString("timeframe", mcp.Description("Time window: 30m, 1h (default), 6h, 24h, 7d")),
+			),
+			diagnoseHandler(diagnoseDeps{
+				logStore:         deps.LogStore,
+				errorGroupStore:  deps.ErrorGroupStore,
+				healthCheckStore: deps.HealthCheckStore,
+				watchStore:       deps.WatchStore,
+			}),
+		)
+		b.Add("diagnose", "All-in-one investigation: errors, logs, performance, watches, health checks", "Overview", "read", "")
+	}
+
 	// Settings (read-only).
 	if deps.SettingsStore != nil {
 		maybeAddTool(s,
@@ -500,17 +521,36 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 		b.Add("get_settings", "Get current OpenTrace settings (retention, auto-update)", "Settings", "read", "")
 	}
 
+	// Agent notes (read-only).
+	if deps.AgentNoteStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("get_notes",
+				mcp.WithDescription("Read agent notes — persistent memory attached to entities (services, queries, endpoints, errors, health checks). Use at the start of a session to recall context from previous sessions. Filter by entity_type, or provide both entity_type and entity_id for a specific note."),
+				mcp.WithString("entity_type", mcp.Description("Filter by type: query, endpoint, service, healthcheck, error")),
+				mcp.WithString("entity_id", mcp.Description("Specific entity ID (requires entity_type)")),
+			),
+			getNotesHandler(deps.AgentNoteStore),
+		)
+		b.Add("get_notes", "Read persistent agent notes for entities", "Agent Memory", "read", "")
+	}
+
 	// Incident timeline.
-	if deps.LogStore != nil {
+	{
 		maybeAddTool(s,
 			mcp.NewTool("incident_timeline",
-				mcp.WithDescription("Build a chronological incident timeline for a time window from error logs. Use when investigating 'what happened between X and Y?', post-incident reviews, or understanding the sequence of events during an outage."),
+				mcp.WithDescription("Build a chronological incident timeline merging error logs, error group lifecycle events (resolved/reopened), watch alerts, and healthcheck status changes. Use when investigating 'what happened between X and Y?', post-incident reviews, or understanding the sequence of events during an outage."),
 				mcp.WithString("start", mcp.Required(), mcp.Description("Start time in ISO 8601 format (e.g. 2024-01-15T10:00:00Z)")),
 				mcp.WithString("end", mcp.Required(), mcp.Description("End time in ISO 8601 format")),
+				mcp.WithString("service", mcp.Description("Filter to a specific service name")),
 			),
-			incidentTimelineHandler(deps.LogStore),
+			incidentTimelineHandler(timelineDeps{
+				logStore:         deps.LogStore,
+				errorGroupStore:  deps.ErrorGroupStore,
+				watchStore:       deps.WatchStore,
+				healthCheckStore: deps.HealthCheckStore,
+			}),
 		)
-		b.Add("incident_timeline", "Build a chronological incident timeline from error logs", "Incidents", "read", "")
+		b.Add("incident_timeline", "Chronological incident timeline from errors, alerts, healthchecks, and deploys", "Incidents", "read", "")
 	}
 
 	// Vacuum/maintenance report.
@@ -603,15 +643,19 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 	}
 
 	// System overview — high-level health dashboard.
-	maybeAddTool(s, systemOverviewTool(), systemOverviewHandler(
-		deps.LogStore, deps.DataSourceStore, deps.ServerStore,
-	))
-	b.Add("system_overview", "Get high-level system health: logs, connectors, servers", "Overview", "read", "")
+	ovDeps := overviewDeps{
+		logStore:         deps.LogStore,
+		dsStore:          deps.DataSourceStore,
+		serverStore:      deps.ServerStore,
+		errorGroupStore:  deps.ErrorGroupStore,
+		watchStore:       deps.WatchStore,
+		healthCheckStore: deps.HealthCheckStore,
+	}
+	maybeAddTool(s, systemOverviewTool(), systemOverviewHandler(ovDeps))
+	b.Add("system_overview", "Get high-level system health: errors, alerts, healthchecks, logs, connectors, servers", "Overview", "read", "")
 
 	// Triage — prioritized inbox of items needing attention.
-	maybeAddTool(s, triageAlertsTool(), triageAlertsHandler(
-		deps.DataSourceStore, deps.ServerStore,
-	))
+	maybeAddTool(s, triageAlertsTool(), triageAlertsHandler(ovDeps))
 	b.Add("triage_alerts", "Get prioritized list of items needing attention", "Overview", "read", "")
 
 	// User listing (read-only, admin-gated at the server level).
@@ -790,6 +834,30 @@ func addWriteTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			deleteHealthcheckHandler(deps.HealthCheckStore),
 		)
 		b.Add("delete_healthcheck", "Delete a health check and its results", "Uptime", "admin", "")
+	}
+
+	// Agent notes (write).
+	if deps.AgentNoteStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("add_note",
+				mcp.WithDescription("Save a persistent note about an entity (service, query, endpoint, error, health check). Notes are remembered across sessions and auto-included in relevant tool responses. Use to record system-specific context like 'this query is intentionally slow' or 'this service handles auth'."),
+				mcp.WithString("entity_type", mcp.Required(), mcp.Description("Entity type: query, endpoint, service, healthcheck, error")),
+				mcp.WithString("entity_id", mcp.Required(), mcp.Description("Entity identifier (fingerprint, URL, query hash, service name)")),
+				mcp.WithString("note", mcp.Required(), mcp.Description("The note to save")),
+			),
+			addNoteHandler(deps.AgentNoteStore),
+		)
+		b.Add("add_note", "Save a persistent note about an entity for future sessions", "Agent Memory", "admin", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("delete_note",
+				mcp.WithDescription("Remove a previously saved agent note."),
+				mcp.WithString("entity_type", mcp.Required(), mcp.Description("Entity type: query, endpoint, service, healthcheck, error")),
+				mcp.WithString("entity_id", mcp.Required(), mcp.Description("Entity identifier")),
+			),
+			deleteNoteHandler(deps.AgentNoteStore),
+		)
+		b.Add("delete_note", "Remove a saved agent note", "Agent Memory", "admin", "")
 	}
 
 	// Agent-first watch tools (write).

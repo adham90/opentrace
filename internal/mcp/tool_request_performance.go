@@ -172,6 +172,19 @@ func requestPerformanceHandler(ls store.LogStore) server.ToolHandlerFunc {
 			"hints":   hints,
 		}
 
+		// Suggested next tools based on findings.
+		var suggestions []ToolSuggestion
+		if nPlusOneCount > 0 {
+			suggestions = append(suggestions, suggest("log_search", "N+1 queries detected — search for SQL details", map[string]any{"level": "debug"}))
+		}
+		if avgSQL > 20 {
+			suggestions = append(suggestions, suggest("query_stats", "High SQL count — check query performance", nil))
+		}
+		if len(entries) > 0 {
+			suggestions = append(suggestions, suggest("diagnose", "Get full system overview", nil))
+		}
+		withSuggestions(resp, suggestions...)
+
 		data, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil

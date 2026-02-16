@@ -21,8 +21,17 @@ func TestSystemOverview(t *testing.T) {
 
 	serverStore := store.NewServerStore(db)
 	logStore := store.NewLogStore(db)
+	errorGroupStore := store.NewErrorGroupStore(db)
+	watchStore := store.NewWatchStore(db)
+	healthCheckStore := store.NewHealthCheckStore(db)
 
-	handler := systemOverviewHandler(logStore, nil, serverStore)
+	handler := systemOverviewHandler(overviewDeps{
+		logStore:         logStore,
+		serverStore:      serverStore,
+		errorGroupStore:  errorGroupStore,
+		watchStore:       watchStore,
+		healthCheckStore: healthCheckStore,
+	})
 
 	res, err := handler(t.Context(), makeRequest(map[string]any{}))
 	if err != nil {
@@ -42,7 +51,7 @@ func TestSystemOverview(t *testing.T) {
 }
 
 func TestTriageAlerts_Empty(t *testing.T) {
-	handler := triageAlertsHandler(nil, nil)
+	handler := triageAlertsHandler(overviewDeps{})
 	res, err := handler(t.Context(), makeRequest(map[string]any{}))
 	if err != nil {
 		t.Fatal(err)

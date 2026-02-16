@@ -193,6 +193,22 @@ func watchStatusHandler(watchStore store.WatchStore) func(ctx context.Context, r
 			"pending_alerts": pendingCount,
 		}
 
+		// Suggest next actions based on alert state.
+		var suggestions []ToolSuggestion
+		if pendingCount > 0 {
+			suggestions = append(suggestions, suggest("diagnose", "Investigate triggered alerts with full context", nil))
+		}
+		for _, w := range watches {
+			if w.Status == store.WatchStatusTriggered {
+				suggestions = append(suggestions, suggest("log_search", "Search error logs for triggered service", map[string]any{
+					"level":   "error",
+					"service": w.Service,
+				}))
+				break
+			}
+		}
+		withSuggestions(result, suggestions...)
+
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}

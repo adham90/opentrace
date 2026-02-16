@@ -13,7 +13,7 @@ import (
 
 func TestLogSearchHandler_Empty(t *testing.T) {
 	ls := &mockLogStore{}
-	handler := logSearchHandler(ls)
+	handler := logSearchHandler(ls, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"query": "something",
@@ -37,7 +37,7 @@ func TestLogSearchHandler_WithResults(t *testing.T) {
 			{ID: 3, Timestamp: now.Add(-1 * time.Minute), Level: "info", Service: "web", Message: "request completed"},
 		},
 	}
-	handler := logSearchHandler(ls)
+	handler := logSearchHandler(ls, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"level": "error",
@@ -74,7 +74,7 @@ func TestLogSearchHandler_WithTimeRange(t *testing.T) {
 			{ID: 2, Timestamp: now.Add(-2 * time.Hour), Level: "error", Service: "api", Message: "old error"},
 		},
 	}
-	handler := logSearchHandler(ls)
+	handler := logSearchHandler(ls, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"level":      "error",
@@ -101,7 +101,7 @@ func TestLogSearchHandler_WithTimeRange(t *testing.T) {
 
 func TestLogSearchHandler_InvalidTimeRange(t *testing.T) {
 	ls := &mockLogStore{}
-	handler := logSearchHandler(ls)
+	handler := logSearchHandler(ls, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"time_range": "invalid",
@@ -133,7 +133,7 @@ func TestLogSearchHandler_Pagination(t *testing.T) {
 	}
 
 	ls := &mockLogStore{entries: entries}
-	handler := logSearchHandler(ls)
+	handler := logSearchHandler(ls, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"limit": float64(50),
@@ -165,7 +165,7 @@ func TestLogSearchHandler_SortAsc(t *testing.T) {
 			{ID: 3, Timestamp: now.Add(-1 * time.Minute), Level: "info", Service: "api", Message: "third"},
 		},
 	}
-	handler := logSearchHandler(ls)
+	handler := logSearchHandler(ls, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"sort": "asc",
@@ -202,7 +202,7 @@ func TestLogSearchHandler_FieldsProjection(t *testing.T) {
 				Metadata: map[string]any{"host": "server-01"}},
 		},
 	}
-	handler := logSearchHandler(ls)
+	handler := logSearchHandler(ls, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"fields": "id,level,message",
@@ -254,7 +254,7 @@ func TestLogSearchHandler_TimeHistogram(t *testing.T) {
 			{ID: 3, Timestamp: now.Add(-1 * time.Minute), Level: "info", Service: "api", Message: "c"},
 		},
 	}
-	handler := logSearchHandler(ls)
+	handler := logSearchHandler(ls, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{}))
 	if err != nil {
@@ -294,7 +294,7 @@ func TestLogSearchHandler_ExpandedSearch(t *testing.T) {
 			{ID: 2, Timestamp: now.Add(-3 * time.Minute), Level: "info", Service: "web", Message: "served"},
 		},
 	}
-	handler := logSearchHandler(ls)
+	handler := logSearchHandler(ls, nil)
 
 	// Search for "payment-api" as a query — should fall back to matching as service name.
 	result, err := handler(context.Background(), makeRequest(map[string]any{
@@ -326,7 +326,7 @@ func TestLogSearchHandler_Summary(t *testing.T) {
 			{ID: 2, Timestamp: now.Add(-3 * time.Minute), Level: "info", Service: "web", Message: "ok"},
 		},
 	}
-	handler := logSearchHandler(ls)
+	handler := logSearchHandler(ls, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{}))
 	if err != nil {
@@ -369,7 +369,7 @@ func TestLogSearchHandler_MetadataReturned(t *testing.T) {
 			},
 		},
 	}
-	handler := logSearchHandler(ls)
+	handler := logSearchHandler(ls, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{}))
 	if err != nil {
@@ -424,7 +424,7 @@ func TestLogSearchHandler_MetadataFilter(t *testing.T) {
 			},
 		},
 	}
-	handler := logSearchHandler(ls)
+	handler := logSearchHandler(ls, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"metadata_filter": map[string]any{"user_id": float64(42)},
@@ -479,7 +479,7 @@ func TestLogSearchHandler_RequestSummaryEntries(t *testing.T) {
 			},
 		},
 	}
-	handler := logSearchHandler(ls)
+	handler := logSearchHandler(ls, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"event_type": "request",
