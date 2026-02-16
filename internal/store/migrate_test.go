@@ -7,8 +7,8 @@ import (
 func TestSQLiteMigrations(t *testing.T) {
 	db := setupTestDB(t)
 
-	// Verify all tables exist
-	tables := []string{"data_sources", "logs", "app_config", "watchers", "watcher_runs", "alerts"}
+	// Verify all tables exist (watchers/watcher_runs/alerts dropped in migration 26)
+	tables := []string{"data_sources", "logs", "app_config"}
 	for _, table := range tables {
 		var name string
 		err := db.QueryRow(

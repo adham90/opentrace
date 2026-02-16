@@ -25,7 +25,7 @@ func TestComparePeriodsHandler_ErrorsIncrease(t *testing.T) {
 		},
 	}
 
-	handler := comparePeriodsHandler(ls, nil)
+	handler := comparePeriodsHandler(ls)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"metric":         "errors",
 		"current_period": "last_1h",
@@ -74,7 +74,7 @@ func TestComparePeriodsHandler_ErrorsDecrease(t *testing.T) {
 		},
 	}
 
-	handler := comparePeriodsHandler(ls, nil)
+	handler := comparePeriodsHandler(ls)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"metric": "errors",
 	}))
@@ -106,7 +106,7 @@ func TestComparePeriodsHandler_LogVolume(t *testing.T) {
 		},
 	}
 
-	handler := comparePeriodsHandler(ls, nil)
+	handler := comparePeriodsHandler(ls)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"metric": "log_volume",
 	}))
@@ -130,36 +130,6 @@ func TestComparePeriodsHandler_LogVolume(t *testing.T) {
 	}
 }
 
-func TestComparePeriodsHandler_Alerts(t *testing.T) {
-	now := time.Now().UTC()
-	as := &mockAlertStore{
-		alerts: []store.Alert{
-			{Severity: store.SeverityCritical, CreatedAt: now.Add(-30 * time.Minute)},
-			{Severity: store.SeverityWarning, CreatedAt: now.Add(-25 * time.Minute)},
-			{Severity: store.SeverityCritical, CreatedAt: now.Add(-90 * time.Minute)},
-		},
-	}
-
-	handler := comparePeriodsHandler(&mockLogStore{}, as)
-	result, err := handler(context.Background(), makeRequest(map[string]any{
-		"metric": "alerts",
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(t, result))
-	}
-
-	text := resultText(t, result)
-	var resp map[string]any
-	json.Unmarshal([]byte(text), &resp)
-
-	if resp["metric"] != "alerts" {
-		t.Errorf("metric = %v, want alerts", resp["metric"])
-	}
-}
-
 func TestComparePeriodsHandler_BaselineZero(t *testing.T) {
 	now := time.Now().UTC()
 	ls := &mockLogStore{
@@ -169,7 +139,7 @@ func TestComparePeriodsHandler_BaselineZero(t *testing.T) {
 		},
 	}
 
-	handler := comparePeriodsHandler(ls, nil)
+	handler := comparePeriodsHandler(ls)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"metric": "errors",
 	}))
@@ -199,7 +169,7 @@ func TestComparePeriodsHandler_YesterdayBaseline(t *testing.T) {
 		},
 	}
 
-	handler := comparePeriodsHandler(ls, nil)
+	handler := comparePeriodsHandler(ls)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"metric":          "errors",
 		"baseline_period": "yesterday_same_time",
@@ -224,7 +194,7 @@ func TestComparePeriodsHandler_YesterdayBaseline(t *testing.T) {
 func TestComparePeriodsHandler_EmptyPeriods(t *testing.T) {
 	ls := &mockLogStore{}
 
-	handler := comparePeriodsHandler(ls, nil)
+	handler := comparePeriodsHandler(ls)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"metric": "errors",
 	}))
@@ -248,7 +218,7 @@ func TestComparePeriodsHandler_EmptyPeriods(t *testing.T) {
 func TestComparePeriodsHandler_MissingMetric(t *testing.T) {
 	ls := &mockLogStore{}
 
-	handler := comparePeriodsHandler(ls, nil)
+	handler := comparePeriodsHandler(ls)
 	result, err := handler(context.Background(), makeRequest(map[string]any{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -261,7 +231,7 @@ func TestComparePeriodsHandler_MissingMetric(t *testing.T) {
 func TestComparePeriodsHandler_InvalidMetric(t *testing.T) {
 	ls := &mockLogStore{}
 
-	handler := comparePeriodsHandler(ls, nil)
+	handler := comparePeriodsHandler(ls)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"metric": "banana",
 	}))

@@ -15,14 +15,14 @@ import (
 // timelineEvent represents a single event in the incident timeline.
 type timelineEvent struct {
 	Time     string `json:"time"`
-	Type     string `json:"type"` // "alert", "log", "metric"
+	Type     string `json:"type"` // "log", "metric"
 	Severity string `json:"severity,omitempty"`
 	Summary  string `json:"summary"`
 	Source   string `json:"source,omitempty"`
 }
 
 // incidentTimelineHandler returns a handler that builds a chronological incident timeline.
-func incidentTimelineHandler(as store.AlertStore, ls store.LogStore) server.ToolHandlerFunc {
+func incidentTimelineHandler(ls store.LogStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 
@@ -49,25 +49,6 @@ func incidentTimelineHandler(as store.AlertStore, ls store.LogStore) server.Tool
 		}
 
 		var events []timelineEvent
-
-		// Fetch alerts in the time window.
-		alerts, err := as.List(ctx, store.ListAlertParams{
-			Limit: 200,
-		})
-		if err == nil {
-			for _, a := range alerts {
-				if a.CreatedAt.Before(start) || a.CreatedAt.After(end) {
-					continue
-				}
-				events = append(events, timelineEvent{
-					Time:     a.CreatedAt.Format(time.RFC3339),
-					Type:     "alert",
-					Severity: string(a.Severity),
-					Summary:  a.Title + ": " + a.Summary,
-					Source:   a.WatcherTitle,
-				})
-			}
-		}
 
 		// Fetch error/fatal logs in the time window.
 		for _, level := range []string{"error", "fatal"} {
@@ -97,15 +78,9 @@ func incidentTimelineHandler(as store.AlertStore, ls store.LogStore) server.Tool
 		})
 
 		// Build summary stats.
-		alertCount := 0
 		logLevels := make(map[string]int)
 		affectedServices := make(map[string]bool)
-		severityCounts := make(map[string]int)
 		for _, e := range events {
-			if e.Type == "alert" {
-				alertCount++
-				severityCounts[e.Severity]++
-			}
 			if e.Type == "log" {
 				logLevels[e.Severity]++
 			}
@@ -139,10 +114,8 @@ func incidentTimelineHandler(as store.AlertStore, ls store.LogStore) server.Tool
 				"start": start.Format(time.RFC3339),
 				"end":   end.Format(time.RFC3339),
 			},
-			"total_events":      len(events),
-			"alert_count":       alertCount,
-			"alert_by_severity": severityCounts,
-			"log_levels":        logLevels,
+			"total_events": len(events),
+			"log_levels":   logLevels,
 			"blast_radius": map[string]any{
 				"affected_services": serviceList,
 				"service_count":     len(serviceList),

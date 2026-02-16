@@ -1,7 +1,6 @@
 package store
 
 import (
-	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -154,279 +153,6 @@ type ServiceLogCount struct {
 	ErrorCount int    `json:"error_count"`
 }
 
-// WatcherType represents the evaluation strategy (AI or rule-based).
-type WatcherType string
-
-const (
-	WatcherTypeAI        WatcherType = "ai"
-	WatcherTypeRule      WatcherType = "rule"
-	WatcherTypeDeadman   WatcherType = "deadman"
-	WatcherTypeDiff      WatcherType = "diff"
-	WatcherTypeComposite WatcherType = "composite"
-	WatcherTypeTrend     WatcherType = "trend"
-	WatcherTypeSequence  WatcherType = "sequence"
-)
-
-// RuleSource identifies what the rule evaluates.
-type RuleSource string
-
-const (
-	RuleSourceQuery  RuleSource = "query"
-	RuleSourceLogs   RuleSource = "logs"
-	RuleSourceHealth RuleSource = "health"
-)
-
-// RuleOperator defines comparison operators.
-type RuleOperator string
-
-const (
-	OpGreaterThan      RuleOperator = "gt"
-	OpGreaterThanEqual RuleOperator = "gte"
-	OpLessThan         RuleOperator = "lt"
-	OpLessThanEqual    RuleOperator = "lte"
-	OpEqual            RuleOperator = "eq"
-	OpNotEqual         RuleOperator = "neq"
-)
-
-// RuleConfig is the top-level rule configuration.
-type RuleConfig struct {
-	Source           RuleSource   `json:"source"`
-	Query            string       `json:"query,omitempty"`
-	Metric           string       `json:"metric,omitempty"`
-	Operator         RuleOperator `json:"operator,omitempty"`
-	Threshold        float64      `json:"threshold"`
-	Filter           *LogFilter   `json:"filter,omitempty"`
-	TimeWindow       string       `json:"time_window,omitempty"`
-	Checks           []string     `json:"checks,omitempty"`
-	LatencyThreshold int          `json:"latency_threshold_ms,omitempty"`
-}
-
-// LogFilter defines log search criteria for rule watchers.
-type LogFilter struct {
-	Service string `json:"service,omitempty"`
-	Level   string `json:"level,omitempty"`
-	Query   string `json:"query,omitempty"`
-}
-
-// WatcherSeverity represents the severity level of a watcher.
-type WatcherSeverity string
-
-const (
-	SeverityInfo     WatcherSeverity = "info"
-	SeverityWarning  WatcherSeverity = "warning"
-	SeverityCritical WatcherSeverity = "critical"
-)
-
-// WatcherEffort represents how thorough the AI analysis should be.
-type WatcherEffort string
-
-const (
-	EffortLow    WatcherEffort = "low"
-	EffortMedium WatcherEffort = "medium"
-	EffortHigh   WatcherEffort = "high"
-)
-
-// WatcherStatus represents the operational status of a watcher.
-type WatcherStatus string
-
-const (
-	WatcherActive  WatcherStatus = "active"
-	WatcherPaused  WatcherStatus = "paused"
-	WatcherError   WatcherStatus = "error"
-	WatcherExpired WatcherStatus = "expired"
-)
-
-// AdaptiveState represents the adaptive scheduling state of a watcher.
-type AdaptiveState string
-
-const (
-	AdaptiveNormal    AdaptiveState = "normal"
-	AdaptiveEscalated AdaptiveState = "escalated"
-	AdaptiveSustained AdaptiveState = "sustained"
-	AdaptiveRelaxed   AdaptiveState = "relaxed"
-	AdaptiveBackoff   AdaptiveState = "backing_off"
-	AdaptiveError     AdaptiveState = "error"
-)
-
-// AdaptiveConfig configures adaptive scheduling for a watcher.
-type AdaptiveConfig struct {
-	Enabled            bool    `json:"enabled"`
-	EscalatedInterval  string  `json:"escalated_interval,omitempty"`
-	EscalationDuration string  `json:"escalation_duration,omitempty"`
-	CooldownRuns       int     `json:"cooldown_runs,omitempty"`
-	RelaxEnabled       bool    `json:"relax_enabled,omitempty"`
-	RelaxedInterval    string  `json:"relaxed_interval,omitempty"`
-	RelaxAfterRuns     int     `json:"relax_after_runs,omitempty"`
-	RelaxSkipRuns      int     `json:"relax_skip_runs,omitempty"`
-	BackoffMultiplier  float64 `json:"backoff_multiplier,omitempty"`
-	MaxBackoffInterval string  `json:"max_backoff_interval,omitempty"`
-	MaxConsecErrors    int     `json:"max_consecutive_errors,omitempty"`
-}
-
-// Watcher represents an automated monitoring rule.
-type Watcher struct {
-	ID           uuid.UUID       `json:"id"`
-	Title        string          `json:"title"`
-	Description  string          `json:"description"`
-	Severity     WatcherSeverity `json:"severity"`
-	Filters      json.RawMessage `json:"filters"`
-	TimeRange    string          `json:"time_range"`
-	Schedule     string          `json:"schedule,omitempty"`
-	Model        string          `json:"model"`
-	Effort       WatcherEffort   `json:"effort"`
-	Status       WatcherStatus   `json:"status"`
-	Notify       json.RawMessage `json:"notify"`
-	WatcherType  WatcherType     `json:"watcher_type"`
-	RuleConfig   *RuleConfig     `json:"rule_config,omitempty"`
-	DataSourceID *string          `json:"data_source_id,omitempty"`
-	TypeConfig   json.RawMessage `json:"type_config,omitempty"`
-	LastRunAt    *time.Time      `json:"last_run_at,omitempty"`
-	NextRunAt    *time.Time      `json:"next_run_at,omitempty"`
-	LastError    *string         `json:"last_error,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
-
-	// Human summary (Claude-generated plain-English explanation).
-	HumanSummary *WatcherHumanSummary `json:"human_summary,omitempty"`
-
-	// Adaptive scheduling fields
-	AdaptiveConfig       *AdaptiveConfig `json:"adaptive_config,omitempty"`
-	AdaptiveState        AdaptiveState   `json:"adaptive_state"`
-	ConsecutiveCleanRuns int             `json:"consecutive_clean_runs"`
-	ConsecutiveErrors    int             `json:"consecutive_errors"`
-	EscalatedAt          *time.Time      `json:"escalated_at,omitempty"`
-	BaseTimeRange        string          `json:"base_time_range,omitempty"`
-	ExpiresAt            *time.Time      `json:"expires_at,omitempty"`
-}
-
-// WatcherHumanSummary provides a Claude-generated plain-English explanation of a watcher.
-type WatcherHumanSummary struct {
-	WhatItMonitors string `json:"what_it_monitors"`
-	WhyItMatters   string `json:"why_it_matters"`
-	WhatToDo       string `json:"what_to_do"`
-}
-
-// WatcherEffectiveness holds computed effectiveness metrics for a watcher.
-type WatcherEffectiveness struct {
-	WatcherID         string         `json:"watcher_id"`
-	WatcherTitle      string         `json:"watcher_title"`
-	Period            string         `json:"period"`
-	TotalRuns         int            `json:"total_runs"`
-	CompletedRuns     int            `json:"completed_runs"`
-	ErrorRuns         int            `json:"error_runs"`
-	TotalAlerts       int            `json:"total_alerts"`
-	DismissedAlerts   int            `json:"dismissed_alerts"`
-	ActedOnAlerts     int            `json:"acted_on_alerts"`
-	FalsePositives    int            `json:"false_positives"`
-	SignalRatio       float64        `json:"signal_ratio"`
-	FalsePositiveRate float64        `json:"false_positive_rate"`
-	AlertRatePct      float64        `json:"alert_rate_pct"`
-	AvgDurationMS     int64          `json:"avg_duration_ms"`
-	DismissReasons    map[string]int `json:"dismiss_reasons,omitempty"`
-	LastAlertAt       *time.Time     `json:"last_alert_at,omitempty"`
-	Trend             string         `json:"trend"`
-}
-
-// CreateWatcherParams defines the input for creating a watcher.
-type CreateWatcherParams struct {
-	Title        string          `json:"title"`
-	Description  string          `json:"description"`
-	Severity     WatcherSeverity `json:"severity"`
-	Filters      json.RawMessage `json:"filters"`
-	TimeRange    string          `json:"time_range"`
-	Schedule     string          `json:"schedule,omitempty"`
-	Model        string          `json:"model"`
-	Effort       WatcherEffort   `json:"effort"`
-	Notify       json.RawMessage `json:"notify"`
-	WatcherType  WatcherType     `json:"watcher_type"`
-	RuleConfig      *RuleConfig          `json:"rule_config,omitempty"`
-	DataSourceID    *string              `json:"data_source_id,omitempty"`
-	TypeConfig      json.RawMessage      `json:"type_config,omitempty"`
-	AdaptiveConfig  *AdaptiveConfig      `json:"adaptive_config,omitempty"`
-	HumanSummary    *WatcherHumanSummary `json:"human_summary,omitempty"`
-	ExpiresAt       *time.Time           `json:"expires_at,omitempty"`
-}
-
-// UpdateWatcherParams defines the input for updating a watcher.
-type UpdateWatcherParams struct {
-	Title        *string          `json:"title,omitempty"`
-	Description  *string          `json:"description,omitempty"`
-	Severity     *WatcherSeverity `json:"severity,omitempty"`
-	Filters      json.RawMessage  `json:"filters,omitempty"`
-	TimeRange    *string          `json:"time_range,omitempty"`
-	Schedule     *string          `json:"schedule,omitempty"`
-	Model        *string          `json:"model,omitempty"`
-	Effort       *WatcherEffort   `json:"effort,omitempty"`
-	Notify       json.RawMessage  `json:"notify,omitempty"`
-	WatcherType  *WatcherType     `json:"watcher_type,omitempty"`
-	RuleConfig      *RuleConfig          `json:"rule_config,omitempty"`
-	DataSourceID    *string              `json:"data_source_id,omitempty"`
-	TypeConfig      json.RawMessage      `json:"type_config,omitempty"`
-	AdaptiveConfig  *AdaptiveConfig      `json:"adaptive_config,omitempty"`
-	HumanSummary    *WatcherHumanSummary `json:"human_summary,omitempty"`
-	ExpiresAt       *time.Time           `json:"expires_at,omitempty"`
-	ClearExpiresAt  bool                 `json:"clear_expires_at,omitempty"`
-}
-
-// ListWatcherParams defines filters for listing watchers.
-type ListWatcherParams struct {
-	WatcherType WatcherType `json:"watcher_type,omitempty"`
-}
-
-// WatcherRun represents a single execution of a watcher.
-type WatcherRun struct {
-	ID            uuid.UUID       `json:"id"`
-	WatcherID     uuid.UUID       `json:"watcher_id"`
-	StartedAt     time.Time       `json:"started_at"`
-	FinishedAt    *time.Time      `json:"finished_at,omitempty"`
-	Status        string          `json:"status"`
-	Summary       *string         `json:"summary,omitempty"`
-	Details       json.RawMessage `json:"details,omitempty"`
-	HasAlert      bool            `json:"has_alert"`
-	Error         *string         `json:"error,omitempty"`
-	ParentAlertID *string         `json:"parent_alert_id,omitempty"`
-	RunType       string          `json:"run_type"`
-	CreatedAt     time.Time       `json:"created_at"`
-}
-
-// Alert represents a notification generated by a watcher run.
-type Alert struct {
-	ID            uuid.UUID       `json:"id"`
-	WatcherID     *uuid.UUID      `json:"watcher_id,omitempty"`
-	RunID         *uuid.UUID      `json:"run_id,omitempty"`
-	WatcherTitle  string          `json:"watcher_title,omitempty"`
-	Title         string          `json:"title"`
-	Summary       string          `json:"summary"`
-	Severity      WatcherSeverity `json:"severity"`
-	Details       json.RawMessage `json:"details,omitempty"`
-	Read          bool            `json:"read"`
-	Dismissed     bool            `json:"dismissed"`
-	DismissReason string          `json:"dismiss_reason,omitempty"`
-	DismissedAt   *time.Time      `json:"dismissed_at,omitempty"`
-	SnoozedUntil  *time.Time      `json:"snoozed_until,omitempty"`
-	CreatedAt     time.Time       `json:"created_at"`
-}
-
-// CreateAlertParams defines the input for creating an alert.
-type CreateAlertParams struct {
-	WatcherID   *uuid.UUID      `json:"watcher_id,omitempty"`
-	RunID       *uuid.UUID      `json:"run_id,omitempty"`
-	Title       string          `json:"title"`
-	Summary     string          `json:"summary"`
-	Severity    WatcherSeverity `json:"severity"`
-	Details     json.RawMessage `json:"details,omitempty"`
-}
-
-// ListAlertParams defines filters for listing alerts.
-type ListAlertParams struct {
-	UnreadOnly    bool            `json:"unread_only,omitempty"`
-	DismissedOnly bool            `json:"dismissed_only,omitempty"`
-	Severity      WatcherSeverity `json:"severity,omitempty"`
-	WatcherID     *uuid.UUID      `json:"watcher_id,omitempty"`
-	Limit         int             `json:"limit,omitempty"`
-	Offset        int             `json:"offset,omitempty"`
-}
-
 // ServerStatus represents the health status of a monitored server.
 type ServerStatus string
 
@@ -528,13 +254,6 @@ type UpdateUserParams struct {
 	IsActive    *bool     `json:"is_active,omitempty"`
 }
 
-// WatcherRun run type constants for investigation tracking.
-const (
-	RunTypeScheduled     = "scheduled"
-	RunTypeManual        = "manual"
-	RunTypeInvestigation = "investigation"
-)
-
 // MCPActivityEvent represents a single MCP tool call or connection event.
 type MCPActivityEvent struct {
 	ID            int64     `json:"id"`
@@ -569,37 +288,6 @@ type MCPActivityStats struct {
 	LastActivity   *time.Time `json:"last_activity,omitempty"`
 }
 
-// AlertGroup represents an incident grouping of related alerts.
-type AlertGroup struct {
-	ID          string     `json:"id"`
-	Title       string     `json:"title"`
-	Status      string     `json:"status"`
-	Severity    string     `json:"severity"`
-	RootCause   *string    `json:"root_cause,omitempty"`
-	Resolution  *string    `json:"resolution,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	ResolvedAt  *time.Time `json:"resolved_at,omitempty"`
-	AlertCount  int        `json:"alert_count,omitempty"`
-	Alerts      []Alert    `json:"alerts,omitempty"`
-}
-
-// CreateAlertGroupParams defines input for creating an alert group.
-type CreateAlertGroupParams struct {
-	Title    string   `json:"title"`
-	Severity string   `json:"severity"`
-	AlertIDs []string `json:"alert_ids"`
-}
-
-// UpdateAlertGroupParams defines input for updating an alert group.
-type UpdateAlertGroupParams struct {
-	Title      *string `json:"title,omitempty"`
-	Status     *string `json:"status,omitempty"`
-	Severity   *string `json:"severity,omitempty"`
-	RootCause  *string `json:"root_cause,omitempty"`
-	Resolution *string `json:"resolution,omitempty"`
-}
-
 // RequestSummarySearchParams defines filters for searching request summaries.
 type RequestSummarySearchParams struct {
 	Start         *time.Time
@@ -630,6 +318,117 @@ type Session struct {
 	Token     string    `json:"-"`
 	ExpiresAt time.Time `json:"expires_at"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// ---------------------------------------------------------------------------
+// Error Groups (Sentry-lite)
+// ---------------------------------------------------------------------------
+
+// ErrorGroupStatus represents the lifecycle state of an error group.
+type ErrorGroupStatus string
+
+const (
+	ErrorGroupUnresolved ErrorGroupStatus = "unresolved"
+	ErrorGroupResolved   ErrorGroupStatus = "resolved"
+	ErrorGroupIgnored    ErrorGroupStatus = "ignored"
+)
+
+// ErrorGroup aggregates errors by fingerprint.
+type ErrorGroup struct {
+	Fingerprint     string           `json:"fingerprint"`
+	Service         string           `json:"service"`
+	Environment     string           `json:"environment"`
+	ExceptionClass  string           `json:"exception_class"`
+	Message         string           `json:"message"`
+	SourceFile      string           `json:"source_file"`
+	SourceLine      int              `json:"source_line"`
+	Status          ErrorGroupStatus `json:"status"`
+	FirstSeenAt     time.Time        `json:"first_seen_at"`
+	LastSeenAt      time.Time        `json:"last_seen_at"`
+	OccurrenceCount int              `json:"occurrence_count"`
+	LastLogID       *int64           `json:"last_log_id,omitempty"`
+	ReopenedCount   int              `json:"reopened_count"`
+	ResolvedAt      *time.Time       `json:"resolved_at,omitempty"`
+	IgnoredAt       *time.Time       `json:"ignored_at,omitempty"`
+	Events          []ErrorGroupEvent `json:"events,omitempty"`
+}
+
+// ErrorGroupEvent records a lifecycle action on an error group.
+type ErrorGroupEvent struct {
+	ID          int64     `json:"id"`
+	Fingerprint string    `json:"fingerprint"`
+	Action      string    `json:"action"` // "resolved", "ignored", "reopened"
+	Reason      string    `json:"reason,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// ListErrorGroupParams defines filters for listing error groups.
+type ListErrorGroupParams struct {
+	Status      ErrorGroupStatus `json:"status,omitempty"`
+	Service     string           `json:"service,omitempty"`
+	Environment string           `json:"environment,omitempty"`
+	SortBy      string           `json:"sort_by,omitempty"` // "occurrence_count", "last_seen_at", "first_seen_at"
+	Limit       int              `json:"limit,omitempty"`
+	Offset      int              `json:"offset,omitempty"`
+}
+
+// ---------------------------------------------------------------------------
+// Uptime / Health Check monitoring
+// ---------------------------------------------------------------------------
+
+// HealthCheckStatus represents the current state of a health check target.
+type HealthCheckStatus string
+
+const (
+	HealthCheckUp       HealthCheckStatus = "up"
+	HealthCheckDown     HealthCheckStatus = "down"
+	HealthCheckDegraded HealthCheckStatus = "degraded"
+)
+
+// HealthCheck represents a configured HTTP endpoint monitor.
+type HealthCheck struct {
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	URL            string    `json:"url"`
+	Method         string    `json:"method"`
+	IntervalSecs   int       `json:"interval_secs"`
+	TimeoutSecs    int       `json:"timeout_secs"`
+	ExpectedStatus int       `json:"expected_status"`
+	Enabled        bool      `json:"enabled"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// HealthCheckResult records a single probe result.
+type HealthCheckResult struct {
+	ID            int64             `json:"id"`
+	HealthCheckID string            `json:"healthcheck_id"`
+	Status        HealthCheckStatus `json:"status"`
+	StatusCode    *int              `json:"status_code,omitempty"`
+	ResponseMs    *int              `json:"response_ms,omitempty"`
+	Error         string            `json:"error,omitempty"`
+	CheckedAt     time.Time         `json:"checked_at"`
+}
+
+// CreateHealthCheckParams defines the input for creating a health check.
+type CreateHealthCheckParams struct {
+	Name           string `json:"name"`
+	URL            string `json:"url"`
+	Method         string `json:"method,omitempty"`
+	IntervalSecs   int    `json:"interval_secs,omitempty"`
+	TimeoutSecs    int    `json:"timeout_secs,omitempty"`
+	ExpectedStatus int    `json:"expected_status,omitempty"`
+}
+
+// UptimeSummary aggregates uptime stats for a single health check.
+type UptimeSummary struct {
+	HealthCheckID string  `json:"healthcheck_id"`
+	Name          string  `json:"name"`
+	URL           string  `json:"url"`
+	CurrentStatus string  `json:"current_status"`
+	UptimePct     float64 `json:"uptime_pct"`
+	AvgResponseMs float64 `json:"avg_response_ms"`
+	TotalChecks   int     `json:"total_checks"`
+	DownChecks    int     `json:"down_checks"`
 }
 
 // ---------------------------------------------------------------------------

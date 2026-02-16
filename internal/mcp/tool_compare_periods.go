@@ -15,14 +15,14 @@ import (
 )
 
 // comparePeriodsHandler returns a handler that compares metrics between two
-// time periods: error rates, log volumes, alert counts, etc.
-func comparePeriodsHandler(ls store.LogStore, as store.AlertStore) server.ToolHandlerFunc {
+// time periods: error rates and log volumes.
+func comparePeriodsHandler(ls store.LogStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 
 		metric, _ := args["metric"].(string)
 		if metric == "" {
-			return mcp.NewToolResultError("metric is required (errors, log_volume, alerts)"), nil
+			return mcp.NewToolResultError("metric is required (errors, log_volume)"), nil
 		}
 
 		currentPeriod := "last_1h"
@@ -53,13 +53,8 @@ func comparePeriodsHandler(ls store.LogStore, as store.AlertStore) server.ToolHa
 			return compareErrors(ctx, ls, currentStart, currentEnd, baseStart, baseEnd, serviceFilter)
 		case "log_volume":
 			return compareLogVolume(ctx, ls, currentStart, currentEnd, baseStart, baseEnd, serviceFilter)
-		case "alerts":
-			if as == nil {
-				return mcp.NewToolResultError("alert store not available"), nil
-			}
-			return compareAlerts(ctx, as, currentStart, currentEnd, baseStart, baseEnd)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("invalid metric: %q (use errors, log_volume, or alerts)", metric)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("invalid metric: %q (use errors or log_volume)", metric)), nil
 		}
 	}
 }
@@ -222,71 +217,6 @@ func compareLogVolume(ctx context.Context, ls store.LogStore, curStart, curEnd, 
 			"direction":        direction,
 			"by_level":         levelChanges,
 		},
-	}
-
-	data, _ := json.MarshalIndent(resp, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
-}
-
-func compareAlerts(ctx context.Context, as store.AlertStore, curStart, curEnd, baseStart, baseEnd time.Time) (*mcp.CallToolResult, error) {
-	curCounts, err := as.CountBySeverity(ctx, curStart, curEnd)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to count current alerts: %v", err)), nil
-	}
-	baseCounts, err := as.CountBySeverity(ctx, baseStart, baseEnd)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to count baseline alerts: %v", err)), nil
-	}
-
-	curTotal := 0
-	for _, c := range curCounts {
-		curTotal += c
-	}
-	baseTotal := 0
-	for _, c := range baseCounts {
-		baseTotal += c
-	}
-
-	changePct, direction := calcChange(baseTotal, curTotal)
-
-	var warnings []string
-	if direction == "increase" && changePct > 100 {
-		warnings = append(warnings, fmt.Sprintf("Alert count increased %.0f%% compared to the baseline period", changePct))
-	}
-
-	// Generate recommendation based on comparison.
-	var recommendation string
-	switch {
-	case direction == "increase" && changePct > 100:
-		recommendation = "Significant alert increase detected. Run 'runbook' with playbook 'error_spike' and check 'list_alerts' for details."
-	case direction == "increase" && changePct > 25:
-		recommendation = "Alert volume is trending upward. Review recent alerts with 'list_alerts' and check if thresholds need adjustment."
-	case direction == "decrease" && math.Abs(changePct) > 50:
-		recommendation = "Alert volume has dropped significantly — the situation appears to be improving."
-	default:
-		recommendation = "Alert volume is stable relative to the baseline period."
-	}
-
-	resp := map[string]any{
-		"metric": "alerts",
-		"current": map[string]any{
-			"period":      periodInfo(curStart, curEnd),
-			"total":       curTotal,
-			"by_severity": curCounts,
-		},
-		"baseline": map[string]any{
-			"period":      periodInfo(baseStart, baseEnd),
-			"total":       baseTotal,
-			"by_severity": baseCounts,
-		},
-		"changes": map[string]any{
-			"total_change_pct": changePct,
-			"direction":        direction,
-		},
-		"recommendation": recommendation,
-	}
-	if len(warnings) > 0 {
-		resp["warnings"] = warnings
 	}
 
 	data, _ := json.MarshalIndent(resp, "", "  ")

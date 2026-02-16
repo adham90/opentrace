@@ -50,8 +50,6 @@ type Server struct {
 	db            *sql.DB
 	dsStore       store.DataSourceStore
 	logStore      store.LogStore
-	watcherStore  store.WatcherStore
-	alertStore    store.AlertStore
 	serverStore   store.ServerStore
 	metricStore   store.MetricStore
 	userStore     store.UserStore
@@ -61,15 +59,14 @@ type Server struct {
 	cfg           *config.Config
 	toolCatalog      *mcpserver.ToolCatalog
 	mcpActivityStore store.MCPActivityStore
-	alertGroupStore  store.AlertGroupStore
 	auditStore       store.AuditStore
 	watchStream      *watcher.WatchStreamEvaluator
 	watchStore       store.WatchStore
 	watchMetrics     *watcher.WatchMetrics
-	versionChecker   *versionChecker
-	selfUpdater    *selfUpdater
+	errorGroupStore    store.ErrorGroupStore
+	healthCheckStore   store.HealthCheckStore
+	versionChecker     *versionChecker
 	sseServer      *mcpgoserver.SSEServer
-	restartCh      chan struct{} // closed when a self-update wants to restart
 	loginLimiter   *RateLimiter
 	apiLimiter     *RateLimiter
 	loginTracker   *loginTracker
@@ -83,8 +80,6 @@ type ServerDeps struct {
 	DB            *sql.DB
 	DSStore       store.DataSourceStore
 	LogStore      store.LogStore
-	WatcherStore  store.WatcherStore
-	AlertStore    store.AlertStore
 	ServerStore   store.ServerStore
 	MetricStore   store.MetricStore
 	UserStore     store.UserStore
@@ -94,11 +89,12 @@ type ServerDeps struct {
 	ToolCatalog   *mcpserver.ToolCatalog
 	Cfg           *config.Config
 	MCPActivityStore store.MCPActivityStore
-	AlertGroupStore  store.AlertGroupStore
 	AuditStore       store.AuditStore
 	WatchStreamEvaluator *watcher.WatchStreamEvaluator
 	WatchStore           store.WatchStore
 	WatchMetrics         *watcher.WatchMetrics
+	ErrorGroupStore      store.ErrorGroupStore
+	HealthCheckStore     store.HealthCheckStore
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
@@ -117,8 +113,6 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		db:            deps.DB,
 		dsStore:       deps.DSStore,
 		logStore:      deps.LogStore,
-		watcherStore:  deps.WatcherStore,
-		alertStore:    deps.AlertStore,
 		serverStore:   deps.ServerStore,
 		metricStore:   deps.MetricStore,
 		userStore:     deps.UserStore,
@@ -128,14 +122,13 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		toolCatalog:   deps.ToolCatalog,
 		cfg:           deps.Cfg,
 		mcpActivityStore: deps.MCPActivityStore,
-		alertGroupStore:  deps.AlertGroupStore,
 		auditStore:       deps.AuditStore,
 		watchStream:      deps.WatchStreamEvaluator,
 		watchStore:       deps.WatchStore,
 		watchMetrics:     deps.WatchMetrics,
-		versionChecker:   newVersionChecker("adham90", "opentrace"),
-		selfUpdater:    newSelfUpdater("adham90", "opentrace"),
-		restartCh:      make(chan struct{}),
+		errorGroupStore:    deps.ErrorGroupStore,
+		healthCheckStore:   deps.HealthCheckStore,
+		versionChecker:     newVersionChecker("adham90", "opentrace"),
 	}
 
 	cfg := deps.Cfg
@@ -276,7 +269,6 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Get("/connectors", srv.handleListConnectors)
 			r.Get("/connectors/{id}", srv.handleGetConnectorAPI)
 			r.Get("/overview", srv.handleOverviewAPI)
-			r.Get("/overview/triage", srv.handleTriageAPI)
 			r.Get("/tools", srv.handleToolsAPI)
 			r.Get("/logs/poll", srv.handleLogsPoll)
 			r.Get("/logs/{id}", srv.handleGetLogDetail)
@@ -290,16 +282,23 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 				r.Get("/watches/alerts/count", srv.handleWatchAlertCount)
 			}
 
+			// Error groups
+			if srv.errorGroupStore != nil {
+				r.Get("/errors", srv.handleListErrorGroups)
+				r.Get("/errors/{fingerprint}", srv.handleGetErrorGroup)
+			}
+
+			// Health checks
+			if srv.healthCheckStore != nil {
+				r.Get("/healthchecks", srv.handleListHealthChecks)
+				r.Get("/healthchecks/{id}/results", srv.handleHealthCheckResults)
+				r.Get("/healthchecks/uptime", srv.handleUptimeSummary)
+			}
+
 			// MCP activity
 			if srv.mcpActivityStore != nil {
 				r.Get("/mcp/activity/stats", srv.handleMCPActivityStats)
 				r.Get("/mcp/activity", srv.handleMCPActivity)
-			}
-
-			// Alert groups (incidents)
-			if srv.alertGroupStore != nil {
-				r.Get("/alert-groups", srv.handleListAlertGroups)
-				r.Get("/alert-groups/{id}", srv.handleGetAlertGroup)
 			}
 
 			if srv.serverStore != nil && srv.metricStore != nil {
@@ -324,13 +323,16 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 				r.Post("/watches/alerts/{alertId}/acknowledge", srv.handleAcknowledgeWatchAlert)
 			}
 
-			// Alert groups (incidents) — write operations
-			if srv.alertGroupStore != nil {
-				r.Post("/alert-groups", srv.handleCreateAlertGroup)
-				r.Put("/alert-groups/{id}", srv.handleUpdateAlertGroup)
-				r.Post("/alert-groups/{id}/alerts", srv.handleAddAlertsToGroup)
-				r.Delete("/alert-groups/{id}", srv.handleDeleteAlertGroup)
-				r.Post("/alert-groups/auto-correlate", srv.handleAutoCorrelate)
+			// Error groups (write)
+			if srv.errorGroupStore != nil {
+				r.Post("/errors/{fingerprint}/resolve", srv.handleResolveErrorGroup)
+				r.Post("/errors/{fingerprint}/ignore", srv.handleIgnoreErrorGroup)
+			}
+
+			// Health checks (write)
+			if srv.healthCheckStore != nil {
+				r.Post("/healthchecks", srv.handleCreateHealthCheck)
+				r.Delete("/healthchecks/{id}", srv.handleDeleteHealthCheck)
 			}
 
 			if srv.serverStore != nil && srv.metricStore != nil {
@@ -345,9 +347,6 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Put("/settings/retention", srv.handleUpdateRetention)
 			r.Get("/settings/api-key", srv.handleGetAPIKey)
 			r.Post("/settings/api-key", srv.handleRegenerateAPIKey)
-			r.Get("/settings/auto-update", srv.handleGetAutoUpdate)
-			r.Put("/settings/auto-update", srv.handleSetAutoUpdate)
-			r.Post("/version/update", srv.handleSelfUpdate)
 			if srv.auditStore != nil {
 				r.Get("/audit-log", srv.handleAuditLog)
 			}
@@ -392,13 +391,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		return s.sseServer.Shutdown(ctx)
 	}
 	return nil
-}
-
-// RestartCh returns a channel that is closed when the server wants to restart
-// (e.g., after a self-update). The caller should listen on this channel and
-// perform the actual process restart.
-func (s *Server) RestartCh() <-chan struct{} {
-	return s.restartCh
 }
 
 // getEffectiveAPIKey returns the API key from the env var (if set) or from the DB.
@@ -513,6 +505,12 @@ func (s *Server) handleVersionBanner(w http.ResponseWriter, r *http.Request) {
   <a href="%s" target="_blank" rel="noopener">View release notes</a>
   <button onclick="this.closest('.update-banner').remove()" class="update-banner-dismiss" aria-label="Dismiss">&times;</button>
 </div>`, resp.LatestVersion, resp.CurrentVersion, resp.ReleaseURL)
+}
+
+// isDocker returns true when running inside a Docker container.
+func isDocker() bool {
+	_, err := os.Stat("/.dockerenv")
+	return err == nil
 }
 
 // handleDevHash returns a hash of UI file modification times for live-reload.

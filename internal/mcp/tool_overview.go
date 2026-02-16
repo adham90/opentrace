@@ -22,52 +22,12 @@ func systemOverviewTool() mcp.Tool {
 
 // systemOverviewHandler returns a handler that builds a system overview.
 func systemOverviewHandler(
-	alertStore store.AlertStore,
-	watcherStore store.WatcherStore,
 	logStore store.LogStore,
 	dsStore store.DataSourceStore,
 	serverStore store.ServerStore,
 ) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		overview := map[string]any{}
-
-		// Alerts
-		if alertStore != nil {
-			alerts := map[string]int{"total": 0, "critical": 0, "warning": 0, "info": 0}
-			if total, err := alertStore.CountTotal(ctx); err == nil {
-				alerts["total"] = total
-			}
-			oneHourAgo := time.Now().Add(-1 * time.Hour)
-			if bySev, err := alertStore.CountBySeverity(ctx, oneHourAgo, time.Now()); err == nil {
-				for sev, count := range bySev {
-					alerts[sev] = count
-				}
-			}
-			overview["alerts"] = alerts
-		}
-
-		// Watchers
-		if watcherStore != nil {
-			watchers, err := watcherStore.List(ctx, store.ListWatcherParams{})
-			if err == nil {
-				wStats := map[string]int{
-					"total": len(watchers), "active": 0, "paused": 0, "error": 0, "expired": 0,
-				}
-				for _, w := range watchers {
-					switch w.Status {
-					case store.WatcherActive:
-						wStats["active"]++
-					case store.WatcherPaused:
-						wStats["paused"]++
-					case store.WatcherError:
-						wStats["error"]++
-					case store.WatcherExpired:
-						wStats["expired"]++
-					}
-				}
-				overview["watchers"] = wStats
-			}
-		}
 
 		// Logs (last hour)
 		if logStore != nil {
@@ -153,57 +113,11 @@ type triageEntry struct {
 
 // triageAlertsHandler returns a handler that builds the triage inbox.
 func triageAlertsHandler(
-	alertStore store.AlertStore,
-	runStore store.WatcherRunStore,
 	dsStore store.DataSourceStore,
 	serverStore store.ServerStore,
 ) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var items []triageEntry
-
-		// Unread alerts
-		if alertStore != nil {
-			alerts, err := alertStore.List(ctx, store.ListAlertParams{
-				UnreadOnly: true,
-				Limit:      10,
-			})
-			if err == nil {
-				for _, a := range alerts {
-					items = append(items, triageEntry{
-						Type:     "alert",
-						Severity: string(a.Severity),
-						Title:    a.Title,
-						Detail:   a.WatcherTitle,
-						Time:     a.CreatedAt.Format(time.RFC3339),
-						ID:       a.ID.String(),
-					})
-				}
-			}
-		}
-
-		// Recent failed runs
-		if runStore != nil {
-			runs, err := runStore.ListRecentFailed(ctx, 5)
-			if err == nil {
-				for _, r := range runs {
-					detail := ""
-					if r.Error != nil {
-						detail = *r.Error
-						if len(detail) > 100 {
-							detail = detail[:100]
-						}
-					}
-					items = append(items, triageEntry{
-						Type:     "failed_run",
-						Severity: "warning",
-						Title:    "Watcher run failed",
-						Detail:   detail,
-						Time:     r.CreatedAt.Format(time.RFC3339),
-						ID:       r.ID.String(),
-					})
-				}
-			}
-		}
 
 		// Error connectors
 		if dsStore != nil {

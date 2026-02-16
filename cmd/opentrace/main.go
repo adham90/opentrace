@@ -13,6 +13,7 @@ import (
 
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/healthcheck"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/store"
 	"github.com/adham90/opentrace/internal/version"
@@ -26,18 +27,17 @@ type appDeps struct {
 	db               *sql.DB
 	dsStore          store.DataSourceStore
 	logStore         store.LogStore
-	watcherStore     store.WatcherStore
-	alertStore       store.AlertStore
 	serverStore      store.ServerStore
 	metricStore      store.MetricStore
 	userStore        store.UserStore
 	sessionStore     store.SessionStore
 	settingsStore    store.SettingsStore
 	mcpActivityStore store.MCPActivityStore
-	alertGroupStore  store.AlertGroupStore
-	auditStore       store.AuditStore
+	auditStore store.AuditStore
 	watchStore       store.WatchStore
-	registry         *connector.Registry
+	errorGroupStore    store.ErrorGroupStore
+	healthCheckStore   store.HealthCheckStore
+	registry           *connector.Registry
 	cfg              *config.Config
 }
 
@@ -108,17 +108,16 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	// Initialize stores
 	dsStore := store.NewDataSourceStore(db)
 	logStore := store.NewLogStore(db)
-	watcherStore := store.NewWatcherStore(db)
-	alertStore := store.NewAlertStore(db)
 	serverStore := store.NewServerStore(db)
 	metricStore := store.NewMetricStore(db)
 	userStore := store.NewUserStore(db)
 	sessionStore := store.NewSessionStore(db)
 	settingsStore := store.NewSettingsStore(db)
 	mcpActivityStore := store.NewMCPActivityStore(db)
-	alertGroupStore := store.NewAlertGroupStore(db)
 	auditStore := store.NewAuditStore(db)
 	watchStore := store.NewWatchStore(db)
+	errorGroupStore := store.NewErrorGroupStore(db)
+	healthCheckStore := store.NewHealthCheckStore(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
@@ -128,19 +127,18 @@ func initApp(ctx context.Context) (*appDeps, error) {
 		db:               db,
 		dsStore:          dsStore,
 		logStore:         logStore,
-		watcherStore:     watcherStore,
-		alertStore:       alertStore,
 		serverStore:      serverStore,
 		metricStore:      metricStore,
 		userStore:        userStore,
 		sessionStore:     sessionStore,
 		settingsStore:    settingsStore,
 		mcpActivityStore: mcpActivityStore,
-		alertGroupStore:  alertGroupStore,
 		auditStore:       auditStore,
 		watchStore:       watchStore,
-		registry:         registry,
-		cfg:              cfg,
+		errorGroupStore:    errorGroupStore,
+		healthCheckStore:   healthCheckStore,
+		registry:           registry,
+		cfg:                cfg,
 	}, nil
 }
 
@@ -161,8 +159,6 @@ func runMCP() error {
 
 	return mcpserver.Serve(mcpserver.Deps{
 		Registry:         deps.registry,
-		WatcherStore:     deps.watcherStore,
-		AlertStore:       deps.alertStore,
 		LogStore:         deps.logStore,
 		ServerStore:      deps.serverStore,
 		MetricStore:      deps.metricStore,
@@ -173,10 +169,11 @@ func runMCP() error {
 		SettingsStore:    deps.settingsStore,
 		Config:           deps.cfg,
 		MCPActivityStore: deps.mcpActivityStore,
-		AlertGroupStore:  deps.alertGroupStore,
 		AuditStore:       deps.auditStore,
 		WatchStore:       deps.watchStore,
 		WatchMetrics:     watchMetrics,
+		ErrorGroupStore:    deps.errorGroupStore,
+		HealthCheckStore:   deps.healthCheckStore,
 	})
 }
 
@@ -222,18 +219,17 @@ func run() error {
 	// Build MCP tool catalog for the /tools page (auto-detected from MCP registrations).
 	toolCatalog := mcpserver.BuildCatalog(mcpserver.Deps{
 		Registry:        deps.registry,
-		WatcherStore:    deps.watcherStore,
-		AlertStore:      deps.alertStore,
 		LogStore:        deps.logStore,
 		ServerStore:     deps.serverStore,
 		MetricStore:     deps.metricStore,
 		DataSourceStore: deps.dsStore,
 		SettingsStore:   deps.settingsStore,
 		Config:          deps.cfg,
-		AlertGroupStore: deps.alertGroupStore,
 		AuditStore:      deps.auditStore,
 		WatchStore:      deps.watchStore,
 		WatchMetrics:    watchMetrics,
+		ErrorGroupStore:  deps.errorGroupStore,
+		HealthCheckStore: deps.healthCheckStore,
 	})
 
 	// Agent-first watch evaluator + stream (reactive on log ingestion)
@@ -246,8 +242,6 @@ func run() error {
 		DB:               deps.db,
 		DSStore:          deps.dsStore,
 		LogStore:         deps.logStore,
-		WatcherStore:     deps.watcherStore,
-		AlertStore:       deps.alertStore,
 		ServerStore:      deps.serverStore,
 		MetricStore:      deps.metricStore,
 		UserStore:        deps.userStore,
@@ -257,11 +251,12 @@ func run() error {
 		ToolCatalog:      toolCatalog,
 		Cfg:              deps.cfg,
 		MCPActivityStore: deps.mcpActivityStore,
-		AlertGroupStore:  deps.alertGroupStore,
 		AuditStore:       deps.auditStore,
 		WatchStreamEvaluator: watchStream,
 		WatchStore:           deps.watchStore,
 		WatchMetrics:         watchMetrics,
+		ErrorGroupStore:      deps.errorGroupStore,
+		HealthCheckStore:     deps.healthCheckStore,
 	})
 
 	httpServer := &http.Server{
@@ -286,6 +281,10 @@ func run() error {
 		SessionManager:  watchSessionMgr,
 	})
 	watchSched.Start(ctx)
+
+	// Start health check scheduler
+	hcSched := healthcheck.NewScheduler(deps.healthCheckStore, 0)
+	hcSched.Start(ctx)
 
 	// Background: clean expired sessions every 15 minutes
 	go func() {
@@ -357,11 +356,6 @@ func run() error {
 				} else if n > 0 {
 					slog.Info("pruned old logs", "count", n)
 				}
-				if n, err := deps.alertStore.Prune(ctx, retention); err != nil {
-					slog.Warn("alert prune failed", "error", err)
-				} else if n > 0 {
-					slog.Info("pruned old alerts", "count", n)
-				}
 				if n, err := deps.mcpActivityStore.Prune(ctx, retention); err != nil {
 					slog.Warn("mcp activity prune failed", "error", err)
 				} else if n > 0 {
@@ -372,6 +366,20 @@ func run() error {
 						slog.Warn("audit log prune failed", "error", err)
 					} else if n > 0 {
 						slog.Info("pruned old audit log entries", "count", n)
+					}
+				}
+				if deps.errorGroupStore != nil {
+					if n, err := deps.errorGroupStore.Prune(ctx, retention); err != nil {
+						slog.Warn("error group prune failed", "error", err)
+					} else if n > 0 {
+						slog.Info("pruned old error groups", "count", n)
+					}
+				}
+				if deps.healthCheckStore != nil {
+					if n, err := deps.healthCheckStore.PruneResults(ctx, retention); err != nil {
+						slog.Warn("healthcheck results prune failed", "error", err)
+					} else if n > 0 {
+						slog.Info("pruned old healthcheck results", "count", n)
 					}
 				}
 			}
@@ -386,42 +394,6 @@ func run() error {
 					slog.Warn("metric prune failed", "error", err)
 				} else if n > 0 {
 					slog.Info("pruned old metrics", "count", n)
-				}
-			}
-		}
-	}()
-
-	// Background: auto-update check (every hour)
-	go func() {
-		ticker := time.NewTicker(1 * time.Hour)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if isDockerEnv() {
-					continue
-				}
-				if deps.settingsStore == nil {
-					continue
-				}
-				enabled, err := deps.settingsStore.GetAutoUpdate(ctx)
-				if err != nil || !enabled {
-					continue
-				}
-				updater := web.NewSelfUpdater("adham90", "opentrace")
-				result, err := updater.Update(ctx)
-				if err != nil {
-					slog.Warn("auto-update failed", "error", err)
-					continue
-				}
-				slog.Info("auto-update succeeded, restarting", "old_version", result.OldVersion, "new_version", result.NewVersion)
-				select {
-				case <-srv.RestartCh():
-				default:
-					p, _ := os.FindProcess(os.Getpid())
-					p.Signal(os.Interrupt)
 				}
 			}
 		}
@@ -443,18 +415,12 @@ func run() error {
 		}
 	}()
 
-	// Wait for either OS signal or self-update restart request
-	shouldRestart := false
-	select {
-	case <-done:
-		slog.Info("shutting down")
-	case <-srv.RestartCh():
-		slog.Info("restarting after self-update")
-		shouldRestart = true
-	}
+	<-done
+	slog.Info("shutting down")
 
 	cancelCtx()
 	watchSched.Stop()
+	hcSched.Stop()
 	deps.registry.CloseAll()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -468,21 +434,7 @@ func run() error {
 		slog.Error("HTTP shutdown error", "error", err)
 	}
 
-	if shouldRestart {
-		execPath, err := os.Executable()
-		if err != nil {
-			return fmt.Errorf("restart: cannot find executable: %w", err)
-		}
-		slog.Info("restarting process", "path", execPath)
-		return syscall.Exec(execPath, os.Args, os.Environ())
-	}
-
 	return nil
-}
-
-func isDockerEnv() bool {
-	_, err := os.Stat("/.dockerenv")
-	return err == nil
 }
 
 // reconnectConnectors re-registers connectors that were previously connected.

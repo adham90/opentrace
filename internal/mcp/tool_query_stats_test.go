@@ -37,7 +37,7 @@ func TestQueryStatsHandler_Success(t *testing.T) {
 		},
 	})
 
-	handler := queryStatsHandler(registry, nil)
+	handler := queryStatsHandler(registry)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"order_by": "calls",
 		"limit":    float64(10),
@@ -84,7 +84,7 @@ func TestQueryStatsHandler_Empty(t *testing.T) {
 		},
 	})
 
-	handler := queryStatsHandler(registry, nil)
+	handler := queryStatsHandler(registry)
 	result, err := handler(context.Background(), makeRequest(nil))
 
 	if err != nil {
@@ -104,7 +104,7 @@ func TestQueryStatsHandler_ExtensionNotInstalled(t *testing.T) {
 		err:            errors.New("relation \"pg_stat_statements\" does not exist"),
 	})
 
-	handler := queryStatsHandler(registry, nil)
+	handler := queryStatsHandler(registry)
 	result, err := handler(context.Background(), makeRequest(nil))
 
 	if err != nil {
@@ -122,7 +122,7 @@ func TestQueryStatsHandler_ExtensionNotInstalled(t *testing.T) {
 
 func TestQueryStatsHandler_NoConnector(t *testing.T) {
 	registry := connector.NewRegistry()
-	handler := queryStatsHandler(registry, nil)
+	handler := queryStatsHandler(registry)
 
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {
@@ -143,7 +143,7 @@ func TestQueryStatsHandler_NotQueryExecutor(t *testing.T) {
 	// Register a plain mockDataSource without QueryExecutor
 	registry.Register(&mockDataSource{connType: connector.ConnectorDatabase})
 
-	handler := queryStatsHandler(registry, nil)
+	handler := queryStatsHandler(registry)
 	result, err := handler(context.Background(), makeRequest(nil))
 
 	if err != nil {

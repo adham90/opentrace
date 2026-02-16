@@ -27,7 +27,7 @@ func TestDBTableStatsHandler_Success(t *testing.T) {
 		},
 	})
 
-	handler := dbTableStatsHandler(registry, nil)
+	handler := dbTableStatsHandler(registry)
 	result, err := handler(context.Background(), makeRequest(nil))
 
 	if err != nil {
@@ -75,7 +75,7 @@ func TestDBTableStatsHandler_Warnings(t *testing.T) {
 		},
 	})
 
-	handler := dbTableStatsHandler(registry, nil)
+	handler := dbTableStatsHandler(registry)
 	result, err := handler(context.Background(), makeRequest(nil))
 
 	if err != nil {
@@ -142,7 +142,7 @@ func TestDBTableStatsHandler_SingleTable(t *testing.T) {
 		},
 	})
 
-	handler := dbTableStatsHandler(registry, nil)
+	handler := dbTableStatsHandler(registry)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"table_name": "users",
 	}))
@@ -176,7 +176,7 @@ func TestDBTableStatsHandler_Empty(t *testing.T) {
 		},
 	})
 
-	handler := dbTableStatsHandler(registry, nil)
+	handler := dbTableStatsHandler(registry)
 	result, err := handler(context.Background(), makeRequest(nil))
 
 	if err != nil {
@@ -191,7 +191,7 @@ func TestDBTableStatsHandler_Empty(t *testing.T) {
 
 func TestDBTableStatsHandler_NoConnector(t *testing.T) {
 	registry := connector.NewRegistry()
-	handler := dbTableStatsHandler(registry, nil)
+	handler := dbTableStatsHandler(registry)
 
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {
@@ -206,7 +206,7 @@ func TestDBTableStatsHandler_NotQueryExecutor(t *testing.T) {
 	registry := connector.NewRegistry()
 	registry.Register(&mockDataSource{connType: connector.ConnectorDatabase})
 
-	handler := dbTableStatsHandler(registry, nil)
+	handler := dbTableStatsHandler(registry)
 	result, err := handler(context.Background(), makeRequest(nil))
 
 	if err != nil {

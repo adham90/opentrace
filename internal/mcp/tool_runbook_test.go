@@ -10,7 +10,7 @@ import (
 
 func TestRunbookHandler_MissingPlaybook(t *testing.T) {
 	registry := connector.NewRegistry()
-	handler := runbookHandler(registry, nil, nil)
+	handler := runbookHandler(registry, nil)
 
 	result, err := handler(context.Background(), makeRequest(nil))
 	if err != nil {
@@ -27,7 +27,7 @@ func TestRunbookHandler_MissingPlaybook(t *testing.T) {
 
 func TestRunbookHandler_UnknownPlaybook(t *testing.T) {
 	registry := connector.NewRegistry()
-	handler := runbookHandler(registry, nil, nil)
+	handler := runbookHandler(registry, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"playbook": "nonexistent",
@@ -46,7 +46,7 @@ func TestRunbookHandler_UnknownPlaybook(t *testing.T) {
 
 func TestRunbookHandler_SlowDB_NoConnector(t *testing.T) {
 	registry := connector.NewRegistry()
-	handler := runbookHandler(registry, nil, nil)
+	handler := runbookHandler(registry, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"playbook": "slow_database",
@@ -73,7 +73,7 @@ func TestRunbookHandler_SlowDB_Success(t *testing.T) {
 		},
 	})
 
-	handler := runbookHandler(registry, nil, nil)
+	handler := runbookHandler(registry, nil)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"playbook": "slow_database",
 	}))
@@ -104,8 +104,8 @@ func TestRunbookHandler_SlowDB_Success(t *testing.T) {
 }
 
 func TestRunbookHandler_ErrorSpike_Success(t *testing.T) {
-	// error_spike doesn't need a db connector, it uses alert/log stores.
-	handler := runbookHandler(connector.NewRegistry(), &mockAlertStore{}, &mockLogStore{})
+	// error_spike doesn't need a db connector, it uses the log store.
+	handler := runbookHandler(connector.NewRegistry(), &mockLogStore{})
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"playbook": "error_spike",
@@ -130,7 +130,7 @@ func TestRunbookHandler_ErrorSpike_Success(t *testing.T) {
 
 func TestRunbookHandler_ConnectionExhaustion_NoConnector(t *testing.T) {
 	registry := connector.NewRegistry()
-	handler := runbookHandler(registry, nil, nil)
+	handler := runbookHandler(registry, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"playbook": "connection_exhaustion",

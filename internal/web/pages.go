@@ -27,9 +27,6 @@ var tmplFuncs = template.FuncMap{
 
 var (
 	logsTmpl           *template.Template
-	alertsTmpl         *template.Template
-	watchersTmpl       *template.Template
-	watcherRunsTmpl    *template.Template
 	watchesTmpl        *template.Template
 	sourcesTmpl        *template.Template
 	loginTmpl          *template.Template
@@ -44,12 +41,6 @@ func init() {
 	// Each page gets layout + its own content template
 	logsTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
 		"templates/layout.html", "templates/logs.html"))
-	alertsTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/alerts.html"))
-	watchersTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/watchers.html"))
-	watcherRunsTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/watcher_runs.html"))
 	sourcesTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/sources.html"))
 	loginTmpl = template.Must(template.ParseFS(templateFS,
@@ -135,7 +126,6 @@ type pageData struct {
 	Title          string
 	Nav            string
 	Content        string
-	WatcherID      string
 	ServerID       string
 	DevMode        bool
 	CSPNonce       string
@@ -390,32 +380,6 @@ func (s *Server) handleGetLogDetail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entry)
 }
 
-func (s *Server) handleAlertsPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Alerts", "alerts")
-	tmpl := s.getTemplate(alertsTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/alerts.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
-}
-
-func (s *Server) handleWatchersPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Watchers", "watchers")
-	tmpl := s.getTemplate(watchersTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/watchers.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
-}
-
-func (s *Server) handleWatcherRunsPage(w http.ResponseWriter, r *http.Request) {
-	watcherID := chi.URLParam(r, "id")
-	data := s.newPageData(r, "Watcher Runs", "watchers")
-	data.WatcherID = watcherID
-	tmpl := s.getTemplate(watcherRunsTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/watcher_runs.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
-}
-
 func (s *Server) handleSourcesPage(w http.ResponseWriter, r *http.Request) {
 	data := s.newPageData(r, "Sources", "sources")
 	tmpl := s.getTemplate(sourcesTmpl,
@@ -492,52 +456,15 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	type overviewStats struct {
-		Alerts     map[string]int `json:"alerts"`
-		Watchers   map[string]int `json:"watchers"`
 		Logs       map[string]int `json:"logs"`
 		Connectors map[string]int `json:"connectors"`
 		Servers    map[string]int `json:"servers"`
 	}
 
 	stats := overviewStats{
-		Alerts:     map[string]int{"total": 0, "critical": 0, "warning": 0, "info": 0},
-		Watchers:   map[string]int{"total": 0, "active": 0, "paused": 0, "error": 0, "expired": 0},
 		Logs:       map[string]int{"last_hour": 0, "errors_last_hour": 0},
 		Connectors: map[string]int{"total": 0, "connected": 0, "error": 0},
 		Servers:    map[string]int{"total": 0, "online": 0, "offline": 0},
-	}
-
-	// Alerts stats — use aggregate counts instead of fetching all rows
-	if s.alertStore != nil {
-		if total, err := s.alertStore.CountTotal(ctx); err == nil {
-			stats.Alerts["total"] = total
-		}
-		oneHourAgo := time.Now().Add(-1 * time.Hour)
-		if bySev, err := s.alertStore.CountBySeverity(ctx, oneHourAgo, time.Now()); err == nil {
-			for sev, count := range bySev {
-				stats.Alerts[sev] = count
-			}
-		}
-	}
-
-	// Watchers stats
-	if s.watcherStore != nil {
-		watchers, err := s.watcherStore.List(ctx, store.ListWatcherParams{})
-		if err == nil {
-			stats.Watchers["total"] = len(watchers)
-			for _, w := range watchers {
-				switch w.Status {
-				case store.WatcherActive:
-					stats.Watchers["active"]++
-				case store.WatcherPaused:
-					stats.Watchers["paused"]++
-				case store.WatcherError:
-					stats.Watchers["error"]++
-				case store.WatcherExpired:
-					stats.Watchers["expired"]++
-				}
-			}
-		}
 	}
 
 	// Logs stats (last hour) — use COUNT query instead of fetching rows

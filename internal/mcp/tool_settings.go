@@ -18,14 +18,8 @@ func getSettingsHandler(ss store.SettingsStore) server.ToolHandlerFunc {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to read retention settings: %v", err)), nil
 		}
 
-		autoUpdate, err := ss.GetAutoUpdate(ctx)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to read auto-update setting: %v", err)), nil
-		}
-
 		resp := map[string]any{
 			"retention_days": retention.RetentionDays,
-			"auto_update":   autoUpdate,
 		}
 
 		data, err := json.MarshalIndent(resp, "", "  ")

@@ -30,7 +30,6 @@
       <span class="term-prompt-symbol">$</span>
       <div class="term-active-filters" id="active-filters"></div>
       <input type="text" id="cmd-input" class="term-cmd-input" placeholder="type a command... level:error service:my-app time:1h or search text" spellcheck="false">
-      <span class="smart-search-status" id="smart-search-status"></span>
       <div class="term-live-badge" id="live-badge" onclick="window.toggleLive()" title="toggle live tail (p)">
         <span class="term-live-dot" id="live-dot"></span>
         <span id="live-label">LIVE</span>
@@ -405,31 +404,6 @@
   color: var(--text-dim);
   font-size: 11px;
 }
-
-/* ── AI search mode ───────────────────────────────────────── */
-.term-cmdline.ai-mode {
-  border-top-color: var(--purple, #a78bfa);
-  background: color-mix(in srgb, var(--bg-secondary) 92%, var(--purple, #a78bfa));
-}
-.term-cmdline.ai-mode .term-prompt-symbol {
-  color: var(--purple, #a78bfa);
-}
-.term-cmdline.ai-loading .term-prompt-symbol {
-  animation: ai-pulse 1s ease-in-out infinite;
-}
-@keyframes ai-pulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.3; }
-}
-.smart-search-status {
-  display: none;
-  color: var(--purple, #a78bfa);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.smart-search-status.visible { display: inline; }
 
 /* ── Toast notifications ──────────────────────────────────── */
 #toast-container {
@@ -975,13 +949,6 @@
     input = input.trim();
     if (!input) return;
 
-    // Smart search: AI mode uses natural language search
-    if (aiMode) {
-      runSmartSearch(input);
-      cmdInput.value = '';
-      return;
-    }
-
     // "clear" command resets everything
     if (input === 'clear') {
       clearAllFilters();
@@ -1053,92 +1020,6 @@
     cmdInput.value = '';
   }
 
-  // ── Smart search ─────────────────────────────────────────
-  var smartSearchStatus = document.getElementById('smart-search-status');
-  var promptSymbol = document.querySelector('.term-prompt-symbol');
-  var aiMode = false;
-  var defaultPlaceholder = cmdInput.placeholder || '';
-
-  function setAIMode(on) {
-    aiMode = !!on;
-    window.aiMode = aiMode;
-    if (aiMode) {
-      form.classList.add('ai-mode');
-      promptSymbol.textContent = '?';
-      cmdInput.placeholder = 'describe what you\'re looking for...';
-    } else {
-      form.classList.remove('ai-mode', 'ai-loading');
-      promptSymbol.textContent = '$';
-      cmdInput.placeholder = defaultPlaceholder;
-    }
-  }
-
-  function runSmartSearch(query) {
-    if (!query) return;
-    setAIMode(true);
-    form.classList.add('ai-loading');
-    smartSearchStatus.textContent = 'thinking...';
-    smartSearchStatus.classList.add('visible');
-    cmdInput.disabled = true;
-
-    fetch('/api/logs/smart-search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: query })
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      cmdInput.disabled = false;
-      form.classList.remove('ai-loading');
-      smartSearchStatus.classList.remove('visible');
-      if (data.error) {
-        showToast(data.error, 'error');
-        setAIMode(false);
-        return;
-      }
-      if (data.filters) {
-        // Clear previous filters before applying new ones
-        filters = { query: '', service: '', level: '', event_type: '', time_range: '', environment: '', commit_hash: '', request_id: '', exception_class: '', error_fingerprint: '', source_file: '', start: '', end: '', metadata: {} };
-        var f = data.filters;
-        Object.keys(f).forEach(function(k) {
-          if (k.indexOf('meta.') === 0) {
-            filters.metadata[k.substring(5)] = f[k];
-          } else if (k === 'level' || k === 'service' || k === 'event_type' || k === 'time_range' || k === 'query' || k === 'start' || k === 'end' || k === 'environment' || k === 'commit_hash' || k === 'request_id' || k === 'exception_class' || k === 'error_fingerprint' || k === 'source_file') {
-            filters[k] = f[k];
-          }
-        });
-        syncHiddenFields();
-        renderFilterChips();
-        applyFilters();
-      }
-      if (data.reasoning) {
-        showToast(data.reasoning, 'info');
-      }
-      // Stay in AI mode — user exits with ESC
-      cmdInput.value = '';
-      cmdInput.focus();
-    })
-    .catch(function(err) {
-      cmdInput.disabled = false;
-      form.classList.remove('ai-loading');
-      smartSearchStatus.classList.remove('visible');
-      setAIMode(false);
-      showToast('Smart search failed: ' + err.message, 'error');
-    });
-  }
-
-  function showToast(message, type) {
-    var container = document.getElementById('toast-container');
-    var el = document.createElement('div');
-    el.className = 'toast toast-' + (type || 'info');
-    el.textContent = message;
-    container.appendChild(el);
-    setTimeout(function() {
-      el.classList.add('toast-fade-out');
-      setTimeout(function() { el.remove(); }, 300);
-    }, 4000);
-  }
-
   // ── Active filter order (for backspace removal) ──────────
   var filterOrder = ['query', 'time_range', 'event_type', 'service', 'level', 'environment', 'commit_hash', 'request_id', 'exception_class', 'error_fingerprint', 'source_file'];
 
@@ -1177,11 +1058,6 @@
       parseCommand(cmdInput.value);
     }
     if (e.key === 'Escape') {
-      if (aiMode) {
-        cmdInput.value = '';
-        setAIMode(false);
-        return;
-      }
       if (cmdInput.value) {
         cmdInput.value = '';
       } else if (hasActiveFilters()) {
@@ -1435,8 +1311,6 @@
 
   // ── Expose for global use ─────────────────────────────────
   window.clearFilters = clearAllFilters;
-  window.setAIMode = setAIMode;
-  window.aiMode = false;
   window.pauseLiveOnFilter = function() {
     // When filters change, keep polling but reset
   };
@@ -1468,8 +1342,7 @@
     { label: 'request_id:',  hint: 'filter by request ID' },
     { label: 'error:',       hint: 'filter by exception class' },
     { label: 'fingerprint:', hint: 'filter by error fingerprint' },
-    { label: 'file:',        hint: 'filter by source file' },
-    { label: '?',            hint: 'smart search (natural language)' }
+    { label: 'file:',        hint: 'filter by source file' }
   ];
 
   var staticValues = {
@@ -1566,15 +1439,6 @@
     var item = items[idx];
     var replacement = item.value || item.label;
 
-    // Selecting "?" enters AI mode without putting ? in the input
-    if (replacement === '?') {
-      cmdInput.value = '';
-      hide();
-      if (window.setAIMode) window.setAIMode(true);
-      cmdInput.focus();
-      return;
-    }
-
     var token = getCurrentToken();
     var val = cmdInput.value;
     // If selecting a prefix suggestion, just insert it
@@ -1599,9 +1463,6 @@
   }
 
   function updateDropdown() {
-    // Hide autocomplete in AI mode — input is free-form natural language
-    if (window.aiMode) { hide(); return; }
-
     var token = getCurrentToken();
     var text = token.text;
 
@@ -1629,13 +1490,6 @@
   }
 
   cmdInput.addEventListener('input', function() {
-    // Typing "?" activates AI mode and clears the ? from input
-    if (!window.aiMode && cmdInput.value === '?') {
-      cmdInput.value = '';
-      if (window.setAIMode) window.setAIMode(true);
-      hide();
-      return;
-    }
     updateDropdown();
   });
   cmdInput.addEventListener('focus', updateDropdown);

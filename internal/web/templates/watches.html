@@ -666,5 +666,52 @@
 .log-level-warn { color: var(--yellow); }
 .log-level-info { color: var(--green); }
 .log-message { flex: 1; font-family: var(--font-mono); word-break: break-all; }
+
+@media (max-width: 699px) {
+  /* Watch rows: stack elements vertically */
+  .watch-row-main {
+    flex-wrap: wrap;
+    padding: 8px 10px;
+    gap: 6px;
+  }
+  .watch-meta {
+    margin-left: 0;
+    width: 100%;
+    font-size: 0.7rem;
+  }
+  .watch-current {
+    font-size: 0.8rem;
+  }
+  /* Watch detail grid: single column */
+  .watch-detail-grid {
+    grid-template-columns: 1fr;
+  }
+  .watch-detail {
+    padding: 8px 10px;
+  }
+  .watch-detail-actions {
+    flex-wrap: wrap;
+  }
+  /* Inline tables: horizontal scroll */
+  .runs-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .runs-table th, .runs-table td {
+    white-space: nowrap;
+  }
+  /* Evidence modal */
+  .modal-wide {
+    max-width: 100vw;
+  }
+  .evidence-item {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .evidence-error-class {
+    width: 100%;
+  }
+}
 </style>
 {{end}}

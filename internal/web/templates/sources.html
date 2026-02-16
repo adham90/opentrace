@@ -710,5 +710,36 @@ setInterval(loadSources, 30000);
 .source-install-cmd .btn {
   flex-shrink: 0;
 }
+
+@media (max-width: 699px) {
+  /* Source row: tighter layout */
+  .source-row-main {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 10px;
+  }
+  .source-type-tag {
+    min-width: auto;
+  }
+  .source-name {
+    flex-basis: calc(100% - 70px);
+  }
+  .source-time-ago {
+    min-width: auto;
+    margin-left: auto;
+  }
+  /* Remove excessive left padding on detail */
+  .source-detail {
+    padding: 0 10px 10px 10px;
+  }
+  /* Install command: stack button below */
+  .source-install-cmd {
+    flex-wrap: wrap;
+  }
+  .source-install-cmd code {
+    width: 100%;
+    overflow-x: auto;
+  }
+}
 </style>
 {{end}}

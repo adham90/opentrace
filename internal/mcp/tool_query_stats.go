@@ -10,12 +10,11 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/internal/connector"
-	"github.com/adham90/opentrace/internal/store"
 )
 
 // queryStatsHandler returns a handler that queries pg_stat_statements for
 // the top SQL queries by the requested metric (calls, total_exec_time, etc.).
-func queryStatsHandler(registry *connector.Registry, ws store.WatcherStore) server.ToolHandlerFunc {
+func queryStatsHandler(registry *connector.Registry) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 

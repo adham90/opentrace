@@ -11,9 +11,8 @@ import (
 
 // mockSettingsStore implements store.SettingsStore for testing.
 type mockSettingsStore struct {
-	retention  *store.RetentionSettings
-	autoUpdate bool
-	err        error
+	retention *store.RetentionSettings
+	err       error
 }
 
 func (m *mockSettingsStore) GetRetention(_ context.Context) (*store.RetentionSettings, error) {
@@ -34,19 +33,14 @@ func (m *mockSettingsStore) SetRetention(_ context.Context, s store.RetentionSet
 	return nil
 }
 
-func (m *mockSettingsStore) GetAPIKey(_ context.Context) (string, error)         { return "", nil }
-func (m *mockSettingsStore) SetAPIKey(_ context.Context, _ string) error          { return nil }
-func (m *mockSettingsStore) GetAutoUpdate(_ context.Context) (bool, error) {
-	return m.autoUpdate, m.err
-}
-func (m *mockSettingsStore) SetAutoUpdate(_ context.Context, _ bool) error { return nil }
+func (m *mockSettingsStore) GetAPIKey(_ context.Context) (string, error) { return "", nil }
+func (m *mockSettingsStore) SetAPIKey(_ context.Context, _ string) error  { return nil }
 
 // --- get_settings tests ---
 
 func TestGetSettingsHandler_Success(t *testing.T) {
 	ss := &mockSettingsStore{
-		retention:  &store.RetentionSettings{RetentionDays: 90},
-		autoUpdate: true,
+		retention: &store.RetentionSettings{RetentionDays: 90},
 	}
 	handler := getSettingsHandler(ss)
 
@@ -66,9 +60,6 @@ func TestGetSettingsHandler_Success(t *testing.T) {
 
 	if resp["retention_days"] != float64(90) {
 		t.Errorf("retention_days = %v, want 90", resp["retention_days"])
-	}
-	if resp["auto_update"] != true {
-		t.Errorf("auto_update = %v, want true", resp["auto_update"])
 	}
 }
 

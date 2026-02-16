@@ -68,8 +68,6 @@ func (s *Server) setupMCPSSE() *server.SSEServer {
 	// Build MCP deps from the web server's stores.
 	deps := mcpserver.Deps{
 		Registry:         s.registry,
-		WatcherStore:     s.watcherStore,
-		AlertStore:       s.alertStore,
 		ServerStore:      s.serverStore,
 		MetricStore:      s.metricStore,
 		UserStore:        s.userStore,
@@ -78,10 +76,11 @@ func (s *Server) setupMCPSSE() *server.SSEServer {
 		SettingsStore:    s.settingsStore,
 		Config:           s.cfg,
 		MCPActivityStore: s.mcpActivityStore,
-		AlertGroupStore:  s.alertGroupStore,
 		AuditStore:       s.auditStore,
 		WatchStore:       s.watchStore,
 		WatchMetrics:     s.watchMetrics,
+		ErrorGroupStore:    s.errorGroupStore,
+		HealthCheckStore:   s.healthCheckStore,
 	}
 
 	// Create MCP server with all tools (admin level).

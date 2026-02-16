@@ -6,41 +6,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/adham90/opentrace/internal/store"
 )
 
 func TestIncidentTimelineHandler_Success(t *testing.T) {
 	now := time.Now().UTC()
-	wID := uuid.New()
-
-	as := &mockAlertStore{
-		alerts: []store.Alert{
-			{
-				ID:          uuid.New(),
-				WatcherID:   &wID,
-				WatcherTitle: "Connection Watcher",
-				Title:       "High connections",
-				Summary:     "92/100 connections",
-				Severity:  store.SeverityCritical,
-				CreatedAt: now.Add(-30 * time.Minute),
-			},
-		},
-	}
 
 	ls := &mockLogStore{
 		entries: []store.LogEntry{
 			{
-				ID:          1,
-				Timestamp:   now.Add(-25 * time.Minute),
-				Level:       "error",
-				Service:     "api",
-				Message: "connection pool exhausted",
+				ID:        1,
+				Timestamp: now.Add(-25 * time.Minute),
+				Level:     "error",
+				Service:   "api",
+				Message:   "connection pool exhausted",
 			},
 		},
 	}
 
-	handler := incidentTimelineHandler(as, ls)
+	handler := incidentTimelineHandler(ls)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"start": now.Add(-1 * time.Hour).Format(time.RFC3339),
 		"end":   now.Format(time.RFC3339),
@@ -63,17 +47,11 @@ func TestIncidentTimelineHandler_Success(t *testing.T) {
 	if !ok || totalEvents < 1 {
 		t.Errorf("expected at least 1 event, got: %v", resp["total_events"])
 	}
-
-	alertCount, ok := resp["alert_count"].(float64)
-	if !ok || alertCount < 1 {
-		t.Errorf("expected at least 1 alert, got: %v", resp["alert_count"])
-	}
 }
 
 func TestIncidentTimelineHandler_MissingStart(t *testing.T) {
-	as := &mockAlertStore{}
 	ls := &mockLogStore{}
-	handler := incidentTimelineHandler(as, ls)
+	handler := incidentTimelineHandler(ls)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"end": time.Now().Format(time.RFC3339),
@@ -88,9 +66,8 @@ func TestIncidentTimelineHandler_MissingStart(t *testing.T) {
 }
 
 func TestIncidentTimelineHandler_MissingEnd(t *testing.T) {
-	as := &mockAlertStore{}
 	ls := &mockLogStore{}
-	handler := incidentTimelineHandler(as, ls)
+	handler := incidentTimelineHandler(ls)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"start": time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
@@ -105,9 +82,8 @@ func TestIncidentTimelineHandler_MissingEnd(t *testing.T) {
 }
 
 func TestIncidentTimelineHandler_EndBeforeStart(t *testing.T) {
-	as := &mockAlertStore{}
 	ls := &mockLogStore{}
-	handler := incidentTimelineHandler(as, ls)
+	handler := incidentTimelineHandler(ls)
 
 	now := time.Now()
 	result, err := handler(context.Background(), makeRequest(map[string]any{
@@ -124,9 +100,8 @@ func TestIncidentTimelineHandler_EndBeforeStart(t *testing.T) {
 }
 
 func TestIncidentTimelineHandler_Empty(t *testing.T) {
-	as := &mockAlertStore{}
 	ls := &mockLogStore{}
-	handler := incidentTimelineHandler(as, ls)
+	handler := incidentTimelineHandler(ls)
 
 	now := time.Now()
 	result, err := handler(context.Background(), makeRequest(map[string]any{

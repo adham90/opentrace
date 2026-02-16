@@ -19,8 +19,6 @@ import (
 // Deps holds the dependencies for the MCP server.
 type Deps struct {
 	Registry        *connector.Registry
-	WatcherStore    store.WatcherStore
-	AlertStore      store.AlertStore
 	ServerStore     store.ServerStore
 	MetricStore     store.MetricStore
 	UserStore       store.UserStore
@@ -31,8 +29,13 @@ type Deps struct {
 	SettingsStore    store.SettingsStore
 	Config           *config.Config
 	MCPActivityStore store.MCPActivityStore
-	AlertGroupStore  store.AlertGroupStore
 	AuditStore       store.AuditStore
+
+	// Error tracking (Sentry-lite)
+	ErrorGroupStore store.ErrorGroupStore
+
+	// Uptime / Health Check monitoring
+	HealthCheckStore store.HealthCheckStore
 
 	// Agent-first watches (Phase 1)
 	WatchStore    store.WatchStore
@@ -218,7 +221,7 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			mcp.WithNumber("limit", mcp.Description("Number of queries to return (default: 20, max: 100)")),
 			mcp.WithString("filter", mcp.Description("Filter queries by pattern (case-insensitive substring match on query text)")),
 		),
-		queryStatsHandler(deps.Registry, nil),
+		queryStatsHandler(deps.Registry),
 	)
 	b.Add("db_query_stats", "Show top SQL queries from pg_stat_statements", "Database Introspection", "read", "database connector")
 
@@ -227,7 +230,7 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			mcp.WithDescription("Show table-level statistics: row counts, dead tuples, sequential vs index scans, cache hit ratios, and vacuum status"),
 			mcp.WithString("table_name", mcp.Description("Filter to a specific table name")),
 		),
-		dbTableStatsHandler(deps.Registry, nil),
+		dbTableStatsHandler(deps.Registry),
 	)
 	b.Add("db_table_stats", "Show table-level statistics: row counts, dead tuples, scans, cache hits", "Database Introspection", "read", "database connector")
 
@@ -235,7 +238,7 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 		mcp.NewTool("db_activity",
 			mcp.WithDescription("Show current database activity: connection summary, long-running queries (>10s), idle-in-transaction sessions (>1min), and connection utilization"),
 		),
-		dbActivityHandler(deps.Registry, nil),
+		dbActivityHandler(deps.Registry),
 	)
 	b.Add("db_activity", "Show current database activity: connections, long-running queries, idle sessions", "Database Introspection", "read", "database connector")
 
@@ -319,7 +322,7 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 				mcp.WithString("baseline_period", mcp.Description("Baseline to compare against: 'previous' (default), 'yesterday_same_time', 'last_week_same_time'")),
 				mcp.WithString("service", mcp.Description("Filter to a specific service (for error/log_volume metrics)")),
 			),
-			comparePeriodsHandler(deps.LogStore, deps.AlertStore),
+			comparePeriodsHandler(deps.LogStore),
 		)
 		b.Add("compare_periods", "Compare error rates, log volume, or alert counts between two time periods", "Log Intelligence", "read", "")
 	}
@@ -441,6 +444,51 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 		b.Add("log_summary", "Debugging overview: error rates, active deploys, top errors with source locations, slowest endpoints", "Log Intelligence", "read", "")
 	}
 
+	// Error tracking (read-only).
+	if deps.ErrorGroupStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("error_groups",
+				mcp.WithDescription("List error groups aggregated by fingerprint — shows unique errors with occurrence counts, status, and affected services. Use to get a Sentry-like overview of application errors. Errors are automatically grouped by the error_fingerprint field from log entries."),
+				mcp.WithString("status", mcp.Description("Filter by status: unresolved (default when omitted), resolved, ignored")),
+				mcp.WithString("service", mcp.Description("Filter by service name")),
+				mcp.WithString("environment", mcp.Description("Filter by environment (e.g. production, staging)")),
+				mcp.WithString("sort_by", mcp.Description("Sort by: last_seen_at (default), occurrence_count, first_seen_at")),
+				mcp.WithNumber("limit", mcp.Description("Number of results (default: 20, max: 100)")),
+			),
+			errorGroupsHandler(deps.ErrorGroupStore),
+		)
+		b.Add("error_groups", "List error groups by fingerprint with occurrence counts and status", "Errors", "read", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("error_detail",
+				mcp.WithDescription("Get full details for a specific error group: exception class, source location, occurrence count, lifecycle events (resolved/reopened history), and recent log entries. Use after error_groups to investigate a specific error."),
+				mcp.WithString("fingerprint", mcp.Required(), mcp.Description("Error fingerprint (from error_groups)")),
+			),
+			errorDetailHandler(deps.ErrorGroupStore, deps.LogStore),
+		)
+		b.Add("error_detail", "Get full details for a specific error group including history and recent occurrences", "Errors", "read", "")
+	}
+
+	// Uptime / Health Check monitoring (read-only).
+	if deps.HealthCheckStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("list_healthchecks",
+				mcp.WithDescription("List all configured HTTP health checks with their current status, response times, and configuration. Use to see what endpoints are being monitored."),
+			),
+			listHealthchecksHandler(deps.HealthCheckStore),
+		)
+		b.Add("list_healthchecks", "List all health checks with current status and configuration", "Uptime", "read", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("uptime_status",
+				mcp.WithDescription("Get uptime summary across all health checks: which endpoints are up/down, response times, and uptime percentage. Specify a time window in hours (default 24h, max 720h/30d)."),
+				mcp.WithNumber("hours", mcp.Description("Time window in hours (default: 24, max: 720)")),
+			),
+			uptimeStatusHandler(deps.HealthCheckStore),
+		)
+		b.Add("uptime_status", "Uptime summary: up/down status, response times, uptime % over a time window", "Uptime", "read", "")
+	}
+
 	// Settings (read-only).
 	if deps.SettingsStore != nil {
 		maybeAddTool(s,
@@ -453,16 +501,16 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 	}
 
 	// Incident timeline.
-	if deps.AlertStore != nil && deps.LogStore != nil {
+	if deps.LogStore != nil {
 		maybeAddTool(s,
 			mcp.NewTool("incident_timeline",
-				mcp.WithDescription("Build a chronological incident timeline for a time window, merging alerts and error logs. Use when investigating 'what happened between X and Y?', post-incident reviews, or understanding the sequence of events during an outage."),
+				mcp.WithDescription("Build a chronological incident timeline for a time window from error logs. Use when investigating 'what happened between X and Y?', post-incident reviews, or understanding the sequence of events during an outage."),
 				mcp.WithString("start", mcp.Required(), mcp.Description("Start time in ISO 8601 format (e.g. 2024-01-15T10:00:00Z)")),
 				mcp.WithString("end", mcp.Required(), mcp.Description("End time in ISO 8601 format")),
 			),
-			incidentTimelineHandler(deps.AlertStore, deps.LogStore),
+			incidentTimelineHandler(deps.LogStore),
 		)
-		b.Add("incident_timeline", "Build a chronological incident timeline merging alerts and error logs", "Incidents", "read", "")
+		b.Add("incident_timeline", "Build a chronological incident timeline from error logs", "Incidents", "read", "")
 	}
 
 	// Vacuum/maintenance report.
@@ -549,20 +597,20 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 				mcp.WithDescription("Run a composite investigation playbook that executes multiple diagnostic queries at once. Available playbooks: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike. Use when you need a comprehensive investigation rather than individual tool calls."),
 				mcp.WithString("playbook", mcp.Required(), mcp.Description("Playbook to run: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike")),
 			),
-			runbookHandler(deps.Registry, deps.AlertStore, deps.LogStore),
+			runbookHandler(deps.Registry, deps.LogStore),
 		)
 		b.Add("runbook", "Run a composite investigation playbook (slow_database, connection_exhaustion, etc.)", "Database Introspection", "read", "database connector")
 	}
 
 	// System overview — high-level health dashboard.
 	maybeAddTool(s, systemOverviewTool(), systemOverviewHandler(
-		deps.AlertStore, deps.WatcherStore, deps.LogStore, deps.DataSourceStore, deps.ServerStore,
+		deps.LogStore, deps.DataSourceStore, deps.ServerStore,
 	))
-	b.Add("system_overview", "Get high-level system health: alerts, watchers, logs, connectors, servers", "Overview", "read", "")
+	b.Add("system_overview", "Get high-level system health: logs, connectors, servers", "Overview", "read", "")
 
 	// Triage — prioritized inbox of items needing attention.
 	maybeAddTool(s, triageAlertsTool(), triageAlertsHandler(
-		deps.AlertStore, nil, deps.DataSourceStore, deps.ServerStore,
+		deps.DataSourceStore, deps.ServerStore,
 	))
 	b.Add("triage_alerts", "Get prioritized list of items needing attention", "Overview", "read", "")
 
@@ -693,6 +741,55 @@ func addWriteTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 
 		maybeAddTool(s, deleteUserTool(), deleteUserHandler(deps.UserStore))
 		b.Add("delete_user", "Permanently delete a user account", "Users", "admin", "")
+	}
+
+	// Error management (admin — changes error group status).
+	if deps.ErrorGroupStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("resolve_error",
+				mcp.WithDescription("Mark an error group as resolved with a reason. The error will auto-reopen if it recurs. Use after fixing the underlying issue."),
+				mcp.WithString("fingerprint", mcp.Required(), mcp.Description("Error fingerprint (from error_groups)")),
+				mcp.WithString("reason", mcp.Required(), mcp.Description("Why this error is resolved (e.g. 'Fixed in PR #42')")),
+			),
+			resolveErrorHandler(deps.ErrorGroupStore),
+		)
+		b.Add("resolve_error", "Mark an error group as resolved (auto-reopens on recurrence)", "Errors", "admin", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("ignore_error",
+				mcp.WithDescription("Permanently ignore an error group. New occurrences are still counted but won't reopen the group. Use for known noise like health check errors."),
+				mcp.WithString("fingerprint", mcp.Required(), mcp.Description("Error fingerprint (from error_groups)")),
+				mcp.WithString("reason", mcp.Required(), mcp.Description("Why this error should be ignored (e.g. 'Known health check noise')")),
+			),
+			ignoreErrorHandler(deps.ErrorGroupStore),
+		)
+		b.Add("ignore_error", "Permanently ignore an error group", "Errors", "admin", "")
+	}
+
+	// Uptime / Health Check management (admin — creates/deletes checks).
+	if deps.HealthCheckStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("create_healthcheck",
+				mcp.WithDescription("Create a new HTTP health check that probes an endpoint at regular intervals. The scheduler automatically starts checking once created."),
+				mcp.WithString("name", mcp.Required(), mcp.Description("Human-readable name (e.g. 'Production API')")),
+				mcp.WithString("url", mcp.Required(), mcp.Description("Full URL to probe (e.g. 'https://api.example.com/health')")),
+				mcp.WithString("method", mcp.Description("HTTP method: GET (default) or HEAD")),
+				mcp.WithNumber("interval_secs", mcp.Description("Check interval in seconds (default: 60)")),
+				mcp.WithNumber("timeout_secs", mcp.Description("Request timeout in seconds (default: 10)")),
+				mcp.WithNumber("expected_status", mcp.Description("Expected HTTP status code (default: 200)")),
+			),
+			createHealthcheckHandler(deps.HealthCheckStore),
+		)
+		b.Add("create_healthcheck", "Create a new HTTP health check monitor", "Uptime", "admin", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("delete_healthcheck",
+				mcp.WithDescription("Delete a health check and all its historical results. Use list_healthchecks to find the ID."),
+				mcp.WithString("id", mcp.Required(), mcp.Description("Health check ID (from list_healthchecks)")),
+			),
+			deleteHealthcheckHandler(deps.HealthCheckStore),
+		)
+		b.Add("delete_healthcheck", "Delete a health check and its results", "Uptime", "admin", "")
 	}
 
 	// Agent-first watch tools (write).

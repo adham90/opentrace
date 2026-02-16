@@ -13,7 +13,7 @@ import (
 )
 
 // runbookHandler returns a handler that runs a composite investigation workflow.
-func runbookHandler(registry *connector.Registry, alertStore store.AlertStore, logStore store.LogStore) server.ToolHandlerFunc {
+func runbookHandler(registry *connector.Registry, logStore store.LogStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 
@@ -32,7 +32,7 @@ func runbookHandler(registry *connector.Registry, alertStore store.AlertStore, l
 		case "replication_lag":
 			return runbookReplicationLag(ctx, registry)
 		case "error_spike":
-			return runbookErrorSpike(ctx, alertStore, logStore)
+			return runbookErrorSpike(ctx, logStore)
 		default:
 			return mcp.NewToolResultError(fmt.Sprintf("unknown playbook %q. Available: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike", playbook)), nil
 		}
@@ -360,27 +360,10 @@ func runbookReplicationLag(ctx context.Context, registry *connector.Registry) (*
 	return mcp.NewToolResultText(string(data)), nil
 }
 
-func runbookErrorSpike(ctx context.Context, alertStore store.AlertStore, logStore store.LogStore) (*mcp.CallToolResult, error) {
+func runbookErrorSpike(ctx context.Context, logStore store.LogStore) (*mcp.CallToolResult, error) {
 	sections := make(map[string]any)
 	var diagnosis []string
 	now := time.Now().UTC()
-
-	// Recent alerts (last 1h).
-	if alertStore != nil {
-		alerts, err := alertStore.List(ctx, store.ListAlertParams{Limit: 20})
-		if err == nil {
-			recent := 0
-			for _, a := range alerts {
-				if a.CreatedAt.After(now.Add(-1 * time.Hour)) {
-					recent++
-				}
-			}
-			sections["alerts_last_hour"] = recent
-			if recent > 5 {
-				diagnosis = append(diagnosis, fmt.Sprintf("%d alerts in last hour — active incident", recent))
-			}
-		}
-	}
 
 	// Error log distribution by service.
 	if logStore != nil {

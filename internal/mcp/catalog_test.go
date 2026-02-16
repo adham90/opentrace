@@ -20,26 +20,22 @@ func TestCatalogBuilder_AddAndBuild(t *testing.T) {
 	b := &CatalogBuilder{}
 	b.Add("db_query_stats", "Show top queries", "Database Introspection", "read", "database connector")
 	b.Add("db_table_stats", "Show table stats", "Database Introspection", "read", "database connector")
-	b.Add("list_watchers", "List watchers", "Watchers", "read", "")
-	b.Add("create_watcher", "Create watcher", "Watchers", "admin", "")
-	b.Add("list_alerts", "List alerts", "Alerts", "read", "")
+	b.Add("log_stats", "Log stats", "Log Intelligence", "read", "")
+	b.Add("trace_lookup", "Trace lookup", "Log Intelligence", "read", "")
 
 	cat := b.Build()
 	categories := cat.Categories()
 
-	if len(categories) != 3 {
-		t.Fatalf("expected 3 categories, got %d", len(categories))
+	if len(categories) != 2 {
+		t.Fatalf("expected 2 categories, got %d", len(categories))
 	}
 
 	// Verify insertion order is preserved.
 	if categories[0].Name != "Database Introspection" {
 		t.Errorf("category[0] = %q, want %q", categories[0].Name, "Database Introspection")
 	}
-	if categories[1].Name != "Watchers" {
-		t.Errorf("category[1] = %q, want %q", categories[1].Name, "Watchers")
-	}
-	if categories[2].Name != "Alerts" {
-		t.Errorf("category[2] = %q, want %q", categories[2].Name, "Alerts")
+	if categories[1].Name != "Log Intelligence" {
+		t.Errorf("category[1] = %q, want %q", categories[1].Name, "Log Intelligence")
 	}
 
 	// Verify tool counts per category.
@@ -47,10 +43,7 @@ func TestCatalogBuilder_AddAndBuild(t *testing.T) {
 		t.Errorf("Database Introspection tools = %d, want 2", len(categories[0].Tools))
 	}
 	if len(categories[1].Tools) != 2 {
-		t.Errorf("Watchers tools = %d, want 2", len(categories[1].Tools))
-	}
-	if len(categories[2].Tools) != 1 {
-		t.Errorf("Alerts tools = %d, want 1", len(categories[2].Tools))
+		t.Errorf("Log Intelligence tools = %d, want 2", len(categories[1].Tools))
 	}
 
 	// Verify tool fields.
@@ -68,7 +61,7 @@ func TestCatalogBuilder_AddAndBuild(t *testing.T) {
 
 func TestCatalogBuilder_CategoryDescriptions(t *testing.T) {
 	b := &CatalogBuilder{}
-	b.Add("list_watchers", "List watchers", "Watchers", "read", "")
+	b.Add("log_stats", "Log stats", "Log Intelligence", "read", "")
 
 	cat := b.Build()
 	categories := cat.Categories()
@@ -90,15 +83,11 @@ func TestToolCatalog_NilCategories(t *testing.T) {
 
 func TestBuildCatalog_WithDeps(t *testing.T) {
 	registry := connector.NewRegistry()
-	ws := &mockWatcherStore{}
-	as := &mockAlertStore{}
 	ls := &mockLogStore{}
 
 	cat := BuildCatalog(Deps{
-		Registry:     registry,
-		WatcherStore: ws,
-		AlertStore:   as,
-		LogStore:     ls,
+		Registry: registry,
+		LogStore: ls,
 	})
 
 	categories := cat.Categories()
