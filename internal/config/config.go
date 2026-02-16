@@ -23,6 +23,8 @@ type Config struct {
 	TLSCert string
 	TLSKey  string
 
+	CORSAllowedOrigins []string
+
 	DevMode bool
 }
 
@@ -95,6 +97,7 @@ func Load() (*Config, error) {
 		TrustedProxies:     parseTrustedProxies(os.Getenv("OPENTRACE_TRUSTED_PROXIES")),
 		TLSCert:            os.Getenv("OPENTRACE_TLS_CERT"),
 		TLSKey:             os.Getenv("OPENTRACE_TLS_KEY"),
+		CORSAllowedOrigins: parseCORSOrigins(os.Getenv("OPENTRACE_CORS_ORIGINS")),
 		DevMode:            os.Getenv("OPENTRACE_DEV") == "true",
 	}, nil
 }
@@ -112,6 +115,21 @@ func envOrDefault(key, defaultVal string) string {
 }
 
 func parseTrustedProxies(val string) []string {
+	if val == "" {
+		return nil
+	}
+	parts := strings.Split(val, ",")
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+func parseCORSOrigins(val string) []string {
 	if val == "" {
 		return nil
 	}

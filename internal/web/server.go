@@ -252,6 +252,13 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Route("/api", func(r chi.Router) {
 		r.Use(DecompressRequest(10 << 20)) // 10MB decompressed limit (zip bomb protection)
 
+		// CORS for cross-origin browser requests (JS error tracking)
+		var corsOrigins []string
+		if cfg != nil {
+			corsOrigins = cfg.CORSAllowedOrigins
+		}
+		r.Use(CORSMiddleware(corsOrigins))
+
 		// Agent install script (no auth — the script is self-contained)
 		r.Get("/agent/install.sh", srv.handleAgentInstallScript)
 

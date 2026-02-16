@@ -338,6 +338,100 @@
       </details>
     </div>
 
+    <!-- JS Error Tracking -->
+    <div class="setup-section">
+      <h3 class="setup-heading"><span class="dim">#</span>Browser Error Tracking</h3>
+      <p class="setup-desc">Capture JavaScript errors from your frontend and forward them to OpenTrace. Errors are grouped automatically and correlated with server-side logs via request ID.</p>
+
+      <h4 class="setup-heading" style="font-size:12px;margin-top:1rem">1. Add the script tag</h4>
+      <p class="setup-desc">Paste this into your HTML <code>&lt;head&gt;</code>:</p>
+      <div class="code-block">
+        <button class="copy-btn" onclick="copyJSSnippet(this)">copy</button>
+        <pre><code id="js-snippet">loading...</code></pre>
+      </div>
+
+      <h4 class="setup-heading" style="font-size:12px;margin-top:1rem">2. Add the request ID meta tag (optional)</h4>
+      <p class="setup-desc">To correlate browser errors with the server request that rendered the page, add this meta tag to your layout. For Rails:</p>
+      <div class="code-block">
+        <button class="copy-btn" onclick="copyCode(this)">copy</button>
+        <pre><code>&lt;meta name="opentrace-rid" content="&lt;%= request.request_id %&gt;"&gt;</code></pre>
+      </div>
+      <p class="setup-desc" style="margin-top:0.5rem">For other frameworks, set the <code>content</code> to your server's request ID.</p>
+
+      <details style="margin-top:1rem">
+        <summary class="setup-desc" style="cursor:pointer"><strong>Advanced options</strong></summary>
+        <div style="margin-top:0.75rem">
+          <p class="setup-desc"><code>OpenTrace.init()</code> accepts these options:</p>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+                  <th>Default</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>service</code></td>
+                  <td>Service name for your frontend (required)</td>
+                  <td>--</td>
+                </tr>
+                <tr>
+                  <td><code>environment</code></td>
+                  <td>Environment tag (production, staging, etc.)</td>
+                  <td><code>""</code></td>
+                </tr>
+                <tr>
+                  <td><code>commitHash</code></td>
+                  <td>Git commit hash for release tracking</td>
+                  <td><code>""</code></td>
+                </tr>
+                <tr>
+                  <td><code>sampleRate</code></td>
+                  <td>Fraction of errors to capture (0.0–1.0)</td>
+                  <td><code>1.0</code></td>
+                </tr>
+                <tr>
+                  <td><code>beforeSend</code></td>
+                  <td>Function to modify or drop events before sending. Return <code>null</code> to drop.</td>
+                  <td><code>null</code></td>
+                </tr>
+                <tr>
+                  <td><code>maxQueueSize</code></td>
+                  <td>Max buffered events before forced flush</td>
+                  <td><code>50</code></td>
+                </tr>
+                <tr>
+                  <td><code>flushInterval</code></td>
+                  <td>Flush interval in milliseconds</td>
+                  <td><code>5000</code></td>
+                </tr>
+                <tr>
+                  <td><code>enabled</code></td>
+                  <td>Kill switch to disable tracking</td>
+                  <td><code>true</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h4 class="setup-heading" style="font-size:12px;margin-top:1rem">Manual error capture</h4>
+          <div class="code-block">
+            <button class="copy-btn" onclick="copyCode(this)">copy</button>
+            <pre><code>// Capture a caught error with extra context
+OpenTrace.captureError(error, { userId: 42, page: '/checkout' });
+
+// Send a manual log message
+OpenTrace.log('warn', 'Payment retry attempted', { orderId: 123 });
+
+// Set context merged into every event
+OpenTrace.setContext({ userId: 42, plan: 'pro' });</code></pre>
+          </div>
+        </div>
+      </details>
+    </div>
+
     <!-- Available Tools -->
     <div class="setup-section">
       <h3 class="setup-heading"><span class="dim">#</span>Available Tools</h3>
@@ -893,6 +987,20 @@ var installURL = baseURL + '/api/agent/install.sh' + (apiKey ? '?key=' + encodeU
       '\nEnvironment=OPENTRACE_API_KEY=' + (apiKey || 'your-api-key') +
       '\nExecStart=/usr/local/bin/opentrace agent\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target';
   }
+
+  // JS error tracking snippet
+  var jsSnippetEl = document.getElementById('js-snippet');
+  if (jsSnippetEl) {
+    jsSnippetEl.textContent =
+      '<script src="' + baseURL + '/static/opentrace.min.js"></script>\n' +
+      '<script>\n' +
+      '  OpenTrace.init({\n' +
+      '    endpoint: "' + baseURL + '/api/logs",\n' +
+      (apiKey ? '    apiKey: "' + apiKey + '",\n' : '') +
+      '    service: "my-app-frontend",\n' +
+      '  });\n' +
+      '</script>';
+  }
 })();
 
 function copyCode(btn) {
@@ -917,6 +1025,11 @@ function copyManualRunCmd(btn) {
 
 function copySystemdCmd(btn) {
   var code = btn.parentElement.querySelector('code');
+  copyAndFlash(btn, code.textContent);
+}
+
+function copyJSSnippet(btn) {
+  var code = document.getElementById('js-snippet');
   copyAndFlash(btn, code.textContent);
 }
 
