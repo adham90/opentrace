@@ -166,6 +166,7 @@ const (
 type Server struct {
 	ID           uuid.UUID        `json:"id"`
 	Hostname     string           `json:"hostname"`
+	DisplayName  string           `json:"display_name,omitempty"`
 	IPAddress    string           `json:"ip_address,omitempty"`
 	OS           string           `json:"os,omitempty"`
 	Arch         string           `json:"arch,omitempty"`
@@ -175,6 +176,11 @@ type Server struct {
 	LastSeenAt   *time.Time       `json:"last_seen_at,omitempty"`
 	CreatedAt    time.Time        `json:"created_at"`
 	UpdatedAt    time.Time        `json:"updated_at"`
+}
+
+// UpdateServerParams defines the input for updating a server's user-facing fields.
+type UpdateServerParams struct {
+	DisplayName *string `json:"display_name,omitempty"`
 }
 
 // RegisterServerParams defines the input for registering/updating a server.

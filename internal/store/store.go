@@ -50,6 +50,7 @@ type ServerStore interface {
 	Register(ctx context.Context, params RegisterServerParams) (*Server, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*Server, error)
 	List(ctx context.Context) ([]Server, error)
+	Update(ctx context.Context, id uuid.UUID, params UpdateServerParams) (*Server, error)
 	UpdateHeartbeat(ctx context.Context, id uuid.UUID) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	MarkStaleOffline(ctx context.Context, threshold time.Duration) (int, error)

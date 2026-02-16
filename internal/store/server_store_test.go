@@ -174,6 +174,55 @@ func TestServerStore_MarkStaleOffline(t *testing.T) {
 	}
 }
 
+func TestServerStore_Update(t *testing.T) {
+	db := setupTestDB(t)
+	ss := NewServerStore(db)
+	ctx := context.Background()
+
+	srv, err := ss.Register(ctx, RegisterServerParams{
+		Hostname: "rename-test",
+		OS:       "linux",
+	})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	newName := "My Production Server"
+	updated, err := ss.Update(ctx, srv.ID, UpdateServerParams{
+		DisplayName: &newName,
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.DisplayName != newName {
+		t.Errorf("display_name = %q, want %q", updated.DisplayName, newName)
+	}
+	if updated.Hostname != "rename-test" {
+		t.Errorf("hostname changed to %q, want %q", updated.Hostname, "rename-test")
+	}
+
+	// Verify via GetByID
+	got, err := ss.GetByID(ctx, srv.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.DisplayName != newName {
+		t.Errorf("GetByID display_name = %q, want %q", got.DisplayName, newName)
+	}
+}
+
+func TestServerStore_Update_NotFound(t *testing.T) {
+	db := setupTestDB(t)
+	ss := NewServerStore(db)
+	ctx := context.Background()
+
+	name := "ghost"
+	_, err := ss.Update(ctx, [16]byte{}, UpdateServerParams{DisplayName: &name})
+	if err != ErrNotFound {
+		t.Errorf("Update nonexistent: got err=%v, want ErrNotFound", err)
+	}
+}
+
 func TestServerStore_GetByID_NotFound(t *testing.T) {
 	db := setupTestDB(t)
 	ss := NewServerStore(db)

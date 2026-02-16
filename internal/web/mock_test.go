@@ -246,6 +246,20 @@ func (m *mockServerStore) List(ctx context.Context) ([]store.Server, error) {
 	return result, nil
 }
 
+func (m *mockServerStore) Update(ctx context.Context, id uuid.UUID, params store.UpdateServerParams) (*store.Server, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.servers[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	if params.DisplayName != nil {
+		s.DisplayName = *params.DisplayName
+	}
+	s.UpdatedAt = time.Now()
+	return s, nil
+}
+
 func (m *mockServerStore) UpdateHeartbeat(ctx context.Context, id uuid.UUID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

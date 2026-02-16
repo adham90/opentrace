@@ -28,7 +28,7 @@
         <code><span class="dim"># Gemfile</span><br>gem 'opentrace_ruby'</code>
       </div>
       <div class="src-code-block" style="margin-top:8px">
-        <code><span class="dim"># config/initializers/opentrace.rb</span><br>OpenTrace.configure do |c|<br>&nbsp;&nbsp;c.endpoint = "<span class="dim">https://your-opentrace-server</span>"<br>&nbsp;&nbsp;c.api_key&nbsp; = ENV["OPENTRACE_API_KEY"]<br>end</code>
+        <code><span class="dim"># config/initializers/opentrace.rb</span><br>OpenTrace.configure do |c|<br>&nbsp;&nbsp;c.endpoint = "<span id="logs-endpoint" class="dim"></span>"<br>&nbsp;&nbsp;c.api_key&nbsp; = "<span style="color:var(--yellow)">{{.APIKey}}</span>"<br>end</code>
       </div>
       <p style="margin:12px 0 0;font-size:11px;color:var(--text-dim)">
         <a href="https://rubygems.org/gems/opentrace_ruby" target="_blank" rel="noopener" style="color:var(--blue)">rubygems</a>
@@ -286,6 +286,7 @@ function renderConnectorRow(c) {
   if (isAdmin) {
     html += '    <div class="source-detail-actions">';
     html += '      <button class="btn btn-sm" onclick="event.stopPropagation();testConnector(\'' + c.id + '\')">Test Connection</button>';
+    html += '      <button class="btn btn-sm" onclick="event.stopPropagation();renameConnector(\'' + c.id + '\', \'' + escapeHtml(c.name).replace(/'/g, "\\'") + '\')">Rename</button>';
     html += '      <button class="btn btn-sm" onclick="event.stopPropagation();editConnector(\'' + c.id + '\')">Edit</button>';
     html += '      <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteConnector(\'' + c.id + '\')">Delete</button>';
     html += '    </div>';
@@ -301,10 +302,11 @@ function renderServerRow(srv) {
   var lastSeen = srv.last_seen_at ? getTimeAgo(srv.last_seen_at) : 'never';
   var expanded = expandedSources['srv-' + srv.id] ? true : false;
 
+  var displayName = (srv.display_name && srv.display_name !== '') ? srv.display_name : srv.hostname;
   var html = '<div class="source-row" data-source-id="srv-' + srv.id + '">';
   html += '  <div class="source-row-main" onclick="toggleSourceDetail(\'srv-' + srv.id + '\')" style="cursor:pointer">';
   html += '    <span class="source-type-tag source-type-srv">[server]</span>';
-  html += '    <span class="source-name">' + escapeHtml(srv.hostname) + '</span>';
+  html += '    <span class="source-name">' + escapeHtml(displayName) + '</span>';
   if (srv.labels && srv.labels.environment) {
     html += '    <span class="badge badge-env">' + escapeHtml(srv.labels.environment) + '</span>';
   }
@@ -315,6 +317,7 @@ function renderServerRow(srv) {
   html += '  <div class="source-detail" id="source-detail-srv-' + srv.id + '" style="display:' + (expanded ? 'block' : 'none') + '">';
   html += '    <div class="source-detail-meta">';
   html += '      <div class="alert-detail-row"><span class="alert-detail-key">id</span><span class="alert-detail-val dim" style="font-size:10px">' + srv.id + '</span></div>';
+  html += '      <div class="alert-detail-row"><span class="alert-detail-key">hostname</span><span class="alert-detail-val">' + escapeHtml(srv.hostname) + '</span></div>';
   if (srv.ip_address) {
     html += '      <div class="alert-detail-row"><span class="alert-detail-key">ip</span><span class="alert-detail-val">' + escapeHtml(srv.ip_address) + '</span></div>';
   }
@@ -343,6 +346,7 @@ function renderServerRow(srv) {
 
   if (isAdmin) {
     html += '    <div class="source-detail-actions">';
+    html += '      <button class="btn btn-sm" onclick="event.stopPropagation();renameServer(\'' + srv.id + '\', \'' + escapeHtml(displayName).replace(/'/g, "\\'") + '\')">Rename</button>';
     html += '      <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteServer(\'' + srv.id + '\')">Remove</button>';
     html += '    </div>';
   }
@@ -635,6 +639,44 @@ function deleteServer(id) {
 }
 window.deleteServer = deleteServer;
 
+// ── Rename actions ─────────────────────────────────────────
+
+function renameConnector(id, currentName) {
+  var newName = prompt('Rename connector:', currentName);
+  if (newName === null || newName.trim() === '') return;
+  fetch('/api/connectors/' + id, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ name: newName.trim() })
+  }).then(function(r) {
+    if (r.ok) {
+      showToast('Connector renamed', 'success');
+      loadSources();
+    } else {
+      r.json().then(function(d) { showToast(d.error || 'Failed to rename', 'error'); });
+    }
+  }).catch(function() { showToast('Network error', 'error'); });
+}
+window.renameConnector = renameConnector;
+
+function renameServer(id, currentName) {
+  var newName = prompt('Rename server:', currentName);
+  if (newName === null || newName.trim() === '') return;
+  fetch('/api/servers/' + id, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ display_name: newName.trim() })
+  }).then(function(r) {
+    if (r.ok) {
+      showToast('Server renamed', 'success');
+      loadSources();
+    } else {
+      r.json().then(function(d) { showToast(d.error || 'Failed to rename', 'error'); });
+    }
+  }).catch(function() { showToast('Network error', 'error'); });
+}
+window.renameServer = renameServer;
+
 // ── Install commands ──────────────────────────────────────
 
 function initInstallCmds() {
@@ -658,6 +700,10 @@ window.copyInstallCmd = copyInstallCmd;
 
 // ── Init ──────────────────────────────────────────────────
 
+(function() {
+  var endpointEl = document.getElementById('logs-endpoint');
+  if (endpointEl) endpointEl.textContent = window.location.origin;
+})();
 initInstallCmds();
 loadSources();
 window.loadPageData = loadSources;

@@ -354,6 +354,55 @@ func TestAgentInstallScript_EmptyAPIKey(t *testing.T) {
 	}
 }
 
+func TestUpdateServer(t *testing.T) {
+	srv := newTestServerWithMetrics()
+
+	// Register a server
+	body := `{"hostname":"rename-test"}`
+	req := httptest.NewRequest("POST", "/api/servers/register", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	var regResp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &regResp)
+	serverID := regResp["server_id"].(string)
+
+	// Update display_name
+	updateBody := `{"display_name":"My Server"}`
+	req = httptest.NewRequest("PUT", "/api/servers/"+serverID, bytes.NewBufferString(updateBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var s map[string]any
+	json.Unmarshal(w.Body.Bytes(), &s)
+	if s["display_name"] != "My Server" {
+		t.Errorf("display_name = %v, want %q", s["display_name"], "My Server")
+	}
+	if s["hostname"] != "rename-test" {
+		t.Errorf("hostname = %v, want %q", s["hostname"], "rename-test")
+	}
+}
+
+func TestUpdateServer_NotFound(t *testing.T) {
+	srv := newTestServerWithMetrics()
+
+	body := `{"display_name":"ghost"}`
+	req := httptest.NewRequest("PUT", "/api/servers/00000000-0000-0000-0000-000000000000", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
 func TestHandleQueryMetrics(t *testing.T) {
 	srv := newTestServerWithMetrics()
 

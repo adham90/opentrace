@@ -339,6 +339,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			}
 
 			if srv.serverStore != nil && srv.metricStore != nil {
+				r.Put("/servers/{id}", srv.handleUpdateServer)
 				r.Delete("/servers/{id}", srv.handleDeleteServer)
 			}
 		})

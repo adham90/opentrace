@@ -113,6 +113,33 @@ func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, srv)
 }
 
+// handleUpdateServer handles PUT /api/servers/{id}.
+func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid server ID")
+		return
+	}
+
+	var params store.UpdateServerParams
+	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	srv, err := s.serverStore.Update(r.Context(), id, params)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "server not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to update server")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, srv)
+}
+
 // handleDeleteServer handles DELETE /api/servers/{id}.
 func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))

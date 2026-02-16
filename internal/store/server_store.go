@@ -67,8 +67,8 @@ func (s *serverStore) Register(ctx context.Context, params RegisterServerParams)
 		// Insert new server
 		serverID = uuid.New()
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO servers (id, hostname, ip_address, os, arch, agent_version, labels, status, last_seen_at, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, 'online', ?, ?, ?)`,
+			`INSERT INTO servers (id, hostname, display_name, ip_address, os, arch, agent_version, labels, status, last_seen_at, created_at, updated_at)
+			 VALUES (?, ?, '', ?, ?, ?, ?, ?, 'online', ?, ?, ?)`,
 			serverID.String(), params.Hostname, params.IPAddress, params.OS, params.Arch,
 			params.AgentVersion, labelsJSON, nowStr, nowStr, nowStr,
 		)
@@ -105,10 +105,10 @@ func (s *serverStore) GetByID(ctx context.Context, id uuid.UUID) (*Server, error
 	var lastSeenAt sql.NullString
 
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, hostname, ip_address, os, arch, agent_version, labels, status, last_seen_at, created_at, updated_at
+		`SELECT id, hostname, display_name, ip_address, os, arch, agent_version, labels, status, last_seen_at, created_at, updated_at
 		 FROM servers WHERE id = ?`, id.String(),
 	).Scan(
-		&srv.ID, &srv.Hostname, &srv.IPAddress, &srv.OS, &srv.Arch,
+		&srv.ID, &srv.Hostname, &srv.DisplayName, &srv.IPAddress, &srv.OS, &srv.Arch,
 		&srv.AgentVersion, &labelsStr, &srv.Status, &lastSeenAt,
 		&createdAt, &updatedAt,
 	)
@@ -136,7 +136,7 @@ func (s *serverStore) GetByID(ctx context.Context, id uuid.UUID) (*Server, error
 
 func (s *serverStore) List(ctx context.Context) ([]Server, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, hostname, ip_address, os, arch, agent_version, labels, status, last_seen_at, created_at, updated_at
+		`SELECT id, hostname, display_name, ip_address, os, arch, agent_version, labels, status, last_seen_at, created_at, updated_at
 		 FROM servers ORDER BY hostname ASC`,
 	)
 	if err != nil {
@@ -152,7 +152,7 @@ func (s *serverStore) List(ctx context.Context) ([]Server, error) {
 		var lastSeenAt sql.NullString
 
 		if err := rows.Scan(
-			&srv.ID, &srv.Hostname, &srv.IPAddress, &srv.OS, &srv.Arch,
+			&srv.ID, &srv.Hostname, &srv.DisplayName, &srv.IPAddress, &srv.OS, &srv.Arch,
 			&srv.AgentVersion, &labelsStr, &srv.Status, &lastSeenAt,
 			&createdAt, &updatedAt,
 		); err != nil {
@@ -175,6 +175,32 @@ func (s *serverStore) List(ctx context.Context) ([]Server, error) {
 	}
 
 	return result, rows.Err()
+}
+
+func (s *serverStore) Update(ctx context.Context, id uuid.UUID, params UpdateServerParams) (*Server, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	var displayName *string
+	if params.DisplayName != nil {
+		displayName = params.DisplayName
+	}
+
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE servers
+		 SET display_name = COALESCE(?, display_name),
+		     updated_at = ?
+		 WHERE id = ?`,
+		displayName, now, id.String(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("updating server: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return nil, ErrNotFound
+	}
+
+	return s.GetByID(ctx, id)
 }
 
 func (s *serverStore) UpdateHeartbeat(ctx context.Context, id uuid.UUID) error {
