@@ -126,6 +126,22 @@ LIMIT %d`, whereClause, orderBy, limit)
 			"hint":        "Use these stats to identify slow queries, high-frequency queries, or queries with poor cache hit ratios. Consider creating watchers for the most impactful ones.",
 		}
 
+		// Suggest explain_query for the top query.
+		if len(rows) > 0 {
+			queryText := rows[0].QueryPreview
+			if queryText != "" {
+				why := "Slowest query"
+				if orderBy == "calls" {
+					why = "Most frequent query"
+				}
+				withSuggestions(resp,
+					suggest("explain_query", why+" — see execution plan", map[string]any{
+						"query": queryText,
+					}),
+				)
+			}
+		}
+
 		data, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil

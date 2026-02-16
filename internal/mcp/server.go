@@ -16,6 +16,40 @@ import (
 	"github.com/adham90/opentrace/internal/watcher"
 )
 
+// mcpInstructions is sent to the client during the MCP initialize handshake.
+// It tells the agent which tools to call first and how to follow suggestion chains.
+const mcpInstructions = `OpenTrace is a self-hosted application monitoring server. You have tools for logs, errors, database stats, health checks, watches (alerts), and agent memory.
+
+## Where to start
+
+- "What's wrong?" / investigating issues → call diagnose (returns errors, logs, performance, watches, healthchecks in one call)
+- "System health" / status check → call system_overview
+- "What needs attention?" → call triage_alerts (prioritized inbox)
+- "Why are queries slow?" → call db_query_stats then follow suggested_tools to explain_query
+- Run a full investigation playbook → call runbook with a playbook name (slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike)
+
+## Follow suggested_tools
+
+Most tool responses include a "suggested_tools" array with pre-filled arguments for the next step. Always prefer following these suggestions over manually constructing the next call — the args are already filled in from the response data.
+
+Example chain: diagnose → error_detail(fingerprint: "abc") → log_search(exception_class: "NoMethodError") → log_context(log_id: 42)
+
+## Agent memory
+
+Use add_note / get_notes to save and recall persistent context about services, queries, endpoints, errors, and health checks across sessions. Call get_notes at the start of a session to recall previous context.
+
+## Key tool categories
+
+- Overview: diagnose, system_overview, triage_alerts
+- Logs: log_search, log_context, log_stats, log_summary, list_log_attributes
+- Errors: error_groups, error_detail, resolve_error, ignore_error
+- Database: db_query_stats, explain_query, db_table_stats, db_activity, db_locks, db_index_analysis, schema_overview
+- Performance: request_performance, compare_periods, trace_lookup
+- Uptime: uptime_status, list_healthchecks, create_healthcheck
+- Watches: watch_status, watch, investigate, dismiss_watch
+- Runbooks: runbook (composite playbooks that run multiple diagnostics at once)
+`
+
 // Deps holds the dependencies for the MCP server.
 type Deps struct {
 	Registry        *connector.Registry
@@ -66,6 +100,7 @@ func NewConfiguredServer(deps Deps, isAdmin bool) *server.MCPServer {
 		name,
 		"0.1.0",
 		server.WithToolCapabilities(false),
+		server.WithInstructions(mcpInstructions),
 	)
 
 	b := &CatalogBuilder{}

@@ -239,6 +239,36 @@ func logSearchHandler(ls store.LogStore, egs store.ErrorGroupStore) server.ToolH
 			resp["time_distribution"] = buildTimeHistogram(entries)
 		}
 
+		// Suggest next steps based on results.
+		var suggestions []ToolSuggestion
+		if len(entries) > 0 {
+			// Suggest log_context for the first result that has an ID.
+			if entries[0].ID > 0 {
+				suggestions = append(suggestions, suggest("log_context", "See surrounding logs for this entry", map[string]any{
+					"log_id": entries[0].ID,
+				}))
+			}
+			// If there's an error fingerprint, suggest error_detail.
+			for _, e := range entries {
+				if e.ErrorFingerprint != "" {
+					suggestions = append(suggestions, suggest("error_detail", "Investigate this error group", map[string]any{
+						"fingerprint": e.ErrorFingerprint,
+					}))
+					break
+				}
+			}
+			// If there's a trace ID, suggest trace_lookup.
+			for _, e := range entries {
+				if e.TraceID != "" {
+					suggestions = append(suggestions, suggest("trace_lookup", "Follow distributed trace", map[string]any{
+						"trace_id": e.TraceID,
+					}))
+					break
+				}
+			}
+		}
+		withSuggestions(resp, suggestions...)
+
 		data, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil

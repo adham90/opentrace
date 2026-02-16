@@ -241,10 +241,13 @@ func TestWatch_EndToEnd(t *testing.T) {
 		"alert_id": alert.ID,
 	})
 
-	var investigatedAlert store.WatchAlert
-	if err := json.Unmarshal([]byte(investigateResult), &investigatedAlert); err != nil {
+	var alertWrapper struct {
+		Alert store.WatchAlert `json:"alert"`
+	}
+	if err := json.Unmarshal([]byte(investigateResult), &alertWrapper); err != nil {
 		t.Fatalf("unmarshal investigated alert: %v", err)
 	}
+	investigatedAlert := alertWrapper.Alert
 	if investigatedAlert.ID != alert.ID {
 		t.Errorf("investigated alert ID = %q, want %q", investigatedAlert.ID, alert.ID)
 	}
@@ -262,13 +265,16 @@ func TestWatch_EndToEnd(t *testing.T) {
 		"service": "payments",
 		"window":  "1h",
 	})
-	var investigation struct {
-		Service    string  `json:"service"`
-		ErrorRate  float64 `json:"error_rate"`
-		ErrorCount float64 `json:"error_count"`
-		LogCount   float64 `json:"log_count"`
+	var invWrapper struct {
+		Investigation struct {
+			Service    string  `json:"service"`
+			ErrorRate  float64 `json:"error_rate"`
+			ErrorCount float64 `json:"error_count"`
+			LogCount   float64 `json:"log_count"`
+		} `json:"investigation"`
 	}
-	json.Unmarshal([]byte(investigateB), &investigation)
+	json.Unmarshal([]byte(investigateB), &invWrapper)
+	investigation := invWrapper.Investigation
 	t.Logf("Investigation (Mode B): service=%s error_rate=%.4f error_count=%.0f log_count=%.0f",
 		investigation.Service, investigation.ErrorRate, investigation.ErrorCount, investigation.LogCount)
 

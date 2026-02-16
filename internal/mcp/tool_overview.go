@@ -316,7 +316,32 @@ func triageAlertsHandler(d overviewDeps) server.ToolHandlerFunc {
 			return mcp.NewToolResultText("Nothing needs attention. System looks healthy."), nil
 		}
 
-		data, err := json.MarshalIndent(items, "", "  ")
+		resp := map[string]any{
+			"count": len(items),
+			"items": items,
+		}
+
+		// Suggest investigating the top item.
+		var suggestions []ToolSuggestion
+		top := items[0]
+		switch top.Type {
+		case "error_group":
+			suggestions = append(suggestions, suggest("error_detail", "Investigate top error", map[string]any{
+				"fingerprint": top.ID,
+			}))
+		case "watch_alert":
+			suggestions = append(suggestions, suggest("investigate", "Investigate top alert", map[string]any{
+				"alert_id": top.ID,
+			}))
+		case "healthcheck":
+			suggestions = append(suggestions, suggest("uptime_status", "Check endpoint uptime details", nil))
+		}
+		if len(items) > 1 {
+			suggestions = append(suggestions, suggest("diagnose", "Full system investigation", nil))
+		}
+		withSuggestions(resp, suggestions...)
+
+		data, err := json.MarshalIndent(resp, "", "  ")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal triage: %v", err)), nil
 		}

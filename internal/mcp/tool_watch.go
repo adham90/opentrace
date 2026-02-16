@@ -241,7 +241,24 @@ func investigateHandler(watchStore store.WatchStore, logStore store.LogStore, me
 			if err != nil {
 				return nil, fmt.Errorf("getting alert: %w", err)
 			}
-			data, _ := json.MarshalIndent(alert, "", "  ")
+
+			// Wrap alert in a map so we can attach suggestions.
+			resp := map[string]any{"alert": alert}
+			var suggestions []ToolSuggestion
+
+			// Look up the parent watch to get the service name.
+			if w, err := watchStore.GetByID(ctx, alert.WatchID); err == nil && w.Service != "" {
+				suggestions = append(suggestions, suggest("log_search", "Search error logs for this service", map[string]any{
+					"level":   "error",
+					"service": w.Service,
+				}))
+				suggestions = append(suggestions, suggest("diagnose", "Full investigation for this service", map[string]any{
+					"service": w.Service,
+				}))
+			}
+			withSuggestions(resp, suggestions...)
+
+			data, _ := json.MarshalIndent(resp, "", "  ")
 			return mcp.NewToolResultText(string(data)), nil
 		}
 
@@ -340,7 +357,23 @@ func investigateHandler(watchStore store.WatchStore, logStore store.LogStore, me
 			}
 		}
 
-		data, _ := json.MarshalIndent(inv, "", "  ")
+		resp := map[string]any{"investigation": inv}
+		var suggestions []ToolSuggestion
+		if inv.ErrorCount > 0 {
+			suggestions = append(suggestions, suggest("log_search", "View error logs for this service", map[string]any{
+				"level":   "error",
+				"service": service,
+			}))
+		}
+		if len(inv.RecentErrors) > 0 && inv.RecentErrors[0].ExceptionClass != "" && inv.RecentErrors[0].ExceptionClass != "Unknown" {
+			suggestions = append(suggestions, suggest("log_search", "Search by exception class", map[string]any{
+				"exception_class": inv.RecentErrors[0].ExceptionClass,
+				"service":         service,
+			}))
+		}
+		withSuggestions(resp, suggestions...)
+
+		data, _ := json.MarshalIndent(resp, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }

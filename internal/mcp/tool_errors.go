@@ -189,6 +189,22 @@ func errorDetailHandler(egs store.ErrorGroupStore, ls store.LogStore) server.Too
 			}
 		}
 
+		// Suggest next steps.
+		var suggestions []ToolSuggestion
+		if eg.ExceptionClass != "" {
+			args := map[string]any{"exception_class": eg.ExceptionClass}
+			if eg.Service != "" {
+				args["service"] = eg.Service
+			}
+			suggestions = append(suggestions, suggest("log_search", "Find all occurrences of this exception", args))
+		}
+		if eg.Status == store.ErrorGroupUnresolved {
+			suggestions = append(suggestions, suggest("resolve_error", "Mark as resolved after fixing", map[string]any{
+				"fingerprint": eg.Fingerprint,
+			}))
+		}
+		withSuggestions(resp, suggestions...)
+
 		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}

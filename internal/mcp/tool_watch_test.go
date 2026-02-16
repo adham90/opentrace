@@ -115,20 +115,22 @@ func TestWatch_Investigate_ModeB(t *testing.T) {
 		"window":  "1h",
 	})
 
-	var inv struct {
-		Service    string  `json:"service"`
-		ErrorRate  float64 `json:"error_rate"`
-		LogCount   float64 `json:"log_count"`
-		ErrorCount float64 `json:"error_count"`
+	var wrapper struct {
+		Investigation struct {
+			Service    string  `json:"service"`
+			ErrorRate  float64 `json:"error_rate"`
+			LogCount   float64 `json:"log_count"`
+			ErrorCount float64 `json:"error_count"`
+		} `json:"investigation"`
 	}
-	if err := json.Unmarshal([]byte(result), &inv); err != nil {
+	if err := json.Unmarshal([]byte(result), &wrapper); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if inv.Service != "api" {
-		t.Errorf("service = %q, want api", inv.Service)
+	if wrapper.Investigation.Service != "api" {
+		t.Errorf("service = %q, want api", wrapper.Investigation.Service)
 	}
-	if inv.LogCount < 10 {
-		t.Errorf("log_count = %v, want >= 10", inv.LogCount)
+	if wrapper.Investigation.LogCount < 10 {
+		t.Errorf("log_count = %v, want >= 10", wrapper.Investigation.LogCount)
 	}
 }
 
@@ -156,15 +158,17 @@ func TestWatch_Investigate_ModeA(t *testing.T) {
 		"alert_id": alert.ID,
 	})
 
-	var got store.WatchAlert
-	if err := json.Unmarshal([]byte(result), &got); err != nil {
+	var wrapper struct {
+		Alert store.WatchAlert `json:"alert"`
+	}
+	if err := json.Unmarshal([]byte(result), &wrapper); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if got.ID != alert.ID {
-		t.Errorf("alert ID = %q, want %q", got.ID, alert.ID)
+	if wrapper.Alert.ID != alert.ID {
+		t.Errorf("alert ID = %q, want %q", wrapper.Alert.ID, alert.ID)
 	}
-	if got.TriggerValue != 0.12 {
-		t.Errorf("trigger_value = %v, want 0.12", got.TriggerValue)
+	if wrapper.Alert.TriggerValue != 0.12 {
+		t.Errorf("trigger_value = %v, want 0.12", wrapper.Alert.TriggerValue)
 	}
 }
 

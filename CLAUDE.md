@@ -127,3 +127,38 @@ Key patterns:
 - **Version**: `GET /api/version` returns build info; `GET /api/version/check` checks GitHub releases
 - **Watcher runs**: `/api/watchers/{id}/runs/{runId}/events` streams SSE execution events
 - **Logs**: Full-text search at `/logs` page or via MCP `log_search` tool
+
+## MCP Workflow Patterns
+
+The MCP server sends instructions during the `initialize` handshake and returns `suggested_tools` with pre-filled args in tool responses. This reduces round trips by guiding the agent through optimal tool chains.
+
+### Entry points
+
+| User intent | Start with |
+|---|---|
+| "What's wrong?" / investigating | `diagnose` |
+| "System health" / status | `system_overview` |
+| "What needs attention?" | `triage_alerts` |
+| "Slow queries?" | `db_query_stats` |
+| Full investigation playbook | `runbook` |
+
+### Suggestion chains (tools that return `suggested_tools`)
+
+- `diagnose` → `error_detail`, `log_search`, `watch_status`, `list_healthchecks`
+- `error_groups` → `error_detail`, `diagnose`
+- `error_detail` → `log_search` (with exception_class), `resolve_error`
+- `log_search` → `log_context`, `error_detail`, `trace_lookup`
+- `db_query_stats` → `explain_query` (with slowest query pre-filled)
+- `triage_alerts` → `error_detail`, `investigate`, `uptime_status`, `diagnose`
+- `investigate` → `log_search` (with service + error level), `diagnose`
+- `uptime_status` → `diagnose` (for down endpoints)
+- `system_overview` → `error_groups`, `log_summary`, `uptime_status`, `diagnose`
+- `watch_status` → `diagnose`, `log_search`
+
+### Adding new suggestions
+
+Use the existing helpers in `internal/mcp/suggestions.go`:
+```go
+suggest("tool_name", "why this is suggested", map[string]any{"arg": "value"})
+withSuggestions(resp, suggestions...)
+```

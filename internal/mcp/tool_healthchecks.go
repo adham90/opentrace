@@ -214,6 +214,16 @@ func uptimeStatusHandler(hcs store.HealthCheckStore) server.ToolHandlerFunc {
 			"endpoints":    extended,
 		}
 
+		// Suggest next steps for down/degraded endpoints.
+		var suggestions []ToolSuggestion
+		for _, ep := range extended {
+			if ep.CurrentStatus == "down" || ep.CurrentStatus == "degraded" {
+				suggestions = append(suggestions, suggest("diagnose", fmt.Sprintf("Investigate '%s' — currently %s", ep.Name, ep.CurrentStatus), nil))
+				break
+			}
+		}
+		withSuggestions(resp, suggestions...)
+
 		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}
