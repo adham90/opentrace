@@ -206,7 +206,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	// Pages — require auth, redirect to onboarding if no users
 	router.Group(func(r chi.Router) {
 		r.Use(srv.RedirectToOnboardingIfNeeded)
-		r.Get("/", srv.handleLogsPage)
+		r.Get("/", srv.handleDashboardPage)
 		r.Get("/logs", srv.handleLogsPage)
 		r.Get("/sources", srv.handleSourcesPage)
 		r.Get("/watches", srv.handleWatchesPage)

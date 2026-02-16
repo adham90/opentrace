@@ -1,0 +1,372 @@
+{{define "content"}}
+<div class="page-header">
+  <h1><span class="prompt">$</span> dashboard</h1>
+</div>
+
+<!-- Stats bar -->
+<div id="dash-stats" class="dash-stats">
+  <div class="dash-stat-card">
+    <div class="dash-stat-value" id="stat-logs">-</div>
+    <div class="dash-stat-label">logs/hr</div>
+  </div>
+  <div class="dash-stat-card">
+    <div class="dash-stat-value dash-stat-errors" id="stat-errors">-</div>
+    <div class="dash-stat-label">errors/hr</div>
+  </div>
+  <div class="dash-stat-card">
+    <div class="dash-stat-value" id="stat-connectors">-</div>
+    <div class="dash-stat-label">connectors</div>
+  </div>
+  <div class="dash-stat-card">
+    <div class="dash-stat-value" id="stat-servers">-</div>
+    <div class="dash-stat-label">servers</div>
+  </div>
+  <div class="dash-stat-card">
+    <div class="dash-stat-value" id="stat-alerts">-</div>
+    <div class="dash-stat-label">pending alerts</div>
+  </div>
+</div>
+
+<!-- Error groups -->
+<div class="dash-section">
+  <div class="dash-section-header">
+    <h2><span class="prompt">$</span> errors</h2>
+    <a href="/logs?level=ERROR" class="dash-section-link">view all &rarr;</a>
+  </div>
+  <div id="dash-errors" class="dash-errors">
+    <div class="loading-state">loading...</div>
+  </div>
+</div>
+
+<!-- Health checks -->
+<div class="dash-section">
+  <div class="dash-section-header">
+    <h2><span class="prompt">$</span> health checks</h2>
+  </div>
+  <div id="dash-health" class="dash-health-grid">
+    <div class="loading-state">loading...</div>
+  </div>
+</div>
+
+<!-- Active watches -->
+<div class="dash-section">
+  <div class="dash-section-header">
+    <h2><span class="prompt">$</span> watches</h2>
+    <a href="/watches" class="dash-section-link">manage &rarr;</a>
+  </div>
+  <div id="dash-watches" class="dash-watches">
+    <div class="loading-state">loading...</div>
+  </div>
+</div>
+
+<script nonce="{{.CSPNonce}}">
+(function(){
+  function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+  function getTimeAgo(dateStr) {
+    if (!dateStr) return 'never';
+    var now = new Date();
+    var date = new Date(dateStr);
+    var diff = Math.floor((now - date) / 1000);
+    if (diff < 0) return 'just now';
+    if (diff < 60) return diff + 's ago';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+  }
+
+  // --- Stats ---
+  function loadStats() {
+    fetch('/api/overview').then(function(r) { return r.json(); }).then(function(d) {
+      document.getElementById('stat-logs').textContent = d.logs ? d.logs.last_hour : 0;
+      var errEl = document.getElementById('stat-errors');
+      var errCount = d.logs ? d.logs.errors_last_hour : 0;
+      errEl.textContent = errCount;
+      if (errCount > 0) errEl.classList.add('dash-stat-hot'); else errEl.classList.remove('dash-stat-hot');
+      document.getElementById('stat-connectors').textContent = d.connectors ? d.connectors.total : 0;
+      document.getElementById('stat-servers').textContent = d.servers ? d.servers.total : 0;
+    }).catch(function() {});
+
+    fetch('/api/watches/alerts/count').then(function(r) { return r.json(); }).then(function(d) {
+      var el = document.getElementById('stat-alerts');
+      el.textContent = d.count || 0;
+      if (d.count > 0) el.classList.add('dash-stat-hot'); else el.classList.remove('dash-stat-hot');
+    }).catch(function() {
+      document.getElementById('stat-alerts').textContent = '0';
+    });
+  }
+
+  // --- Errors ---
+  function loadErrors() {
+    fetch('/api/errors?status=unresolved&limit=5&sort_by=occurrence_count').then(function(r) {
+      if (!r.ok) throw new Error('status ' + r.status);
+      return r.json();
+    }).then(function(errors) {
+      var el = document.getElementById('dash-errors');
+      if (!errors || errors.length === 0) {
+        el.innerHTML = '<div class="empty-state">No unresolved errors.</div>';
+        return;
+      }
+      var html = '';
+      errors.forEach(function(eg) {
+        var fp = encodeURIComponent(eg.fingerprint || '');
+        html += '<a class="dash-error-row" href="/logs?error_fingerprint=' + fp + '">';
+        html += '<div class="dash-error-main">';
+        html += '<span class="dash-error-class">' + escapeHtml(eg.exception_class || 'Error') + '</span>';
+        html += '<span class="dash-error-msg">' + escapeHtml(eg.message || '') + '</span>';
+        html += '</div>';
+        html += '<div class="dash-error-meta">';
+        if (eg.service) html += '<span class="dash-error-service">' + escapeHtml(eg.service) + '</span>';
+        html += '<span class="dash-error-count">' + (eg.occurrence_count || eg.count || 0) + 'x</span>';
+        html += '<span class="dash-error-time">' + getTimeAgo(eg.last_seen_at || eg.last_seen) + '</span>';
+        html += '</div>';
+        html += '</a>';
+      });
+      el.innerHTML = html;
+    }).catch(function() {
+      document.getElementById('dash-errors').innerHTML = '<div class="empty-state">Could not load errors.</div>';
+    });
+  }
+
+  // --- Health Checks ---
+  function loadHealth() {
+    fetch('/api/healthchecks/uptime?hours=24').then(function(r) {
+      if (!r.ok) throw new Error('status ' + r.status);
+      return r.json();
+    }).then(function(checks) {
+      var el = document.getElementById('dash-health');
+      if (!checks || checks.length === 0) {
+        el.innerHTML = '<div class="empty-state">No health checks configured.</div>';
+        return;
+      }
+      var html = '';
+      checks.forEach(function(hc) {
+        var status = (hc.status || 'unknown').toLowerCase();
+        var statusCls = 'dash-hc-unknown';
+        if (status === 'up' || status === 'healthy') statusCls = 'dash-hc-up';
+        else if (status === 'down' || status === 'unhealthy') statusCls = 'dash-hc-down';
+        else if (status === 'degraded') statusCls = 'dash-hc-degraded';
+
+        html += '<div class="dash-hc-card ' + statusCls + '">';
+        html += '<div class="dash-hc-indicator"></div>';
+        html += '<div class="dash-hc-info">';
+        html += '<div class="dash-hc-name">' + escapeHtml(hc.name || hc.url || 'unnamed') + '</div>';
+        if (hc.host || hc.url) html += '<div class="dash-hc-host">' + escapeHtml(hc.host || hc.url) + '</div>';
+        html += '</div>';
+        html += '<div class="dash-hc-metrics">';
+        if (hc.uptime_percent !== undefined) html += '<span class="dash-hc-uptime">' + hc.uptime_percent.toFixed(1) + '%</span>';
+        if (hc.avg_latency_ms !== undefined) html += '<span class="dash-hc-latency">' + Math.round(hc.avg_latency_ms) + 'ms</span>';
+        html += '</div>';
+        html += '</div>';
+      });
+      el.innerHTML = html;
+    }).catch(function() {
+      document.getElementById('dash-health').innerHTML = '<div class="empty-state">Could not load health checks.</div>';
+    });
+  }
+
+  // --- Watches ---
+  function loadWatches() {
+    fetch('/api/watches').then(function(r) {
+      if (!r.ok) throw new Error('status ' + r.status);
+      return r.json();
+    }).then(function(watches) {
+      var el = document.getElementById('dash-watches');
+      // Show only active/triggered, limit 10
+      var active = (watches || []).filter(function(w) {
+        return w.status === 'active' || w.status === 'triggered';
+      }).slice(0, 10);
+      if (active.length === 0) {
+        el.innerHTML = '<div class="empty-state">No active watches.</div>';
+        return;
+      }
+      var html = '';
+      active.forEach(function(w) {
+        var statusCls = w.status === 'triggered' ? 'status-error' : 'status-active';
+        html += '<div class="dash-watch-row">';
+        html += '<span class="watch-status ' + statusCls + '">' + escapeHtml(w.status) + '</span>';
+        html += '<span class="watch-metric">' + escapeHtml(w.metric) + '</span>';
+        if (w.service) html += '<span class="watch-service">' + escapeHtml(w.service) + '</span>';
+        if (w.current_value !== undefined && w.current_value !== null) {
+          html += '<span class="watch-current">current: ' + formatVal(w.metric, w.current_value) + '</span>';
+        }
+        html += '<span class="watch-meta">' + getTimeAgo(w.created_at) + '</span>';
+        html += '</div>';
+      });
+      el.innerHTML = html;
+    }).catch(function() {
+      document.getElementById('dash-watches').innerHTML = '<div class="empty-state">Could not load watches.</div>';
+    });
+  }
+
+  function formatVal(metric, value) {
+    if (value === undefined || value === null) return '-';
+    if (metric === 'error_rate' || metric === 'cache_hit_rate') return (value * 100).toFixed(2) + '%';
+    if (metric === 'response_time' || metric === 'p95_response') return value.toFixed(0) + 'ms';
+    return value.toFixed(2);
+  }
+
+  function loadAll() {
+    loadStats();
+    loadErrors();
+    loadHealth();
+    loadWatches();
+  }
+
+  loadAll();
+  setInterval(loadAll, 30000);
+})();
+</script>
+
+<style nonce="{{.CSPNonce}}">
+/* Stats bar */
+.dash-stats {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1px;
+  margin-bottom: 1.5rem;
+  background: var(--border, #333);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.dash-stat-card {
+  background: var(--bg-secondary, #1a1a2e);
+  padding: 1rem;
+  text-align: center;
+}
+.dash-stat-value {
+  font-size: 1.8rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text, #eee);
+  line-height: 1.2;
+}
+.dash-stat-errors { color: var(--text-muted, #999); }
+.dash-stat-hot { color: var(--red) !important; }
+.dash-stat-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted, #666);
+  margin-top: 0.25rem;
+}
+
+/* Section layout */
+.dash-section { margin-bottom: 1.5rem; }
+.dash-section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+.dash-section-header h2 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text, #eee);
+  margin: 0;
+}
+.dash-section-link {
+  font-size: 0.75rem;
+  color: var(--cyan);
+  text-decoration: none;
+}
+.dash-section-link:hover { text-decoration: underline; }
+
+/* Error groups */
+.dash-errors { display: flex; flex-direction: column; gap: 1px; }
+.dash-error-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  background: var(--bg-secondary, #1a1a2e);
+  text-decoration: none;
+  color: inherit;
+  border-left: 3px solid var(--red);
+  transition: background 0.15s;
+}
+.dash-error-row:hover { background: var(--bg-hover, #222240); }
+.dash-error-main { display: flex; align-items: baseline; gap: 0.75rem; flex: 1; min-width: 0; }
+.dash-error-class { font-weight: 600; color: var(--red); white-space: nowrap; font-size: 0.85rem; }
+.dash-error-msg { color: var(--text-muted, #999); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-error-meta { display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0; }
+.dash-error-service { background: rgba(128,128,255,0.1); padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.75rem; color: var(--blue); }
+.dash-error-count { font-family: var(--font-mono); font-size: 0.8rem; color: var(--yellow); font-weight: 600; }
+.dash-error-time { font-size: 0.7rem; color: var(--text-muted, #666); }
+
+/* Health checks grid */
+.dash-health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.5rem;
+}
+.dash-hc-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--bg-secondary, #1a1a2e);
+  border-radius: 4px;
+  border-left: 3px solid var(--text-muted, #666);
+}
+.dash-hc-up { border-left-color: var(--green); }
+.dash-hc-down { border-left-color: var(--red); }
+.dash-hc-degraded { border-left-color: var(--yellow); }
+.dash-hc-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-muted, #666);
+}
+.dash-hc-up .dash-hc-indicator { background: var(--green); }
+.dash-hc-down .dash-hc-indicator { background: var(--red); }
+.dash-hc-degraded .dash-hc-indicator { background: var(--yellow); }
+.dash-hc-info { flex: 1; min-width: 0; }
+.dash-hc-name { font-size: 0.85rem; font-weight: 600; color: var(--text, #eee); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-hc-host { font-size: 0.7rem; color: var(--text-muted, #666); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-hc-metrics { display: flex; flex-direction: column; align-items: flex-end; gap: 0.15rem; flex-shrink: 0; }
+.dash-hc-uptime { font-family: var(--font-mono); font-size: 0.8rem; font-weight: 600; color: var(--green); }
+.dash-hc-down .dash-hc-uptime { color: var(--red); }
+.dash-hc-degraded .dash-hc-uptime { color: var(--yellow); }
+.dash-hc-latency { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted, #666); }
+
+/* Active watches */
+.dash-watches { display: flex; flex-direction: column; gap: 1px; }
+.dash-watch-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  background: var(--bg-secondary, #1a1a2e);
+  flex-wrap: wrap;
+}
+
+/* Mobile */
+@media (max-width: 699px) {
+  .dash-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .dash-stat-card:last-child {
+    grid-column: span 2;
+  }
+  .dash-stat-value { font-size: 1.4rem; }
+  .dash-error-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+  .dash-error-meta { width: 100%; }
+  .dash-health-grid {
+    grid-template-columns: 1fr;
+  }
+  .dash-watch-row {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+  }
+  .watch-meta { margin-left: 0; width: 100%; }
+}
+</style>
+{{end}}

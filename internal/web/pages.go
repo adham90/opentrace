@@ -26,6 +26,7 @@ var tmplFuncs = template.FuncMap{
 }
 
 var (
+	dashboardTmpl      *template.Template
 	logsTmpl           *template.Template
 	watchesTmpl        *template.Template
 	sourcesTmpl        *template.Template
@@ -39,6 +40,8 @@ var (
 
 func init() {
 	// Each page gets layout + its own content template
+	dashboardTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/dashboard.html"))
 	logsTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
 		"templates/layout.html", "templates/logs.html"))
 	sourcesTmpl = template.Must(template.ParseFS(templateFS,
@@ -179,6 +182,14 @@ func (s *Server) getTemplate(fallback *template.Template, files ...string) *temp
 		return fallback
 	}
 	return t
+}
+
+func (s *Server) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
+	data := s.newPageData(r, "Dashboard", "dashboard")
+	tmpl := s.getTemplate(dashboardTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/dashboard.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
 }
 
 func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {

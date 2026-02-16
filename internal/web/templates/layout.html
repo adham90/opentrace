@@ -25,12 +25,11 @@
       <div class="shortcut-title">Keyboard Shortcuts</div>
       <div class="shortcut-section">
         <div class="shortcut-section-label">Navigation</div>
-        <div class="shortcut-row"><kbd>0</kbd><span>Go to Logs</span></div>
-        <div class="shortcut-row"><kbd>1</kbd><span>Go to Watchers</span></div>
-        <div class="shortcut-row"><kbd>2</kbd><span>Go to Alerts</span></div>
+        <div class="shortcut-row"><kbd>0</kbd><span>Go to Dashboard</span></div>
+        <div class="shortcut-row"><kbd>1</kbd><span>Go to Logs</span></div>
+        <div class="shortcut-row"><kbd>2</kbd><span>Go to Watches</span></div>
         <div class="shortcut-row"><kbd>3</kbd><span>Go to Sources</span></div>
-        <div class="shortcut-row"><kbd>4</kbd><span>Go to Watches</span></div>
-        <div class="shortcut-row"><kbd>5</kbd><span>Go to Settings</span></div>
+        <div class="shortcut-row"><kbd>4</kbd><span>Go to Settings</span></div>
       </div>
       {{if eq .Nav "logs"}}
       <div class="shortcut-section">
@@ -60,10 +59,11 @@
   <nav class="tmux-bar">
     <div class="tmux-left">
       <button class="mobile-menu-btn" onclick="toggleMobileMenu()" aria-label="Menu">&#9776;</button>
-      <a href="/" class="tmux-tab {{if eq .Nav "logs"}}active{{end}}">[0:logs]</a>
-      <a href="/watches" class="tmux-tab {{if eq .Nav "watches"}}active{{end}}">1:watches</a>
-      <a href="/sources" class="tmux-tab {{if eq .Nav "sources"}}active{{end}}">2:sources</a>
-      <a href="/settings" class="tmux-tab {{if eq .Nav "settings"}}active{{end}}">3:settings</a>
+      <a href="/" class="tmux-tab {{if eq .Nav "dashboard"}}active{{end}}">[0:dashboard]</a>
+      <a href="/logs" class="tmux-tab {{if eq .Nav "logs"}}active{{end}}">1:logs</a>
+      <a href="/watches" class="tmux-tab {{if eq .Nav "watches"}}active{{end}}">2:watches</a>
+      <a href="/sources" class="tmux-tab {{if eq .Nav "sources"}}active{{end}}">3:sources</a>
+      <a href="/settings" class="tmux-tab {{if eq .Nav "settings"}}active{{end}}">4:settings</a>
     </div>
     <div class="tmux-right">
       {{if .User}}<span class="tmux-info">{{.User.DisplayName}}@opentrace</span>{{end}}
@@ -77,7 +77,8 @@
       <span class="mobile-menu-title">OpenTrace</span>
       <button class="mobile-menu-close" onclick="closeMobileMenu()">&times;</button>
     </div>
-    <a href="/" class="mobile-menu-item {{if eq .Nav "logs"}}active{{end}}">logs</a>
+    <a href="/" class="mobile-menu-item {{if eq .Nav "dashboard"}}active{{end}}">dashboard</a>
+    <a href="/logs" class="mobile-menu-item {{if eq .Nav "logs"}}active{{end}}">logs</a>
     <a href="/watches" class="mobile-menu-item {{if eq .Nav "watches"}}active{{end}}">watches</a>
     <a href="/sources" class="mobile-menu-item {{if eq .Nav "sources"}}active{{end}}">sources</a>
     <a href="/settings" class="mobile-menu-item {{if eq .Nav "settings"}}active{{end}}">settings</a>
@@ -210,7 +211,7 @@
 
   // Keyboard navigation + shortcut overlay
   (function(){
-    var tabs = {0:'/', 1:'/watches', 2:'/sources', 3:'/settings'};
+    var tabs = {0:'/', 1:'/logs', 2:'/watches', 3:'/sources', 4:'/settings'};
 
     window.toggleShortcuts = function() {
       var overlay = document.getElementById('shortcut-overlay');
@@ -241,7 +242,7 @@
       }
 
       var n = parseInt(e.key, 10);
-      if (n >= 0 && n <= 5 && tabs[n]) {
+      if (n >= 0 && n <= 4 && tabs[n]) {
         window.location.href = tabs[n];
       }
     });
