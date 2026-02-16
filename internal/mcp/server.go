@@ -32,7 +32,9 @@ const mcpInstructions = `OpenTrace is a self-hosted application monitoring serve
 
 Most tool responses include a "suggested_tools" array with pre-filled arguments for the next step. Always prefer following these suggestions over manually constructing the next call — the args are already filled in from the response data.
 
-Example chain: diagnose → error_detail(fingerprint: "abc") → log_search(exception_class: "NoMethodError") → log_context(log_id: 42)
+Example chains:
+- diagnose → error_detail(fingerprint: "abc") → log_search(exception_class: "NoMethodError") → log_context(log_id: 42)
+- log_search(level: "error") → investigate_error(log_id: 42) — one-call deep dive with exception, backtrace, params, SQL, context
 
 ## Agent memory
 
@@ -42,7 +44,7 @@ Use add_note / get_notes to save and recall persistent context about services, q
 
 - Overview: diagnose, system_overview, triage_alerts
 - Logs: log_search, log_context, log_stats, log_summary, list_log_attributes
-- Errors: error_groups, error_detail, resolve_error, ignore_error
+- Errors: error_groups, error_detail, investigate_error, resolve_error, ignore_error
 - Database: db_query_stats, explain_query, db_table_stats, db_activity, db_locks, db_index_analysis, schema_overview
 - Performance: request_performance, compare_periods, trace_lookup
 - Uptime: uptime_status, list_healthchecks, create_healthcheck
@@ -505,6 +507,19 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			errorDetailHandler(deps.ErrorGroupStore, deps.LogStore),
 		)
 		b.Add("error_detail", "Get full details for a specific error group including history and recent occurrences", "Errors", "read", "")
+	}
+
+	// Deep-dive error investigation (one-call context assembly).
+	if deps.LogStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("investigate_error",
+				mcp.WithDescription("Deep-dive into a single error: returns exception details (class, message, backtrace, cause chain), request params, SQL queries, surrounding logs, trace timeline, and error group status — ALL in one call. Use when you find a 500 error in log_search and need to understand why it failed. Accepts either a log_id or trace_id as entry point."),
+				mcp.WithNumber("log_id", mcp.Description("Log entry ID (from log_search results). Provide this OR trace_id.")),
+				mcp.WithString("trace_id", mcp.Description("Trace/correlation ID. If provided without log_id, finds the first error entry in the trace.")),
+			),
+			investigateErrorHandler(deps.LogStore, deps.ErrorGroupStore),
+		)
+		b.Add("investigate_error", "Deep-dive into an error: exception, backtrace, params, SQL, context, error group in one call", "Errors", "read", "")
 	}
 
 	// Uptime / Health Check monitoring (read-only).

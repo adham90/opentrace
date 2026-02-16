@@ -106,34 +106,50 @@ func logContextHandler(ls store.LogStore) server.ToolHandlerFunc {
 
 		// Build response.
 		type contextEntry struct {
-			ID        int64          `json:"id"`
-			Timestamp string         `json:"timestamp"`
-			Level     string         `json:"level"`
-			Service   string         `json:"service,omitempty"`
-			Message   string         `json:"message"`
-			Metadata  map[string]any `json:"metadata,omitempty"`
-			Position  string         `json:"position"` // "before", "anchor", "after"
+			ID               int64          `json:"id"`
+			Timestamp        string         `json:"timestamp"`
+			Level            string         `json:"level"`
+			Service          string         `json:"service,omitempty"`
+			Message          string         `json:"message"`
+			ExceptionClass   string         `json:"exception_class,omitempty"`
+			ErrorFingerprint string         `json:"error_fingerprint,omitempty"`
+			SourceFile       string         `json:"source_file,omitempty"`
+			SourceLine       int            `json:"source_line,omitempty"`
+			TraceID          string         `json:"trace_id,omitempty"`
+			RequestID        string         `json:"request_id,omitempty"`
+			Metadata         map[string]any `json:"metadata,omitempty"`
+			Position         string         `json:"position"` // "before", "anchor", "after"
+		}
+
+		toContextEntry := func(e store.LogEntry, pos string, truncMsg bool) contextEntry {
+			msg := e.Message
+			if truncMsg && len(msg) > 500 {
+				msg = msg[:500] + "..."
+			}
+			return contextEntry{
+				ID:               e.ID,
+				Timestamp:        e.Timestamp.Format(time.RFC3339Nano),
+				Level:            e.Level,
+				Service:          e.Service,
+				Message:          msg,
+				ExceptionClass:   e.ExceptionClass,
+				ErrorFingerprint: e.ErrorFingerprint,
+				SourceFile:       e.SourceFile,
+				SourceLine:       e.SourceLine,
+				TraceID:          e.TraceID,
+				RequestID:        e.RequestID,
+				Metadata:         e.Metadata,
+				Position:         pos,
+			}
 		}
 
 		entries := make([]contextEntry, 0, len(beforeEntries)+1+len(afterEntries))
 		for _, e := range beforeEntries {
-			entries = append(entries, contextEntry{
-				ID: e.ID, Timestamp: e.Timestamp.Format(time.RFC3339Nano),
-				Level: e.Level, Service: e.Service, Message: truncate(e.Message, 500),
-				Metadata: e.Metadata, Position: "before",
-			})
+			entries = append(entries, toContextEntry(e, "before", true))
 		}
-		entries = append(entries, contextEntry{
-			ID: anchor.ID, Timestamp: anchor.Timestamp.Format(time.RFC3339Nano),
-			Level: anchor.Level, Service: anchor.Service, Message: anchor.Message,
-			Metadata: anchor.Metadata, Position: "anchor",
-		})
+		entries = append(entries, toContextEntry(*anchor, "anchor", false))
 		for _, e := range afterEntries {
-			entries = append(entries, contextEntry{
-				ID: e.ID, Timestamp: e.Timestamp.Format(time.RFC3339Nano),
-				Level: e.Level, Service: e.Service, Message: truncate(e.Message, 500),
-				Metadata: e.Metadata, Position: "after",
-			})
+			entries = append(entries, toContextEntry(e, "after", true))
 		}
 
 		resp := map[string]any{

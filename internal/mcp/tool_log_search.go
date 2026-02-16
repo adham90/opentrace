@@ -207,8 +207,51 @@ func logSearchHandler(ls store.LogStore, egs store.ErrorGroupStore) server.ToolH
 			results = append(results, entry)
 		}
 
+		// Build a compact one-line-per-entry text summary so the AI agent
+		// can quickly scan results without parsing full JSON.
+		var summaryLines []string
+		for _, e := range entries {
+			ts := e.Timestamp.Format("2006-01-02 15:04:05")
+			msg := e.Message
+			if len(msg) > 120 {
+				msg = msg[:120] + "..."
+			}
+
+			line := fmt.Sprintf("[%s] %s [%s]", ts, e.Level, e.Service)
+
+			// Surface exception info prominently in the summary line.
+			if e.ExceptionClass != "" {
+				line += fmt.Sprintf(" %s", e.ExceptionClass)
+				if e.SourceFile != "" {
+					if e.SourceLine > 0 {
+						line += fmt.Sprintf(" at %s:%d", e.SourceFile, e.SourceLine)
+					} else {
+						line += fmt.Sprintf(" at %s", e.SourceFile)
+					}
+				}
+				// Include exception_message from metadata if available.
+				if meta, ok := e.Metadata["exception_message"]; ok {
+					excMsg := fmt.Sprintf("%v", meta)
+					if len(excMsg) > 100 {
+						excMsg = excMsg[:100] + "..."
+					}
+					line += fmt.Sprintf(": %s", excMsg)
+				}
+			} else {
+				line += fmt.Sprintf(": %s", msg)
+			}
+
+			// Append trace_id if present for easy correlation.
+			if e.TraceID != "" {
+				line += fmt.Sprintf(" trace=%s", e.TraceID)
+			}
+
+			summaryLines = append(summaryLines, line)
+		}
+
 		resp := map[string]any{
 			"total_returned": len(results),
+			"text_summary":   strings.Join(summaryLines, "\n"),
 			"entries":        results,
 		}
 
@@ -242,6 +285,15 @@ func logSearchHandler(ls store.LogStore, egs store.ErrorGroupStore) server.ToolH
 		// Suggest next steps based on results.
 		var suggestions []ToolSuggestion
 		if len(entries) > 0 {
+			// For error entries, suggest investigate_error for one-call deep dive.
+			for _, e := range entries {
+				if e.Level == "ERROR" || e.Level == "FATAL" {
+					suggestions = append(suggestions, suggest("investigate_error", "Deep-dive into this error: exception, backtrace, params, SQL, context", map[string]any{
+						"log_id": e.ID,
+					}))
+					break
+				}
+			}
 			// Suggest log_context for the first result that has an ID.
 			if entries[0].ID > 0 {
 				suggestions = append(suggestions, suggest("log_context", "See surrounding logs for this entry", map[string]any{
