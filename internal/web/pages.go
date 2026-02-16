@@ -143,9 +143,11 @@ type pageData struct {
 	Users          []store.User
 	IsAdmin        bool
 	RetentionDays  int
-	APIKey         string
-	EnvKeyOverride bool
-	Breadcrumbs    []Breadcrumb
+	APIKey          string
+	EnvKeyOverride  bool
+	CORSOrigins     string
+	CORSEnvOverride bool
+	Breadcrumbs     []Breadcrumb
 }
 
 func (s *Server) isDevMode() bool {
@@ -578,6 +580,14 @@ func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 		data.RetentionDays = 30
 	}
 	data.EnvKeyOverride = s.cfg != nil && s.cfg.APIKey != ""
+	data.CORSEnvOverride = s.cfg != nil && len(s.cfg.CORSAllowedOrigins) > 0
+	if data.CORSEnvOverride {
+		data.CORSOrigins = strings.Join(s.cfg.CORSAllowedOrigins, ",")
+	} else if s.settingsStore != nil {
+		if val, err := s.settingsStore.GetCORSOrigins(r.Context()); err == nil {
+			data.CORSOrigins = val
+		}
+	}
 
 	// Load users for user management tab
 	if s.userStore != nil {

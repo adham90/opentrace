@@ -259,6 +259,59 @@ func CORSMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 	}
 }
 
+// DynamicCORSMiddleware resolves CORS allowed origins per-request (env var or DB)
+// and sets appropriate CORS headers. If no origins are configured, CORS headers
+// are not set (same-origin only).
+func (s *Server) DynamicCORSMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		origins := s.getEffectiveCORSOrigins(r.Context())
+		if len(origins) == 0 {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		allowAll := len(origins) == 1 && origins[0] == "*"
+		if allowAll {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		} else {
+			allowed := false
+			for _, o := range origins {
+				if o == origin {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				if r.Method == http.MethodOptions {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				next.ServeHTTP(w, r)
+				return
+			}
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
+
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Version, X-Batch-ID")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+		w.Header().Set("Vary", "Origin")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 // StaticCacheHeaders wraps a handler to set long-lived cache headers for static assets.
 func StaticCacheHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

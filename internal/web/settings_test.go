@@ -152,6 +152,99 @@ func TestAPIKey_Regenerate(t *testing.T) {
 	}
 }
 
+func TestCORS_Get(t *testing.T) {
+	srv := newSettingsTestServer(t)
+
+	rr := settingsRequest(t, srv, "GET", "/api/settings/cors", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var resp map[string]any
+	json.NewDecoder(rr.Body).Decode(&resp)
+	if resp["cors_origins"] != "" {
+		t.Errorf("expected empty cors_origins, got %q", resp["cors_origins"])
+	}
+	if resp["env_override"] != false {
+		t.Error("expected env_override = false")
+	}
+}
+
+func TestCORS_PutAndGet(t *testing.T) {
+	srv := newSettingsTestServer(t)
+
+	rr := settingsRequest(t, srv, "PUT", "/api/settings/cors", `{"cors_origins":"https://example.com,https://app.example.com"}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, want 200", rr.Code)
+	}
+
+	rr = settingsRequest(t, srv, "GET", "/api/settings/cors", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200", rr.Code)
+	}
+
+	var resp map[string]any
+	json.NewDecoder(rr.Body).Decode(&resp)
+	if resp["cors_origins"] != "https://example.com,https://app.example.com" {
+		t.Errorf("cors_origins = %q, want comma-separated origins", resp["cors_origins"])
+	}
+}
+
+func TestCORS_PutBlockedByEnvVar(t *testing.T) {
+	us := newMockUserStore()
+	us.Create(context.Background(), store.CreateUserParams{
+		Email:        "admin@test.com",
+		PasswordHash: "hash",
+		DisplayName:  "Admin",
+		Role:         store.RoleAdmin,
+	})
+	srv := NewServerWithDeps(ServerDeps{
+		DSStore:       newMockStore(),
+		LogStore:      newMockLogStore(),
+		UserStore:     us,
+		SessionStore:  newMockSessionStore(),
+		SettingsStore: newMockSettingsStore(),
+		Cfg:           &config.Config{CORSAllowedOrigins: []string{"https://env.example.com"}},
+	})
+
+	rr := settingsRequest(t, srv, "PUT", "/api/settings/cors", `{"cors_origins":"https://other.com"}`)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rr.Code)
+	}
+}
+
+func TestCORS_GetWithEnvOverride(t *testing.T) {
+	us := newMockUserStore()
+	us.Create(context.Background(), store.CreateUserParams{
+		Email:        "admin@test.com",
+		PasswordHash: "hash",
+		DisplayName:  "Admin",
+		Role:         store.RoleAdmin,
+	})
+	srv := NewServerWithDeps(ServerDeps{
+		DSStore:       newMockStore(),
+		LogStore:      newMockLogStore(),
+		UserStore:     us,
+		SessionStore:  newMockSessionStore(),
+		SettingsStore: newMockSettingsStore(),
+		Cfg:           &config.Config{CORSAllowedOrigins: []string{"https://env.example.com"}},
+	})
+
+	rr := settingsRequest(t, srv, "GET", "/api/settings/cors", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var resp map[string]any
+	json.NewDecoder(rr.Body).Decode(&resp)
+	if resp["cors_origins"] != "https://env.example.com" {
+		t.Errorf("cors_origins = %q, want env value", resp["cors_origins"])
+	}
+	if resp["env_override"] != true {
+		t.Error("expected env_override = true")
+	}
+}
+
 func TestAPIKey_RegenerateBlockedByEnvVar(t *testing.T) {
 	us := newMockUserStore()
 	us.Create(context.Background(), store.CreateUserParams{

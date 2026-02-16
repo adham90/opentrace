@@ -83,6 +83,63 @@ func TestSettingsStore_Upsert(t *testing.T) {
 	}
 }
 
+func TestSettingsStore_CORSOrigins(t *testing.T) {
+	db := setupTestDB(t)
+	ss := NewSettingsStore(db)
+	ctx := context.Background()
+
+	// Default: empty string
+	origins, err := ss.GetCORSOrigins(ctx)
+	if err != nil {
+		t.Fatalf("GetCORSOrigins (empty): %v", err)
+	}
+	if origins != "" {
+		t.Errorf("expected empty default, got %q", origins)
+	}
+
+	// Set origins
+	err = ss.SetCORSOrigins(ctx, "https://example.com,https://app.example.com")
+	if err != nil {
+		t.Fatalf("SetCORSOrigins: %v", err)
+	}
+
+	origins, err = ss.GetCORSOrigins(ctx)
+	if err != nil {
+		t.Fatalf("GetCORSOrigins (after set): %v", err)
+	}
+	if origins != "https://example.com,https://app.example.com" {
+		t.Errorf("expected origins, got %q", origins)
+	}
+
+	// Overwrite
+	err = ss.SetCORSOrigins(ctx, "*")
+	if err != nil {
+		t.Fatalf("SetCORSOrigins (overwrite): %v", err)
+	}
+
+	origins, err = ss.GetCORSOrigins(ctx)
+	if err != nil {
+		t.Fatalf("GetCORSOrigins (after overwrite): %v", err)
+	}
+	if origins != "*" {
+		t.Errorf("expected *, got %q", origins)
+	}
+
+	// Clear
+	err = ss.SetCORSOrigins(ctx, "")
+	if err != nil {
+		t.Fatalf("SetCORSOrigins (clear): %v", err)
+	}
+
+	origins, err = ss.GetCORSOrigins(ctx)
+	if err != nil {
+		t.Fatalf("GetCORSOrigins (after clear): %v", err)
+	}
+	if origins != "" {
+		t.Errorf("expected empty after clear, got %q", origins)
+	}
+}
+
 func TestSettingsStore_APIKey(t *testing.T) {
 	db := setupTestDB(t)
 	ss := NewSettingsStore(db)

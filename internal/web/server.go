@@ -253,11 +253,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Use(DecompressRequest(10 << 20)) // 10MB decompressed limit (zip bomb protection)
 
 		// CORS for cross-origin browser requests (JS error tracking)
-		var corsOrigins []string
-		if cfg != nil {
-			corsOrigins = cfg.CORSAllowedOrigins
-		}
-		r.Use(CORSMiddleware(corsOrigins))
+		r.Use(srv.DynamicCORSMiddleware)
 
 		// Agent install script (no auth — the script is self-contained)
 		r.Get("/agent/install.sh", srv.handleAgentInstallScript)
@@ -358,6 +354,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Put("/settings/retention", srv.handleUpdateRetention)
 			r.Get("/settings/api-key", srv.handleGetAPIKey)
 			r.Post("/settings/api-key", srv.handleRegenerateAPIKey)
+			r.Get("/settings/cors", srv.handleGetCORSOrigins)
+			r.Put("/settings/cors", srv.handleUpdateCORSOrigins)
 			if srv.auditStore != nil {
 				r.Get("/audit-log", srv.handleAuditLog)
 			}
@@ -402,6 +400,35 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		return s.sseServer.Shutdown(ctx)
 	}
 	return nil
+}
+
+// getEffectiveCORSOrigins returns the CORS allowed origins from the env var (if set) or from the DB.
+// Returns a slice of origin strings parsed from the comma-separated value.
+func (s *Server) getEffectiveCORSOrigins(ctx context.Context) []string {
+	if s.cfg != nil && len(s.cfg.CORSAllowedOrigins) > 0 {
+		return s.cfg.CORSAllowedOrigins
+	}
+	if s.settingsStore != nil {
+		raw, err := s.settingsStore.GetCORSOrigins(ctx)
+		if err == nil && raw != "" {
+			return parseCORSOriginsString(raw)
+		}
+	}
+	return nil
+}
+
+// parseCORSOriginsString splits a comma-separated origins string into a slice,
+// trimming whitespace from each entry and filtering empty strings.
+func parseCORSOriginsString(s string) []string {
+	parts := strings.Split(s, ",")
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 // getEffectiveAPIKey returns the API key from the env var (if set) or from the DB.

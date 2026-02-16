@@ -556,8 +556,9 @@ func (m *mockSessionStore) DeleteAllForUser(ctx context.Context, userID string) 
 // mockSettingsStore implements store.SettingsStore for testing.
 type mockSettingsStore struct {
 	mu          sync.Mutex
-	retention *store.RetentionSettings
-	apiKey    string
+	retention   *store.RetentionSettings
+	apiKey      string
+	corsOrigins string
 }
 
 func newMockSettingsStore() *mockSettingsStore {
@@ -590,6 +591,19 @@ func (m *mockSettingsStore) SetAPIKey(ctx context.Context, key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.apiKey = key
+	return nil
+}
+
+func (m *mockSettingsStore) GetCORSOrigins(ctx context.Context) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.corsOrigins, nil
+}
+
+func (m *mockSettingsStore) SetCORSOrigins(ctx context.Context, origins string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.corsOrigins = origins
 	return nil
 }
 

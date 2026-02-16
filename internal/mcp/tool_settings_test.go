@@ -33,8 +33,10 @@ func (m *mockSettingsStore) SetRetention(_ context.Context, s store.RetentionSet
 	return nil
 }
 
-func (m *mockSettingsStore) GetAPIKey(_ context.Context) (string, error) { return "", nil }
-func (m *mockSettingsStore) SetAPIKey(_ context.Context, _ string) error  { return nil }
+func (m *mockSettingsStore) GetAPIKey(_ context.Context) (string, error)        { return "", nil }
+func (m *mockSettingsStore) SetAPIKey(_ context.Context, _ string) error        { return nil }
+func (m *mockSettingsStore) GetCORSOrigins(_ context.Context) (string, error)   { return "", nil }
+func (m *mockSettingsStore) SetCORSOrigins(_ context.Context, _ string) error   { return nil }
 
 // --- get_settings tests ---
 

@@ -96,6 +96,35 @@
       </form>
     </div>
 
+    <!-- CORS Allowed Origins -->
+    <div class="settings-section">
+      <h3 class="settings-section-title"><span class="dim">#</span> CORS Allowed Origins</h3>
+      <p class="text-dim" style="font-size:0.85rem;margin-bottom:0.75rem">
+        Origins allowed to make cross-origin requests to the API (e.g. browser JS error tracking).
+        Use <code>*</code> to allow all origins, or a comma-separated list like <code>https://app.example.com,https://staging.example.com</code>.
+        Leave empty for same-origin only.
+      </p>
+      {{if .CORSEnvOverride}}
+      <div style="background:rgba(255,200,50,0.1);border:1px solid rgba(255,200,50,0.3);color:var(--yellow);padding:0.5rem 1rem;border-radius:4px;margin-bottom:1rem;font-size:0.85rem">
+        CORS origins are set via <code>OPENTRACE_CORS_ORIGINS</code> environment variable. UI management is disabled.
+      </div>
+      {{end}}
+      <form id="cors-form" onsubmit="return saveCORS(event)">
+        <div class="form-group">
+          <label for="cors-origins">Allowed origins</label>
+          <input type="text" id="cors-origins" name="cors_origins"
+                 value="{{.CORSOrigins}}"
+                 placeholder="https://example.com,https://app.example.com"
+                 style="max-width:500px;width:100%"
+                 {{if .CORSEnvOverride}}disabled{{end}}>
+        </div>
+        {{if not .CORSEnvOverride}}
+        <button type="submit" class="btn btn-primary">Save</button>
+        <span id="cors-save-status" style="margin-left:1em"></span>
+        {{end}}
+      </form>
+    </div>
+
     <!-- Appearance & Session -->
     <div class="settings-section">
       <h3 class="settings-section-title"><span class="dim">#</span> Appearance & Session</h3>
@@ -776,6 +805,32 @@ function confirmRegenerate() {
 }
 
 loadAPIKey();
+
+// ---- General: CORS Allowed Origins ----
+function saveCORS(e) {
+  e.preventDefault();
+  var origins = document.getElementById('cors-origins').value.trim();
+  var status = document.getElementById('cors-save-status');
+  status.textContent = 'Saving...';
+  status.style.color = '';
+  fetch('/api/settings/cors', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({cors_origins: origins})
+  }).then(function(r) {
+    if (r.ok) {
+      status.textContent = 'Saved';
+      status.style.color = 'var(--green)';
+      setTimeout(function(){ status.textContent = ''; status.style.color = ''; }, 2000);
+    } else {
+      return r.json().then(function(d){ status.textContent = 'Error: ' + (d.error || 'unknown'); status.style.color = 'var(--red)'; });
+    }
+  }).catch(function(err) {
+    status.textContent = 'Error: ' + err.message;
+    status.style.color = 'var(--red)';
+  });
+  return false;
+}
 
 // ---- General: Version & Updates ----
 var versionState = {isDocker: false, latestVersion: '', currentVersion: ''};

@@ -20,6 +20,7 @@ func NewSettingsStore(db *sql.DB) SettingsStore {
 const retentionKey = "retention"
 const apiKeyKey = "api_key"
 const autoUpdateKey = "auto_update"
+const corsOriginsKey = "cors_origins"
 
 func (s *settingsStore) GetRetention(ctx context.Context) (*RetentionSettings, error) {
 	var raw string
@@ -108,6 +109,32 @@ func (s *settingsStore) SetAutoUpdate(ctx context.Context, enabled bool) error {
 	)
 	if err != nil {
 		return fmt.Errorf("upserting auto_update: %w", err)
+	}
+	return nil
+}
+
+func (s *settingsStore) GetCORSOrigins(ctx context.Context) (string, error) {
+	var val string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT value FROM app_config WHERE key = ?`, corsOriginsKey,
+	).Scan(&val)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("querying cors_origins: %w", err)
+	}
+	return val, nil
+}
+
+func (s *settingsStore) SetCORSOrigins(ctx context.Context, origins string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO app_config (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		corsOriginsKey, origins,
+	)
+	if err != nil {
+		return fmt.Errorf("upserting cors_origins: %w", err)
 	}
 	return nil
 }

@@ -104,6 +104,8 @@ type SettingsStore interface {
 	SetRetention(ctx context.Context, settings RetentionSettings) error
 	GetAPIKey(ctx context.Context) (string, error)
 	SetAPIKey(ctx context.Context, key string) error
+	GetCORSOrigins(ctx context.Context) (string, error)
+	SetCORSOrigins(ctx context.Context, origins string) error
 }
 
 // MCPActivityStore tracks MCP tool calls and connection events.

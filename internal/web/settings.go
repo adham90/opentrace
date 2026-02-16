@@ -70,6 +70,54 @@ func (s *Server) handleRegenerateAPIKey(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]string{"api_key": key})
 }
 
+func (s *Server) handleGetCORSOrigins(w http.ResponseWriter, r *http.Request) {
+	envOverride := s.cfg != nil && len(s.cfg.CORSAllowedOrigins) > 0
+
+	var origins string
+	if envOverride {
+		origins = strings.Join(s.cfg.CORSAllowedOrigins, ",")
+	} else if s.settingsStore != nil {
+		val, err := s.settingsStore.GetCORSOrigins(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to get CORS origins")
+			return
+		}
+		origins = val
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"cors_origins": origins,
+		"env_override": envOverride,
+	})
+}
+
+func (s *Server) handleUpdateCORSOrigins(w http.ResponseWriter, r *http.Request) {
+	if s.cfg != nil && len(s.cfg.CORSAllowedOrigins) > 0 {
+		writeError(w, http.StatusConflict, "CORS origins are set via OPENTRACE_CORS_ORIGINS environment variable and cannot be changed from the UI")
+		return
+	}
+
+	var req struct {
+		CORSOrigins string `json:"cors_origins"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	if s.settingsStore == nil {
+		writeError(w, http.StatusInternalServerError, "settings store not configured")
+		return
+	}
+
+	if err := s.settingsStore.SetCORSOrigins(r.Context(), req.CORSOrigins); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save CORS origins")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"cors_origins": req.CORSOrigins})
+}
+
 // maskAPIKey returns a masked version of an API key for safe display.
 // Shows the first 8 characters followed by "****", or empty if key is empty.
 func maskAPIKey(key string) string {
