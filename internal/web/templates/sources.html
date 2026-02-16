@@ -2,43 +2,77 @@
 <div class="sources-page">
   <div class="page-header">
     <h1><span class="prompt">$</span> sources</h1>
-    <div class="actions">
+  </div>
+
+  <!-- ── Databases ─────────────────────────────────────────── -->
+  <div class="src-section">
+    <div class="src-section-header">
+      <span class="dim"># databases</span>
       {{if .IsAdmin}}
       <button class="btn btn-sm" onclick="showAddConnectorModal()">+ database</button>
-      <button class="btn btn-sm" onclick="showInstallPanel()">+ server</button>
       {{end}}
     </div>
-  </div>
-
-  <div id="sources-list">
-    <div class="loading-state">loading sources</div>
-  </div>
-
-  <!-- Install agent panel (hidden by default) -->
-  {{if .IsAdmin}}
-  <div id="install-panel" class="source-install-panel" style="display:none">
-    <div class="source-install-header">
-      <span class="prompt">$</span> install agent
-      <button class="btn-close" onclick="hideInstallPanel()">&times;</button>
+    <div id="db-list">
+      <div class="loading-state">loading databases</div>
     </div>
-    <div class="source-install-body">
-      <p class="dim" style="margin-bottom:12px;font-size:12px">Run this on any Linux server to install the OpenTrace agent. It will auto-register and start sending metrics.</p>
-      <div class="source-install-cmd">
-        <code id="install-cmd">curl -fsSL <span id="install-url"></span>/api/agent/install.sh?key={{.APIKey}} | bash</code>
+  </div>
+
+  <!-- ── Application Logs ──────────────────────────────────── -->
+  <div class="src-section">
+    <div class="src-section-header">
+      <span class="dim"># application logs</span>
+    </div>
+    <div class="src-guide-card">
+      <p style="margin:0 0 12px;font-size:12px;color:var(--text-dim)">Use the <span style="color:var(--text)">opentrace_ruby</span> gem to send structured logs from your Rails app.</p>
+      <div class="src-code-block">
+        <code><span class="dim"># Gemfile</span><br>gem 'opentrace_ruby'</code>
+      </div>
+      <div class="src-code-block" style="margin-top:8px">
+        <code><span class="dim"># config/initializers/opentrace.rb</span><br>OpenTrace.configure do |c|<br>&nbsp;&nbsp;c.endpoint = "<span class="dim">https://your-opentrace-server</span>"<br>&nbsp;&nbsp;c.api_key&nbsp; = ENV["OPENTRACE_API_KEY"]<br>end</code>
+      </div>
+      <p style="margin:12px 0 0;font-size:11px;color:var(--text-dim)">
+        <a href="https://rubygems.org/gems/opentrace_ruby" target="_blank" rel="noopener" style="color:var(--blue)">rubygems</a>
+        &nbsp;&middot;&nbsp;
+        <a href="https://github.com/adham90/opentrace_ruby" target="_blank" rel="noopener" style="color:var(--blue)">github</a>
+      </p>
+    </div>
+  </div>
+
+  <!-- ── Servers ───────────────────────────────────────────── -->
+  <div class="src-section">
+    <div class="src-section-header">
+      <span class="dim"># servers</span>
+    </div>
+    <div id="srv-list">
+      <div class="loading-state">loading servers</div>
+    </div>
+    <!-- Install agent card (always visible) -->
+    {{if .IsAdmin}}
+    <div class="src-install-card" id="install-card">
+      <div style="margin-bottom:12px">
+        <span style="font-size:12px;font-weight:600;color:var(--text)">install agent</span>
+        <p style="margin:4px 0 0;font-size:11px;color:var(--text-dim)">Run this on any Linux server to install the OpenTrace agent. It will auto-register and start sending metrics.</p>
+      </div>
+      <div class="src-cmd-row">
+        <code id="install-cmd"></code>
         <button class="btn btn-sm" onclick="copyInstallCmd()">copy</button>
       </div>
       <div style="margin-top:8px">
-        <span class="dim" style="font-size:11px">Or download the script and review it first:</span>
-        <div class="source-install-cmd" style="margin-top:4px">
-          <code>curl -fsSL <span class="install-url-mirror"></span>/api/agent/install.sh?key={{.APIKey}} -o install.sh && chmod +x install.sh && ./install.sh</code>
+        <span style="font-size:11px;color:var(--text-dim)">Or review first:</span>
+        <div class="src-cmd-row" style="margin-top:4px">
+          <code id="install-cmd-review"></code>
         </div>
       </div>
     </div>
+    {{else}}
+    <div class="src-install-card">
+      <span style="font-size:12px;color:var(--text-dim)">Ask an admin to install the agent on your servers.</span>
+    </div>
+    {{end}}
   </div>
-  {{end}}
 </div>
 
-<!-- Connector Create/Edit Modal -->
+<!-- ── Connector Modal ───────────────────────────────────── -->
 {{if .IsAdmin}}
 <div id="connector-modal" class="modal" role="dialog" aria-modal="true" style="display:none" onclick="if(event.target===this)hideConnectorModal()">
   <div class="modal-content">
@@ -49,21 +83,31 @@
     <form id="connector-form" onsubmit="saveConnector(event)">
       <div class="modal-body">
         <input type="hidden" id="connector-edit-id" value="">
+
         <div class="form-group">
           <label>Name</label>
           <input type="text" id="connector-name" placeholder="e.g. production-db" required>
         </div>
-        <div class="form-grid">
-          <div class="form-group">
-            <label>Type</label>
-            <select id="connector-type">
-              <option value="database">Database (PostgreSQL)</option>
-              <option value="logs">Logs</option>
-              <option value="monitoring">Monitoring</option>
-            </select>
+
+        <!-- Input mode toggle -->
+        <div class="form-group">
+          <label>Connection</label>
+          <div class="src-mode-toggle">
+            <button type="button" class="src-mode-btn active" data-mode="string" onclick="setConnMode('string')">connection string</button>
+            <button type="button" class="src-mode-btn" data-mode="fields" onclick="setConnMode('fields')">individual fields</button>
           </div>
         </div>
-        <div id="connector-db-fields">
+
+        <!-- Connection string mode -->
+        <div id="conn-mode-string">
+          <div class="form-group">
+            <label>Connection String</label>
+            <textarea id="connector-connstr" rows="2" placeholder="postgresql://user:password@host:5432/dbname?sslmode=prefer" style="resize:vertical"></textarea>
+          </div>
+        </div>
+
+        <!-- Fields mode -->
+        <div id="conn-mode-fields" style="display:none">
           <div class="form-group">
             <label>Host</label>
             <input type="text" id="connector-host" placeholder="localhost">
@@ -113,6 +157,7 @@ var isAdmin = {{.IsAdmin}};
 var allConnectors = [];
 var allServers = [];
 var expandedSources = {};
+var connMode = 'string';
 
 function escapeHtml(str) {
   var div = document.createElement('div');
@@ -135,18 +180,16 @@ function getTimeAgo(dateStr) {
 // ── Data loading ──────────────────────────────────────────
 
 function loadSources() {
-  var connUrl = '/api/connectors';
-  var srvUrl = '/api/servers';
-
   Promise.all([
-    fetch(connUrl).then(function(r) { return r.json(); }),
-    fetch(srvUrl).then(function(r) { return r.json(); })
+    fetch('/api/connectors').then(function(r) { return r.json(); }),
+    fetch('/api/servers').then(function(r) { return r.json(); })
   ]).then(function(results) {
     allConnectors = results[0] || [];
     allServers = results[1] || [];
-    renderSources();
+    renderDatabases();
+    renderServers();
   }).catch(function() {
-    document.getElementById('sources-list').innerHTML =
+    document.getElementById('db-list').innerHTML =
       '<div class="empty-state"><div class="empty-icon">!!</div><p>Failed to load sources</p></div>';
   });
 }
@@ -165,39 +208,32 @@ function getServerStatusClass(status) {
   return 'status-offline';
 }
 
-function renderSources() {
-  var container = document.getElementById('sources-list');
-
-  if (allConnectors.length === 0 && allServers.length === 0) {
-    var desc = isAdmin
-      ? 'Add a database connection or install the agent on a server to get started.'
-      : 'No sources have been configured yet. Ask an admin to add databases or servers.';
-    container.innerHTML = '<div class="empty-state">' +
-      '<div class="empty-icon">--</div>' +
-      '<p class="empty-state-title">No sources configured</p>' +
-      '<p class="empty-state-desc">' + escapeHtml(desc) + '</p>' +
-      '</div>';
+function renderDatabases() {
+  var container = document.getElementById('db-list');
+  if (allConnectors.length === 0) {
+    var msg = isAdmin
+      ? 'No database connectors. Click + database to add one.'
+      : 'No database connectors configured. Ask an admin to add one.';
+    container.innerHTML = '<div class="src-empty">' + escapeHtml(msg) + '</div>';
     return;
   }
-
   var html = '';
-
-  // Section: Databases
-  if (allConnectors.length > 0) {
-    html += '<div class="source-section-label"><span class="dim"># databases (' + allConnectors.length + ')</span></div>';
-    for (var i = 0; i < allConnectors.length; i++) {
-      html += renderConnectorRow(allConnectors[i]);
-    }
+  for (var i = 0; i < allConnectors.length; i++) {
+    html += renderConnectorRow(allConnectors[i]);
   }
+  container.innerHTML = html;
+}
 
-  // Section: Servers
-  if (allServers.length > 0) {
-    html += '<div class="source-section-label" style="margin-top:16px"><span class="dim"># servers (' + allServers.length + ')</span></div>';
-    for (var j = 0; j < allServers.length; j++) {
-      html += renderServerRow(allServers[j]);
-    }
+function renderServers() {
+  var container = document.getElementById('srv-list');
+  if (allServers.length === 0) {
+    container.innerHTML = '<div class="src-empty">No servers registered yet.</div>';
+    return;
   }
-
+  var html = '';
+  for (var i = 0; i < allServers.length; i++) {
+    html += renderServerRow(allServers[i]);
+  }
   container.innerHTML = html;
 }
 
@@ -215,23 +251,28 @@ function renderConnectorRow(c) {
   html += '    <span class="source-time-ago">' + lastSeen + '</span>';
   html += '  </div>';
 
-  // Expandable detail
   html += '  <div class="source-detail" id="source-detail-db-' + c.id + '" style="display:' + (expanded ? 'block' : 'none') + '">';
   html += '    <div class="source-detail-meta">';
   html += '      <div class="alert-detail-row"><span class="alert-detail-key">id</span><span class="alert-detail-val dim" style="font-size:10px">' + c.id + '</span></div>';
   html += '      <div class="alert-detail-row"><span class="alert-detail-key">type</span><span class="alert-detail-val">' + escapeHtml(c.type) + '</span></div>';
   if (c.config) {
-    if (c.config.host) {
-      html += '      <div class="alert-detail-row"><span class="alert-detail-key">host</span><span class="alert-detail-val">' + escapeHtml(c.config.host) + (c.config.port ? ':' + c.config.port : '') + '</span></div>';
-    }
-    if (c.config.database) {
-      html += '      <div class="alert-detail-row"><span class="alert-detail-key">database</span><span class="alert-detail-val">' + escapeHtml(c.config.database) + '</span></div>';
-    }
-    if (c.config.user) {
-      html += '      <div class="alert-detail-row"><span class="alert-detail-key">user</span><span class="alert-detail-val">' + escapeHtml(c.config.user) + '</span></div>';
-    }
-    if (c.config.sslmode) {
-      html += '      <div class="alert-detail-row"><span class="alert-detail-key">ssl</span><span class="alert-detail-val">' + escapeHtml(c.config.sslmode) + '</span></div>';
+    if (c.config.connection_string) {
+      // Mask password in display
+      var masked = maskConnStr(c.config.connection_string);
+      html += '      <div class="alert-detail-row"><span class="alert-detail-key">connection</span><span class="alert-detail-val" style="word-break:break-all;font-size:11px">' + escapeHtml(masked) + '</span></div>';
+    } else {
+      if (c.config.host) {
+        html += '      <div class="alert-detail-row"><span class="alert-detail-key">host</span><span class="alert-detail-val">' + escapeHtml(c.config.host) + (c.config.port ? ':' + c.config.port : '') + '</span></div>';
+      }
+      if (c.config.database) {
+        html += '      <div class="alert-detail-row"><span class="alert-detail-key">database</span><span class="alert-detail-val">' + escapeHtml(c.config.database) + '</span></div>';
+      }
+      if (c.config.user) {
+        html += '      <div class="alert-detail-row"><span class="alert-detail-key">user</span><span class="alert-detail-val">' + escapeHtml(c.config.user) + '</span></div>';
+      }
+      if (c.config.sslmode) {
+        html += '      <div class="alert-detail-row"><span class="alert-detail-key">ssl</span><span class="alert-detail-val">' + escapeHtml(c.config.sslmode) + '</span></div>';
+      }
     }
   }
   if (c.status_message) {
@@ -242,7 +283,6 @@ function renderConnectorRow(c) {
   }
   html += '    </div>';
 
-  // Actions
   if (isAdmin) {
     html += '    <div class="source-detail-actions">';
     html += '      <button class="btn btn-sm" onclick="event.stopPropagation();testConnector(\'' + c.id + '\')">Test Connection</button>';
@@ -272,7 +312,6 @@ function renderServerRow(srv) {
   html += '    <span class="source-time-ago">' + lastSeen + '</span>';
   html += '  </div>';
 
-  // Expandable detail
   html += '  <div class="source-detail" id="source-detail-srv-' + srv.id + '" style="display:' + (expanded ? 'block' : 'none') + '">';
   html += '    <div class="source-detail-meta">';
   html += '      <div class="alert-detail-row"><span class="alert-detail-key">id</span><span class="alert-detail-val dim" style="font-size:10px">' + srv.id + '</span></div>';
@@ -299,11 +338,9 @@ function renderServerRow(srv) {
     html += '      <div class="alert-detail-row"><span class="alert-detail-key">registered</span><span class="alert-detail-val">' + new Date(srv.created_at).toLocaleString() + '</span></div>';
   }
 
-  // Load latest metrics on expand
   html += '      <div id="server-metrics-' + srv.id + '"></div>';
   html += '    </div>';
 
-  // Actions
   if (isAdmin) {
     html += '    <div class="source-detail-actions">';
     html += '      <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteServer(\'' + srv.id + '\')">Remove</button>';
@@ -327,7 +364,6 @@ function toggleSourceDetail(key) {
   el.style.display = 'block';
   expandedSources[key] = true;
 
-  // Load server metrics on first expand
   if (key.indexOf('srv-') === 0) {
     var serverId = key.substring(4);
     loadServerMetrics(serverId);
@@ -350,7 +386,6 @@ function loadServerMetrics(serverId) {
         el.innerHTML = '<span class="dim" style="font-size:11px">no recent metrics</span>';
         return;
       }
-      // Group by metric name and show latest value
       var latest = {};
       for (var i = 0; i < points.length; i++) {
         var p = points[i];
@@ -376,16 +411,79 @@ function loadServerMetrics(serverId) {
     });
 }
 
+// ── Connection string helpers ─────────────────────────────
+
+function buildConnStr() {
+  var host = document.getElementById('connector-host').value.trim() || 'localhost';
+  var port = document.getElementById('connector-port').value.trim() || '5432';
+  var db = document.getElementById('connector-dbname').value.trim();
+  var user = document.getElementById('connector-user').value.trim();
+  var pass = document.getElementById('connector-pass').value;
+  var ssl = document.getElementById('connector-ssl').value;
+
+  var userPart = '';
+  if (user) {
+    userPart = encodeURIComponent(user);
+    if (pass) userPart += ':' + encodeURIComponent(pass);
+    userPart += '@';
+  }
+
+  var str = 'postgresql://' + userPart + host + ':' + port;
+  if (db) str += '/' + encodeURIComponent(db);
+  if (ssl && ssl !== 'prefer') str += '?sslmode=' + ssl;
+  else str += '?sslmode=prefer';
+  return str;
+}
+
+function parseConnStr(str) {
+  // Parse postgresql://user:pass@host:port/db?sslmode=X
+  var result = { host: '', port: '5432', database: '', user: '', password: '', sslmode: 'prefer' };
+  if (!str) return result;
+  try {
+    // Handle the postgresql:// prefix for URL parsing
+    var url = new URL(str.replace(/^postgres:\/\//, 'postgresql://').replace(/^postgresql:\/\//, 'http://'));
+    result.host = url.hostname || '';
+    result.port = url.port || '5432';
+    result.database = url.pathname.replace(/^\//, '') || '';
+    result.user = decodeURIComponent(url.username || '');
+    result.password = decodeURIComponent(url.password || '');
+    var ssl = url.searchParams.get('sslmode');
+    if (ssl) result.sslmode = ssl;
+  } catch(e) {
+    // If parsing fails, leave defaults
+  }
+  return result;
+}
+
+function maskConnStr(str) {
+  if (!str) return '';
+  // Mask password portion: postgresql://user:****@host:port/db
+  return str.replace(/:([^@/:]+)@/, ':****@');
+}
+
+// ── Connector mode toggle ─────────────────────────────────
+
+function setConnMode(mode) {
+  connMode = mode;
+  var btns = document.querySelectorAll('.src-mode-btn');
+  for (var i = 0; i < btns.length; i++) {
+    btns[i].classList.toggle('active', btns[i].dataset.mode === mode);
+  }
+  document.getElementById('conn-mode-string').style.display = mode === 'string' ? 'block' : 'none';
+  document.getElementById('conn-mode-fields').style.display = mode === 'fields' ? 'block' : 'none';
+}
+window.setConnMode = setConnMode;
+
 // ── Connector CRUD ────────────────────────────────────────
 
 function showAddConnectorModal() {
   document.getElementById('connector-modal-title').textContent = 'add-database';
   document.getElementById('connector-edit-id').value = '';
   document.getElementById('connector-form').reset();
+  document.getElementById('connector-connstr').value = '';
   document.getElementById('connector-port').value = '5432';
   document.getElementById('connector-ssl').value = 'prefer';
-  document.getElementById('connector-type').disabled = false;
-  updateConnectorFields();
+  setConnMode('string');
   document.getElementById('connector-modal').style.display = 'flex';
 }
 window.showAddConnectorModal = showAddConnectorModal;
@@ -395,17 +493,20 @@ function editConnector(id) {
     document.getElementById('connector-modal-title').textContent = 'edit-database';
     document.getElementById('connector-edit-id').value = c.id;
     document.getElementById('connector-name').value = c.name || '';
-    document.getElementById('connector-type').value = c.type || 'database';
-    document.getElementById('connector-type').disabled = true;
-    if (c.config) {
-      document.getElementById('connector-host').value = c.config.host || '';
-      document.getElementById('connector-port').value = c.config.port || '5432';
-      document.getElementById('connector-dbname').value = c.config.database || '';
-      document.getElementById('connector-user').value = c.config.user || '';
-      document.getElementById('connector-pass').value = '';
-      document.getElementById('connector-ssl').value = c.config.sslmode || 'prefer';
-    }
-    updateConnectorFields();
+
+    var connStr = (c.config && c.config.connection_string) ? c.config.connection_string : '';
+    document.getElementById('connector-connstr').value = connStr;
+
+    // Also populate fields for convenience
+    var parsed = parseConnStr(connStr);
+    document.getElementById('connector-host').value = (c.config && c.config.host) || parsed.host;
+    document.getElementById('connector-port').value = (c.config && c.config.port) || parsed.port;
+    document.getElementById('connector-dbname').value = (c.config && c.config.database) || parsed.database;
+    document.getElementById('connector-user').value = (c.config && c.config.user) || parsed.user;
+    document.getElementById('connector-pass').value = '';
+    document.getElementById('connector-ssl').value = (c.config && c.config.sslmode) || parsed.sslmode;
+
+    setConnMode(connStr ? 'string' : 'fields');
     document.getElementById('connector-modal').style.display = 'flex';
   }).catch(function() {
     showToast('Failed to load connector details', 'error');
@@ -418,14 +519,6 @@ function hideConnectorModal() {
 }
 window.hideConnectorModal = hideConnectorModal;
 
-function updateConnectorFields() {
-  var type = document.getElementById('connector-type').value;
-  var dbFields = document.getElementById('connector-db-fields');
-  dbFields.style.display = (type === 'database') ? 'block' : 'none';
-}
-
-document.getElementById('connector-type').addEventListener('change', updateConnectorFields);
-
 function saveConnector(e) {
   e.preventDefault();
   var btn = document.getElementById('connector-save-btn');
@@ -433,32 +526,37 @@ function saveConnector(e) {
   var isEdit = editId !== '';
 
   var name = document.getElementById('connector-name').value.trim();
-  var type = document.getElementById('connector-type').value;
-
   if (!name) {
     showToast('Name is required', 'error');
     return;
   }
 
-  var config = {};
-  if (type === 'database') {
-    config.host = document.getElementById('connector-host').value.trim();
-    config.port = parseInt(document.getElementById('connector-port').value) || 5432;
-    config.database = document.getElementById('connector-dbname').value.trim();
-    config.user = document.getElementById('connector-user').value.trim();
-    var pass = document.getElementById('connector-pass').value;
-    if (pass) config.password = pass;
-    config.sslmode = document.getElementById('connector-ssl').value;
+  // Build connection_string from whichever mode is active
+  var connectionString = '';
+  if (connMode === 'string') {
+    connectionString = document.getElementById('connector-connstr').value.trim();
+    if (!connectionString) {
+      showToast('Connection string is required', 'error');
+      return;
+    }
+  } else {
+    var host = document.getElementById('connector-host').value.trim();
+    if (!host) {
+      showToast('Host is required', 'error');
+      return;
+    }
+    connectionString = buildConnStr();
   }
+
+  var config = { connection_string: connectionString };
 
   setButtonLoading(btn, true, 'saving...');
 
   if (isEdit) {
-    var body = { name: name, config: config };
     fetch('/api/connectors/' + editId, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body)
+      body: JSON.stringify({ name: name, config: config })
     }).then(function(r) {
       setButtonLoading(btn, false, 'Save');
       if (!r.ok) return r.json().then(function(d) { showToast(d.error || 'Failed to update connector', 'error'); });
@@ -470,11 +568,10 @@ function saveConnector(e) {
       showToast('Network error', 'error');
     });
   } else {
-    var body = { type: type, name: name, config: config };
     fetch('/api/connectors', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body)
+      body: JSON.stringify({ type: 'database', name: name, config: config })
     }).then(function(r) {
       setButtonLoading(btn, false, 'Save');
       if (!r.ok) return r.json().then(function(d) { showToast(d.error || 'Failed to create connector', 'error'); });
@@ -538,29 +635,15 @@ function deleteServer(id) {
 }
 window.deleteServer = deleteServer;
 
-// ── Install panel ─────────────────────────────────────────
+// ── Install commands ──────────────────────────────────────
 
-function showInstallPanel() {
-  var panel = document.getElementById('install-panel');
-  if (!panel) return;
-  // Set the server URL dynamically
+function initInstallCmds() {
   var baseUrl = window.location.protocol + '//' + window.location.host;
-  var urlEl = document.getElementById('install-url');
-  if (urlEl) urlEl.textContent = baseUrl;
-  var mirrors = document.querySelectorAll('.install-url-mirror');
-  for (var i = 0; i < mirrors.length; i++) {
-    mirrors[i].textContent = baseUrl;
-  }
-  panel.style.display = 'block';
-  panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+  var cmdEl = document.getElementById('install-cmd');
+  var reviewEl = document.getElementById('install-cmd-review');
+  if (cmdEl) cmdEl.textContent = 'curl -fsSL ' + baseUrl + '/api/agent/install.sh?key={{.APIKey}} | bash';
+  if (reviewEl) reviewEl.textContent = 'curl -fsSL ' + baseUrl + '/api/agent/install.sh?key={{.APIKey}} -o install.sh && chmod +x install.sh && ./install.sh';
 }
-window.showInstallPanel = showInstallPanel;
-
-function hideInstallPanel() {
-  var panel = document.getElementById('install-panel');
-  if (panel) panel.style.display = 'none';
-}
-window.hideInstallPanel = hideInstallPanel;
 
 function copyInstallCmd() {
   var baseUrl = window.location.protocol + '//' + window.location.host;
@@ -575,21 +658,94 @@ window.copyInstallCmd = copyInstallCmd;
 
 // ── Init ──────────────────────────────────────────────────
 
+initInstallCmds();
 loadSources();
 window.loadPageData = loadSources;
 setInterval(loadSources, 30000);
 </script>
 
 <style nonce="{{.CSPNonce}}">
-/* Sources page styles */
 .sources-page { max-width: 100%; }
 
-.source-section-label {
+/* ── Sections ─────────────────────────────────────────── */
+
+.src-section {
+  margin-bottom: 16px;
+}
+
+.src-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 8px 12px 4px;
   font-size: 12px;
   font-family: var(--font-mono, 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace);
   user-select: none;
 }
+
+.src-empty {
+  padding: 16px 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: var(--font-mono, 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace);
+}
+
+/* ── Guide card (application logs) ────────────────────── */
+
+.src-guide-card {
+  margin: 0 12px;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono, 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace);
+}
+
+.src-code-block {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-family: var(--font-mono, 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace);
+  overflow-x: auto;
+  line-height: 1.5;
+}
+
+/* ── Install card (servers) ───────────────────────────── */
+
+.src-install-card {
+  margin: 8px 12px 0;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono, 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace);
+}
+
+.src-cmd-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-family: var(--font-mono, 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace);
+  overflow-x: auto;
+}
+
+.src-cmd-row code {
+  flex: 1;
+  word-break: break-all;
+}
+
+.src-cmd-row .btn {
+  flex-shrink: 0;
+}
+
+/* ── Source rows ──────────────────────────────────────── */
 
 .source-row {
   border-bottom: 1px solid var(--border);
@@ -660,59 +816,46 @@ setInterval(loadSources, 30000);
   flex-wrap: wrap;
 }
 
-/* Install panel */
-.source-install-panel {
-  margin-top: 16px;
+/* ── Modal: mode toggle ──────────────────────────────── */
+
+.src-mode-toggle {
+  display: flex;
+  gap: 0;
   border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg-secondary);
+  border-radius: 3px;
+  overflow: hidden;
 }
 
-.source-install-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
+.src-mode-btn {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 11px;
   font-family: var(--font-mono, 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace);
-  font-size: 13px;
+  text-transform: uppercase;
+  background: var(--bg-secondary);
+  color: var(--text-dim);
+  border: none;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.src-mode-btn:not(:last-child) {
+  border-right: 1px solid var(--border);
+}
+
+.src-mode-btn.active {
+  background: var(--bg-tertiary);
+  color: var(--text);
   font-weight: 600;
 }
 
-.source-install-header .prompt { color: var(--green); }
-
-.source-install-header .btn-close {
-  margin-left: auto;
-}
-
-.source-install-body {
-  padding: 14px;
-}
-
-.source-install-cmd {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.src-mode-btn:hover:not(.active) {
   background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 8px 12px;
-  font-family: var(--font-mono, 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace);
-  font-size: 12px;
-  overflow-x: auto;
 }
 
-.source-install-cmd code {
-  flex: 1;
-  word-break: break-all;
-}
-
-.source-install-cmd .btn {
-  flex-shrink: 0;
-}
+/* ── Responsive ──────────────────────────────────────── */
 
 @media (max-width: 699px) {
-  /* Source row: tighter layout */
   .source-row-main {
     flex-wrap: wrap;
     gap: 6px;
@@ -728,17 +871,19 @@ setInterval(loadSources, 30000);
     min-width: auto;
     margin-left: auto;
   }
-  /* Remove excessive left padding on detail */
   .source-detail {
     padding: 0 10px 10px 10px;
   }
-  /* Install command: stack button below */
-  .source-install-cmd {
+  .src-cmd-row {
     flex-wrap: wrap;
   }
-  .source-install-cmd code {
+  .src-cmd-row code {
     width: 100%;
     overflow-x: auto;
+  }
+  .src-guide-card,
+  .src-install-card {
+    margin: 0 8px;
   }
 }
 </style>
