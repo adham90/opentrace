@@ -66,6 +66,8 @@ type Server struct {
 	errorGroupStore    store.ErrorGroupStore
 	healthCheckStore   store.HealthCheckStore
 	agentNoteStore     store.AgentNoteStore
+	trendStore         store.TrendStore
+	analyticsStore     store.AnalyticsStore
 	versionChecker     *versionChecker
 	sseServer      *mcpgoserver.SSEServer
 	loginLimiter   *RateLimiter
@@ -97,6 +99,8 @@ type ServerDeps struct {
 	ErrorGroupStore      store.ErrorGroupStore
 	HealthCheckStore     store.HealthCheckStore
 	AgentNoteStore       store.AgentNoteStore
+	TrendStore           store.TrendStore
+	AnalyticsStore       store.AnalyticsStore
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
@@ -131,6 +135,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		errorGroupStore:    deps.ErrorGroupStore,
 		healthCheckStore:   deps.HealthCheckStore,
 		agentNoteStore:     deps.AgentNoteStore,
+		trendStore:         deps.TrendStore,
+		analyticsStore:     deps.AnalyticsStore,
 		versionChecker:     newVersionChecker("adham90", "opentrace"),
 	}
 
@@ -299,6 +305,17 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 				r.Get("/healthchecks", srv.handleListHealthChecks)
 				r.Get("/healthchecks/{id}/results", srv.handleHealthCheckResults)
 				r.Get("/healthchecks/uptime", srv.handleUptimeSummary)
+			}
+
+			// Trends + Analytics
+			if srv.trendStore != nil {
+				r.Get("/trends", srv.handleTrendsAPI)
+				r.Get("/trends/deploys", srv.handleDeployMarkersAPI)
+			}
+			if srv.analyticsStore != nil {
+				r.Get("/analytics/summary", srv.handleAnalyticsSummaryAPI)
+				r.Get("/analytics/endpoints", srv.handleTopEndpointsAPI)
+				r.Get("/analytics/heatmap", srv.handleTrafficHeatmapAPI)
 			}
 
 			// MCP activity

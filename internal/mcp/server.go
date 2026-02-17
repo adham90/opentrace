@@ -79,6 +79,10 @@ type Deps struct {
 	// Agent-first watches (Phase 1)
 	WatchStore    store.WatchStore
 	WatchMetrics  *watcher.WatchMetrics
+
+	// Trends + Analytics (Phase 1 features)
+	TrendStore     store.TrendStore
+	AnalyticsStore store.AnalyticsStore
 }
 
 // NewConfiguredServer creates an MCPServer and registers tools based on the
@@ -718,6 +722,72 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 	if deps.AuditStore != nil {
 		maybeAddTool(s, getAuditLogTool(), getAuditLogHandler(deps.AuditStore))
 		b.Add("get_audit_log", "View recent admin actions for security review", "Audit", "read", "")
+	}
+
+	// Trends Dashboard tools (read-only).
+	if deps.TrendStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("trends",
+				mcp.WithDescription("Query time-series metric trends. Returns bucketed data points for charting error rate, response time, request volume, SQL counts, etc. Supports period-over-period comparison and deploy markers."),
+				mcp.WithString("metric", mcp.Description("Metric to query: error_rate, p95_response, avg_response, request_volume, avg_sql_count, avg_db_time, cache_hit_ratio, error_count (default: request_volume)")),
+				mcp.WithString("interval", mcp.Description("Bucket interval: 5m, 15m, 1h (default), 1d")),
+				mcp.WithString("since", mcp.Description("Lookback window: '1h', '24h' (default), '7d'")),
+				mcp.WithString("service", mcp.Description("Filter to a specific service")),
+				mcp.WithString("endpoint", mcp.Description("Filter to a specific endpoint (controller#action)")),
+				mcp.WithString("environment", mcp.Description("Filter by environment")),
+				mcp.WithString("compare_to", mcp.Description("Compare to baseline: 'previous_period' or 'previous_week'")),
+			),
+			trendsHandler(deps.TrendStore),
+		)
+		b.Add("trends", "Query time-series metric trends with period comparison and deploy markers", "Trends", "read", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("top_movers",
+				mcp.WithDescription("Find services with the biggest metric changes compared to a baseline period. Useful for identifying regressions after deploys."),
+				mcp.WithString("metric", mcp.Description("Metric to compare: error_rate, p95_response (default), request_volume, avg_sql_count")),
+				mcp.WithString("since", mcp.Description("Current period lookback: '24h' (default), '7d'")),
+				mcp.WithString("baseline", mcp.Description("Baseline: 'previous_period' (default), 'previous_week'")),
+				mcp.WithNumber("limit", mcp.Description("Number of results (default: 10)")),
+			),
+			topMoversHandler(deps.TrendStore),
+		)
+		b.Add("top_movers", "Find services with the biggest metric changes vs baseline", "Trends", "read", "")
+	}
+
+	// Web Analytics tools (read-only).
+	if deps.AnalyticsStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("web_analytics",
+				mcp.WithDescription("Get a high-level overview of web traffic: total requests, top endpoints, error rates, status code breakdown, HTTP method distribution."),
+				mcp.WithString("service", mcp.Description("Filter by service")),
+				mcp.WithString("since", mcp.Description("Lookback window: '1h', '24h' (default), '7d'")),
+			),
+			webAnalyticsHandler(deps.AnalyticsStore),
+		)
+		b.Add("web_analytics", "High-level web traffic overview: requests, error rates, status codes", "Analytics", "read", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("top_endpoints",
+				mcp.WithDescription("Rank endpoints by traffic volume, error rate, or response time. Find busiest, slowest, or most error-prone endpoints."),
+				mcp.WithString("service", mcp.Description("Filter by service")),
+				mcp.WithString("sort_by", mcp.Description("Sort by: request_count (default), error_rate, avg_duration, p95_duration")),
+				mcp.WithString("since", mcp.Description("Lookback window: '24h' (default), '7d'")),
+				mcp.WithNumber("min_requests", mcp.Description("Minimum request count to include (default: 5)")),
+				mcp.WithNumber("limit", mcp.Description("Number of results (default: 20)")),
+			),
+			topEndpointsHandler(deps.AnalyticsStore),
+		)
+		b.Add("top_endpoints", "Rank endpoints by traffic, error rate, or response time", "Analytics", "read", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("traffic_heatmap",
+				mcp.WithDescription("Get a 24x7 heatmap of traffic volume by day of week and hour. Shows busiest and quietest times for scheduling maintenance."),
+				mcp.WithString("service", mcp.Description("Filter by service")),
+				mcp.WithString("metric", mcp.Description("Metric: request_count (default), error_count, avg_duration")),
+			),
+			trafficHeatmapHandler(deps.AnalyticsStore),
+		)
+		b.Add("traffic_heatmap", "24x7 traffic heatmap by day and hour for capacity planning", "Analytics", "read", "")
 	}
 
 	// Agent-first watch tools (read-only).
