@@ -66,6 +66,8 @@ type LogEntry struct {
 	SpanID           string          `json:"span_id,omitempty"`
 	ParentSpanID     string          `json:"parent_span_id,omitempty"`
 	RequestID        string          `json:"request_id,omitempty"`
+	UserID           string          `json:"user_id,omitempty"`
+	SessionID        string          `json:"session_id,omitempty"`
 	Message          string          `json:"message"`
 	EventType        string          `json:"event_type,omitempty"`
 	ExceptionClass   string          `json:"exception_class,omitempty"`
@@ -782,4 +784,126 @@ type AnalyticsParams struct {
 	Service string    `json:"service,omitempty"`
 	Since   time.Time `json:"since"`
 	Until   time.Time `json:"until"`
+}
+
+// --- Phase 2: User Journey / Session Timeline ---
+
+// UserSession represents a pre-computed user session aggregation.
+type UserSession struct {
+	ID              int64     `json:"id"`
+	SessionID       string    `json:"session_id"`
+	UserID          string    `json:"user_id,omitempty"`
+	Service         string    `json:"service"`
+	Environment     string    `json:"environment,omitempty"`
+	StartedAt       time.Time `json:"started_at"`
+	EndedAt         time.Time `json:"ended_at"`
+	RequestCount    int       `json:"request_count"`
+	ErrorCount      int       `json:"error_count"`
+	TotalDurationMs float64   `json:"total_duration_ms"`
+	EntryPath       string    `json:"entry_path"`
+	ExitPath        string    `json:"exit_path"`
+	ExitStatus      int       `json:"exit_status"`
+	HasError        bool      `json:"has_error"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// SessionListParams defines filters for listing user sessions.
+type SessionListParams struct {
+	UserID      string    `json:"user_id,omitempty"`
+	Service     string    `json:"service,omitempty"`
+	HasError    *bool     `json:"has_error,omitempty"`
+	Since       time.Time `json:"since"`
+	Until       time.Time `json:"until"`
+	Limit       int       `json:"limit"`
+	Offset      int       `json:"offset"`
+}
+
+// RequestStep represents one HTTP request in a user journey.
+type RequestStep struct {
+	Timestamp  time.Time `json:"timestamp"`
+	Controller string    `json:"controller"`
+	Action     string    `json:"action"`
+	Path       string    `json:"path"`
+	Method     string    `json:"method"`
+	Status     int       `json:"status"`
+	DurationMs float64   `json:"duration_ms"`
+	SQLCount   int       `json:"sql_count"`
+	HasError   bool      `json:"has_error"`
+	ErrorClass string    `json:"error_class,omitempty"`
+	RequestID  string    `json:"request_id"`
+	LogID      int64     `json:"log_id"`
+}
+
+// PathFrequency represents a common navigation path and its frequency.
+type PathFrequency struct {
+	Steps            []string `json:"steps"`
+	Count            int      `json:"count"`
+	AvgTotalDuration float64  `json:"avg_total_duration_ms"`
+	ErrorRate        float64  `json:"error_rate"`
+}
+
+// PathAnalysisParams defines filters for path analysis queries.
+type PathAnalysisParams struct {
+	Service        string    `json:"service,omitempty"`
+	Since          time.Time `json:"since"`
+	MinOccurrences int       `json:"min_occurrences"`
+	PathLength     int       `json:"path_length"`
+	ErrorPathsOnly bool      `json:"error_paths_only"`
+	StartingFrom   string    `json:"starting_from,omitempty"`
+}
+
+// Funnel represents a user-defined conversion funnel.
+type Funnel struct {
+	ID        int64        `json:"id"`
+	Name      string       `json:"name"`
+	Service   string       `json:"service,omitempty"`
+	Steps     []FunnelStep `json:"steps"`
+	CreatedAt time.Time    `json:"created_at"`
+	UpdatedAt time.Time    `json:"updated_at"`
+}
+
+// FunnelStep represents one step in a conversion funnel.
+type FunnelStep struct {
+	Controller string `json:"controller"`
+	Action     string `json:"action"`
+	Label      string `json:"label"`
+}
+
+// FunnelResult contains the analysis results for a funnel.
+type FunnelResult struct {
+	FunnelName        string             `json:"funnel_name"`
+	TotalEntered      int                `json:"total_entered"`
+	Steps             []FunnelStepResult `json:"steps"`
+	OverallConversion float64            `json:"overall_conversion"`
+}
+
+// FunnelStepResult contains the result for one funnel step.
+type FunnelStepResult struct {
+	Label   string  `json:"label"`
+	Count   int     `json:"count"`
+	Pct     float64 `json:"pct"`
+	DropOff int     `json:"drop_off"`
+}
+
+// RequestTimeline contains parsed timeline data for a single request.
+type RequestTimeline struct {
+	LogID      int64           `json:"log_id"`
+	RequestID  string          `json:"request_id"`
+	Controller string          `json:"controller"`
+	Action     string          `json:"action"`
+	Path       string          `json:"path"`
+	Status     int             `json:"status"`
+	DurationMs float64         `json:"duration_ms"`
+	StartedAt  time.Time       `json:"started_at"`
+	Events     []TimelineEvent `json:"events"`
+	Bottleneck *TimelineEvent  `json:"bottleneck,omitempty"`
+}
+
+// TimelineEvent represents a single event in a request timeline.
+type TimelineEvent struct {
+	Type       string         `json:"type"`
+	Name       string         `json:"name"`
+	StartMs    float64        `json:"start_ms"`
+	DurationMs float64        `json:"duration_ms"`
+	Details    map[string]any `json:"details,omitempty"`
 }

@@ -68,6 +68,7 @@ type Server struct {
 	agentNoteStore     store.AgentNoteStore
 	trendStore         store.TrendStore
 	analyticsStore     store.AnalyticsStore
+	journeyStore       store.JourneyStore
 	versionChecker     *versionChecker
 	sseServer      *mcpgoserver.SSEServer
 	loginLimiter   *RateLimiter
@@ -101,6 +102,7 @@ type ServerDeps struct {
 	AgentNoteStore       store.AgentNoteStore
 	TrendStore           store.TrendStore
 	AnalyticsStore       store.AnalyticsStore
+	JourneyStore         store.JourneyStore
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
@@ -137,6 +139,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		agentNoteStore:     deps.AgentNoteStore,
 		trendStore:         deps.TrendStore,
 		analyticsStore:     deps.AnalyticsStore,
+		journeyStore:       deps.JourneyStore,
 		versionChecker:     newVersionChecker("adham90", "opentrace"),
 	}
 
@@ -318,6 +321,19 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 				r.Get("/analytics/heatmap", srv.handleTrafficHeatmapAPI)
 			}
 
+			// User Journey + Session Timeline
+			if srv.journeyStore != nil {
+				r.Get("/journeys/sessions", srv.handleListSessionsAPI)
+				r.Get("/journeys/sessions/{sessionID}", srv.handleGetSessionAPI)
+				r.Get("/journeys/sessions/{sessionID}/requests", srv.handleSessionRequestsAPI)
+				r.Get("/journeys/sessions/{sessionID}/timeline", srv.handleSessionTimelineAPI)
+				r.Get("/journeys/user/{userID}", srv.handleUserJourneyAPI)
+				r.Get("/journeys/paths", srv.handlePathAnalysisAPI)
+				r.Get("/journeys/funnels", srv.handleListFunnelsAPI)
+				r.Get("/journeys/funnels/{funnelID}", srv.handleAnalyzeFunnelAPI)
+				r.Get("/journeys/timeline/{logID}", srv.handleRequestTimelineAPI)
+			}
+
 			// MCP activity
 			if srv.mcpActivityStore != nil {
 				r.Get("/mcp/activity/stats", srv.handleMCPActivityStats)
@@ -350,6 +366,12 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			if srv.errorGroupStore != nil {
 				r.Post("/errors/{fingerprint}/resolve", srv.handleResolveErrorGroup)
 				r.Post("/errors/{fingerprint}/ignore", srv.handleIgnoreErrorGroup)
+			}
+
+			// Funnels (write)
+			if srv.journeyStore != nil {
+				r.Post("/journeys/funnels", srv.handleCreateFunnelAPI)
+				r.Delete("/journeys/funnels/{funnelID}", srv.handleDeleteFunnelAPI)
 			}
 
 			// Health checks (write)

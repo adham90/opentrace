@@ -35,9 +35,10 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []LogEntry) (int, er
 	stmt, err := tx.PrepareContext(ctx,
 		`INSERT INTO logs (timestamp, level, service, environment, commit_hash,
 		                   trace_id, span_id, parent_span_id, request_id,
+		                   user_id, session_id,
 		                   message, event_type, exception_class, error_fingerprint,
 		                   source_file, source_line, metadata)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return 0, fmt.Errorf("prepare insert: %w", err)
 	}
@@ -57,6 +58,7 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []LogEntry) (int, er
 		ts := e.Timestamp.UTC().Format(time.RFC3339Nano)
 		res, err := stmt.ExecContext(ctx, ts, e.Level, e.Service, e.Environment, e.CommitHash,
 			e.TraceID, e.SpanID, e.ParentSpanID, e.RequestID,
+			e.UserID, e.SessionID,
 			e.Message, e.EventType, e.ExceptionClass, e.ErrorFingerprint,
 			e.SourceFile, e.SourceLine, string(meta))
 		if err != nil {
@@ -147,6 +149,18 @@ func promoteFromMetadata(e *LogEntry) {
 			if line, ok := bt[0].(string); ok {
 				e.SourceFile, e.SourceLine = parseBacktraceLine(line)
 			}
+		}
+	}
+	if e.UserID == "" {
+		if v, ok := e.Metadata["user_id"].(string); ok && v != "" {
+			e.UserID = v
+		} else if v, ok := e.Metadata["user_id"].(float64); ok {
+			e.UserID = strconv.FormatInt(int64(v), 10)
+		}
+	}
+	if e.SessionID == "" {
+		if v, ok := e.Metadata["session_id"].(string); ok && v != "" {
+			e.SessionID = v
 		}
 	}
 }
@@ -246,6 +260,7 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 
 	const selectCols = `l.id, l.timestamp, l.level, l.service, l.environment, l.commit_hash,
 		l.trace_id, l.span_id, l.parent_span_id, l.request_id,
+		l.user_id, l.session_id,
 		l.message, l.event_type, l.exception_class, l.error_fingerprint,
 		l.source_file, l.source_line, l.metadata`
 
@@ -308,11 +323,13 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 		var tsStr string
 		var metaJSON sql.NullString
 		var environment, commitHash, spanID, parentSpanID, requestID sql.NullString
+		var userID, sessionID sql.NullString
 		var eventType, exceptionClass, errorFingerprint, sourceFile sql.NullString
 		var sourceLine sql.NullInt64
 		if err := rows.Scan(
 			&entry.ID, &tsStr, &entry.Level, &entry.Service, &environment, &commitHash,
 			&entry.TraceID, &spanID, &parentSpanID, &requestID,
+			&userID, &sessionID,
 			&entry.Message, &eventType, &exceptionClass, &errorFingerprint,
 			&sourceFile, &sourceLine, &metaJSON,
 		); err != nil {
@@ -333,6 +350,12 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 		}
 		if requestID.Valid {
 			entry.RequestID = requestID.String
+		}
+		if userID.Valid {
+			entry.UserID = userID.String
+		}
+		if sessionID.Valid {
+			entry.SessionID = sessionID.String
 		}
 		if eventType.Valid {
 			entry.EventType = eventType.String

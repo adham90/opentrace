@@ -83,6 +83,9 @@ type Deps struct {
 	// Trends + Analytics (Phase 1 features)
 	TrendStore     store.TrendStore
 	AnalyticsStore store.AnalyticsStore
+
+	// User Journey + Session Timeline (Phase 2 features)
+	JourneyStore store.JourneyStore
 }
 
 // NewConfiguredServer creates an MCPServer and registers tools based on the
@@ -788,6 +791,63 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			trafficHeatmapHandler(deps.AnalyticsStore),
 		)
 		b.Add("traffic_heatmap", "24x7 traffic heatmap by day and hour for capacity planning", "Analytics", "read", "")
+	}
+
+	// User Journey + Session Timeline (Phase 2)
+	if deps.JourneyStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("user_journey",
+				mcp.WithDescription("Reconstruct the sequence of HTTP requests a user made in a session. Shows what they did before/after an error or slow request."),
+				mcp.WithString("user_id", mcp.Description("Find sessions for this user")),
+				mcp.WithString("session_id", mcp.Description("Specific session to examine")),
+				mcp.WithString("since", mcp.Description("Time range: 1h, 24h, 7d (default: 24h)")),
+				mcp.WithNumber("limit", mcp.Description("Max sessions to return (default: 10)")),
+			),
+			userJourneyHandler(deps.JourneyStore))
+		b.Add("user_journey", "Reconstruct user sessions and request paths for debugging", "Journey", "read", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("path_analysis",
+				mcp.WithDescription("Analyze common navigation patterns across all users. Find the most frequent paths, drop-off points, and paths that lead to errors."),
+				mcp.WithString("service", mcp.Description("Filter by service")),
+				mcp.WithString("since", mcp.Description("Time range (default: 7d)")),
+				mcp.WithNumber("min_occurrences", mcp.Description("Minimum times a path must appear (default: 5)")),
+				mcp.WithNumber("path_length", mcp.Description("Max steps in path (default: 5)")),
+				mcp.WithBoolean("error_paths_only", mcp.Description("Only show paths ending in errors")),
+				mcp.WithString("starting_from", mcp.Description("Only paths starting with this Controller#Action")),
+			),
+			pathAnalysisHandler(deps.JourneyStore))
+		b.Add("path_analysis", "Discover common user navigation flows and error paths", "Journey", "read", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("funnel_analysis",
+				mcp.WithDescription("Define and analyze conversion funnels. Track signup flows, checkout processes, onboarding, etc."),
+				mcp.WithString("action", mcp.Description("create | analyze | list | delete (default: list)")),
+				mcp.WithNumber("funnel_id", mcp.Description("Required for analyze/delete")),
+				mcp.WithString("name", mcp.Description("Required for create")),
+				mcp.WithString("service", mcp.Description("Optional service filter")),
+				mcp.WithString("since", mcp.Description("For analyze — time range (default: 7d)")),
+			),
+			funnelAnalysisHandler(deps.JourneyStore))
+		b.Add("funnel_analysis", "Define and analyze step-by-step conversion funnels", "Journey", "write", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("request_timeline",
+				mcp.WithDescription("Get a detailed waterfall timeline for a specific request. Shows every SQL query, view render, cache operation, and HTTP call with timing."),
+				mcp.WithNumber("log_id", mcp.Description("The log entry ID to analyze"), mcp.Required()),
+				mcp.WithNumber("min_duration_ms", mcp.Description("Only show events slower than this (default: 0)")),
+			),
+			requestTimelineHandler(deps.JourneyStore))
+		b.Add("request_timeline", "Waterfall breakdown of a single request's SQL, views, cache, HTTP calls", "Journey", "read", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("session_waterfall",
+				mcp.WithDescription("Get timelines for all requests in a session. Shows the full user experience sequentially."),
+				mcp.WithString("session_id", mcp.Description("The session to examine"), mcp.Required()),
+				mcp.WithBoolean("summary_only", mcp.Description("Only return per-request summaries without events (default: false)")),
+			),
+			sessionWaterfallHandler(deps.JourneyStore))
+		b.Add("session_waterfall", "Full session timeline showing all request waterfalls sequentially", "Journey", "read", "")
 	}
 
 	// Agent-first watch tools (read-only).
