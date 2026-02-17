@@ -13,15 +13,6 @@ import (
 	"github.com/adham90/opentrace/internal/watcher"
 )
 
-// handleWatchesPage renders the watches UI page.
-func (s *Server) handleWatchesPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Watches", "watches")
-	tmpl := s.getTemplate(watchesTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/watches.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
-}
-
 // handleListWatches returns active watches as JSON.
 func (s *Server) handleListWatches(w http.ResponseWriter, r *http.Request) {
 	if s.watchStore == nil {

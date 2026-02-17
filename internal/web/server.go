@@ -219,13 +219,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Group(func(r chi.Router) {
 		r.Use(srv.RedirectToOnboardingIfNeeded)
 		r.Get("/", srv.handleDashboardPage)
-		r.Get("/logs", srv.handleLogsPage)
-		r.Get("/sources", srv.handleSourcesPage)
-		r.Get("/watches", srv.handleWatchesPage)
-		r.Get("/alerts", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/watches", http.StatusMovedPermanently)
-		})
-		r.Get("/tools", srv.handleToolsPage)
+		r.Get("/logs", srv.handleLogsFragment)
 		r.Get("/profile", srv.handleProfilePage)
 	})
 

@@ -210,66 +210,30 @@ func TestAPIKeyAuth_Disabled(t *testing.T) {
 	}
 }
 
-func TestLogsPage_Renders(t *testing.T) {
-	srv, ls := setupTestServerWithLogStore()
-
-	// Seed a log entry
-	ls.entries = []store.LogEntry{
-		{
-			ID:        1,
-			Timestamp: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
-			Level:     "INFO",
-			Service:   "api",
-			Message:   "request received",
-		},
-	}
+func TestLogsPage_RedirectsToDashboard(t *testing.T) {
+	srv, _ := setupTestServerWithLogStore()
 
 	req := httptest.NewRequest(http.MethodGet, "/logs", nil)
 	w := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusOK, w.Body.String())
+	if w.Code != http.StatusMovedPermanently {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusMovedPermanently)
 	}
-
-	body := w.Body.String()
-	if !strings.Contains(body, "request received") {
-		t.Error("expected body to contain log message")
-	}
-	if !strings.Contains(body, "INFO") {
-		t.Error("expected body to contain log level")
-	}
-	if !strings.Contains(body, "term-entry") {
-		t.Error("expected body to contain terminal log entry")
+	if loc := w.Header().Get("Location"); loc != "/" {
+		t.Errorf("redirect location = %q, want %q", loc, "/")
 	}
 }
 
-func TestLogsPage_WithFilters(t *testing.T) {
-	srv, ls := setupTestServerWithLogStore()
+func TestLogsPage_WithFilters_RedirectsToDashboard(t *testing.T) {
+	srv, _ := setupTestServerWithLogStore()
 
 	req := httptest.NewRequest(http.MethodGet, "/logs?level=ERROR&service=api&query=timeout", nil)
 	w := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
-	}
-
-	ls.mu.Lock()
-	params := ls.lastSearchParams
-	ls.mu.Unlock()
-
-	if params.Level != "ERROR" {
-		t.Errorf("level = %q, want %q", params.Level, "ERROR")
-	}
-	if params.Service != "api" {
-		t.Errorf("service = %q, want %q", params.Service, "api")
-	}
-	if params.Query != "timeout" {
-		t.Errorf("query = %q, want %q", params.Query, "timeout")
-	}
-	if params.Limit != 51 {
-		t.Errorf("limit = %d, want %d", params.Limit, 51)
+	if w.Code != http.StatusMovedPermanently {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusMovedPermanently)
 	}
 }
 

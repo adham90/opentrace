@@ -26,26 +26,18 @@ var tmplFuncs = template.FuncMap{
 }
 
 var (
-	dashboardTmpl      *template.Template
-	logsTmpl           *template.Template
-	watchesTmpl        *template.Template
-	sourcesTmpl        *template.Template
-	loginTmpl          *template.Template
-	registerTmpl       *template.Template
-	profileTmpl        *template.Template
-	settingsTmpl       *template.Template
-	toolsTmpl          *template.Template
-	onboardingTmpl     *template.Template
+	dashboardTmpl  *template.Template
+	loginTmpl      *template.Template
+	registerTmpl   *template.Template
+	profileTmpl    *template.Template
+	settingsTmpl   *template.Template
+	onboardingTmpl *template.Template
 )
 
 func init() {
 	// Each page gets layout + its own content template
-	dashboardTmpl = template.Must(template.ParseFS(templateFS,
+	dashboardTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
 		"templates/layout.html", "templates/dashboard.html"))
-	logsTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
-		"templates/layout.html", "templates/logs.html"))
-	sourcesTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/sources.html"))
 	loginTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/login.html"))
 	registerTmpl = template.Must(template.ParseFS(templateFS,
@@ -54,12 +46,8 @@ func init() {
 		"templates/layout.html", "templates/profile.html"))
 	settingsTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/settings.html"))
-	toolsTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/tools.html"))
 	onboardingTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout_minimal.html", "templates/onboarding.html"))
-	watchesTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/watches.html"))
 }
 
 // logsFragmentTmpl is used for rendering HTMX fragment responses for logs-list
@@ -119,16 +107,9 @@ func parseMetadataParams(q url.Values) map[string]string {
 	return m
 }
 
-// Breadcrumb represents a single navigation breadcrumb.
-type Breadcrumb struct {
-	Label string
-	URL   string // empty for the last (current) item
-}
-
 type pageData struct {
 	Title          string
 	Nav            string
-	Content        string
 	ServerID       string
 	DevMode        bool
 	CSPNonce       string
@@ -147,7 +128,6 @@ type pageData struct {
 	EnvKeyOverride  bool
 	CORSOrigins     string
 	CORSEnvOverride bool
-	Breadcrumbs     []Breadcrumb
 }
 
 func (s *Server) isDevMode() bool {
@@ -187,14 +167,6 @@ func (s *Server) getTemplate(fallback *template.Template, files ...string) *temp
 }
 
 func (s *Server) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Dashboard", "dashboard")
-	tmpl := s.getTemplate(dashboardTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/dashboard.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
-}
-
-func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 	filters := LogFilters{
 		Query:            r.URL.Query().Get("query"),
 		Service:          r.URL.Query().Get("service"),
@@ -232,7 +204,7 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		Level:            filters.Level,
 		EventType:        filters.EventType,
 		Start:            parseTimeRange(filters.TimeRange),
-		Limit:            limit + 1, // fetch one extra to detect if there are more
+		Limit:            limit + 1,
 		Offset:           offset,
 		MetadataFilter:   parseMetadataParams(r.URL.Query()),
 		Environment:      filters.Environment,
@@ -242,7 +214,106 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		ErrorFingerprint: filters.ErrorFingerprint,
 		SourceFile:       filters.SourceFile,
 	}
-	// Explicit start/end override time_range preset
+	if s := r.URL.Query().Get("start"); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			searchParams.Start = &t
+		}
+	}
+	if e := r.URL.Query().Get("end"); e != "" {
+		if t, err := time.Parse(time.RFC3339, e); err == nil {
+			searchParams.End = &t
+		}
+	}
+
+	var logs []store.LogEntry
+	var hasMore bool
+	var maxID int64
+	if s.logStore != nil {
+		var err error
+		logs, err = s.logStore.Search(r.Context(), searchParams)
+		if err != nil {
+			logs = nil
+		}
+		hasMore = len(logs) > limit
+		if hasMore {
+			logs = logs[:limit]
+		}
+		for _, l := range logs {
+			if l.ID > maxID {
+				maxID = l.ID
+			}
+		}
+	}
+
+	data := s.newPageData(r, "Dashboard", "dashboard")
+	data.Logs = logs
+	data.LogFilters = filters
+	data.LogOffset = offset
+	data.LogLimit = limit
+	data.HasMore = hasMore
+	data.MaxLogID = maxID
+
+	tmpl := s.getTemplate(dashboardTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/dashboard.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+// handleLogsFragment serves HTMX log fragments for the dashboard.
+// Browser visits to /logs redirect to the dashboard.
+func (s *Server) handleLogsFragment(w http.ResponseWriter, r *http.Request) {
+	if !isHTMX(r) {
+		http.Redirect(w, r, "/", http.StatusMovedPermanently)
+		return
+	}
+
+	filters := LogFilters{
+		Query:            r.URL.Query().Get("query"),
+		Service:          r.URL.Query().Get("service"),
+		Level:            r.URL.Query().Get("level"),
+		EventType:        r.URL.Query().Get("event_type"),
+		TimeRange:        r.URL.Query().Get("time_range"),
+		Environment:      r.URL.Query().Get("environment"),
+		CommitHash:       r.URL.Query().Get("commit_hash"),
+		RequestID:        r.URL.Query().Get("request_id"),
+		ExceptionClass:   r.URL.Query().Get("exception_class"),
+		ErrorFingerprint: r.URL.Query().Get("error_fingerprint"),
+		SourceFile:       r.URL.Query().Get("source_file"),
+	}
+
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	offset := 0
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	searchParams := store.LogSearchParams{
+		Query:            filters.Query,
+		Service:          filters.Service,
+		Level:            filters.Level,
+		EventType:        filters.EventType,
+		Start:            parseTimeRange(filters.TimeRange),
+		Limit:            limit + 1,
+		Offset:           offset,
+		MetadataFilter:   parseMetadataParams(r.URL.Query()),
+		Environment:      filters.Environment,
+		CommitHash:       filters.CommitHash,
+		RequestID:        filters.RequestID,
+		ExceptionClass:   filters.ExceptionClass,
+		ErrorFingerprint: filters.ErrorFingerprint,
+		SourceFile:       filters.SourceFile,
+	}
 	if s := r.URL.Query().Get("start"); s != "" {
 		if t, err := time.Parse(time.RFC3339, s); err == nil {
 			searchParams.Start = &t
@@ -272,31 +343,22 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	data := s.newPageData(r, "Logs", "logs")
-	data.Content = "logs"
-	data.Logs = logs
-	data.LogFilters = filters
-	data.LogOffset = offset
-	data.LogLimit = limit
-	data.HasMore = hasMore
-	data.MaxLogID = maxID
-
-	if isHTMX(r) {
-		w.Header().Set("Content-Type", "text/html")
-		ft := s.getTemplate(logsFragmentTmpl, "internal/web/templates/logs.html")
-		// If this is a "load more" request (has offset), return just the rows
-		if offset > 0 {
-			ft.ExecuteTemplate(w, "logs-rows", data)
-		} else {
-			ft.ExecuteTemplate(w, "logs-list", data)
-		}
-		return
+	data := pageData{
+		Logs:       logs,
+		LogFilters: filters,
+		LogOffset:  offset,
+		LogLimit:   limit,
+		HasMore:    hasMore,
+		MaxLogID:   maxID,
 	}
 
-	tmpl := s.getTemplate(logsTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/logs.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	w.Header().Set("Content-Type", "text/html")
+	ft := s.getTemplate(logsFragmentTmpl, "internal/web/templates/logs.html")
+	if offset > 0 {
+		ft.ExecuteTemplate(w, "logs-rows", data)
+	} else {
+		ft.ExecuteTemplate(w, "logs-list", data)
+	}
 }
 
 func (s *Server) handleLogsPoll(w http.ResponseWriter, r *http.Request) {
@@ -393,21 +455,6 @@ func (s *Server) handleGetLogDetail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entry)
 }
 
-func (s *Server) handleSourcesPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Sources", "sources")
-	tmpl := s.getTemplate(sourcesTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/sources.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
-}
-
-func (s *Server) handleToolsPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Tools", "tools")
-	tmpl := s.getTemplate(toolsTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/tools.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
-}
 
 func (s *Server) handleToolsAPI(w http.ResponseWriter, r *http.Request) {
 	type toolInfo struct {
@@ -602,3 +649,4 @@ func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 		"internal/web/templates/settings.html")
 	tmpl.ExecuteTemplate(w, "layout", data)
 }
+
