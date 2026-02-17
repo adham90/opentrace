@@ -86,6 +86,9 @@ type Deps struct {
 
 	// User Journey + Session Timeline (Phase 2 features)
 	JourneyStore store.JourneyStore
+
+	// Error Impact (Phase 3 features)
+	ErrorImpactStore store.ErrorImpactStore
 }
 
 // NewConfiguredServer creates an MCPServer and registers tools based on the
@@ -848,6 +851,39 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			),
 			sessionWaterfallHandler(deps.JourneyStore))
 		b.Add("session_waterfall", "Full session timeline showing all request waterfalls sequentially", "Journey", "read", "")
+	}
+
+	// Error Impact (Phase 3 — cohort-based error tracking)
+	if deps.ErrorImpactStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("error_impact",
+				mcp.WithDescription("Get user impact analysis for an error: how many users are affected, common traits (browser, OS), affected user list, and impact score. Use after error_groups or error_detail to understand the blast radius."),
+				mcp.WithString("fingerprint", mcp.Required(), mcp.Description("Error fingerprint (from error_groups or error_detail)")),
+				mcp.WithNumber("limit", mcp.Description("Max affected users to return (default: 10)")),
+			),
+			errorImpactHandler(deps.ErrorImpactStore, deps.ErrorGroupStore))
+		b.Add("error_impact", "Analyze user impact for an error: affected users, common traits, score", "Errors", "read", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("user_errors",
+				mcp.WithDescription("List all errors affecting a specific user. Shows every error they've encountered with occurrence counts and status. Use to understand a user's experience or investigate a support ticket."),
+				mcp.WithString("user_id", mcp.Required(), mcp.Description("The user ID to look up")),
+				mcp.WithString("since", mcp.Description("Lookback window: '1h', '24h' (default), '7d'")),
+			),
+			userErrorsHandler(deps.ErrorImpactStore))
+		b.Add("user_errors", "List all errors affecting a specific user", "Errors", "read", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("top_errors_by_impact",
+				mcp.WithDescription("Rank errors by user impact — the errors affecting the most users, weighted by recency. Like a prioritized error inbox based on real user pain, not just occurrence count."),
+				mcp.WithString("status", mcp.Description("Filter by status: unresolved, resolved, ignored")),
+				mcp.WithString("service", mcp.Description("Filter by service")),
+				mcp.WithString("sort_by", mcp.Description("Sort by: impact_score (default), unique_users, occurrence_count, last_seen")),
+				mcp.WithString("since", mcp.Description("Lookback window: '24h' (default), '7d'")),
+				mcp.WithNumber("limit", mcp.Description("Number of results (default: 20)")),
+			),
+			topErrorsByImpactHandler(deps.ErrorImpactStore))
+		b.Add("top_errors_by_impact", "Rank errors by user impact score (affected users × recency)", "Errors", "read", "")
 	}
 
 	// Agent-first watch tools (read-only).

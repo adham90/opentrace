@@ -211,6 +211,24 @@ type JourneyStore interface {
 	GetSessionTimeline(ctx context.Context, sessionID string) ([]RequestTimeline, error)
 }
 
+// ErrorImpactStore tracks which users are affected by each error and computes impact scores.
+type ErrorImpactStore interface {
+	// Called on each error occurrence (upsert)
+	TrackImpact(ctx context.Context, fingerprint string, userID string, contextData map[string]any, logID int64, service string) error
+
+	// Query
+	GetImpact(ctx context.Context, fingerprint string) (*ErrorImpact, error)
+	GetAffectedUsers(ctx context.Context, fingerprint string, limit int) ([]AffectedUser, error)
+	GetUserErrors(ctx context.Context, userID string, since time.Time) ([]ErrorSummary, error)
+
+	// Scoring
+	ComputeImpactScores(ctx context.Context) error
+	TopByImpact(ctx context.Context, params ImpactQueryParams) ([]ErrorGroupWithImpact, error)
+
+	// Pattern detection
+	FindCommonTraits(ctx context.Context, fingerprint string) (map[string]any, error)
+}
+
 // WatchStore manages agent-first watches (Phase 1).
 type WatchStore interface {
 	Create(ctx context.Context, params CreateWatchParams) (*Watch, error)

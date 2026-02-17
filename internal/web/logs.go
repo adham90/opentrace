@@ -207,11 +207,15 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 		if s.watchStream != nil {
 			go s.watchStream.OnLogsReceived(logEntries)
 		}
-		// Upsert error groups for entries with error_fingerprint.
+		// Upsert error groups and track impact for entries with error_fingerprint.
 		if s.errorGroupStore != nil {
 			for _, e := range logEntries {
 				if e.ErrorFingerprint != "" {
 					_ = s.errorGroupStore.Upsert(r.Context(), e)
+					// Track user impact if we have a user ID
+					if s.errorImpactStore != nil && e.UserID != "" {
+						_ = s.errorImpactStore.TrackImpact(r.Context(), e.ErrorFingerprint, e.UserID, e.Metadata, e.ID, e.Service)
+					}
 				}
 			}
 		}

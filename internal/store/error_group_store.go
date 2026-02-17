@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -111,7 +112,8 @@ func (s *errorGroupStore) Get(ctx context.Context, fingerprint string) (*ErrorGr
 	row := s.db.QueryRowContext(ctx,
 		`SELECT fingerprint, service, environment, exception_class, message,
 		        source_file, source_line, status, first_seen_at, last_seen_at,
-		        occurrence_count, last_log_id, reopened_count, resolved_at, ignored_at
+		        occurrence_count, last_log_id, reopened_count, resolved_at, ignored_at,
+		        unique_users, impact_score, COALESCE(common_context, '{}')
 		 FROM error_groups WHERE fingerprint = ?`, fingerprint)
 
 	eg, err := scanErrorGroup(row)
@@ -159,7 +161,8 @@ func (s *errorGroupStore) List(ctx context.Context, params ListErrorGroupParams)
 	query := fmt.Sprintf(
 		`SELECT fingerprint, service, environment, exception_class, message,
 		        source_file, source_line, status, first_seen_at, last_seen_at,
-		        occurrence_count, last_log_id, reopened_count, resolved_at, ignored_at
+		        occurrence_count, last_log_id, reopened_count, resolved_at, ignored_at,
+		        unique_users, impact_score, COALESCE(common_context, '{}')
 		 FROM error_groups %s ORDER BY %s LIMIT ? OFFSET ?`,
 		where, orderBy)
 	args = append(args, limit, params.Offset)
@@ -300,11 +303,13 @@ func scanErrorGroup(sc interface{ Scan(...any) error }) (*ErrorGroup, error) {
 	var firstSeen, lastSeen string
 	var resolvedAt, ignoredAt sql.NullString
 	var lastLogID sql.NullInt64
+	var commonCtxJSON string
 
 	err := sc.Scan(
 		&eg.Fingerprint, &eg.Service, &eg.Environment, &eg.ExceptionClass, &eg.Message,
 		&eg.SourceFile, &eg.SourceLine, &eg.Status, &firstSeen, &lastSeen,
 		&eg.OccurrenceCount, &lastLogID, &eg.ReopenedCount, &resolvedAt, &ignoredAt,
+		&eg.UniqueUsers, &eg.ImpactScore, &commonCtxJSON,
 	)
 	if err != nil {
 		return nil, err
@@ -322,6 +327,9 @@ func scanErrorGroup(sc interface{ Scan(...any) error }) (*ErrorGroup, error) {
 	if ignoredAt.Valid {
 		t, _ := time.Parse(time.RFC3339, ignoredAt.String)
 		eg.IgnoredAt = &t
+	}
+	if commonCtxJSON != "" && commonCtxJSON != "{}" {
+		json.Unmarshal([]byte(commonCtxJSON), &eg.CommonContext)
 	}
 
 	return &eg, nil

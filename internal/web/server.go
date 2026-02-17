@@ -69,6 +69,7 @@ type Server struct {
 	trendStore         store.TrendStore
 	analyticsStore     store.AnalyticsStore
 	journeyStore       store.JourneyStore
+	errorImpactStore   store.ErrorImpactStore
 	versionChecker     *versionChecker
 	sseServer      *mcpgoserver.SSEServer
 	loginLimiter   *RateLimiter
@@ -103,6 +104,7 @@ type ServerDeps struct {
 	TrendStore           store.TrendStore
 	AnalyticsStore       store.AnalyticsStore
 	JourneyStore         store.JourneyStore
+	ErrorImpactStore     store.ErrorImpactStore
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
@@ -140,6 +142,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		trendStore:         deps.TrendStore,
 		analyticsStore:     deps.AnalyticsStore,
 		journeyStore:       deps.JourneyStore,
+		errorImpactStore:   deps.ErrorImpactStore,
 		versionChecker:     newVersionChecker("adham90", "opentrace"),
 	}
 
@@ -319,6 +322,14 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 				r.Get("/analytics/summary", srv.handleAnalyticsSummaryAPI)
 				r.Get("/analytics/endpoints", srv.handleTopEndpointsAPI)
 				r.Get("/analytics/heatmap", srv.handleTrafficHeatmapAPI)
+			}
+
+			// Error Impact (Cohort-Based)
+			if srv.errorImpactStore != nil {
+				r.Get("/errors/impact/top", srv.handleTopErrorsByImpactAPI)
+				r.Get("/errors/user/{userID}", srv.handleUserErrorsAPI)
+				r.Get("/errors/{fingerprint}/impact", srv.handleErrorImpactAPI)
+				r.Get("/errors/{fingerprint}/affected-users", srv.handleAffectedUsersAPI)
 			}
 
 			// User Journey + Session Timeline

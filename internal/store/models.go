@@ -359,6 +359,11 @@ type ErrorGroup struct {
 	ResolvedAt      *time.Time       `json:"resolved_at,omitempty"`
 	IgnoredAt       *time.Time       `json:"ignored_at,omitempty"`
 	Events          []ErrorGroupEvent `json:"events,omitempty"`
+
+	// Phase 3: Impact tracking
+	UniqueUsers   int            `json:"unique_users"`
+	ImpactScore   float64        `json:"impact_score"`
+	CommonContext map[string]any `json:"common_context,omitempty"`
 }
 
 // ErrorGroupEvent records a lifecycle action on an error group.
@@ -906,4 +911,50 @@ type TimelineEvent struct {
 	StartMs    float64        `json:"start_ms"`
 	DurationMs float64        `json:"duration_ms"`
 	Details    map[string]any `json:"details,omitempty"`
+}
+
+// --- Phase 3: Cohort-Based Error Impact ---
+
+// ErrorImpact summarizes the user impact of an error group.
+type ErrorImpact struct {
+	Fingerprint      string         `json:"fingerprint"`
+	UniqueUsers      int            `json:"unique_users"`
+	TotalOccurrences int            `json:"total_occurrences"`
+	ImpactScore      float64        `json:"impact_score"`
+	CommonTraits     map[string]any `json:"common_traits,omitempty"`
+}
+
+// AffectedUser represents a user affected by an error.
+type AffectedUser struct {
+	UserID          string         `json:"user_id"`
+	OccurrenceCount int            `json:"occurrence_count"`
+	FirstSeenAt     time.Time      `json:"first_seen_at"`
+	LastSeenAt      time.Time      `json:"last_seen_at"`
+	LastContext      map[string]any `json:"last_context,omitempty"`
+}
+
+// ErrorSummary is a lightweight error record for user-scoped queries.
+type ErrorSummary struct {
+	Fingerprint     string           `json:"fingerprint"`
+	ExceptionClass  string           `json:"exception_class"`
+	Message         string           `json:"message"`
+	OccurrenceCount int              `json:"occurrence_count"`
+	FirstSeenAt     time.Time        `json:"first_seen_at"`
+	LastSeenAt      time.Time        `json:"last_seen_at"`
+	Status          ErrorGroupStatus `json:"status"`
+}
+
+// ImpactQueryParams defines filters for querying errors by impact.
+type ImpactQueryParams struct {
+	Status  ErrorGroupStatus `json:"status,omitempty"`
+	Service string           `json:"service,omitempty"`
+	Since   time.Time        `json:"since"`
+	SortBy  string           `json:"sort_by,omitempty"` // impact_score, unique_users, occurrence_count, last_seen
+	Limit   int              `json:"limit,omitempty"`
+}
+
+// ErrorGroupWithImpact extends ErrorGroup with impact details.
+type ErrorGroupWithImpact struct {
+	ErrorGroup
+	TopAffectedUsers []AffectedUser `json:"top_affected_users,omitempty"`
 }

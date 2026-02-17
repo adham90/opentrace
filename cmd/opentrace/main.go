@@ -38,6 +38,10 @@ type appDeps struct {
 	errorGroupStore    store.ErrorGroupStore
 	healthCheckStore   store.HealthCheckStore
 	agentNoteStore     store.AgentNoteStore
+	trendStore         store.TrendStore
+	analyticsStore     store.AnalyticsStore
+	journeyStore       store.JourneyStore
+	errorImpactStore   store.ErrorImpactStore
 	registry           *connector.Registry
 	cfg              *config.Config
 }
@@ -120,6 +124,10 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	errorGroupStore := store.NewErrorGroupStore(db)
 	healthCheckStore := store.NewHealthCheckStore(db)
 	agentNoteStore := store.NewAgentNoteStore(db)
+	trendStore := store.NewTrendStore(db)
+	analyticsStore := store.NewAnalyticsStore(db)
+	journeyStore := store.NewJourneyStore(db)
+	errorImpactStore := store.NewErrorImpactStore(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
@@ -140,6 +148,10 @@ func initApp(ctx context.Context) (*appDeps, error) {
 		errorGroupStore:    errorGroupStore,
 		healthCheckStore:   healthCheckStore,
 		agentNoteStore:     agentNoteStore,
+		trendStore:         trendStore,
+		analyticsStore:     analyticsStore,
+		journeyStore:       journeyStore,
+		errorImpactStore:   errorImpactStore,
 		registry:           registry,
 		cfg:                cfg,
 	}, nil
@@ -178,6 +190,10 @@ func runMCP() error {
 		ErrorGroupStore:    deps.errorGroupStore,
 		HealthCheckStore:   deps.healthCheckStore,
 		AgentNoteStore:     deps.agentNoteStore,
+		TrendStore:         deps.trendStore,
+		AnalyticsStore:     deps.analyticsStore,
+		JourneyStore:       deps.journeyStore,
+		ErrorImpactStore:   deps.errorImpactStore,
 	})
 }
 
@@ -235,6 +251,10 @@ func run() error {
 		ErrorGroupStore:  deps.errorGroupStore,
 		HealthCheckStore: deps.healthCheckStore,
 		AgentNoteStore:  deps.agentNoteStore,
+		TrendStore:      deps.trendStore,
+		AnalyticsStore:  deps.analyticsStore,
+		JourneyStore:    deps.journeyStore,
+		ErrorImpactStore: deps.errorImpactStore,
 	})
 
 	// Agent-first watch evaluator + stream (reactive on log ingestion)
@@ -263,6 +283,10 @@ func run() error {
 		ErrorGroupStore:      deps.errorGroupStore,
 		HealthCheckStore:     deps.healthCheckStore,
 		AgentNoteStore:       deps.agentNoteStore,
+		TrendStore:           deps.trendStore,
+		AnalyticsStore:       deps.analyticsStore,
+		JourneyStore:         deps.journeyStore,
+		ErrorImpactStore:     deps.errorImpactStore,
 	})
 
 	httpServer := &http.Server{
@@ -407,6 +431,45 @@ func run() error {
 					slog.Warn("metric prune failed", "error", err)
 				} else if n > 0 {
 					slog.Info("pruned old metrics", "count", n)
+				}
+			}
+		}
+	}()
+
+	// Background: aggregation jobs for trends, analytics, sessions, and impact scores (every 5 minutes)
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+
+			since := time.Now().UTC().Add(-10 * time.Minute)
+
+			if deps.trendStore != nil {
+				if err := deps.trendStore.AggregateBuckets(ctx, "1h", since); err != nil {
+					slog.Warn("trend aggregation failed", "error", err)
+				}
+			}
+			if deps.analyticsStore != nil {
+				if err := deps.analyticsStore.AggregateEndpointStats(ctx, "1h", since); err != nil {
+					slog.Warn("endpoint stats aggregation failed", "error", err)
+				}
+				if err := deps.analyticsStore.UpdateTrafficHeatmap(ctx, since); err != nil {
+					slog.Warn("traffic heatmap update failed", "error", err)
+				}
+			}
+			if deps.journeyStore != nil {
+				if err := deps.journeyStore.BuildSessions(ctx, since); err != nil {
+					slog.Warn("session building failed", "error", err)
+				}
+			}
+			if deps.errorImpactStore != nil {
+				if err := deps.errorImpactStore.ComputeImpactScores(ctx); err != nil {
+					slog.Warn("impact score computation failed", "error", err)
 				}
 			}
 		}

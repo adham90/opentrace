@@ -82,6 +82,10 @@ func (s *Server) setupMCPSSE() *server.SSEServer {
 		ErrorGroupStore:    s.errorGroupStore,
 		HealthCheckStore:   s.healthCheckStore,
 		AgentNoteStore:     s.agentNoteStore,
+		TrendStore:         s.trendStore,
+		AnalyticsStore:     s.analyticsStore,
+		JourneyStore:       s.journeyStore,
+		ErrorImpactStore:   s.errorImpactStore,
 	}
 
 	// Create MCP server with all tools (admin level).
