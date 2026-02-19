@@ -4,18 +4,10 @@
     <h1><span class="prompt">$</span> settings</h1>
   </div>
 
-  <!-- Tab Navigation -->
-  <div class="settings-tabs">
-    <button class="settings-tab active" data-tab="general" onclick="switchTab('general', this)">general</button>
-    <button class="settings-tab" data-tab="users" onclick="switchTab('users', this)">users</button>
-    <button class="settings-tab" data-tab="setup" onclick="switchTab('setup', this)">setup</button>
-    <button class="settings-tab" data-tab="profile" onclick="switchTab('profile', this)">profile</button>
-  </div>
-
   <!-- ============================================================ -->
-  <!-- GENERAL TAB                                                   -->
+  <!-- GENERAL                                                        -->
   <!-- ============================================================ -->
-  <div id="tab-general" class="settings-panel">
+  <div id="general" class="settings-group">
 
     <!-- Version & Updates -->
     <div class="settings-section">
@@ -125,21 +117,12 @@
       </form>
     </div>
 
-    <!-- Appearance & Session -->
-    <div class="settings-section">
-      <h3 class="settings-section-title"><span class="dim">#</span> Appearance & Session</h3>
-      <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap">
-        <button class="btn" onclick="cycleTheme(); updateThemeLabel();" id="theme-toggle-btn">theme: system</button>
-        <a href="/logout" class="btn btn-danger" onclick="return confirm('Log out?')">Logout</a>
-      </div>
-    </div>
-
   </div>
 
   <!-- ============================================================ -->
-  <!-- USERS TAB                                                     -->
+  <!-- USERS                                                          -->
   <!-- ============================================================ -->
-  <div id="tab-users" class="settings-panel" style="display:none">
+  <div id="users" class="settings-group">
 
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
       <h3 class="settings-section-title" style="margin:0"><span class="dim">#</span> User Management</h3>
@@ -203,9 +186,9 @@
   </div>
 
   <!-- ============================================================ -->
-  <!-- SETUP TAB                                                     -->
+  <!-- SETUP                                                          -->
   <!-- ============================================================ -->
-  <div id="tab-setup" class="settings-panel" style="display:none">
+  <div id="setup" class="settings-group">
 
     <!-- Quick Start -->
     <div class="setup-section">
@@ -544,9 +527,9 @@ OpenTrace.setContext({ userId: 42, plan: 'pro' });</code></pre>
   </div>
 
   <!-- ============================================================ -->
-  <!-- PROFILE TAB                                                   -->
+  <!-- PROFILE                                                        -->
   <!-- ============================================================ -->
-  <div id="tab-profile" class="settings-panel" style="display:none">
+  <div id="profile" class="settings-group">
 
     {{if .User}}
     <!-- Account Info -->
@@ -660,62 +643,14 @@ OpenTrace.setContext({ userId: 42, plan: 'pro' });</code></pre>
 <!-- SCRIPTS                                                       -->
 <!-- ============================================================ -->
 <script nonce="{{.CSPNonce}}">
-// ---- Tab switching with hash-based navigation ----
-function switchTab(name, btn) {
-  // Hide all panels
-  var panels = document.querySelectorAll('.settings-panel');
-  for (var i = 0; i < panels.length; i++) {
-    panels[i].style.display = 'none';
-  }
-  // Deactivate all tabs
-  var tabs = document.querySelectorAll('.settings-tab');
-  for (var i = 0; i < tabs.length; i++) {
-    tabs[i].classList.remove('active');
-  }
-  // Show selected panel and activate tab
-  var panel = document.getElementById('tab-' + name);
-  if (panel) panel.style.display = '';
-  if (btn) {
-    btn.classList.add('active');
-  } else {
-    var tabBtn = document.querySelector('.settings-tab[data-tab="' + name + '"]');
-    if (tabBtn) tabBtn.classList.add('active');
-  }
-  // Update hash without scrolling
-  if (name === 'general') {
-    history.replaceState(null, '', window.location.pathname);
-  } else {
-    history.replaceState(null, '', '#' + name);
-  }
-}
-
-// Restore tab from hash on load
+// ---- Scroll to hash anchor on load ----
 (function() {
   var hash = window.location.hash.replace('#', '');
-  var validTabs = ['general', 'ai', 'users', 'setup', 'profile'];
-  if (hash && validTabs.indexOf(hash) !== -1) {
-    switchTab(hash);
+  if (hash) {
+    var el = document.getElementById(hash);
+    if (el) setTimeout(function() { el.scrollIntoView({behavior: 'smooth'}); }, 100);
   }
-  // Handle browser back/forward
-  window.addEventListener('hashchange', function() {
-    var h = window.location.hash.replace('#', '');
-    if (h && validTabs.indexOf(h) !== -1) {
-      switchTab(h);
-    } else {
-      switchTab('general');
-    }
-  });
 })();
-
-// ---- Theme toggle label ----
-function updateThemeLabel() {
-  var btn = document.getElementById('theme-toggle-btn');
-  if (btn) {
-    var t = localStorage.getItem('opentrace-theme') || 'system';
-    btn.textContent = 'theme: ' + t;
-  }
-}
-updateThemeLabel();
 
 // ---- General: Data Retention ----
 function saveRetention(e) {
@@ -1238,7 +1173,7 @@ function changePassword(e) {
 .settings-page {
 }
 
-/* Flat terminal-style sections (replaces .card wrappers) */
+/* Flat terminal-style sections */
 .settings-section {
   padding-bottom: 1rem;
   margin-bottom: 1rem;
@@ -1249,38 +1184,15 @@ function changePassword(e) {
   margin-bottom: 0;
 }
 
-/* Tab bar */
-.settings-tabs {
-  display: flex;
-  gap: 0;
+/* Settings groups */
+.settings-group {
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 1.5rem;
 }
-
-.settings-tab {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  padding: 8px 16px;
-  background: none;
-  border: 1px solid transparent;
+.settings-group:last-child {
   border-bottom: none;
-  color: var(--text-dim);
-  cursor: pointer;
-  position: relative;
-  bottom: -1px;
-  transition: color 0.15s, background 0.15s;
-}
-
-.settings-tab:hover {
-  color: var(--text-bright);
-  background: var(--bg-tertiary);
-}
-
-.settings-tab.active {
-  color: var(--green);
-  background: var(--bg);
-  border-color: var(--border);
-  border-bottom-color: var(--bg);
+  margin-bottom: 0;
 }
 
 /* Section titles */
@@ -1390,17 +1302,6 @@ function changePassword(e) {
 
 /* Responsive */
 @media (max-width: 699px) {
-  /* Settings tabs: horizontal scroll with better touch targets */
-  .settings-tabs {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-  .settings-tab {
-    padding: 10px 12px;
-    font-size: 12px;
-    white-space: nowrap;
-  }
-
   /* User management header: allow wrapping */
   #tab-users > div:first-child {
     flex-wrap: wrap;
@@ -1467,10 +1368,6 @@ function changePassword(e) {
 }
 
 @media (max-width: 379px) {
-  .settings-tab {
-    padding: 8px 10px;
-    font-size: 11px;
-  }
   .mcp-tab {
     padding: 6px 10px;
     font-size: 11px;

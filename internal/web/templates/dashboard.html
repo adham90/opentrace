@@ -14,10 +14,24 @@
       </span>
     </div>
     <div class="status-bar-right">
-      {{if .User}}<span class="status-user">{{.User.DisplayName}}</span>{{end}}
-      <button class="status-gear" id="slideout-toggle" onclick="toggleSlideout()" title="Sources & Settings" aria-label="Settings">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.5"/><path d="M8 1.5v1.2M8 13.3v1.2M3.4 3.4l.85.85M11.75 11.75l.85.85M1.5 8h1.2M13.3 8h1.2M3.4 12.6l.85-.85M11.75 4.25l.85-.85"/></svg>
-      </button>
+      {{if .User}}
+      <div class="user-menu" id="user-menu">
+        <button class="user-menu-trigger" onclick="toggleUserMenu()">
+          {{.User.DisplayName}}
+          <svg width="8" height="5" viewBox="0 0 8 5" fill="currentColor"><path d="M0 0l4 5 4-5z"/></svg>
+        </button>
+        <div class="user-menu-dropdown" id="user-menu-dropdown">
+          <button class="user-menu-item" onclick="cycleTheme(); updateDropdownTheme();">theme: <span id="dropdown-theme-label">system</span></button>
+          <div class="user-menu-divider"></div>
+          <a href="/settings#profile" class="user-menu-item">Profile</a>
+          <a href="/settings" class="user-menu-item">Settings</a>
+          <a href="/settings#setup" class="user-menu-item">Setup</a>
+          {{if .IsAdmin}}<a href="/settings#users" class="user-menu-item">Users</a>{{end}}
+          <div class="user-menu-divider"></div>
+          <a href="/logout" class="user-menu-item user-menu-item-danger" onclick="return confirm('Log out?')">Logout</a>
+        </div>
+      </div>
+      {{end}}
     </div>
   </header>
 
@@ -89,33 +103,6 @@
   </form>
 </div>
 
-<!-- ── Slide-out Panel ──────────────────────────────────────── -->
-<div class="slideout-overlay" id="slideout-overlay" onclick="toggleSlideout()"></div>
-<div class="slideout" id="slideout">
-  <div class="slideout-header">
-    <span class="slideout-title">Sources & Settings</span>
-    <button class="slideout-close" onclick="toggleSlideout()" aria-label="Close">&times;</button>
-  </div>
-  <div class="slideout-body">
-    <div class="slideout-section">
-      <div class="slideout-section-label">Databases</div>
-      <div id="slideout-databases" class="slideout-list"><span class="slideout-loading">loading...</span></div>
-    </div>
-    <div class="slideout-section">
-      <div class="slideout-section-label">Servers</div>
-      <div id="slideout-servers" class="slideout-list"><span class="slideout-loading">loading...</span></div>
-    </div>
-    <div class="slideout-section">
-      <div class="slideout-section-label">Quick Info</div>
-      <div id="slideout-info" class="slideout-info">
-        {{if .IsAdmin}}<div class="slideout-info-row"><span class="slideout-info-key">API Key</span><span class="slideout-info-val" id="slideout-apikey">{{if .APIKey}}****{{.APIKey | printf "%.4s"}}{{else}}not set{{end}}</span></div>{{end}}
-      </div>
-    </div>
-    <div class="slideout-footer">
-      <a href="/settings" class="btn btn-sm btn-primary">Manage Settings</a>
-    </div>
-  </div>
-</div>
 
 <script nonce="{{.CSPNonce}}">
 (function(){
@@ -221,50 +208,21 @@
   loadStatusAll();
   setInterval(loadStatusAll, 30000);
 
-  // ── Slideout ─────────────────────────────────────────────
-  window.toggleSlideout = function() {
-    var el = document.getElementById('slideout');
-    var ov = document.getElementById('slideout-overlay');
-    var open = el.classList.contains('slideout-open');
-    if (open) {
-      el.classList.remove('slideout-open');
-      ov.classList.remove('slideout-overlay-open');
-    } else {
-      el.classList.add('slideout-open');
-      ov.classList.add('slideout-overlay-open');
-      loadSlideoutData();
-    }
+  // ── User Menu ─────────────────────────────────────────────
+  window.toggleUserMenu = function() {
+    document.getElementById('user-menu-dropdown').classList.toggle('user-menu-open');
   };
-
-  function loadSlideoutData() {
-    // Databases
-    fetch('/api/connectors').then(function(r){ return r.json(); }).then(function(list) {
-      var el = document.getElementById('slideout-databases');
-      if (!list || list.length === 0) { el.innerHTML = '<span class="slideout-empty">No databases configured.</span>'; return; }
-      var html = '';
-      list.forEach(function(c) {
-        var cls = c.status === 'connected' ? 'status-dot-ok' : (c.status === 'error' ? 'status-dot-err' : 'status-dot-off');
-        html += '<div class="slideout-row"><span class="status-dot ' + cls + '"></span><span>' + escH(c.name || c.type || 'database') + '</span></div>';
-      });
-      el.innerHTML = html;
-    }).catch(function() {
-      document.getElementById('slideout-databases').innerHTML = '<span class="slideout-empty">Could not load.</span>';
-    });
-
-    // Servers
-    fetch('/api/servers').then(function(r){ return r.json(); }).then(function(list) {
-      var el = document.getElementById('slideout-servers');
-      if (!list || list.length === 0) { el.innerHTML = '<span class="slideout-empty">No servers reporting.</span>'; return; }
-      var html = '';
-      list.forEach(function(s) {
-        var cls = s.status === 'online' ? 'status-dot-ok' : 'status-dot-off';
-        html += '<div class="slideout-row"><span class="status-dot ' + cls + '"></span><span>' + escH(s.hostname || s.name || 'server') + '</span></div>';
-      });
-      el.innerHTML = html;
-    }).catch(function() {
-      document.getElementById('slideout-servers').innerHTML = '<span class="slideout-empty">Could not load.</span>';
-    });
-  }
+  window.updateDropdownTheme = function() {
+    var el = document.getElementById('dropdown-theme-label');
+    if (el) el.textContent = localStorage.getItem('opentrace-theme') || 'system';
+  };
+  updateDropdownTheme();
+  document.addEventListener('click', function(e) {
+    var menu = document.getElementById('user-menu');
+    if (menu && !menu.contains(e.target)) {
+      document.getElementById('user-menu-dropdown').classList.remove('user-menu-open');
+    }
+  });
 
   // ── Filter state ────────────────────────────────────────
   var filters = {

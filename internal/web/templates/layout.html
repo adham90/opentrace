@@ -182,10 +182,10 @@
           overlay.style.display = 'none';
           return;
         }
-        // Close slideout if open
-        var slideout = document.getElementById('slideout');
-        if (slideout && slideout.classList.contains('slideout-open')) {
-          window.toggleSlideout && window.toggleSlideout();
+        // Close user menu if open
+        var userMenu = document.getElementById('user-menu-dropdown');
+        if (userMenu && userMenu.classList.contains('user-menu-open')) {
+          userMenu.classList.remove('user-menu-open');
           return;
         }
         var modals = document.querySelectorAll('.modal[style*="flex"]');
