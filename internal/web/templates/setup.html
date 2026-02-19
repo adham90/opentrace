@@ -5,327 +5,149 @@
     <a href="/" class="page-close" title="Back to dashboard">&times;</a>
   </div>
 
-  <!-- Quick Start -->
-  <div class="setup-section">
-    <h3 class="setup-heading"><span class="dim">#</span>Quick Start</h3>
-    <ol class="setup-steps">
-      <li>
-        <strong>Build the binary</strong>
+  <!-- ── Step 1: Install ──────────────────────────────────── -->
+  <div class="setup-step">
+    <div class="setup-step-num">1</div>
+    <div class="setup-step-body">
+      <h3 class="setup-step-title">Install</h3>
+      <div class="code-block">
+        <button class="copy-btn" onclick="copyCode(this)">copy</button>
+        <pre><code>go install github.com/adham90/opentrace/cmd/opentrace@latest</code></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Step 2: Connect your MCP client ──────────────────── -->
+  <div class="setup-step">
+    <div class="setup-step-num">2</div>
+    <div class="setup-step-body">
+      <h3 class="setup-step-title">Connect your MCP client</h3>
+
+      <div class="setup-client-picker" id="client-picker">
+        <button class="setup-client-btn active" onclick="pickClient('claude', this)">Claude Code</button>
+        <button class="setup-client-btn" onclick="pickClient('cursor', this)">Cursor</button>
+        <button class="setup-client-btn" onclick="pickClient('windsurf', this)">Windsurf</button>
+        <button class="setup-client-btn" onclick="pickClient('other', this)">Other</button>
+      </div>
+
+      <p class="setup-client-hint" id="client-hint">Add to <code>.mcp.json</code> or <code>~/.claude.json</code></p>
+
+      <div class="code-block">
+        <button class="copy-btn" onclick="copyCode(this)">copy</button>
+        <pre><code id="mcp-config">{
+  "mcpServers": {
+    "opentrace": {
+      "command": "opentrace",
+      "args": ["mcp"]
+    }
+  }
+}</code></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Step 3: Verify ───────────────────────────────────── -->
+  <div class="setup-step">
+    <div class="setup-step-num">3</div>
+    <div class="setup-step-body">
+      <h3 class="setup-step-title">Verify</h3>
+      <p class="setup-step-desc">Ask your agent to run <code>list_connectors</code> — it should return your configured data sources.</p>
+      <p class="setup-step-desc">See all <a href="/tools">available MCP tools</a>.</p>
+    </div>
+  </div>
+
+  <!-- ── More: collapsible extras ─────────────────────────── -->
+  <div class="setup-extras">
+
+    <details class="setup-extra">
+      <summary>VM Metrics Agent</summary>
+      <div class="setup-extra-body">
+        <p class="setup-step-desc">Collect CPU, memory, disk, network and load metrics from your servers.</p>
         <div class="code-block">
-          <button class="copy-btn" onclick="copyCode(this)">copy</button>
-          <pre><code>go install github.com/adham90/opentrace/cmd/opentrace@latest</code></pre>
+          <button class="copy-btn" onclick="copyInstallCmd(this)">copy</button>
+          <pre><code id="agent-install-cmd">loading...</code></pre>
         </div>
-      </li>
-      <li>
-        <strong>Configure your agent</strong> — add the MCP server config to your client (see sections below)
-      </li>
-      <li>
-        <strong>Verify the connection</strong> — ask your agent to <code>list_connectors</code>; it should return your configured data sources
-      </li>
-    </ol>
-  </div>
 
-  <!-- Claude Code -->
-  <div class="setup-section">
-    <h3 class="setup-heading"><span class="dim">#</span>Claude Code</h3>
-    <p class="setup-desc">Add to your project's <code>.mcp.json</code> or global <code>~/.claude.json</code> under <code>mcpServers</code>:</p>
-    <div class="code-block">
-      <button class="copy-btn" onclick="copyCode(this)">copy</button>
-      <pre><code>{
-  "mcpServers": {
-    "opentrace": {
-      "command": "opentrace",
-      "args": ["mcp"]
-    }
-  }
-}</code></pre>
-    </div>
-  </div>
-
-  <!-- Cursor -->
-  <div class="setup-section">
-    <h3 class="setup-heading"><span class="dim">#</span>Cursor</h3>
-    <p class="setup-desc">Add to <code>.cursor/mcp.json</code> in your project root:</p>
-    <div class="code-block">
-      <button class="copy-btn" onclick="copyCode(this)">copy</button>
-      <pre><code>{
-  "mcpServers": {
-    "opentrace": {
-      "command": "opentrace",
-      "args": ["mcp"]
-    }
-  }
-}</code></pre>
-    </div>
-  </div>
-
-  <!-- Windsurf -->
-  <div class="setup-section">
-    <h3 class="setup-heading"><span class="dim">#</span>Windsurf</h3>
-    <p class="setup-desc">Add to <code>~/.codeium/windsurf/mcp_config.json</code>:</p>
-    <div class="code-block">
-      <button class="copy-btn" onclick="copyCode(this)">copy</button>
-      <pre><code>{
-  "mcpServers": {
-    "opentrace": {
-      "command": "opentrace",
-      "args": ["mcp"]
-    }
-  }
-}</code></pre>
-    </div>
-  </div>
-
-  <!-- Other MCP Clients -->
-  <div class="setup-section">
-    <h3 class="setup-heading"><span class="dim">#</span>Other MCP Clients</h3>
-    <p class="setup-desc">Generic stdio transport config for any MCP-compatible client:</p>
-    <div class="code-block">
-      <button class="copy-btn" onclick="copyCode(this)">copy</button>
-      <pre><code>{
-  "name": "opentrace",
-  "transport": "stdio",
-  "command": "opentrace",
-  "args": ["mcp"]
-}</code></pre>
-    </div>
-  </div>
-
-  <!-- VM Agent Setup -->
-  <div class="setup-section">
-    <h3 class="setup-heading"><span class="dim">#</span>VM Metrics Agent</h3>
-    <p class="setup-desc">OpenTrace includes a lightweight agent that collects system metrics (CPU, memory, disk, network, load) from your servers.</p>
-
-    <h4 class="setup-heading" style="font-size:12px;margin-top:1rem">One-line install</h4>
-    <p class="setup-desc">Run this on the server you want to monitor:</p>
-    <div class="code-block">
-      <button class="copy-btn" onclick="copyInstallCmd(this)">copy</button>
-      <pre><code id="agent-install-cmd">loading...</code></pre>
-    </div>
-
-    <details style="margin-top:1rem">
-      <summary class="setup-desc" style="cursor:pointer"><strong>Manual setup</strong></summary>
-      <div style="margin-top:0.75rem">
-        <ol class="setup-steps">
-          <li>
-            <strong>Install the binary on your server</strong>
-            <div class="code-block">
-              <button class="copy-btn" onclick="copyCode(this)">copy</button>
-              <pre><code>go install github.com/adham90/opentrace/cmd/opentrace@latest</code></pre>
-            </div>
-          </li>
-          <li>
-            <strong>Run the agent</strong>
+        <details style="margin-top:1rem">
+          <summary class="setup-step-desc" style="cursor:pointer">Manual setup &amp; systemd service</summary>
+          <div style="margin-top:0.75rem">
+            <p class="setup-step-desc">Run the agent manually:</p>
             <div class="code-block">
               <button class="copy-btn" onclick="copyManualRunCmd(this)">copy</button>
               <pre><code id="agent-manual-cmd">loading...</code></pre>
             </div>
-          </li>
-          <li>
-            <strong>Check the dashboard</strong> — your server should appear on the <a href="/servers">servers page</a> within seconds
-          </li>
-        </ol>
 
-        <p class="setup-desc">Agent environment variables:</p>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Variable</th>
-                <th>Description</th>
-                <th>Default</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><code>OPENTRACE_SERVER_URL</code></td>
-                <td>URL of your OpenTrace server (required)</td>
-                <td>--</td>
-              </tr>
-              <tr>
-                <td><code>OPENTRACE_API_KEY</code></td>
-                <td>API key for authentication</td>
-                <td>--</td>
-              </tr>
-              <tr>
-                <td><code>OPENTRACE_AGENT_INTERVAL</code></td>
-                <td>Metrics collection interval</td>
-                <td><code>30s</code></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+            <p class="setup-step-desc" style="margin-top:1rem">Systemd unit file:</p>
+            <div class="code-block">
+              <button class="copy-btn" onclick="copySystemdCmd(this)">copy</button>
+              <pre><code id="agent-systemd-cmd">loading...</code></pre>
+            </div>
 
-        <p class="setup-desc" style="margin-top:1rem">Running as a systemd service:</p>
-        <div class="code-block">
-          <button class="copy-btn" onclick="copySystemdCmd(this)">copy</button>
-          <pre><code id="agent-systemd-cmd">loading...</code></pre>
-        </div>
+            <div class="setup-env-table" style="margin-top:1rem">
+              <div class="setup-env-row"><code>OPENTRACE_SERVER_URL</code> <span>URL of your OpenTrace server (required)</span></div>
+              <div class="setup-env-row"><code>OPENTRACE_API_KEY</code> <span>API key for authentication</span></div>
+              <div class="setup-env-row"><code>OPENTRACE_AGENT_INTERVAL</code> <span>Collection interval (default: 30s)</span></div>
+            </div>
+          </div>
+        </details>
       </div>
     </details>
-  </div>
 
-  <!-- JS Error Tracking -->
-  <div class="setup-section">
-    <h3 class="setup-heading"><span class="dim">#</span>Browser Error Tracking</h3>
-    <p class="setup-desc">Capture JavaScript errors from your frontend and forward them to OpenTrace. Errors are grouped automatically and correlated with server-side logs via request ID.</p>
-
-    <h4 class="setup-heading" style="font-size:12px;margin-top:1rem">1. Add the script tag</h4>
-    <p class="setup-desc">Paste this into your HTML <code>&lt;head&gt;</code>:</p>
-    <div class="code-block">
-      <button class="copy-btn" onclick="copyJSSnippet(this)">copy</button>
-      <pre><code id="js-snippet">loading...</code></pre>
-    </div>
-
-    <h4 class="setup-heading" style="font-size:12px;margin-top:1rem">2. Add the request ID meta tag (optional)</h4>
-    <p class="setup-desc">To correlate browser errors with the server request that rendered the page, add this meta tag to your layout. For Rails:</p>
-    <div class="code-block">
-      <button class="copy-btn" onclick="copyCode(this)">copy</button>
-      <pre><code>&lt;meta name="opentrace-rid" content="&lt;%= request.request_id %&gt;"&gt;</code></pre>
-    </div>
-    <p class="setup-desc" style="margin-top:0.5rem">For other frameworks, set the <code>content</code> to your server's request ID.</p>
-
-    <details style="margin-top:1rem">
-      <summary class="setup-desc" style="cursor:pointer"><strong>Advanced options</strong></summary>
-      <div style="margin-top:0.75rem">
-        <p class="setup-desc"><code>OpenTrace.init()</code> accepts these options:</p>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Option</th>
-                <th>Description</th>
-                <th>Default</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><code>service</code></td>
-                <td>Service name for your frontend (required)</td>
-                <td>--</td>
-              </tr>
-              <tr>
-                <td><code>environment</code></td>
-                <td>Environment tag (production, staging, etc.)</td>
-                <td><code>""</code></td>
-              </tr>
-              <tr>
-                <td><code>commitHash</code></td>
-                <td>Git commit hash for release tracking</td>
-                <td><code>""</code></td>
-              </tr>
-              <tr>
-                <td><code>sampleRate</code></td>
-                <td>Fraction of errors to capture (0.0–1.0)</td>
-                <td><code>1.0</code></td>
-              </tr>
-              <tr>
-                <td><code>beforeSend</code></td>
-                <td>Function to modify or drop events before sending. Return <code>null</code> to drop.</td>
-                <td><code>null</code></td>
-              </tr>
-              <tr>
-                <td><code>maxQueueSize</code></td>
-                <td>Max buffered events before forced flush</td>
-                <td><code>50</code></td>
-              </tr>
-              <tr>
-                <td><code>flushInterval</code></td>
-                <td>Flush interval in milliseconds</td>
-                <td><code>5000</code></td>
-              </tr>
-              <tr>
-                <td><code>enabled</code></td>
-                <td>Kill switch to disable tracking</td>
-                <td><code>true</code></td>
-              </tr>
-            </tbody>
-          </table>
+    <details class="setup-extra">
+      <summary>Browser Error Tracking</summary>
+      <div class="setup-extra-body">
+        <p class="setup-step-desc">Capture JavaScript errors and forward them to OpenTrace.</p>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyJSSnippet(this)">copy</button>
+          <pre><code id="js-snippet">loading...</code></pre>
         </div>
-
-        <h4 class="setup-heading" style="font-size:12px;margin-top:1rem">Manual error capture</h4>
+        <p class="setup-step-desc" style="margin-top:0.75rem">Optional: add a meta tag to correlate with server requests:</p>
         <div class="code-block">
           <button class="copy-btn" onclick="copyCode(this)">copy</button>
-          <pre><code>// Capture a caught error with extra context
-OpenTrace.captureError(error, { userId: 42, page: '/checkout' });
-
-// Send a manual log message
-OpenTrace.log('warn', 'Payment retry attempted', { orderId: 123 });
-
-// Set context merged into every event
-OpenTrace.setContext({ userId: 42, plan: 'pro' });</code></pre>
+          <pre><code>&lt;meta name="opentrace-rid" content="&lt;%= request.request_id %&gt;"&gt;</code></pre>
         </div>
+
+        <details style="margin-top:1rem">
+          <summary class="setup-step-desc" style="cursor:pointer">Advanced options &amp; manual capture</summary>
+          <div style="margin-top:0.75rem">
+            <div class="setup-env-table">
+              <div class="setup-env-row"><code>service</code> <span>Service name (required)</span></div>
+              <div class="setup-env-row"><code>environment</code> <span>Environment tag</span></div>
+              <div class="setup-env-row"><code>commitHash</code> <span>Git commit for release tracking</span></div>
+              <div class="setup-env-row"><code>sampleRate</code> <span>Fraction of errors to capture (0–1, default: 1)</span></div>
+              <div class="setup-env-row"><code>beforeSend</code> <span>Modify/drop events before sending</span></div>
+              <div class="setup-env-row"><code>maxQueueSize</code> <span>Buffer size before flush (default: 50)</span></div>
+              <div class="setup-env-row"><code>flushInterval</code> <span>Flush interval ms (default: 5000)</span></div>
+              <div class="setup-env-row"><code>enabled</code> <span>Kill switch (default: true)</span></div>
+            </div>
+            <div class="code-block" style="margin-top:1rem">
+              <button class="copy-btn" onclick="copyCode(this)">copy</button>
+              <pre><code>OpenTrace.captureError(error, { userId: 42 });
+OpenTrace.log('warn', 'Retry attempted', { orderId: 123 });
+OpenTrace.setContext({ userId: 42, plan: 'pro' });</code></pre>
+            </div>
+          </div>
+        </details>
       </div>
     </details>
-  </div>
 
-  <!-- Available Tools -->
-  <div class="setup-section">
-    <h3 class="setup-heading"><span class="dim">#</span>Available Tools</h3>
-    <p class="setup-desc">See all available MCP tools on the <a href="/tools">tools page</a>.</p>
-  </div>
-
-  <!-- Environment Variables -->
-  <div class="setup-section">
-    <h3 class="setup-heading"><span class="dim">#</span>Environment Variables</h3>
-    <p class="setup-desc">Optional environment variables to configure OpenTrace:</p>
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Variable</th>
-            <th>Description</th>
-            <th>Default</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><code>OPENTRACE_DATA_DIR</code></td>
-            <td>Directory for SQLite database</td>
-            <td><code>~/.opentrace</code></td>
-          </tr>
-          <tr>
-            <td><code>OPENTRACE_LLM_PROVIDER</code></td>
-            <td>LLM provider for watchers (<code>openai</code>, <code>anthropic</code>, <code>gemini</code>)</td>
-            <td><code>openai</code></td>
-          </tr>
-          <tr>
-            <td><code>OPENTRACE_LLM_MODEL</code></td>
-            <td>Model name for the chosen provider</td>
-            <td><code>gpt-4o-mini</code></td>
-          </tr>
-          <tr>
-            <td><code>OPENAI_API_KEY</code></td>
-            <td>API key for OpenAI provider</td>
-            <td>--</td>
-          </tr>
-          <tr>
-            <td><code>ANTHROPIC_API_KEY</code></td>
-            <td>API key for Anthropic provider</td>
-            <td>--</td>
-          </tr>
-          <tr>
-            <td><code>GEMINI_API_KEY</code></td>
-            <td>API key for Google Gemini provider</td>
-            <td>--</td>
-          </tr>
-          <tr>
-            <td><code>OPENTRACE_PORT</code></td>
-            <td>HTTP server port</td>
-            <td><code>7777</code></td>
-          </tr>
-          <tr>
-            <td><code>OPENTRACE_API_KEY</code></td>
-            <td>API key for log ingestion endpoint</td>
-            <td>--</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <p class="setup-note">You can pass environment variables to the MCP server by adding an <code>"env"</code> block to the config:</p>
-    <div class="code-block">
-      <button class="copy-btn" onclick="copyCode(this)">copy</button>
-      <pre><code>{
+    <details class="setup-extra">
+      <summary>Environment Variables</summary>
+      <div class="setup-extra-body">
+        <div class="setup-env-table">
+          <div class="setup-env-row"><code>OPENTRACE_PORT</code> <span>HTTP port (default: 7777)</span></div>
+          <div class="setup-env-row"><code>OPENTRACE_DATA_DIR</code> <span>SQLite directory (default: ~/.opentrace)</span></div>
+          <div class="setup-env-row"><code>OPENTRACE_API_KEY</code> <span>API key for log ingestion</span></div>
+          <div class="setup-env-row"><code>OPENTRACE_LLM_PROVIDER</code> <span>openai, anthropic, or gemini</span></div>
+          <div class="setup-env-row"><code>OPENTRACE_LLM_MODEL</code> <span>Model name (default: gpt-4o-mini)</span></div>
+          <div class="setup-env-row"><code>OPENAI_API_KEY</code> <span>API key for OpenAI</span></div>
+          <div class="setup-env-row"><code>ANTHROPIC_API_KEY</code> <span>API key for Anthropic</span></div>
+          <div class="setup-env-row"><code>GEMINI_API_KEY</code> <span>API key for Gemini</span></div>
+        </div>
+        <p class="setup-step-desc" style="margin-top:1rem">Pass env vars to the MCP server:</p>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">copy</button>
+          <pre><code>{
   "mcpServers": {
     "opentrace": {
       "command": "opentrace",
@@ -336,7 +158,10 @@ OpenTrace.setContext({ userId: 42, plan: 'pro' });</code></pre>
     }
   }
 }</code></pre>
-    </div>
+        </div>
+      </div>
+    </details>
+
   </div>
 
 </div>
@@ -346,11 +171,31 @@ var baseURL = window.location.protocol + '//' + window.location.host;
 var apiKey = {{.APIKey}};
 var installURL = baseURL + '/api/agent/install.sh' + (apiKey ? '?key=' + encodeURIComponent(apiKey) : '');
 
+// ---- Client picker ----
+var clientHints = {
+  claude:   'Add to <code>.mcp.json</code> or <code>~/.claude.json</code>',
+  cursor:   'Add to <code>.cursor/mcp.json</code> in your project root',
+  windsurf: 'Add to <code>~/.codeium/windsurf/mcp_config.json</code>',
+  other:    'Use this generic stdio config with any MCP client'
+};
+var clientConfigs = {
+  claude:   '{\n  "mcpServers": {\n    "opentrace": {\n      "command": "opentrace",\n      "args": ["mcp"]\n    }\n  }\n}',
+  cursor:   '{\n  "mcpServers": {\n    "opentrace": {\n      "command": "opentrace",\n      "args": ["mcp"]\n    }\n  }\n}',
+  windsurf: '{\n  "mcpServers": {\n    "opentrace": {\n      "command": "opentrace",\n      "args": ["mcp"]\n    }\n  }\n}',
+  other:    '{\n  "name": "opentrace",\n  "transport": "stdio",\n  "command": "opentrace",\n  "args": ["mcp"]\n}'
+};
+
+function pickClient(id, btn) {
+  document.querySelectorAll('.setup-client-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  document.getElementById('client-hint').innerHTML = clientHints[id];
+  document.getElementById('mcp-config').textContent = clientConfigs[id];
+}
+
+// ---- Dynamic content ----
 (function() {
   var installEl = document.getElementById('agent-install-cmd');
-  if (installEl) {
-    installEl.textContent = 'curl -fsSL ' + installURL + ' | sudo bash';
-  }
+  if (installEl) installEl.textContent = 'curl -fsSL ' + installURL + ' | sudo bash';
 
   var manualEl = document.getElementById('agent-manual-cmd');
   if (manualEl) {
@@ -380,6 +225,7 @@ var installURL = baseURL + '/api/agent/install.sh' + (apiKey ? '?key=' + encodeU
   }
 })();
 
+// ---- Copy helpers ----
 function copyCode(btn) {
   var code = btn.parentElement.querySelector('code');
   navigator.clipboard.writeText(code.textContent).then(function() {
@@ -388,25 +234,10 @@ function copyCode(btn) {
     setTimeout(function() { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 2000);
   });
 }
-
-function copyInstallCmd(btn) {
-  copyAndFlash(btn, 'curl -fsSL ' + installURL + ' | sudo bash');
-}
-
-function copyManualRunCmd(btn) {
-  copyAndFlash(btn, 'OPENTRACE_SERVER_URL=' + baseURL + (apiKey ? ' OPENTRACE_API_KEY=' + apiKey : '') + ' opentrace agent');
-}
-
-function copySystemdCmd(btn) {
-  var code = btn.parentElement.querySelector('code');
-  copyAndFlash(btn, code.textContent);
-}
-
-function copyJSSnippet(btn) {
-  var code = document.getElementById('js-snippet');
-  copyAndFlash(btn, code.textContent);
-}
-
+function copyInstallCmd(btn) { copyAndFlash(btn, 'curl -fsSL ' + installURL + ' | sudo bash'); }
+function copyManualRunCmd(btn) { copyAndFlash(btn, 'OPENTRACE_SERVER_URL=' + baseURL + (apiKey ? ' OPENTRACE_API_KEY=' + apiKey : '') + ' opentrace agent'); }
+function copySystemdCmd(btn) { var c = btn.parentElement.querySelector('code'); copyAndFlash(btn, c.textContent); }
+function copyJSSnippet(btn) { copyAndFlash(btn, document.getElementById('js-snippet').textContent); }
 function copyAndFlash(btn, text) {
   navigator.clipboard.writeText(text).then(function() {
     btn.textContent = 'copied!';
@@ -415,4 +246,148 @@ function copyAndFlash(btn, text) {
   });
 }
 </script>
+
+<style nonce="{{.CSPNonce}}">
+/* ── Steps ─────────────────────────────────────────── */
+.setup-step {
+  display: flex;
+  gap: 16px;
+  padding-bottom: 1.5rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.setup-step-num {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.setup-step-body {
+  flex: 1;
+  min-width: 0;
+}
+.setup-step-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-bright);
+  margin: 0 0 0.75rem 0;
+}
+.setup-step-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0 0 0.5rem 0;
+  line-height: 1.5;
+}
+
+/* ── Client picker ─────────────────────────────────── */
+.setup-client-picker {
+  display: flex;
+  gap: 0;
+  margin-bottom: 0.75rem;
+}
+.setup-client-btn {
+  padding: 5px 12px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  transition: color 0.15s, background 0.15s;
+}
+.setup-client-btn:first-child { border-radius: 4px 0 0 4px; }
+.setup-client-btn:last-child { border-radius: 0 4px 4px 0; }
+.setup-client-btn + .setup-client-btn { border-left: none; }
+.setup-client-btn:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+.setup-client-btn.active {
+  color: var(--green);
+  border-color: var(--green);
+  background: var(--green-dim);
+}
+.setup-client-btn.active + .setup-client-btn { border-left: none; }
+.setup-client-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0 0 0.5rem 0;
+}
+
+/* ── Collapsible extras ────────────────────────────── */
+.setup-extras {
+  margin-top: 0.5rem;
+}
+.setup-extra {
+  border-bottom: 1px solid var(--border);
+}
+.setup-extra:last-child {
+  border-bottom: none;
+}
+.setup-extra > summary {
+  padding: 10px 0;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.setup-extra > summary::before {
+  content: '+';
+  color: var(--text-dim);
+  font-size: 14px;
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.setup-extra[open] > summary::before {
+  content: '\2212';
+}
+.setup-extra > summary::-webkit-details-marker { display: none; }
+.setup-extra > summary:hover { color: var(--text); }
+.setup-extra-body {
+  padding: 0 0 1rem 24px;
+}
+
+/* ── Env var rows ──────────────────────────────────── */
+.setup-env-table {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.setup-env-row {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  padding: 4px 0;
+}
+.setup-env-row code {
+  color: var(--text-bright);
+  flex-shrink: 0;
+  min-width: 200px;
+}
+.setup-env-row span {
+  color: var(--text-dim);
+}
+
+/* ── Responsive ────────────────────────────────────── */
+@media (max-width: 699px) {
+  .setup-step { gap: 12px; }
+  .setup-client-picker { flex-wrap: wrap; }
+  .setup-client-btn { padding: 6px 10px; font-size: 11px; }
+  .setup-env-row { flex-direction: column; gap: 2px; }
+  .setup-env-row code { min-width: 0; }
+  .setup-extra-body { padding-left: 0; }
+}
+</style>
 {{end}}
