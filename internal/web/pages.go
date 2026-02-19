@@ -31,6 +31,8 @@ var (
 	registerTmpl   *template.Template
 	profileTmpl    *template.Template
 	settingsTmpl   *template.Template
+	setupTmpl      *template.Template
+	usersTmpl      *template.Template
 	onboardingTmpl *template.Template
 )
 
@@ -46,6 +48,10 @@ func init() {
 		"templates/layout.html", "templates/profile.html"))
 	settingsTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/settings.html"))
+	setupTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/setup.html"))
+	usersTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/users.html"))
 	onboardingTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout_minimal.html", "templates/onboarding.html"))
 }
@@ -636,17 +642,31 @@ func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Load users for user management tab
+	tmpl := s.getTemplate(settingsTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/settings.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleSetupPage(w http.ResponseWriter, r *http.Request) {
+	data := s.newPageData(r, "Setup", "setup")
+	tmpl := s.getTemplate(setupTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/setup.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleUsersPage(w http.ResponseWriter, r *http.Request) {
+	data := s.newPageData(r, "Users", "users")
 	if s.userStore != nil {
 		users, err := s.userStore.List(r.Context())
 		if err == nil {
 			data.Users = users
 		}
 	}
-
-	tmpl := s.getTemplate(settingsTmpl,
+	tmpl := s.getTemplate(usersTmpl,
 		"internal/web/templates/layout.html",
-		"internal/web/templates/settings.html")
+		"internal/web/templates/users.html")
 	tmpl.ExecuteTemplate(w, "layout", data)
 }
 

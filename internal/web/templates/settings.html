@@ -2,657 +2,121 @@
 <div class="settings-page">
   <div class="page-header">
     <h1><span class="prompt">$</span> settings</h1>
+    <a href="/" class="page-close" title="Back to dashboard">&times;</a>
   </div>
 
-  <!-- ============================================================ -->
-  <!-- GENERAL                                                        -->
-  <!-- ============================================================ -->
-  <div id="general" class="settings-group">
+  <!-- Version & Updates -->
+  <div class="settings-section">
+    <h3 class="settings-section-title"><span class="dim">#</span> Version & Updates</h3>
+    <div id="version-info" style="font-size:0.9rem">
+      <div style="display:flex;gap:2rem;margin-bottom:0.75rem;flex-wrap:wrap">
+        <div><span class="text-dim">current:</span> <strong id="ver-current">loading...</strong></div>
+        <div><span class="text-dim">commit:</span> <code id="ver-commit">...</code></div>
+        <div><span class="text-dim">built:</span> <span id="ver-date">...</span></div>
+      </div>
+      <div id="ver-status" style="margin-bottom:0.75rem"></div>
 
-    <!-- Version & Updates -->
-    <div class="settings-section">
-      <h3 class="settings-section-title"><span class="dim">#</span> Version & Updates</h3>
-      <div id="version-info" style="font-size:0.9rem">
-        <div style="display:flex;gap:2rem;margin-bottom:0.75rem;flex-wrap:wrap">
-          <div><span class="text-dim">current:</span> <strong id="ver-current">loading...</strong></div>
-          <div><span class="text-dim">commit:</span> <code id="ver-commit">...</code></div>
-          <div><span class="text-dim">built:</span> <span id="ver-date">...</span></div>
-        </div>
-        <div id="ver-status" style="margin-bottom:0.75rem"></div>
+      <div id="ver-update-actions" style="display:none;margin-bottom:0.75rem">
+        <button class="btn btn-primary" onclick="performUpdate()" id="ver-update-btn" style="margin-right:0.5rem">Update now</button>
+        <span id="ver-update-status" style="font-size:0.9rem"></span>
+      </div>
 
-        <div id="ver-update-actions" style="display:none;margin-bottom:0.75rem">
-          <button class="btn btn-primary" onclick="performUpdate()" id="ver-update-btn" style="margin-right:0.5rem">Update now</button>
-          <span id="ver-update-status" style="font-size:0.9rem"></span>
-        </div>
+      <div id="ver-docker-notice" style="display:none;background:rgba(100,180,255,0.1);border:1px solid rgba(100,180,255,0.3);color:#80b8ff;padding:0.5rem 1rem;border-radius:4px;margin-bottom:0.75rem;font-size:0.85rem">
+        Running in Docker. Updates are handled by your container orchestrator.<br>
+        <code style="margin-top:0.25rem;display:inline-block">docker compose pull && docker compose up -d</code>
+      </div>
 
-        <div id="ver-docker-notice" style="display:none;background:rgba(100,180,255,0.1);border:1px solid rgba(100,180,255,0.3);color:#80b8ff;padding:0.5rem 1rem;border-radius:4px;margin-bottom:0.75rem;font-size:0.85rem">
-          Running in Docker. Updates are handled by your container orchestrator.<br>
-          <code style="margin-top:0.25rem;display:inline-block">docker compose pull && docker compose up -d</code>
-        </div>
+      <div id="ver-instructions" style="display:none">
+        <p class="help-text" style="margin-bottom:0.5rem"><strong>Release notes:</strong></p>
+        <div id="ver-release-notes" style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:4px;padding:0.75rem;font-size:0.85rem;max-height:200px;overflow-y:auto;white-space:pre-wrap"></div>
+      </div>
 
-        <div id="ver-instructions" style="display:none">
-          <p class="help-text" style="margin-bottom:0.5rem"><strong>Release notes:</strong></p>
-          <div id="ver-release-notes" style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:4px;padding:0.75rem;font-size:0.85rem;max-height:200px;overflow-y:auto;white-space:pre-wrap"></div>
-        </div>
+      <div style="margin-top:0.75rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
+        <button class="btn" onclick="checkForUpdates()" id="ver-check-btn">Check for updates</button>
+        <span id="ver-check-status" style="font-size:0.9rem"></span>
+      </div>
 
-        <div style="margin-top:0.75rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
-          <button class="btn" onclick="checkForUpdates()" id="ver-check-btn">Check for updates</button>
-          <span id="ver-check-status" style="font-size:0.9rem"></span>
-        </div>
-
-        <div id="ver-auto-update" style="display:none;margin-top:0.75rem">
-          <label class="checkbox-label">
-            <input type="checkbox" id="auto-update-toggle" onchange="toggleAutoUpdate(this.checked)">
-            <span>Auto-update (check every hour and apply automatically)</span>
-          </label>
-        </div>
+      <div id="ver-auto-update" style="display:none;margin-top:0.75rem">
+        <label class="checkbox-label">
+          <input type="checkbox" id="auto-update-toggle" onchange="toggleAutoUpdate(this.checked)">
+          <span>Auto-update (check every hour and apply automatically)</span>
+        </label>
       </div>
     </div>
-
-    <!-- API Key -->
-    <div class="settings-section">
-      <h3 class="settings-section-title"><span class="dim">#</span> API Key</h3>
-      <p class="text-dim" style="font-size:0.85rem;margin-bottom:0.75rem">
-        This key authenticates agents sending logs and metrics.
-      </p>
-      {{if .EnvKeyOverride}}
-      <div style="background:rgba(255,200,50,0.1);border:1px solid rgba(255,200,50,0.3);color:var(--yellow);padding:0.5rem 1rem;border-radius:4px;margin-bottom:1rem;font-size:0.85rem">
-        API key is set via <code>OPENTRACE_API_KEY</code> environment variable. UI management is disabled.
-      </div>
-      {{end}}
-      <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.75rem">
-        <code id="api-key-value" style="flex:1;padding:0.5rem;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;word-break:break-all;font-size:0.85rem;cursor:pointer" onclick="toggleKeyVisibility()">Loading...</code>
-        <button class="btn btn-primary" onclick="copyAPIKey()" style="white-space:nowrap">Copy</button>
-      </div>
-      {{if not .EnvKeyOverride}}
-      <button class="btn" onclick="confirmRegenerate()" id="regen-btn">Regenerate Key</button>
-      <span id="regen-status" style="margin-left:1em;font-size:0.9rem"></span>
-      {{end}}
-    </div>
-
-    <!-- Data Retention -->
-    <div class="settings-section">
-      <h3 class="settings-section-title"><span class="dim">#</span> Data Retention</h3>
-      <p class="text-dim" style="font-size:0.85rem;margin-bottom:0.75rem">
-        How long logs, watcher runs, and alerts are kept. Set to <strong>0</strong> to keep forever. Default: 30 days.
-      </p>
-      <form id="retention-form" onsubmit="return saveRetention(event)">
-        <div class="form-group">
-          <label for="retention-days">Retention period (days)</label>
-          <input type="number" id="retention-days" name="retention_days"
-                 min="0" step="1" value="{{.RetentionDays}}"
-                 style="max-width:200px">
-        </div>
-        <button type="submit" class="btn btn-primary">Save</button>
-        <span id="save-status" style="margin-left:1em"></span>
-      </form>
-    </div>
-
-    <!-- CORS Allowed Origins -->
-    <div class="settings-section">
-      <h3 class="settings-section-title"><span class="dim">#</span> CORS Allowed Origins</h3>
-      <p class="text-dim" style="font-size:0.85rem;margin-bottom:0.75rem">
-        Origins allowed to make cross-origin requests to the API (e.g. browser JS error tracking).
-        Use <code>*</code> to allow all origins, or a comma-separated list like <code>https://app.example.com,https://staging.example.com</code>.
-        Leave empty for same-origin only.
-      </p>
-      {{if .CORSEnvOverride}}
-      <div style="background:rgba(255,200,50,0.1);border:1px solid rgba(255,200,50,0.3);color:var(--yellow);padding:0.5rem 1rem;border-radius:4px;margin-bottom:1rem;font-size:0.85rem">
-        CORS origins are set via <code>OPENTRACE_CORS_ORIGINS</code> environment variable. UI management is disabled.
-      </div>
-      {{end}}
-      <form id="cors-form" onsubmit="return saveCORS(event)">
-        <div class="form-group">
-          <label for="cors-origins">Allowed origins</label>
-          <input type="text" id="cors-origins" name="cors_origins"
-                 value="{{.CORSOrigins}}"
-                 placeholder="https://example.com,https://app.example.com"
-                 style="max-width:500px;width:100%"
-                 {{if .CORSEnvOverride}}disabled{{end}}>
-        </div>
-        {{if not .CORSEnvOverride}}
-        <button type="submit" class="btn btn-primary">Save</button>
-        <span id="cors-save-status" style="margin-left:1em"></span>
-        {{end}}
-      </form>
-    </div>
-
   </div>
 
-  <!-- ============================================================ -->
-  <!-- USERS                                                          -->
-  <!-- ============================================================ -->
-  <div id="users" class="settings-group">
-
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-      <h3 class="settings-section-title" style="margin:0"><span class="dim">#</span> User Management</h3>
-      <a href="/register" class="btn btn-primary btn-sm">+ Invite User</a>
-    </div>
-
-    <div id="users-list">
-      {{if .Users}}
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Email</th>
-              <th>Display Name</th>
-              <th>Role</th>
-              <th>MCP</th>
-              <th>Active</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {{range .Users}}
-            <tr id="user-row-{{.ID}}">
-              <td>{{.Email}}</td>
-              <td>{{.DisplayName}}</td>
-              <td>
-                <select class="role-select" onchange="updateRole('{{.ID}}', this.value)" {{if not $.IsAdmin}}disabled{{end}}>
-                  <option value="admin" {{if eq (print .Role) "admin"}}selected{{end}}>admin</option>
-                  <option value="member" {{if eq (print .Role) "member"}}selected{{end}}>member</option>
-                </select>
-              </td>
-              <td>
-                <label class="toggle-label">
-                  <input type="checkbox" {{if .MCPEnabled}}checked{{end}} onchange="toggleMCP('{{.ID}}', this.checked)">
-                  <span class="toggle-text">{{if .MCPEnabled}}on{{else}}off{{end}}</span>
-                </label>
-              </td>
-              <td>
-                <label class="toggle-label">
-                  <input type="checkbox" {{if .IsActive}}checked{{end}} onchange="toggleActive('{{.ID}}', this.checked)">
-                  <span class="toggle-text">{{if .IsActive}}yes{{else}}no{{end}}</span>
-                </label>
-              </td>
-              <td class="actions-cell">
-                <button class="btn btn-sm" onclick="regenToken('{{.ID}}')">Regen Token</button>
-                <button class="btn btn-sm btn-danger" onclick="deleteUser('{{.ID}}', '{{.Email}}')">Delete</button>
-              </td>
-            </tr>
-            {{end}}
-          </tbody>
-        </table>
-      </div>
-      {{else}}
-      <div class="empty-state">
-        <div class="empty-icon">--</div>
-        <p>no users registered</p>
-      </div>
-      {{end}}
-    </div>
-
-  </div>
-
-  <!-- ============================================================ -->
-  <!-- SETUP                                                          -->
-  <!-- ============================================================ -->
-  <div id="setup" class="settings-group">
-
-    <!-- Quick Start -->
-    <div class="setup-section">
-      <h3 class="setup-heading"><span class="dim">#</span>Quick Start</h3>
-      <ol class="setup-steps">
-        <li>
-          <strong>Build the binary</strong>
-          <div class="code-block">
-            <button class="copy-btn" onclick="copyCode(this)">copy</button>
-            <pre><code>go install github.com/adham90/opentrace/cmd/opentrace@latest</code></pre>
-          </div>
-        </li>
-        <li>
-          <strong>Configure your agent</strong> — add the MCP server config to your client (see sections below)
-        </li>
-        <li>
-          <strong>Verify the connection</strong> — ask your agent to <code>list_connectors</code>; it should return your configured data sources
-        </li>
-      </ol>
-    </div>
-
-    <!-- Claude Code -->
-    <div class="setup-section">
-      <h3 class="setup-heading"><span class="dim">#</span>Claude Code</h3>
-      <p class="setup-desc">Add to your project's <code>.mcp.json</code> or global <code>~/.claude.json</code> under <code>mcpServers</code>:</p>
-      <div class="code-block">
-        <button class="copy-btn" onclick="copyCode(this)">copy</button>
-        <pre><code>{
-  "mcpServers": {
-    "opentrace": {
-      "command": "opentrace",
-      "args": ["mcp"]
-    }
-  }
-}</code></pre>
-      </div>
-    </div>
-
-    <!-- Cursor -->
-    <div class="setup-section">
-      <h3 class="setup-heading"><span class="dim">#</span>Cursor</h3>
-      <p class="setup-desc">Add to <code>.cursor/mcp.json</code> in your project root:</p>
-      <div class="code-block">
-        <button class="copy-btn" onclick="copyCode(this)">copy</button>
-        <pre><code>{
-  "mcpServers": {
-    "opentrace": {
-      "command": "opentrace",
-      "args": ["mcp"]
-    }
-  }
-}</code></pre>
-      </div>
-    </div>
-
-    <!-- Windsurf -->
-    <div class="setup-section">
-      <h3 class="setup-heading"><span class="dim">#</span>Windsurf</h3>
-      <p class="setup-desc">Add to <code>~/.codeium/windsurf/mcp_config.json</code>:</p>
-      <div class="code-block">
-        <button class="copy-btn" onclick="copyCode(this)">copy</button>
-        <pre><code>{
-  "mcpServers": {
-    "opentrace": {
-      "command": "opentrace",
-      "args": ["mcp"]
-    }
-  }
-}</code></pre>
-      </div>
-    </div>
-
-    <!-- Other MCP Clients -->
-    <div class="setup-section">
-      <h3 class="setup-heading"><span class="dim">#</span>Other MCP Clients</h3>
-      <p class="setup-desc">Generic stdio transport config for any MCP-compatible client:</p>
-      <div class="code-block">
-        <button class="copy-btn" onclick="copyCode(this)">copy</button>
-        <pre><code>{
-  "name": "opentrace",
-  "transport": "stdio",
-  "command": "opentrace",
-  "args": ["mcp"]
-}</code></pre>
-      </div>
-    </div>
-
-    <!-- VM Agent Setup -->
-    <div class="setup-section">
-      <h3 class="setup-heading"><span class="dim">#</span>VM Metrics Agent</h3>
-      <p class="setup-desc">OpenTrace includes a lightweight agent that collects system metrics (CPU, memory, disk, network, load) from your servers.</p>
-
-      <h4 class="setup-heading" style="font-size:12px;margin-top:1rem">One-line install</h4>
-      <p class="setup-desc">Run this on the server you want to monitor:</p>
-      <div class="code-block">
-        <button class="copy-btn" onclick="copyInstallCmd(this)">copy</button>
-        <pre><code id="agent-install-cmd">loading...</code></pre>
-      </div>
-
-      <details style="margin-top:1rem">
-        <summary class="setup-desc" style="cursor:pointer"><strong>Manual setup</strong></summary>
-        <div style="margin-top:0.75rem">
-          <ol class="setup-steps">
-            <li>
-              <strong>Install the binary on your server</strong>
-              <div class="code-block">
-                <button class="copy-btn" onclick="copyCode(this)">copy</button>
-                <pre><code>go install github.com/adham90/opentrace/cmd/opentrace@latest</code></pre>
-              </div>
-            </li>
-            <li>
-              <strong>Run the agent</strong>
-              <div class="code-block">
-                <button class="copy-btn" onclick="copyManualRunCmd(this)">copy</button>
-                <pre><code id="agent-manual-cmd">loading...</code></pre>
-              </div>
-            </li>
-            <li>
-              <strong>Check the dashboard</strong> — your server should appear on the <a href="/servers">servers page</a> within seconds
-            </li>
-          </ol>
-
-          <p class="setup-desc">Agent environment variables:</p>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Variable</th>
-                  <th>Description</th>
-                  <th>Default</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><code>OPENTRACE_SERVER_URL</code></td>
-                  <td>URL of your OpenTrace server (required)</td>
-                  <td>--</td>
-                </tr>
-                <tr>
-                  <td><code>OPENTRACE_API_KEY</code></td>
-                  <td>API key for authentication</td>
-                  <td>--</td>
-                </tr>
-                <tr>
-                  <td><code>OPENTRACE_AGENT_INTERVAL</code></td>
-                  <td>Metrics collection interval</td>
-                  <td><code>30s</code></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <p class="setup-desc" style="margin-top:1rem">Running as a systemd service:</p>
-          <div class="code-block">
-            <button class="copy-btn" onclick="copySystemdCmd(this)">copy</button>
-            <pre><code id="agent-systemd-cmd">loading...</code></pre>
-          </div>
-        </div>
-      </details>
-    </div>
-
-    <!-- JS Error Tracking -->
-    <div class="setup-section">
-      <h3 class="setup-heading"><span class="dim">#</span>Browser Error Tracking</h3>
-      <p class="setup-desc">Capture JavaScript errors from your frontend and forward them to OpenTrace. Errors are grouped automatically and correlated with server-side logs via request ID.</p>
-
-      <h4 class="setup-heading" style="font-size:12px;margin-top:1rem">1. Add the script tag</h4>
-      <p class="setup-desc">Paste this into your HTML <code>&lt;head&gt;</code>:</p>
-      <div class="code-block">
-        <button class="copy-btn" onclick="copyJSSnippet(this)">copy</button>
-        <pre><code id="js-snippet">loading...</code></pre>
-      </div>
-
-      <h4 class="setup-heading" style="font-size:12px;margin-top:1rem">2. Add the request ID meta tag (optional)</h4>
-      <p class="setup-desc">To correlate browser errors with the server request that rendered the page, add this meta tag to your layout. For Rails:</p>
-      <div class="code-block">
-        <button class="copy-btn" onclick="copyCode(this)">copy</button>
-        <pre><code>&lt;meta name="opentrace-rid" content="&lt;%= request.request_id %&gt;"&gt;</code></pre>
-      </div>
-      <p class="setup-desc" style="margin-top:0.5rem">For other frameworks, set the <code>content</code> to your server's request ID.</p>
-
-      <details style="margin-top:1rem">
-        <summary class="setup-desc" style="cursor:pointer"><strong>Advanced options</strong></summary>
-        <div style="margin-top:0.75rem">
-          <p class="setup-desc"><code>OpenTrace.init()</code> accepts these options:</p>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Option</th>
-                  <th>Description</th>
-                  <th>Default</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><code>service</code></td>
-                  <td>Service name for your frontend (required)</td>
-                  <td>--</td>
-                </tr>
-                <tr>
-                  <td><code>environment</code></td>
-                  <td>Environment tag (production, staging, etc.)</td>
-                  <td><code>""</code></td>
-                </tr>
-                <tr>
-                  <td><code>commitHash</code></td>
-                  <td>Git commit hash for release tracking</td>
-                  <td><code>""</code></td>
-                </tr>
-                <tr>
-                  <td><code>sampleRate</code></td>
-                  <td>Fraction of errors to capture (0.0–1.0)</td>
-                  <td><code>1.0</code></td>
-                </tr>
-                <tr>
-                  <td><code>beforeSend</code></td>
-                  <td>Function to modify or drop events before sending. Return <code>null</code> to drop.</td>
-                  <td><code>null</code></td>
-                </tr>
-                <tr>
-                  <td><code>maxQueueSize</code></td>
-                  <td>Max buffered events before forced flush</td>
-                  <td><code>50</code></td>
-                </tr>
-                <tr>
-                  <td><code>flushInterval</code></td>
-                  <td>Flush interval in milliseconds</td>
-                  <td><code>5000</code></td>
-                </tr>
-                <tr>
-                  <td><code>enabled</code></td>
-                  <td>Kill switch to disable tracking</td>
-                  <td><code>true</code></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <h4 class="setup-heading" style="font-size:12px;margin-top:1rem">Manual error capture</h4>
-          <div class="code-block">
-            <button class="copy-btn" onclick="copyCode(this)">copy</button>
-            <pre><code>// Capture a caught error with extra context
-OpenTrace.captureError(error, { userId: 42, page: '/checkout' });
-
-// Send a manual log message
-OpenTrace.log('warn', 'Payment retry attempted', { orderId: 123 });
-
-// Set context merged into every event
-OpenTrace.setContext({ userId: 42, plan: 'pro' });</code></pre>
-          </div>
-        </div>
-      </details>
-    </div>
-
-    <!-- Available Tools -->
-    <div class="setup-section">
-      <h3 class="setup-heading"><span class="dim">#</span>Available Tools</h3>
-      <p class="setup-desc">See all available MCP tools on the <a href="/tools">tools page</a>.</p>
-    </div>
-
-    <!-- Environment Variables -->
-    <div class="setup-section">
-      <h3 class="setup-heading"><span class="dim">#</span>Environment Variables</h3>
-      <p class="setup-desc">Optional environment variables to configure OpenTrace:</p>
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Variable</th>
-              <th>Description</th>
-              <th>Default</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>OPENTRACE_DATA_DIR</code></td>
-              <td>Directory for SQLite database</td>
-              <td><code>~/.opentrace</code></td>
-            </tr>
-            <tr>
-              <td><code>OPENTRACE_LLM_PROVIDER</code></td>
-              <td>LLM provider for watchers (<code>openai</code>, <code>anthropic</code>, <code>gemini</code>)</td>
-              <td><code>openai</code></td>
-            </tr>
-            <tr>
-              <td><code>OPENTRACE_LLM_MODEL</code></td>
-              <td>Model name for the chosen provider</td>
-              <td><code>gpt-4o-mini</code></td>
-            </tr>
-            <tr>
-              <td><code>OPENAI_API_KEY</code></td>
-              <td>API key for OpenAI provider</td>
-              <td>--</td>
-            </tr>
-            <tr>
-              <td><code>ANTHROPIC_API_KEY</code></td>
-              <td>API key for Anthropic provider</td>
-              <td>--</td>
-            </tr>
-            <tr>
-              <td><code>GEMINI_API_KEY</code></td>
-              <td>API key for Google Gemini provider</td>
-              <td>--</td>
-            </tr>
-            <tr>
-              <td><code>OPENTRACE_PORT</code></td>
-              <td>HTTP server port</td>
-              <td><code>7777</code></td>
-            </tr>
-            <tr>
-              <td><code>OPENTRACE_API_KEY</code></td>
-              <td>API key for log ingestion endpoint</td>
-              <td>--</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p class="setup-note">You can pass environment variables to the MCP server by adding an <code>"env"</code> block to the config:</p>
-      <div class="code-block">
-        <button class="copy-btn" onclick="copyCode(this)">copy</button>
-        <pre><code>{
-  "mcpServers": {
-    "opentrace": {
-      "command": "opentrace",
-      "args": ["mcp"],
-      "env": {
-        "OPENTRACE_DATA_DIR": "/path/to/data"
-      }
-    }
-  }
-}</code></pre>
-      </div>
-    </div>
-
-  </div>
-
-  <!-- ============================================================ -->
-  <!-- PROFILE                                                        -->
-  <!-- ============================================================ -->
-  <div id="profile" class="settings-group">
-
-    {{if .User}}
-    <!-- Account Info -->
-    <div class="settings-section">
-      <h3 class="settings-section-title"><span class="dim">#</span> Account Info</h3>
-      <div class="profile-info">
-        <div class="profile-row">
-          <span class="profile-label">email</span>
-          <span>{{.User.Email}}</span>
-        </div>
-        <div class="profile-row">
-          <span class="profile-label">display name</span>
-          <span>{{.User.DisplayName}}</span>
-        </div>
-        <div class="profile-row">
-          <span class="profile-label">role</span>
-          <span class="badge badge-type">{{.User.Role}}</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- MCP Access Token -->
-    <div class="settings-section">
-      <h3 class="settings-section-title"><span class="dim">#</span> MCP Access Token</h3>
-      <div id="mcp-section">
-        {{if .User.MCPEnabled}}
-        <p class="text-dim" style="font-size:0.85rem;margin:0 0 1rem 0">Your personal MCP token for connecting AI tools to OpenTrace.</p>
-        <div class="code-block" style="position:relative">
-          <button class="copy-btn" id="mcp-reveal-btn" onclick="revealToken()">reveal</button>
-          <pre><code id="mcp-token-display">mcp_****...****</code></pre>
-        </div>
-
-        <h4 style="margin:1.5rem 0 0.5rem 0;font-size:12px;font-weight:600;color:var(--text-bright)">MCP Configuration</h4>
-        <p class="text-dim" style="font-size:0.85rem;margin:0 0 0.75rem 0">
-          Copy this JSON into <code>~/.claude/settings.json</code> (global) or your project's <code>.mcp.json</code> file.
-        </p>
-
-        <div class="mcp-config-tabs" style="margin-bottom:0.5rem">
-          <button class="mcp-tab active" onclick="switchMCPTab('remote', this)" id="mcp-tab-remote">Remote (URL)</button>
-          <button class="mcp-tab" onclick="switchMCPTab('local', this)" id="mcp-tab-local">Local (stdio)</button>
-        </div>
-
-        <div id="mcp-config-remote">
-          <div class="code-block" style="position:relative">
-            <button class="copy-btn" id="mcp-config-remote-copy-btn" onclick="copyMCPConfig('remote', this)" disabled>copy</button>
-            <pre><code id="mcp-config-remote-display">{
-  "mcpServers": {
-    "opentrace": {
-      "type": "http",
-      "url": "<origin>/mcp/sse",
-      "headers": {
-        "Authorization": "Bearer --------"
-      }
-    }
-  }
-}</code></pre>
-          </div>
-          <p class="text-dim" style="margin:0.5rem 0 0 0;font-size:0.8rem">
-            Works with any remote OpenTrace deployment. Click <strong>reveal</strong> above to load your token, then copy.
-          </p>
-        </div>
-
-        <div id="mcp-config-local" style="display:none">
-          <div class="code-block" style="position:relative">
-            <button class="copy-btn" id="mcp-config-local-copy-btn" onclick="copyMCPConfig('local', this)" disabled>copy</button>
-            <pre><code id="mcp-config-local-display">{
-  "mcpServers": {
-    "opentrace": {
-      "command": "opentrace",
-      "args": ["mcp"],
-      "env": {
-        "OPENTRACE_MCP_TOKEN": "--------"
-      }
-    }
-  }
-}</code></pre>
-          </div>
-          <p class="text-dim" style="margin:0.5rem 0 0 0;font-size:0.8rem">
-            Requires the <code>opentrace</code> binary installed locally. Click <strong>reveal</strong> above to load your token, then copy.
-          </p>
-        </div>
-        {{else}}
-        <p class="text-dim" style="font-size:0.85rem">MCP access is disabled for your account. Contact an admin to enable it.</p>
-        {{end}}
-      </div>
-    </div>
-
-    <!-- Change Password -->
-    <div class="settings-section">
-      <h3 class="settings-section-title"><span class="dim">#</span> Change Password</h3>
-      <form id="password-form" onsubmit="return changePassword(event)">
-        <div class="form-group">
-          <label for="current_password">Current Password</label>
-          <input type="password" id="current_password" name="current_password" required style="max-width:400px">
-        </div>
-        <div class="form-group">
-          <label for="new_password">New Password</label>
-          <input type="password" id="new_password" name="new_password" required minlength="8" placeholder="min 8 characters" style="max-width:400px">
-        </div>
-        <button type="submit" class="btn btn-primary">Update Password</button>
-        <span id="password-status" style="margin-left:1em;font-size:0.9rem"></span>
-      </form>
+  <!-- API Key -->
+  <div class="settings-section">
+    <h3 class="settings-section-title"><span class="dim">#</span> API Key</h3>
+    <p class="text-dim" style="font-size:0.85rem;margin-bottom:0.75rem">
+      This key authenticates agents sending logs and metrics.
+    </p>
+    {{if .EnvKeyOverride}}
+    <div style="background:rgba(255,200,50,0.1);border:1px solid rgba(255,200,50,0.3);color:var(--yellow);padding:0.5rem 1rem;border-radius:4px;margin-bottom:1rem;font-size:0.85rem">
+      API key is set via <code>OPENTRACE_API_KEY</code> environment variable. UI management is disabled.
     </div>
     {{end}}
+    <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.75rem">
+      <code id="api-key-value" style="flex:1;padding:0.5rem;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;word-break:break-all;font-size:0.85rem;cursor:pointer" onclick="toggleKeyVisibility()">Loading...</code>
+      <button class="btn btn-primary" onclick="copyAPIKey()" style="white-space:nowrap">Copy</button>
+    </div>
+    {{if not .EnvKeyOverride}}
+    <button class="btn" onclick="confirmRegenerate()" id="regen-btn">Regenerate Key</button>
+    <span id="regen-status" style="margin-left:1em;font-size:0.9rem"></span>
+    {{end}}
+  </div>
 
+  <!-- Data Retention -->
+  <div class="settings-section">
+    <h3 class="settings-section-title"><span class="dim">#</span> Data Retention</h3>
+    <p class="text-dim" style="font-size:0.85rem;margin-bottom:0.75rem">
+      How long logs, watcher runs, and alerts are kept. Set to <strong>0</strong> to keep forever. Default: 30 days.
+    </p>
+    <form id="retention-form" onsubmit="return saveRetention(event)">
+      <div class="form-group">
+        <label for="retention-days">Retention period (days)</label>
+        <input type="number" id="retention-days" name="retention_days"
+               min="0" step="1" value="{{.RetentionDays}}"
+               style="max-width:200px">
+      </div>
+      <button type="submit" class="btn btn-primary">Save</button>
+      <span id="save-status" style="margin-left:1em"></span>
+    </form>
+  </div>
+
+  <!-- CORS Allowed Origins -->
+  <div class="settings-section">
+    <h3 class="settings-section-title"><span class="dim">#</span> CORS Allowed Origins</h3>
+    <p class="text-dim" style="font-size:0.85rem;margin-bottom:0.75rem">
+      Origins allowed to make cross-origin requests to the API (e.g. browser JS error tracking).
+      Use <code>*</code> to allow all origins, or a comma-separated list like <code>https://app.example.com,https://staging.example.com</code>.
+      Leave empty for same-origin only.
+    </p>
+    {{if .CORSEnvOverride}}
+    <div style="background:rgba(255,200,50,0.1);border:1px solid rgba(255,200,50,0.3);color:var(--yellow);padding:0.5rem 1rem;border-radius:4px;margin-bottom:1rem;font-size:0.85rem">
+      CORS origins are set via <code>OPENTRACE_CORS_ORIGINS</code> environment variable. UI management is disabled.
+    </div>
+    {{end}}
+    <form id="cors-form" onsubmit="return saveCORS(event)">
+      <div class="form-group">
+        <label for="cors-origins">Allowed origins</label>
+        <input type="text" id="cors-origins" name="cors_origins"
+               value="{{.CORSOrigins}}"
+               placeholder="https://example.com,https://app.example.com"
+               style="max-width:500px;width:100%"
+               {{if .CORSEnvOverride}}disabled{{end}}>
+      </div>
+      {{if not .CORSEnvOverride}}
+      <button type="submit" class="btn btn-primary">Save</button>
+      <span id="cors-save-status" style="margin-left:1em"></span>
+      {{end}}
+    </form>
   </div>
 
 </div>
 
-<!-- ============================================================ -->
-<!-- SCRIPTS                                                       -->
-<!-- ============================================================ -->
 <script nonce="{{.CSPNonce}}">
-// ---- Scroll to hash anchor on load ----
-(function() {
-  var hash = window.location.hash.replace('#', '');
-  if (hash) {
-    var el = document.getElementById(hash);
-    if (el) setTimeout(function() { el.scrollIntoView({behavior: 'smooth'}); }, 100);
-  }
-})();
-
-// ---- General: Data Retention ----
+// ---- Data Retention ----
 function saveRetention(e) {
   e.preventDefault();
   var days = parseInt(document.getElementById('retention-days').value, 10);
@@ -681,7 +145,7 @@ function saveRetention(e) {
   return false;
 }
 
-// ---- General: API Key Management ----
+// ---- API Key Management ----
 var apiKeyData = {key: '', visible: false};
 
 function loadAPIKey() {
@@ -741,7 +205,7 @@ function confirmRegenerate() {
 
 loadAPIKey();
 
-// ---- General: CORS Allowed Origins ----
+// ---- CORS Allowed Origins ----
 function saveCORS(e) {
   e.preventDefault();
   var origins = document.getElementById('cors-origins').value.trim();
@@ -767,7 +231,7 @@ function saveCORS(e) {
   return false;
 }
 
-// ---- General: Version & Updates ----
+// ---- Version & Updates ----
 var versionState = {isDocker: false, latestVersion: '', currentVersion: ''};
 
 function loadVersion() {
@@ -897,283 +361,9 @@ function toggleAutoUpdate(enabled) {
 }
 
 loadVersion();
-
-// ---- Users: Admin functions ----
-function userApiCall(url, body) {
-  return fetch(url, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body)
-  }).then(function(r) {
-    if (!r.ok) return r.json().then(function(d) { throw new Error(d.error || 'request failed'); });
-    return r.json();
-  });
-}
-
-function updateRole(id, role) {
-  userApiCall('/api/users/' + id + '/role', {role: role}).catch(function(e) {
-    if (typeof showToast === 'function') showToast('Error: ' + e.message, 'error');
-    location.reload();
-  });
-}
-
-function toggleMCP(id, enabled) {
-  userApiCall('/api/users/' + id + '/mcp', {enabled: enabled}).catch(function(e) {
-    if (typeof showToast === 'function') showToast('Error: ' + e.message, 'error');
-    location.reload();
-  });
-}
-
-function toggleActive(id, active) {
-  userApiCall('/api/users/' + id + '/active', {active: active}).catch(function(e) {
-    if (typeof showToast === 'function') showToast('Error: ' + e.message, 'error');
-    location.reload();
-  });
-}
-
-function regenToken(id) {
-  if (!confirm('Regenerate MCP token? The old token will stop working.')) return;
-  userApiCall('/api/users/' + id + '/mcp-token', {}).then(function(d) {
-    if (typeof showToast === 'function') {
-      showToast('New MCP token generated. Copy it now.', 'success', 0);
-    }
-    prompt('New MCP token (copy it now):', d.mcp_token);
-  }).catch(function(e) {
-    if (typeof showToast === 'function') showToast('Error: ' + e.message, 'error');
-  });
-}
-
-function deleteUser(id, email) {
-  if (!confirm('Delete user ' + email + '? This cannot be undone.')) return;
-  fetch('/api/users/' + id, {method: 'DELETE'}).then(function(r) {
-    if (!r.ok) return r.json().then(function(d) { throw new Error(d.error || 'delete failed'); });
-    location.reload();
-  }).catch(function(e) {
-    if (typeof showToast === 'function') showToast('Error: ' + e.message, 'error');
-  });
-}
-
-// ---- Setup: Agent install commands ----
-var baseURL = window.location.protocol + '//' + window.location.host;
-var apiKey = {{.APIKey}};
-var installURL = baseURL + '/api/agent/install.sh' + (apiKey ? '?key=' + encodeURIComponent(apiKey) : '');
-
-(function() {
-  var installEl = document.getElementById('agent-install-cmd');
-  if (installEl) {
-    installEl.textContent = 'curl -fsSL ' + installURL + ' | sudo bash';
-  }
-
-  var manualEl = document.getElementById('agent-manual-cmd');
-  if (manualEl) {
-    manualEl.textContent = 'OPENTRACE_SERVER_URL=' + baseURL +
-      (apiKey ? ' \\\nOPENTRACE_API_KEY=' + apiKey : '') +
-      ' \\\nopentrace agent';
-  }
-
-  var systemdEl = document.getElementById('agent-systemd-cmd');
-  if (systemdEl) {
-    systemdEl.textContent = '[Unit]\nDescription=OpenTrace Agent\nAfter=network.target\n\n[Service]\nType=simple\nEnvironment=OPENTRACE_SERVER_URL=' + baseURL +
-      '\nEnvironment=OPENTRACE_API_KEY=' + (apiKey || 'your-api-key') +
-      '\nExecStart=/usr/local/bin/opentrace agent\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target';
-  }
-
-  // JS error tracking snippet
-  var jsSnippetEl = document.getElementById('js-snippet');
-  if (jsSnippetEl) {
-    jsSnippetEl.textContent =
-      '<script src="' + baseURL + '/static/opentrace.min.js"></script>\n' +
-      '<script>\n' +
-      '  OpenTrace.init({\n' +
-      '    endpoint: "' + baseURL + '/api/logs",\n' +
-      (apiKey ? '    apiKey: "' + apiKey + '",\n' : '') +
-      '    service: "my-app-frontend",\n' +
-      '  });\n' +
-      '</script>';
-  }
-})();
-
-function copyCode(btn) {
-  var code = btn.parentElement.querySelector('code');
-  navigator.clipboard.writeText(code.textContent).then(function() {
-    btn.textContent = 'copied!';
-    btn.classList.add('copied');
-    setTimeout(function() {
-      btn.textContent = 'copy';
-      btn.classList.remove('copied');
-    }, 2000);
-  });
-}
-
-function copyInstallCmd(btn) {
-  copyAndFlash(btn, 'curl -fsSL ' + installURL + ' | sudo bash');
-}
-
-function copyManualRunCmd(btn) {
-  copyAndFlash(btn, 'OPENTRACE_SERVER_URL=' + baseURL + (apiKey ? ' OPENTRACE_API_KEY=' + apiKey : '') + ' opentrace agent');
-}
-
-function copySystemdCmd(btn) {
-  var code = btn.parentElement.querySelector('code');
-  copyAndFlash(btn, code.textContent);
-}
-
-function copyJSSnippet(btn) {
-  var code = document.getElementById('js-snippet');
-  copyAndFlash(btn, code.textContent);
-}
-
-function copyAndFlash(btn, text) {
-  navigator.clipboard.writeText(text).then(function() {
-    btn.textContent = 'copied!';
-    btn.classList.add('copied');
-    setTimeout(function() {
-      btn.textContent = 'copy';
-      btn.classList.remove('copied');
-    }, 2000);
-  });
-}
-
-// ---- Profile: MCP Token ----
-var mcpToken = null;
-
-function revealToken() {
-  var btn = document.getElementById('mcp-reveal-btn');
-  var display = document.getElementById('mcp-token-display');
-
-  if (mcpToken) {
-    navigator.clipboard.writeText(mcpToken);
-    btn.textContent = 'copied!';
-    btn.classList.add('copied');
-    setTimeout(function() { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 1500);
-    return;
-  }
-
-  btn.textContent = 'loading...';
-  fetch('/api/profile/mcp-token').then(function(r) {
-    if (!r.ok) throw new Error('failed');
-    return r.json();
-  }).then(function(d) {
-    mcpToken = d.mcp_token;
-    display.textContent = mcpToken;
-    btn.textContent = 'copy';
-    updateConfigDisplays();
-  }).catch(function() {
-    btn.textContent = 'error';
-    setTimeout(function() { btn.textContent = 'reveal'; }, 2000);
-  });
-}
-
-function updateConfigDisplays() {
-  if (!mcpToken) return;
-
-  var remoteEl = document.getElementById('mcp-config-remote-display');
-  var remoteBtn = document.getElementById('mcp-config-remote-copy-btn');
-  if (remoteEl) {
-    var remoteConfig = {
-      mcpServers: {
-        opentrace: {
-          type: 'http',
-          url: window.location.origin + '/mcp/sse',
-          headers: {
-            Authorization: 'Bearer ' + mcpToken
-          }
-        }
-      }
-    };
-    remoteEl.textContent = JSON.stringify(remoteConfig, null, 2);
-    remoteBtn.disabled = false;
-  }
-
-  var localEl = document.getElementById('mcp-config-local-display');
-  var localBtn = document.getElementById('mcp-config-local-copy-btn');
-  if (localEl) {
-    var localConfig = {
-      mcpServers: {
-        opentrace: {
-          command: 'opentrace',
-          args: ['mcp'],
-          env: {
-            OPENTRACE_MCP_TOKEN: mcpToken
-          }
-        }
-      }
-    };
-    localEl.textContent = JSON.stringify(localConfig, null, 2);
-    localBtn.disabled = false;
-  }
-}
-
-function switchMCPTab(tab, btn) {
-  document.getElementById('mcp-config-remote').style.display = tab === 'remote' ? '' : 'none';
-  document.getElementById('mcp-config-local').style.display = tab === 'local' ? '' : 'none';
-  var mcpTabs = document.querySelectorAll('.mcp-tab');
-  for (var i = 0; i < mcpTabs.length; i++) { mcpTabs[i].classList.remove('active'); }
-  btn.classList.add('active');
-}
-
-function copyMCPConfig(variant, btn) {
-  var el = document.getElementById('mcp-config-' + variant + '-display');
-  navigator.clipboard.writeText(el.textContent);
-  btn.textContent = 'copied!';
-  btn.classList.add('copied');
-  setTimeout(function() { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 1500);
-}
-
-// ---- Profile: Change Password ----
-function changePassword(e) {
-  e.preventDefault();
-  var form = document.getElementById('password-form');
-  var status = document.getElementById('password-status');
-  var current = document.getElementById('current_password').value;
-  var newPw = document.getElementById('new_password').value;
-
-  if (!current || !newPw) {
-    status.textContent = 'Both fields required';
-    status.style.color = 'var(--red)';
-    return false;
-  }
-  if (newPw.length < 8) {
-    status.textContent = 'Password must be at least 8 characters';
-    status.style.color = 'var(--red)';
-    return false;
-  }
-
-  status.textContent = 'Saving...';
-  status.style.color = '';
-
-  fetch('/api/profile/password', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({current_password: current, new_password: newPw})
-  }).then(function(r) {
-    if (r.ok) {
-      status.textContent = 'Password updated';
-      status.style.color = 'var(--green)';
-      form.reset();
-      setTimeout(function(){ status.textContent = ''; status.style.color = ''; }, 3000);
-    } else {
-      return r.json().then(function(d) {
-        status.textContent = 'Error: ' + (d.error || 'unknown');
-        status.style.color = 'var(--red)';
-      });
-    }
-  }).catch(function(err) {
-    status.textContent = 'Error: ' + err.message;
-    status.style.color = 'var(--red)';
-  });
-  return false;
-}
 </script>
 
-<!-- ============================================================ -->
-<!-- SCOPED STYLES                                                  -->
-<!-- ============================================================ -->
 <style nonce="{{.CSPNonce}}">
-.settings-page {
-}
-
-/* Flat terminal-style sections */
 .settings-section {
   padding-bottom: 1rem;
   margin-bottom: 1rem;
@@ -1183,19 +373,6 @@ function changePassword(e) {
   border-bottom: none;
   margin-bottom: 0;
 }
-
-/* Settings groups */
-.settings-group {
-  margin-bottom: 2rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid var(--border);
-}
-.settings-group:last-child {
-  border-bottom: none;
-  margin-bottom: 0;
-}
-
-/* Section titles */
 .settings-section-title {
   font-size: 13px;
   font-weight: 600;
@@ -1205,180 +382,10 @@ function changePassword(e) {
 .settings-section-title > .dim {
   margin-right: 0.4em;
 }
-
-/* Table wrapper for overflow */
-.table-wrap {
-  overflow-x: auto;
-}
-
-/* Users table */
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-.data-table th, .data-table td {
-  padding: 0.6rem 0.75rem;
-  text-align: left;
-  border-bottom: 1px solid var(--border);
-  font-size: 12px;
-}
-.data-table th {
-  font-size: 10px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-weight: 600;
-}
-
-.role-select {
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 3px 8px;
-  border-radius: 4px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-
-.toggle-label {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  cursor: pointer;
-}
-.toggle-text {
-  font-size: 11px;
-  color: var(--text-dim);
-}
-
-.actions-cell {
-  display: flex;
-  gap: 0.4rem;
-  flex-wrap: wrap;
-}
-
-/* Profile info rows */
-.profile-info {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-.profile-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 12px;
-}
-.profile-label {
-  color: var(--text-dim);
-}
-
-/* MCP config sub-tabs */
-.mcp-config-tabs {
-  display: flex;
-  gap: 0;
-}
-.mcp-tab {
-  padding: 0.35rem 1rem;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  cursor: pointer;
-  font-size: 11px;
-  font-family: var(--font-mono);
-}
-.mcp-tab:first-child {
-  border-radius: 4px 0 0 4px;
-}
-.mcp-tab:last-child {
-  border-radius: 0 4px 4px 0;
-  border-left: none;
-}
-.mcp-tab.active {
-  background: var(--green-dim);
-  color: var(--green);
-  border-color: var(--green);
-}
-
-/* Responsive */
 @media (max-width: 699px) {
-  /* User management header: allow wrapping */
-  #tab-users > div:first-child {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  /* Data table: tighter on mobile */
-  .data-table th, .data-table td {
-    padding: 0.4rem 0.5rem;
-    font-size: 11px;
-  }
-  .data-table th {
-    font-size: 9px;
-  }
-
-  /* Actions cell: stack buttons */
-  .actions-cell {
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  /* Profile rows: allow wrapping */
-  .profile-row {
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-
-  /* MCP config tabs: touchable */
-  .mcp-config-tabs {
-    flex-wrap: wrap;
-  }
-  .mcp-tab {
-    padding: 8px 12px;
-    font-size: 12px;
-  }
-  .mcp-tab:first-child {
-    border-radius: 4px 4px 0 0;
-  }
-  .mcp-tab:last-child {
-    border-radius: 0 0 4px 4px;
-    border-left: 1px solid var(--border);
-    border-top: none;
-  }
-
-  /* Form inputs: full width */
-  #retention-days {
-    max-width: 100% !important;
-  }
-  #current_password,
-  #new_password {
-    max-width: 100% !important;
-  }
-
-  /* Version info: tighter gap (overrides inline style gap:2rem) */
-  #version-info > div:first-child {
-    gap: 0.75rem !important;
-  }
-
-  /* Section spacing */
-  .settings-section {
-    padding-bottom: 0.75rem;
-    margin-bottom: 0.75rem;
-  }
-}
-
-@media (max-width: 379px) {
-  .mcp-tab {
-    padding: 6px 10px;
-    font-size: 11px;
-  }
-  .profile-row {
-    font-size: 11px;
-  }
-  .data-table th, .data-table td {
-    padding: 0.3rem 0.4rem;
-    font-size: 10px;
-  }
+  #retention-days { max-width: 100% !important; }
+  #version-info > div:first-child { gap: 0.75rem !important; }
+  .settings-section { padding-bottom: 0.75rem; margin-bottom: 0.75rem; }
 }
 </style>
 {{end}}

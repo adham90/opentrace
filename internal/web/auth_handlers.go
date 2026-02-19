@@ -292,9 +292,9 @@ func (s *Server) handleRegisterSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Admin created a new user — redirect to settings (user management tab)
+	// Admin created a new user — redirect to users page
 	s.audit(r, "user.create", "user", user.ID, fmt.Sprintf("email=%s role=%s", email, role))
-	http.Redirect(w, r, "/settings#users", http.StatusFound)
+	http.Redirect(w, r, "/users", http.StatusFound)
 }
 
 func (s *Server) renderRegisterError(w http.ResponseWriter, r *http.Request, msg string) {

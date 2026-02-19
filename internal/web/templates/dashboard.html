@@ -23,10 +23,10 @@
         <div class="user-menu-dropdown" id="user-menu-dropdown">
           <button class="user-menu-item" onclick="cycleTheme(); updateDropdownTheme();">theme: <span id="dropdown-theme-label">system</span></button>
           <div class="user-menu-divider"></div>
-          <a href="/settings#profile" class="user-menu-item">Profile</a>
+          <a href="/profile" class="user-menu-item">Profile</a>
           <a href="/settings" class="user-menu-item">Settings</a>
-          <a href="/settings#setup" class="user-menu-item">Setup</a>
-          {{if .IsAdmin}}<a href="/settings#users" class="user-menu-item">Users</a>{{end}}
+          <a href="/setup" class="user-menu-item">Setup</a>
+          {{if .IsAdmin}}<a href="/users" class="user-menu-item">Users</a>{{end}}
           <div class="user-menu-divider"></div>
           <a href="/logout" class="user-menu-item user-menu-item-danger" onclick="return confirm('Log out?')">Logout</a>
         </div>

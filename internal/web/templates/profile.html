@@ -1,54 +1,53 @@
 {{define "content"}}
-<div class="profile-page">
+<div class="settings-page">
   <div class="page-header">
     <h1><span class="prompt">$</span> profile</h1>
+    <a href="/" class="page-close" title="Back to dashboard">&times;</a>
   </div>
 
-  {{if .Success}}
-  <div class="alert alert-success">{{.Success}}</div>
-  {{end}}
-
   {{if .User}}
-  <div class="card" style="padding: 1.5rem; margin-bottom: 1.5rem;">
-    <h3 style="margin: 0 0 1rem 0;">Account Info</h3>
+  <!-- Account Info -->
+  <div class="settings-section">
+    <h3 class="settings-section-title"><span class="dim">#</span> Account Info</h3>
     <div class="profile-info">
       <div class="profile-row">
-        <span class="profile-label">Email</span>
+        <span class="profile-label">email</span>
         <span>{{.User.Email}}</span>
       </div>
       <div class="profile-row">
-        <span class="profile-label">Display Name</span>
+        <span class="profile-label">display name</span>
         <span>{{.User.DisplayName}}</span>
       </div>
       <div class="profile-row">
-        <span class="profile-label">Role</span>
+        <span class="profile-label">role</span>
         <span class="badge badge-type">{{.User.Role}}</span>
       </div>
     </div>
   </div>
 
-  <div class="card" style="padding: 1.5rem; margin-bottom: 1.5rem;">
-    <h3 style="margin: 0 0 1rem 0;">MCP Access Token</h3>
+  <!-- MCP Access Token -->
+  <div class="settings-section">
+    <h3 class="settings-section-title"><span class="dim">#</span> MCP Access Token</h3>
     <div id="mcp-section">
       {{if .User.MCPEnabled}}
-      <p class="text-dim" style="margin: 0 0 1rem 0;">Your personal MCP token for connecting AI tools to OpenTrace.</p>
-      <div class="code-block" style="position: relative;">
+      <p class="text-dim" style="font-size:0.85rem;margin:0 0 1rem 0">Your personal MCP token for connecting AI tools to OpenTrace.</p>
+      <div class="code-block" style="position:relative">
         <button class="copy-btn" id="mcp-reveal-btn" onclick="revealToken()">reveal</button>
         <pre><code id="mcp-token-display">mcp_****...****</code></pre>
       </div>
 
-      <h4 style="margin: 1.5rem 0 0.5rem 0;">Claude Code Configuration</h4>
-      <p class="text-dim" style="margin: 0 0 0.75rem 0;">
+      <h4 style="margin:1.5rem 0 0.5rem 0;font-size:12px;font-weight:600;color:var(--text-bright)">MCP Configuration</h4>
+      <p class="text-dim" style="font-size:0.85rem;margin:0 0 0.75rem 0">
         Copy this JSON into <code>~/.claude/settings.json</code> (global) or your project's <code>.mcp.json</code> file.
       </p>
 
-      <div class="mcp-config-tabs" style="margin-bottom: 0.5rem;">
+      <div class="mcp-config-tabs" style="margin-bottom:0.5rem">
         <button class="mcp-tab active" onclick="switchMCPTab('remote', this)" id="mcp-tab-remote">Remote (URL)</button>
         <button class="mcp-tab" onclick="switchMCPTab('local', this)" id="mcp-tab-local">Local (stdio)</button>
       </div>
 
       <div id="mcp-config-remote">
-        <div class="code-block" style="position: relative;">
+        <div class="code-block" style="position:relative">
           <button class="copy-btn" id="mcp-config-remote-copy-btn" onclick="copyMCPConfig('remote', this)" disabled>copy</button>
           <pre><code id="mcp-config-remote-display">{
   "mcpServers": {
@@ -56,19 +55,19 @@
       "type": "http",
       "url": "<origin>/mcp/sse",
       "headers": {
-        "Authorization": "Bearer ••••••••"
+        "Authorization": "Bearer --------"
       }
     }
   }
 }</code></pre>
         </div>
-        <p class="text-dim" style="margin: 0.5rem 0 0 0; font-size: 0.8rem;">
+        <p class="text-dim" style="margin:0.5rem 0 0 0;font-size:0.8rem">
           Works with any remote OpenTrace deployment. Click <strong>reveal</strong> above to load your token, then copy.
         </p>
       </div>
 
-      <div id="mcp-config-local" style="display: none;">
-        <div class="code-block" style="position: relative;">
+      <div id="mcp-config-local" style="display:none">
+        <div class="code-block" style="position:relative">
           <button class="copy-btn" id="mcp-config-local-copy-btn" onclick="copyMCPConfig('local', this)" disabled>copy</button>
           <pre><code id="mcp-config-local-display">{
   "mcpServers": {
@@ -76,40 +75,44 @@
       "command": "opentrace",
       "args": ["mcp"],
       "env": {
-        "OPENTRACE_MCP_TOKEN": "••••••••"
+        "OPENTRACE_MCP_TOKEN": "--------"
       }
     }
   }
 }</code></pre>
         </div>
-        <p class="text-dim" style="margin: 0.5rem 0 0 0; font-size: 0.8rem;">
+        <p class="text-dim" style="margin:0.5rem 0 0 0;font-size:0.8rem">
           Requires the <code>opentrace</code> binary installed locally. Click <strong>reveal</strong> above to load your token, then copy.
         </p>
       </div>
       {{else}}
-      <p class="text-dim">MCP access is disabled for your account. Contact an admin to enable it.</p>
+      <p class="text-dim" style="font-size:0.85rem">MCP access is disabled for your account. Contact an admin to enable it.</p>
       {{end}}
     </div>
   </div>
 
-  <div class="card" style="padding: 1.5rem;">
-    <h3 style="margin: 0 0 1rem 0;">Change Password</h3>
-    <form method="POST" action="/api/profile/password" class="auth-form" id="password-form">
+  <!-- Change Password -->
+  <div class="settings-section">
+    <h3 class="settings-section-title"><span class="dim">#</span> Change Password</h3>
+    <form id="password-form" onsubmit="return changePassword(event)">
       <div class="form-group">
         <label for="current_password">Current Password</label>
-        <input type="password" id="current_password" name="current_password" required>
+        <input type="password" id="current_password" name="current_password" required style="max-width:400px">
       </div>
       <div class="form-group">
         <label for="new_password">New Password</label>
-        <input type="password" id="new_password" name="new_password" required minlength="8" placeholder="min 8 characters">
+        <input type="password" id="new_password" name="new_password" required minlength="8" placeholder="min 8 characters" style="max-width:400px">
       </div>
       <button type="submit" class="btn btn-primary">Update Password</button>
+      <span id="password-status" style="margin-left:1em;font-size:0.9rem"></span>
     </form>
   </div>
   {{end}}
+
 </div>
 
 <script nonce="{{.CSPNonce}}">
+// ---- MCP Token ----
 var mcpToken = null;
 
 function revealToken() {
@@ -117,10 +120,10 @@ function revealToken() {
   var display = document.getElementById('mcp-token-display');
 
   if (mcpToken) {
-    // Already revealed — copy it
     navigator.clipboard.writeText(mcpToken);
     btn.textContent = 'copied!';
-    setTimeout(function() { btn.textContent = 'copy'; }, 1500);
+    btn.classList.add('copied');
+    setTimeout(function() { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 1500);
     return;
   }
 
@@ -142,7 +145,6 @@ function revealToken() {
 function updateConfigDisplays() {
   if (!mcpToken) return;
 
-  // Remote (URL) config
   var remoteEl = document.getElementById('mcp-config-remote-display');
   var remoteBtn = document.getElementById('mcp-config-remote-copy-btn');
   if (remoteEl) {
@@ -161,7 +163,6 @@ function updateConfigDisplays() {
     remoteBtn.disabled = false;
   }
 
-  // Local (stdio) config
   var localEl = document.getElementById('mcp-config-local-display');
   var localBtn = document.getElementById('mcp-config-local-copy-btn');
   if (localEl) {
@@ -184,7 +185,8 @@ function updateConfigDisplays() {
 function switchMCPTab(tab, btn) {
   document.getElementById('mcp-config-remote').style.display = tab === 'remote' ? '' : 'none';
   document.getElementById('mcp-config-local').style.display = tab === 'local' ? '' : 'none';
-  document.querySelectorAll('.mcp-tab').forEach(function(t) { t.classList.remove('active'); });
+  var mcpTabs = document.querySelectorAll('.mcp-tab');
+  for (var i = 0; i < mcpTabs.length; i++) { mcpTabs[i].classList.remove('active'); }
   btn.classList.add('active');
 }
 
@@ -192,66 +194,101 @@ function copyMCPConfig(variant, btn) {
   var el = document.getElementById('mcp-config-' + variant + '-display');
   navigator.clipboard.writeText(el.textContent);
   btn.textContent = 'copied!';
-  setTimeout(function() { btn.textContent = 'copy'; }, 1500);
+  btn.classList.add('copied');
+  setTimeout(function() { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 1500);
+}
+
+// ---- Change Password ----
+function changePassword(e) {
+  e.preventDefault();
+  var form = document.getElementById('password-form');
+  var status = document.getElementById('password-status');
+  var current = document.getElementById('current_password').value;
+  var newPw = document.getElementById('new_password').value;
+
+  if (!current || !newPw) {
+    status.textContent = 'Both fields required';
+    status.style.color = 'var(--red)';
+    return false;
+  }
+  if (newPw.length < 8) {
+    status.textContent = 'Password must be at least 8 characters';
+    status.style.color = 'var(--red)';
+    return false;
+  }
+
+  status.textContent = 'Saving...';
+  status.style.color = '';
+
+  fetch('/api/profile/password', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({current_password: current, new_password: newPw})
+  }).then(function(r) {
+    if (r.ok) {
+      status.textContent = 'Password updated';
+      status.style.color = 'var(--green)';
+      form.reset();
+      setTimeout(function(){ status.textContent = ''; status.style.color = ''; }, 3000);
+    } else {
+      return r.json().then(function(d) {
+        status.textContent = 'Error: ' + (d.error || 'unknown');
+        status.style.color = 'var(--red)';
+      });
+    }
+  }).catch(function(err) {
+    status.textContent = 'Error: ' + err.message;
+    status.style.color = 'var(--red)';
+  });
+  return false;
 }
 </script>
 
-<style>
-.profile-page {
-  max-width: 600px;
+<style nonce="{{.CSPNonce}}">
+.settings-section {
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.settings-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+.settings-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-bright);
+  margin: 0 0 0.75rem 0;
+}
+.settings-section-title > .dim {
+  margin-right: 0.4em;
 }
 .profile-info {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.6rem;
 }
 .profile-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  font-size: 12px;
 }
 .profile-label {
-  font-size: 0.85rem;
-  opacity: 0.7;
-}
-.auth-form .form-group {
-  margin-bottom: 1rem;
-}
-.auth-form label {
-  display: block;
-  margin-bottom: 0.25rem;
-  font-size: 0.85rem;
-  opacity: 0.7;
-}
-.auth-form input {
-  width: 100%;
-  max-width: 400px;
-  padding: 0.5rem;
-  background: var(--bg-secondary, #1a1a2e);
-  border: 1px solid var(--border, #333);
-  color: var(--fg, #e0e0e0);
-  border-radius: 4px;
-}
-.alert-success {
-  background: rgba(80, 255, 80, 0.1);
-  border: 1px solid rgba(80, 255, 80, 0.3);
-  color: #50ff50;
-  padding: 0.5rem 1rem;
-  border-radius: 4px;
-  margin-bottom: 1rem;
-  font-size: 0.9rem;
+  color: var(--text-dim);
 }
 .mcp-config-tabs {
   display: flex;
   gap: 0;
 }
 .mcp-tab {
-  padding: 0.4rem 1rem;
+  padding: 0.35rem 1rem;
   background: transparent;
-  border: 1px solid var(--border, #333);
-  color: var(--fg-dim, #999);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 11px;
+  font-family: var(--font-mono);
 }
 .mcp-tab:first-child {
   border-radius: 4px 0 0 4px;
@@ -261,9 +298,24 @@ function copyMCPConfig(variant, btn) {
   border-left: none;
 }
 .mcp-tab.active {
-  background: var(--accent, #6c63ff);
-  color: #fff;
-  border-color: var(--accent, #6c63ff);
+  background: var(--green-dim);
+  color: var(--green);
+  border-color: var(--green);
+}
+@media (max-width: 699px) {
+  .profile-row {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .mcp-config-tabs { flex-wrap: wrap; }
+  .mcp-tab { padding: 8px 12px; font-size: 12px; }
+  .mcp-tab:first-child { border-radius: 4px 4px 0 0; }
+  .mcp-tab:last-child { border-radius: 0 0 4px 4px; border-left: 1px solid var(--border); border-top: none; }
+  #current_password, #new_password { max-width: 100% !important; }
+}
+@media (max-width: 379px) {
+  .mcp-tab { padding: 6px 10px; font-size: 11px; }
+  .profile-row { font-size: 11px; }
 }
 </style>
 {{end}}

@@ -223,14 +223,16 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Get("/profile", srv.handleProfilePage)
 	})
 
-	// Settings (admin) — consolidated page for settings, users, setup, profile
+	// Settings (admin)
 	router.Group(func(r chi.Router) {
 		r.Use(srv.RedirectToOnboardingIfNeeded)
 		r.Use(RequireAdmin)
 		r.Get("/settings", srv.handleSettingsPage)
+		r.Get("/setup", srv.handleSetupPage)
+		r.Get("/users", srv.handleUsersPage)
 		// Legacy redirects
 		r.Get("/admin/users", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/settings", http.StatusMovedPermanently)
+			http.Redirect(w, r, "/users", http.StatusMovedPermanently)
 		})
 		r.Get("/admin/settings", func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/settings", http.StatusMovedPermanently)
