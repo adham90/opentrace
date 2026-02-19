@@ -177,7 +177,8 @@
       items.sort(function(a,b){ return new Date(b.time) - new Date(a.time); });
       var html = '';
       items.slice(0, 8).forEach(function(it) {
-        html += '<div class="attention-item attention-' + it.severity + '">';
+        var sevClass = it.severity === 'error' ? 'sev-error' : (it.severity === 'warn' ? 'sev-warn' : 'sev-info');
+        html += '<div class="attention-item attention-' + it.severity + ' ' + sevClass + '">';
         html += '<span class="attention-dot"></span>';
         html += '<span class="attention-desc">' + escH(it.desc) + '</span>';
         html += '<span class="attention-time">' + getTimeAgo(it.time) + '</span>';
@@ -393,6 +394,11 @@
       Object.keys(log.metadata).sort().forEach(function(k) {
         var v = log.metadata[k];
         if (v == null) { html += dRow(k, ''); return; }
+        if (k === 'backtrace' && Array.isArray(v)) {
+          html += '<div class="term-detail-row"><span class="term-detail-key">backtrace</span><span class="term-detail-val"></span></div>';
+          html += '<pre class="term-detail-stack">' + escH(v.join('\n')) + '</pre>';
+          return;
+        }
         if (typeof v === 'object') { html += dRow(k, JSON.stringify(v)); return; }
         html += dRow(k, String(v));
       });
