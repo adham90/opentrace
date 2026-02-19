@@ -8,8 +8,8 @@ set -euo pipefail
 #   hcloud context create opentrace  (enter your Hetzner API token)
 #
 # Usage:
-#   ./deploy/deploy.sh --domain example.com --llm-provider anthropic --anthropic-api-key sk-ant-xxx
-#   ./deploy/deploy.sh --domain example.com --llm-provider openai --openai-api-key sk-xxx
+#   ./deploy/deploy.sh --domain example.com
+#   ./deploy/deploy.sh --domain example.com --app-api-key my-secret-key
 #   ./deploy/deploy.sh --help
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,13 +20,6 @@ SERVER_TYPE="cx23"        # 2 vCPU, 4GB RAM (~€4/mo)
 IMAGE="ubuntu-24.04"
 LOCATION="fsn1"           # Falkenstein, Germany
 DOMAIN=""
-LLM_PROVIDER="anthropic"
-ANTHROPIC_API_KEY=""
-ANTHROPIC_MODEL="claude-sonnet-4-5-20250929"
-OPENAI_API_KEY=""
-OPENAI_MODEL="gpt-4o"
-GEMINI_API_KEY=""
-GEMINI_MODEL="gemini-2.5-flash-preview-04-17"
 APP_API_KEY=""
 SSH_KEY=""
 
@@ -37,15 +30,6 @@ Usage: $(basename "$0") [OPTIONS]
 Required:
   --domain <domain>              Domain name pointing to the server (e.g. trace.example.com)
 
-LLM Provider (pick one):
-  --llm-provider <provider>      LLM provider: anthropic, openai, gemini, ollama (default: anthropic)
-  --anthropic-api-key <key>      Anthropic API key (required if provider is anthropic)
-  --anthropic-model <model>      Anthropic model (default: claude-sonnet-4-5-20250929)
-  --openai-api-key <key>         OpenAI API key (required if provider is openai)
-  --openai-model <model>         OpenAI model (default: gpt-4o)
-  --gemini-api-key <key>         Gemini API key (required if provider is gemini)
-  --gemini-model <model>         Gemini model (default: gemini-2.5-flash-preview-04-17)
-
 Optional:
   --server-name <name>           Server name (default: opentrace)
   --server-type <type>           Hetzner server type (default: cx23)
@@ -55,9 +39,8 @@ Optional:
   --help                         Show this help
 
 Examples:
-  $(basename "$0") --domain trace.example.com --anthropic-api-key sk-ant-xxx
-  $(basename "$0") --domain trace.example.com --llm-provider openai --openai-api-key sk-xxx
-  $(basename "$0") --domain trace.example.com --llm-provider gemini --gemini-api-key AIza...
+  $(basename "$0") --domain trace.example.com
+  $(basename "$0") --domain trace.example.com --app-api-key my-secret-key
 EOF
   exit 0
 }
@@ -66,13 +49,6 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --domain)             DOMAIN="$2"; shift 2 ;;
-    --llm-provider)       LLM_PROVIDER="$2"; shift 2 ;;
-    --anthropic-api-key)  ANTHROPIC_API_KEY="$2"; shift 2 ;;
-    --anthropic-model)    ANTHROPIC_MODEL="$2"; shift 2 ;;
-    --openai-api-key)     OPENAI_API_KEY="$2"; shift 2 ;;
-    --openai-model)       OPENAI_MODEL="$2"; shift 2 ;;
-    --gemini-api-key)     GEMINI_API_KEY="$2"; shift 2 ;;
-    --gemini-model)       GEMINI_MODEL="$2"; shift 2 ;;
     --app-api-key)        APP_API_KEY="$2"; shift 2 ;;
     --server-name)        SERVER_NAME="$2"; shift 2 ;;
     --server-type)        SERVER_TYPE="$2"; shift 2 ;;
@@ -92,21 +68,6 @@ fi
 
 if ! command -v hcloud &>/dev/null; then
   echo "Error: hcloud CLI not found. Install it with: brew install hcloud"
-  exit 1
-fi
-
-if [[ "$LLM_PROVIDER" == "anthropic" && -z "$ANTHROPIC_API_KEY" ]]; then
-  echo "Error: --anthropic-api-key is required when using anthropic provider"
-  exit 1
-fi
-
-if [[ "$LLM_PROVIDER" == "openai" && -z "$OPENAI_API_KEY" ]]; then
-  echo "Error: --openai-api-key is required when using openai provider"
-  exit 1
-fi
-
-if [[ "$LLM_PROVIDER" == "gemini" && -z "$GEMINI_API_KEY" ]]; then
-  echo "Error: --gemini-api-key is required when using gemini provider"
   exit 1
 fi
 
@@ -131,13 +92,6 @@ fi
 # ─── Generate cloud-init from template ───
 CLOUD_INIT=$(cat "$SCRIPT_DIR/cloud-init.yml")
 CLOUD_INIT="${CLOUD_INIT//\$\{DOMAIN\}/$DOMAIN}"
-CLOUD_INIT="${CLOUD_INIT//\$\{LLM_PROVIDER\}/$LLM_PROVIDER}"
-CLOUD_INIT="${CLOUD_INIT//\$\{ANTHROPIC_API_KEY\}/$ANTHROPIC_API_KEY}"
-CLOUD_INIT="${CLOUD_INIT//\$\{ANTHROPIC_MODEL\}/$ANTHROPIC_MODEL}"
-CLOUD_INIT="${CLOUD_INIT//\$\{OPENAI_API_KEY\}/$OPENAI_API_KEY}"
-CLOUD_INIT="${CLOUD_INIT//\$\{OPENAI_MODEL\}/$OPENAI_MODEL}"
-CLOUD_INIT="${CLOUD_INIT//\$\{GEMINI_API_KEY\}/$GEMINI_API_KEY}"
-CLOUD_INIT="${CLOUD_INIT//\$\{GEMINI_MODEL\}/$GEMINI_MODEL}"
 CLOUD_INIT="${CLOUD_INIT//\$\{APP_API_KEY\}/$APP_API_KEY}"
 
 TMPFILE=$(mktemp)

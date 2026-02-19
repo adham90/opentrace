@@ -135,14 +135,16 @@ OpenTrace.setContext({ userId: 42, plan: 'pro' });</code></pre>
       <summary>Environment Variables</summary>
       <div class="setup-extra-body">
         <div class="setup-env-table">
-          <div class="setup-env-row"><code>OPENTRACE_PORT</code> <span>HTTP port (default: 7777)</span></div>
+          <div class="setup-env-row"><code>OPENTRACE_LISTEN_ADDR</code> <span>HTTP listen address (default: 127.0.0.1:8080)</span></div>
           <div class="setup-env-row"><code>OPENTRACE_DATA_DIR</code> <span>SQLite directory (default: ~/.opentrace)</span></div>
           <div class="setup-env-row"><code>OPENTRACE_API_KEY</code> <span>API key for log ingestion</span></div>
-          <div class="setup-env-row"><code>OPENTRACE_LLM_PROVIDER</code> <span>openai, anthropic, or gemini</span></div>
-          <div class="setup-env-row"><code>OPENTRACE_LLM_MODEL</code> <span>Model name (default: gpt-4o-mini)</span></div>
-          <div class="setup-env-row"><code>OPENAI_API_KEY</code> <span>API key for OpenAI</span></div>
-          <div class="setup-env-row"><code>ANTHROPIC_API_KEY</code> <span>API key for Anthropic</span></div>
-          <div class="setup-env-row"><code>GEMINI_API_KEY</code> <span>API key for Gemini</span></div>
+          <div class="setup-env-row"><code>OPENTRACE_CORS_ORIGINS</code> <span>Allowed CORS origins, comma-separated</span></div>
+          <div class="setup-env-row"><code>OPENTRACE_MCP_TOKEN</code> <span>MCP SSE transport auth token</span></div>
+          <div class="setup-env-row"><code>OPENTRACE_MCP_NAME</code> <span>Custom MCP server name</span></div>
+          <div class="setup-env-row"><code>OPENTRACE_TLS_CERT</code> <span>Path to TLS certificate</span></div>
+          <div class="setup-env-row"><code>OPENTRACE_TLS_KEY</code> <span>Path to TLS private key</span></div>
+          <div class="setup-env-row"><code>OPENTRACE_TRUSTED_PROXIES</code> <span>Reverse proxy IPs, comma-separated</span></div>
+          <div class="setup-env-row"><code>OPENTRACE_DEV</code> <span>Enable dev mode (default: false)</span></div>
         </div>
         <p class="setup-step-desc" style="margin-top:1rem">Pass env vars to the MCP server:</p>
         <div class="code-block">

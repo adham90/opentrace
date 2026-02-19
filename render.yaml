@@ -9,12 +9,6 @@ services:
         value: /data
       - key: OPENTRACE_LISTEN_ADDR
         value: ":8080"
-      - key: OPENTRACE_LLM_PROVIDER
-        sync: false
-      - key: OPENTRACE_ANTHROPIC_API_KEY
-        sync: false
-      - key: OPENTRACE_OPENAI_API_KEY
-        sync: false
       - key: OPENTRACE_API_KEY
         generateValue: true
     disk:
