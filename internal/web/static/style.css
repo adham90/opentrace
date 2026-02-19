@@ -341,6 +341,9 @@ button:focus-visible, .btn:focus-visible {
   flex-shrink: 0;
   white-space: nowrap;
 }
+.attention-clickable { cursor: pointer; }
+.attention-clickable .attention-desc { text-decoration: underline; text-decoration-color: transparent; transition: text-decoration-color 0.15s; }
+.attention-clickable:hover .attention-desc { text-decoration-color: var(--text-dim); }
 /* Mobile: wrap attention items */
 @media (max-width: 639px) {
   .attention-item { padding: 5px 8px; font-size: 11px; }

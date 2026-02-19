@@ -1337,6 +1337,20 @@
     applyFilters();
   };
 
+  // ── Update empty state when filters are active ─────────────
+  document.body.addEventListener('htmx:afterSwap', function(evt) {
+    if (evt.detail.target.id !== 'logs-list') return;
+    if (!hasActiveFilters()) return;
+    var emptyMsg = evt.detail.target.querySelector('.term-empty-msg');
+    if (emptyMsg) {
+      emptyMsg.innerHTML = 'no logs matching current filters<br>try clearing filters with <kbd style="background:var(--bg-tertiary);padding:1px 5px;border-radius:3px;border:1px solid var(--border)">Esc</kbd> or <kbd style="background:var(--bg-tertiary);padding:1px 5px;border-radius:3px;border:1px solid var(--border)">c</kbd>';
+    }
+    var emptyPrompt = evt.detail.target.querySelector('.term-empty-prompt');
+    if (emptyPrompt) {
+      emptyPrompt.textContent = '$ grep "match" — 0 results';
+    }
+  });
+
   // ── Initial render ────────────────────────────────────────
   syncHiddenFields();
   renderFilterChips();

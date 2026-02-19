@@ -165,7 +165,13 @@
       var html = '';
       items.slice(0, 8).forEach(function(it) {
         var sevClass = it.severity === 'error' ? 'sev-error' : (it.severity === 'warn' ? 'sev-warn' : 'sev-info');
-        html += '<div class="attention-item attention-' + it.severity + ' ' + sevClass + '">';
+        var clickable = it.filterKey && it.filterValue;
+        html += '<div class="attention-item attention-' + it.severity + ' ' + sevClass + (clickable ? ' attention-clickable' : '') + '"';
+        if (clickable) {
+          html += ' data-filter-key="' + escH(it.filterKey) + '" data-filter-value="' + escH(it.filterValue) + '"';
+          html += ' title="Click to filter logs by ' + escH(it.filterKey.replace('_', ' ')) + '"';
+        }
+        html += '>';
         html += '<span class="attention-dot"></span>';
         html += '<span class="attention-desc">' + escH(it.desc) + '</span>';
         html += '<span class="attention-time">' + getTimeAgo(it.time) + '</span>';
@@ -173,6 +179,13 @@
       });
       list.innerHTML = html;
       zone.style.display = '';
+      list.querySelectorAll('.attention-clickable').forEach(function(el) {
+        el.addEventListener('click', function() {
+          // Clear all filters first so attention clicks don't stack
+          filters = { query: '', service: '', level: '', event_type: '', time_range: '', environment: '', commit_hash: '', request_id: '', exception_class: '', error_fingerprint: '', source_file: '', start: '', end: '', metadata: {} };
+          setFilter(el.getAttribute('data-filter-key'), el.getAttribute('data-filter-value'));
+        });
+      });
     }
 
     fetch('/api/errors?status=unresolved&limit=5&sort_by=occurrence_count').then(function(r){
@@ -183,7 +196,9 @@
         items.push({
           severity: 'error',
           desc: (eg.exception_class || 'Error') + (eg.occurrence_count > 1 ? ' (' + eg.occurrence_count + 'x)' : '') + (eg.service ? ' on ' + eg.service : ''),
-          time: eg.last_seen_at || eg.last_seen || eg.created_at
+          time: eg.last_seen_at || eg.last_seen || eg.created_at,
+          filterKey: 'exception_class',
+          filterValue: eg.exception_class || ''
         });
       });
       finish();
@@ -197,7 +212,9 @@
         items.push({
           severity: 'warn',
           desc: w.metric + (w.service ? ' on ' + w.service : ''),
-          time: w.updated_at || w.created_at
+          time: w.updated_at || w.created_at,
+          filterKey: w.service ? 'service' : '',
+          filterValue: w.service || ''
         });
       });
       finish();
@@ -490,11 +507,27 @@
     var params = buildFilterParams();
     params.set('limit', '50');
     fetch('/logs?' + params.toString(), { headers: { 'HX-Request': 'true' } })
-      .then(function(r){ return r.text(); })
+      .then(function(r){
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        var ct = r.headers.get('content-type') || '';
+        if (ct.indexOf('text/html') === -1) throw new Error('unexpected response');
+        return r.text();
+      })
       .then(function(html) {
         var el = document.getElementById('logs-list');
         if (el) {
           el.innerHTML = html.trim();
+          // When filters are active and no logs match, show a helpful message
+          if (hasActiveFilters()) {
+            var emptyMsg = el.querySelector('.term-empty-msg');
+            if (emptyMsg) {
+              emptyMsg.innerHTML = 'no logs matching current filters<br>try clearing filters with <kbd style="background:var(--bg-tertiary);padding:1px 5px;border-radius:3px;border:1px solid var(--border)">Esc</kbd> or <kbd style="background:var(--bg-tertiary);padding:1px 5px;border-radius:3px;border:1px solid var(--border)">c</kbd>';
+            }
+            var emptyPrompt = el.querySelector('.term-empty-prompt');
+            if (emptyPrompt) {
+              emptyPrompt.textContent = '$ grep "match" — 0 results';
+            }
+          }
           // Update max-id from new content
           var logList = el.querySelector('.log-list');
           if (logList) {
