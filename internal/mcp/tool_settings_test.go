@@ -33,10 +33,16 @@ func (m *mockSettingsStore) SetRetention(_ context.Context, s store.RetentionSet
 	return nil
 }
 
-func (m *mockSettingsStore) GetAPIKey(_ context.Context) (string, error)        { return "", nil }
-func (m *mockSettingsStore) SetAPIKey(_ context.Context, _ string) error        { return nil }
-func (m *mockSettingsStore) GetCORSOrigins(_ context.Context) (string, error)   { return "", nil }
-func (m *mockSettingsStore) SetCORSOrigins(_ context.Context, _ string) error   { return nil }
+func (m *mockSettingsStore) GetAPIKey(_ context.Context) (string, error)          { return "", nil }
+func (m *mockSettingsStore) SetAPIKey(_ context.Context, _ string) error          { return nil }
+func (m *mockSettingsStore) GetCORSOrigins(_ context.Context) (string, error)     { return "", nil }
+func (m *mockSettingsStore) SetCORSOrigins(_ context.Context, _ string) error     { return nil }
+func (m *mockSettingsStore) GetMaxQueryRows(_ context.Context) (int, error)       { return 0, nil }
+func (m *mockSettingsStore) SetMaxQueryRows(_ context.Context, _ int) error       { return nil }
+func (m *mockSettingsStore) GetStatementTimeout(_ context.Context) (int, error)   { return 0, nil }
+func (m *mockSettingsStore) SetStatementTimeout(_ context.Context, _ int) error   { return nil }
+func (m *mockSettingsStore) GetMCPName(_ context.Context) (string, error)         { return "", nil }
+func (m *mockSettingsStore) SetMCPName(_ context.Context, _ string) error         { return nil }
 
 // --- get_settings tests ---
 

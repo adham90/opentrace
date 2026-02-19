@@ -19,7 +19,18 @@ func getSettingsHandler(ss store.SettingsStore) server.ToolHandlerFunc {
 		}
 
 		resp := map[string]any{
-			"retention_days": retention.RetentionDays,
+			"retention_days":        retention.RetentionDays,
+			"metric_retention_days": retention.MetricRetentionDays,
+		}
+
+		if v, err := ss.GetMaxQueryRows(ctx); err == nil && v > 0 {
+			resp["max_query_rows"] = v
+		}
+		if v, err := ss.GetStatementTimeout(ctx); err == nil && v > 0 {
+			resp["statement_timeout_ms"] = v
+		}
+		if v, err := ss.GetMCPName(ctx); err == nil && v != "" {
+			resp["mcp_name"] = v
 		}
 
 		data, err := json.MarshalIndent(resp, "", "  ")

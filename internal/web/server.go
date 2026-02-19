@@ -402,6 +402,10 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Post("/settings/api-key", srv.handleRegenerateAPIKey)
 			r.Get("/settings/cors", srv.handleGetCORSOrigins)
 			r.Put("/settings/cors", srv.handleUpdateCORSOrigins)
+			r.Get("/settings/query-guardrails", srv.handleGetQueryGuardrails)
+			r.Put("/settings/query-guardrails", srv.handleUpdateQueryGuardrails)
+			r.Get("/settings/mcp-name", srv.handleGetMCPName)
+			r.Put("/settings/mcp-name", srv.handleUpdateMCPName)
 			if srv.auditStore != nil {
 				r.Get("/audit-log", srv.handleAuditLog)
 			}

@@ -21,6 +21,9 @@ const retentionKey = "retention"
 const apiKeyKey = "api_key"
 const autoUpdateKey = "auto_update"
 const corsOriginsKey = "cors_origins"
+const maxQueryRowsKey = "max_query_rows"
+const statementTimeoutKey = "statement_timeout"
+const mcpNameKey = "mcp_name"
 
 func (s *settingsStore) GetRetention(ctx context.Context) (*RetentionSettings, error) {
 	var raw string
@@ -135,6 +138,80 @@ func (s *settingsStore) SetCORSOrigins(ctx context.Context, origins string) erro
 	)
 	if err != nil {
 		return fmt.Errorf("upserting cors_origins: %w", err)
+	}
+	return nil
+}
+
+func (s *settingsStore) GetMaxQueryRows(ctx context.Context) (int, error) {
+	return s.getIntSetting(ctx, maxQueryRowsKey, 0)
+}
+
+func (s *settingsStore) SetMaxQueryRows(ctx context.Context, val int) error {
+	return s.setIntSetting(ctx, maxQueryRowsKey, val)
+}
+
+func (s *settingsStore) GetStatementTimeout(ctx context.Context) (int, error) {
+	return s.getIntSetting(ctx, statementTimeoutKey, 0)
+}
+
+func (s *settingsStore) SetStatementTimeout(ctx context.Context, val int) error {
+	return s.setIntSetting(ctx, statementTimeoutKey, val)
+}
+
+func (s *settingsStore) GetMCPName(ctx context.Context) (string, error) {
+	var val string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT value FROM app_config WHERE key = ?`, mcpNameKey,
+	).Scan(&val)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("querying mcp_name: %w", err)
+	}
+	return val, nil
+}
+
+func (s *settingsStore) SetMCPName(ctx context.Context, name string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO app_config (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		mcpNameKey, name,
+	)
+	if err != nil {
+		return fmt.Errorf("upserting mcp_name: %w", err)
+	}
+	return nil
+}
+
+// getIntSetting reads an integer from app_config, returning defaultVal if missing.
+func (s *settingsStore) getIntSetting(ctx context.Context, key string, defaultVal int) (int, error) {
+	var val string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT value FROM app_config WHERE key = ?`, key,
+	).Scan(&val)
+	if err == sql.ErrNoRows {
+		return defaultVal, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("querying %s: %w", key, err)
+	}
+	var n int
+	if _, err := fmt.Sscanf(val, "%d", &n); err != nil {
+		return defaultVal, nil
+	}
+	return n, nil
+}
+
+// setIntSetting writes an integer to app_config.
+func (s *settingsStore) setIntSetting(ctx context.Context, key string, val int) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO app_config (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		key, fmt.Sprintf("%d", val),
+	)
+	if err != nil {
+		return fmt.Errorf("upserting %s: %w", key, err)
 	}
 	return nil
 }

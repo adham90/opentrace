@@ -79,6 +79,16 @@
                min="0" step="1" value="{{.RetentionDays}}"
                style="max-width:200px">
       </div>
+      <div class="form-group" style="margin-top:0.5rem">
+        <label for="metric-retention-days">Metric retention (days)</label>
+        <input type="number" id="metric-retention-days" name="metric_retention_days"
+               min="0" step="1" value="{{.MetricRetentionDays}}"
+               style="max-width:200px"
+               placeholder="0">
+        <p class="text-dim" style="font-size:0.8rem;margin-top:0.25rem">
+          Separate retention for server metrics. Set to <strong>0</strong> to use the global retention period above.
+        </p>
+      </div>
       <button type="submit" class="btn btn-primary">Save</button>
       <span id="save-status" style="margin-left:1em"></span>
     </form>
@@ -113,6 +123,68 @@
     </form>
   </div>
 
+  <!-- Query Guardrails -->
+  <div class="settings-section">
+    <h3 class="settings-section-title"><span class="dim">#</span> Query Guardrails</h3>
+    <p class="text-dim" style="font-size:0.85rem;margin-bottom:0.75rem">
+      Safety limits for database connector queries. Max rows caps result sets; statement timeout kills long-running queries.
+    </p>
+    {{if .QueryEnvOverride}}
+    <div style="background:rgba(255,200,50,0.1);border:1px solid rgba(255,200,50,0.3);color:var(--yellow);padding:0.5rem 1rem;border-radius:4px;margin-bottom:1rem;font-size:0.85rem">
+      Query guardrails are set via <code>OPENTRACE_MAX_QUERY_ROWS</code> / <code>OPENTRACE_STATEMENT_TIMEOUT_MS</code> environment variables. UI management is disabled.
+    </div>
+    {{end}}
+    <form id="guardrails-form" onsubmit="return saveGuardrails(event)">
+      <div style="display:flex;gap:1rem;flex-wrap:wrap">
+        <div class="form-group">
+          <label for="max-query-rows">Max rows</label>
+          <input type="number" id="max-query-rows" name="max_query_rows"
+                 min="1" step="1" value="{{.MaxQueryRows}}"
+                 style="max-width:160px"
+                 {{if .QueryEnvOverride}}disabled{{end}}>
+        </div>
+        <div class="form-group">
+          <label for="statement-timeout">Statement timeout (ms)</label>
+          <input type="number" id="statement-timeout" name="statement_timeout_ms"
+                 min="100" step="100" value="{{.StatementTimeoutMS}}"
+                 style="max-width:160px"
+                 {{if .QueryEnvOverride}}disabled{{end}}>
+        </div>
+      </div>
+      {{if not .QueryEnvOverride}}
+      <button type="submit" class="btn btn-primary">Save</button>
+      <span id="guardrails-save-status" style="margin-left:1em"></span>
+      {{end}}
+    </form>
+  </div>
+
+  <!-- MCP Server Name -->
+  <div class="settings-section">
+    <h3 class="settings-section-title"><span class="dim">#</span> MCP Server Name</h3>
+    <p class="text-dim" style="font-size:0.85rem;margin-bottom:0.75rem">
+      The name reported by the MCP server during initialization. Change this if you run multiple OpenTrace instances.
+    </p>
+    {{if .MCPNameEnvOverride}}
+    <div style="background:rgba(255,200,50,0.1);border:1px solid rgba(255,200,50,0.3);color:var(--yellow);padding:0.5rem 1rem;border-radius:4px;margin-bottom:1rem;font-size:0.85rem">
+      MCP name is set via <code>OPENTRACE_MCP_NAME</code> environment variable. UI management is disabled.
+    </div>
+    {{end}}
+    <form id="mcp-name-form" onsubmit="return saveMCPName(event)">
+      <div class="form-group">
+        <label for="mcp-name">Server name</label>
+        <input type="text" id="mcp-name" name="mcp_name"
+               value="{{.MCPName}}"
+               placeholder="opentrace"
+               style="max-width:300px"
+               {{if .MCPNameEnvOverride}}disabled{{end}}>
+      </div>
+      {{if not .MCPNameEnvOverride}}
+      <button type="submit" class="btn btn-primary">Save</button>
+      <span id="mcp-name-save-status" style="margin-left:1em"></span>
+      {{end}}
+    </form>
+  </div>
+
 </div>
 
 <script nonce="{{.CSPNonce}}">
@@ -124,12 +196,14 @@ function saveRetention(e) {
     document.getElementById('save-status').textContent = 'Invalid value';
     return false;
   }
+  var metricDays = parseInt(document.getElementById('metric-retention-days').value, 10);
+  if (isNaN(metricDays) || metricDays < 0) metricDays = 0;
   var status = document.getElementById('save-status');
   status.textContent = 'Saving...';
   fetch('/api/settings/retention', {
     method: 'PUT',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({retention_days: days})
+    body: JSON.stringify({retention_days: days, metric_retention_days: metricDays})
   }).then(function(r) {
     if (r.ok) {
       status.textContent = 'Saved';
@@ -204,6 +278,67 @@ function confirmRegenerate() {
 }
 
 loadAPIKey();
+
+// ---- Query Guardrails ----
+function saveGuardrails(e) {
+  e.preventDefault();
+  var maxRows = parseInt(document.getElementById('max-query-rows').value, 10);
+  var timeout = parseInt(document.getElementById('statement-timeout').value, 10);
+  if (isNaN(maxRows) || maxRows < 1) {
+    document.getElementById('guardrails-save-status').textContent = 'Max rows must be >= 1';
+    return false;
+  }
+  if (isNaN(timeout) || timeout < 100) {
+    document.getElementById('guardrails-save-status').textContent = 'Timeout must be >= 100ms';
+    return false;
+  }
+  var status = document.getElementById('guardrails-save-status');
+  status.textContent = 'Saving...';
+  status.style.color = '';
+  fetch('/api/settings/query-guardrails', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({max_query_rows: maxRows, statement_timeout_ms: timeout})
+  }).then(function(r) {
+    if (r.ok) {
+      status.textContent = 'Saved';
+      status.style.color = 'var(--green)';
+      setTimeout(function(){ status.textContent = ''; status.style.color = ''; }, 2000);
+    } else {
+      return r.json().then(function(d){ status.textContent = 'Error: ' + (d.error || 'unknown'); status.style.color = 'var(--red)'; });
+    }
+  }).catch(function(err) {
+    status.textContent = 'Error: ' + err.message;
+    status.style.color = 'var(--red)';
+  });
+  return false;
+}
+
+// ---- MCP Server Name ----
+function saveMCPName(e) {
+  e.preventDefault();
+  var name = document.getElementById('mcp-name').value.trim();
+  var status = document.getElementById('mcp-name-save-status');
+  status.textContent = 'Saving...';
+  status.style.color = '';
+  fetch('/api/settings/mcp-name', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({mcp_name: name})
+  }).then(function(r) {
+    if (r.ok) {
+      status.textContent = 'Saved';
+      status.style.color = 'var(--green)';
+      setTimeout(function(){ status.textContent = ''; status.style.color = ''; }, 2000);
+    } else {
+      return r.json().then(function(d){ status.textContent = 'Error: ' + (d.error || 'unknown'); status.style.color = 'var(--red)'; });
+    }
+  }).catch(function(err) {
+    status.textContent = 'Error: ' + err.message;
+    status.style.color = 'var(--red)';
+  });
+  return false;
+}
 
 // ---- CORS Allowed Origins ----
 function saveCORS(e) {

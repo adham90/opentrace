@@ -951,7 +951,7 @@ func addWriteTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 					mcp.WithDescription("Test and activate a connector. Creates the connection, verifies connectivity, and registers it for use by all tools. Use after create_connector or to re-test an existing connector."),
 					mcp.WithString("connector_id", mcp.Required(), mcp.Description("Connector UUID (from create_connector or list_connectors)")),
 				),
-				testConnectorHandler(deps.DataSourceStore, deps.Registry, deps.LogStore, deps.Config),
+				testConnectorHandler(deps.DataSourceStore, deps.Registry, deps.LogStore, deps.Config, deps.SettingsStore),
 			)
 			b.Add("test_connector", "Test and activate a connector", "Connectors", "admin", "")
 		}

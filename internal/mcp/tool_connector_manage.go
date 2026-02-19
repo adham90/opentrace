@@ -53,7 +53,7 @@ func createConnectorHandler(dsStore store.DataSourceStore) server.ToolHandlerFun
 }
 
 // testConnectorHandler returns a handler that tests an existing connector.
-func testConnectorHandler(dsStore store.DataSourceStore, registry *connector.Registry, logStore store.LogStore, cfg *config.Config) server.ToolHandlerFunc {
+func testConnectorHandler(dsStore store.DataSourceStore, registry *connector.Registry, logStore store.LogStore, cfg *config.Config, ss store.SettingsStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 
@@ -76,7 +76,7 @@ func testConnectorHandler(dsStore store.DataSourceStore, registry *connector.Reg
 		}
 
 		// Create and test the connector.
-		c, err := connector.CreateConnector(ctx, *ds, logStore, cfg)
+		c, err := connector.CreateConnector(ctx, *ds, logStore, cfg, ss)
 		if err != nil {
 			status := store.StatusError
 			msg := fmt.Sprintf("failed to create connector: %v", err)

@@ -555,10 +555,13 @@ func (m *mockSessionStore) DeleteAllForUser(ctx context.Context, userID string) 
 
 // mockSettingsStore implements store.SettingsStore for testing.
 type mockSettingsStore struct {
-	mu          sync.Mutex
-	retention   *store.RetentionSettings
-	apiKey      string
-	corsOrigins string
+	mu               sync.Mutex
+	retention        *store.RetentionSettings
+	apiKey           string
+	corsOrigins      string
+	maxQueryRows     int
+	statementTimeout int
+	mcpName          string
 }
 
 func newMockSettingsStore() *mockSettingsStore {
@@ -604,6 +607,45 @@ func (m *mockSettingsStore) SetCORSOrigins(ctx context.Context, origins string) 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.corsOrigins = origins
+	return nil
+}
+
+func (m *mockSettingsStore) GetMaxQueryRows(ctx context.Context) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.maxQueryRows, nil
+}
+
+func (m *mockSettingsStore) SetMaxQueryRows(ctx context.Context, val int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.maxQueryRows = val
+	return nil
+}
+
+func (m *mockSettingsStore) GetStatementTimeout(ctx context.Context) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.statementTimeout, nil
+}
+
+func (m *mockSettingsStore) SetStatementTimeout(ctx context.Context, val int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.statementTimeout = val
+	return nil
+}
+
+func (m *mockSettingsStore) GetMCPName(ctx context.Context) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.mcpName, nil
+}
+
+func (m *mockSettingsStore) SetMCPName(ctx context.Context, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mcpName = name
 	return nil
 }
 

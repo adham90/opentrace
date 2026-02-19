@@ -3,13 +3,15 @@ package connector
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/store"
 )
 
 // CreateConnector builds the appropriate DataSource from a store.DataSource record.
-func CreateConnector(ctx context.Context, ds store.DataSource, logStore store.LogStore, cfg *config.Config) (DataSource, error) {
+// Resolution order for query guardrails: env (from config) > DB (from settingsStore) > defaults (500, 5000).
+func CreateConnector(ctx context.Context, ds store.DataSource, logStore store.LogStore, cfg *config.Config, ss store.SettingsStore) (DataSource, error) {
 	switch ds.Type {
 	case store.ConnectorLogs:
 		return NewLogsConnector(logStore), nil
@@ -19,15 +21,39 @@ func CreateConnector(ctx context.Context, ds store.DataSource, logStore store.Lo
 		if !ok || connStr == "" {
 			return nil, fmt.Errorf("database connector requires connection_string in config")
 		}
-		maxRows := 500
-		stmtTimeout := 5000
-		if cfg != nil {
-			maxRows = cfg.MaxQueryRows
-			stmtTimeout = cfg.StatementTimeoutMS
-		}
+		maxRows, stmtTimeout := resolveQueryGuardrails(ctx, cfg, ss)
 		return NewDatabaseConnector(ctx, connStr, maxRows, stmtTimeout)
 
 	default:
 		return nil, fmt.Errorf("unknown connector type: %q", ds.Type)
 	}
+}
+
+// resolveQueryGuardrails returns effective max rows and statement timeout.
+// Priority: env var (via config) > DB setting > defaults.
+func resolveQueryGuardrails(ctx context.Context, cfg *config.Config, ss store.SettingsStore) (maxRows, stmtTimeout int) {
+	maxRows = 500
+	stmtTimeout = 5000
+
+	// Check env override first
+	envMaxRows := os.Getenv("OPENTRACE_MAX_QUERY_ROWS") != ""
+	envTimeout := os.Getenv("OPENTRACE_STATEMENT_TIMEOUT_MS") != ""
+
+	if envMaxRows && cfg != nil {
+		maxRows = cfg.MaxQueryRows
+	} else if ss != nil {
+		if v, err := ss.GetMaxQueryRows(ctx); err == nil && v > 0 {
+			maxRows = v
+		}
+	}
+
+	if envTimeout && cfg != nil {
+		stmtTimeout = cfg.StatementTimeoutMS
+	} else if ss != nil {
+		if v, err := ss.GetStatementTimeout(ctx); err == nil && v > 0 {
+			stmtTimeout = v
+		}
+	}
+
+	return maxRows, stmtTimeout
 }

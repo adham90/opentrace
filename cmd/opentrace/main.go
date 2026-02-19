@@ -131,7 +131,7 @@ func initApp(ctx context.Context) (*appDeps, error) {
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
-	reconnectConnectors(ctx, dsStore, logStore, registry, cfg)
+	reconnectConnectors(ctx, dsStore, logStore, registry, cfg, settingsStore)
 
 	return &appDeps{
 		db:               db,
@@ -172,6 +172,14 @@ func runMCP() error {
 
 	watchMetrics := watcher.NewWatchMetrics(deps.logStore)
 
+	// Resolve MCP name: env override > DB > default
+	mcpName := os.Getenv("OPENTRACE_MCP_NAME")
+	if mcpName == "" {
+		if v, err := deps.settingsStore.GetMCPName(ctx); err == nil && v != "" {
+			mcpName = v
+		}
+	}
+
 	return mcpserver.Serve(mcpserver.Deps{
 		Registry:         deps.registry,
 		LogStore:         deps.logStore,
@@ -179,7 +187,7 @@ func runMCP() error {
 		MetricStore:      deps.metricStore,
 		UserStore:        deps.userStore,
 		MCPToken:         os.Getenv("OPENTRACE_MCP_TOKEN"),
-		ServerName:       os.Getenv("OPENTRACE_MCP_NAME"),
+		ServerName:       mcpName,
 		DataSourceStore:  deps.dsStore,
 		SettingsStore:    deps.settingsStore,
 		Config:           deps.cfg,
@@ -354,11 +362,12 @@ func run() error {
 
 	// Background: unified data retention job every hour
 	go func() {
-		metricRetentionDays := 0
+		// Env var override for metric retention (checked once at startup, same as before).
+		envMetricRetentionDays := 0
 		if v := os.Getenv("OPENTRACE_METRIC_RETENTION_DAYS"); v != "" {
 			var d int
 			if _, err := fmt.Sscanf(v, "%d", &d); err == nil && d > 0 {
-				metricRetentionDays = d
+				envMetricRetentionDays = d
 			}
 		}
 
@@ -421,7 +430,11 @@ func run() error {
 				}
 			}
 
-			metricDays := metricRetentionDays
+			// Metric retention: env override > DB setting > global retention
+			metricDays := envMetricRetentionDays
+			if metricDays == 0 {
+				metricDays = settings.MetricRetentionDays
+			}
 			if metricDays == 0 {
 				metricDays = globalDays
 			}
@@ -514,7 +527,7 @@ func run() error {
 }
 
 // reconnectConnectors re-registers connectors that were previously connected.
-func reconnectConnectors(ctx context.Context, dsStore store.DataSourceStore, logStore store.LogStore, registry *connector.Registry, cfg *config.Config) {
+func reconnectConnectors(ctx context.Context, dsStore store.DataSourceStore, logStore store.LogStore, registry *connector.Registry, cfg *config.Config, ss store.SettingsStore) {
 	dataSources, err := dsStore.List(ctx, store.ListDataSourceParams{})
 	if err != nil {
 		slog.Warn("failed to list connectors for reconnect", "error", err)
@@ -526,7 +539,7 @@ func reconnectConnectors(ctx context.Context, dsStore store.DataSourceStore, log
 			continue
 		}
 
-		c, err := connector.CreateConnector(ctx, ds, logStore, cfg)
+		c, err := connector.CreateConnector(ctx, ds, logStore, cfg, ss)
 		if err != nil {
 			slog.Warn("failed to recreate connector", "connector", ds.Name, "type", string(ds.Type), "error", err)
 			status := store.StatusError

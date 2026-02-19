@@ -95,7 +95,8 @@ type SessionStore interface {
 
 // RetentionSettings holds data retention configuration.
 type RetentionSettings struct {
-	RetentionDays int `json:"retention_days"`
+	RetentionDays       int `json:"retention_days"`
+	MetricRetentionDays int `json:"metric_retention_days"` // 0 = use global retention_days
 }
 
 // SettingsStore manages application settings stored in app_config.
@@ -106,6 +107,12 @@ type SettingsStore interface {
 	SetAPIKey(ctx context.Context, key string) error
 	GetCORSOrigins(ctx context.Context) (string, error)
 	SetCORSOrigins(ctx context.Context, origins string) error
+	GetMaxQueryRows(ctx context.Context) (int, error)
+	SetMaxQueryRows(ctx context.Context, val int) error
+	GetStatementTimeout(ctx context.Context) (int, error)
+	SetStatementTimeout(ctx context.Context, val int) error
+	GetMCPName(ctx context.Context) (string, error)
+	SetMCPName(ctx context.Context, name string) error
 }
 
 // MCPActivityStore tracks MCP tool calls and connection events.

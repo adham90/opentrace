@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -129,11 +130,17 @@ type pageData struct {
 	User           *store.User
 	Users          []store.User
 	IsAdmin        bool
-	RetentionDays  int
-	APIKey          string
-	EnvKeyOverride  bool
-	CORSOrigins     string
-	CORSEnvOverride bool
+	RetentionDays       int
+	MetricRetentionDays int
+	APIKey              string
+	EnvKeyOverride      bool
+	CORSOrigins         string
+	CORSEnvOverride     bool
+	MaxQueryRows        int
+	StatementTimeoutMS  int
+	QueryEnvOverride    bool
+	MCPName             string
+	MCPNameEnvOverride  bool
 }
 
 func (s *Server) isDevMode() bool {
@@ -626,6 +633,7 @@ func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 		settings, err := s.settingsStore.GetRetention(r.Context())
 		if err == nil {
 			data.RetentionDays = settings.RetentionDays
+			data.MetricRetentionDays = settings.MetricRetentionDays
 		} else {
 			data.RetentionDays = 30
 		}
@@ -639,6 +647,33 @@ func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 	} else if s.settingsStore != nil {
 		if val, err := s.settingsStore.GetCORSOrigins(r.Context()); err == nil {
 			data.CORSOrigins = val
+		}
+	}
+
+	// Query guardrails
+	data.QueryEnvOverride = os.Getenv("OPENTRACE_MAX_QUERY_ROWS") != "" || os.Getenv("OPENTRACE_STATEMENT_TIMEOUT_MS") != ""
+	data.MaxQueryRows = 500
+	data.StatementTimeoutMS = 5000
+	if data.QueryEnvOverride && s.cfg != nil {
+		data.MaxQueryRows = s.cfg.MaxQueryRows
+		data.StatementTimeoutMS = s.cfg.StatementTimeoutMS
+	} else if s.settingsStore != nil {
+		if v, err := s.settingsStore.GetMaxQueryRows(r.Context()); err == nil && v > 0 {
+			data.MaxQueryRows = v
+		}
+		if v, err := s.settingsStore.GetStatementTimeout(r.Context()); err == nil && v > 0 {
+			data.StatementTimeoutMS = v
+		}
+	}
+
+	// MCP name
+	data.MCPNameEnvOverride = os.Getenv("OPENTRACE_MCP_NAME") != ""
+	data.MCPName = "opentrace"
+	if data.MCPNameEnvOverride {
+		data.MCPName = os.Getenv("OPENTRACE_MCP_NAME")
+	} else if s.settingsStore != nil {
+		if v, err := s.settingsStore.GetMCPName(r.Context()); err == nil && v != "" {
+			data.MCPName = v
 		}
 	}
 

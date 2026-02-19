@@ -75,7 +75,7 @@ func (s *Server) handleTestConnectorAPI(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Create connector and test connection
-	c, err := connector.CreateConnector(r.Context(), *ds, s.logStore, s.cfg)
+	c, err := connector.CreateConnector(r.Context(), *ds, s.logStore, s.cfg, s.settingsStore)
 	now := time.Now()
 	if err != nil {
 		status := store.StatusError
