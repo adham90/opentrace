@@ -693,12 +693,11 @@ button:focus-visible, .btn:focus-visible {
   left: 0;
   right: 0;
   background: var(--bg-secondary);
-  border: 1px solid var(--border);
+  border-top: 1px solid var(--border);
   border-bottom: none;
   max-height: 240px;
   overflow-y: auto;
   z-index: 200;
-  box-shadow: 0 -4px 12px rgba(0,0,0,0.3);
 }
 .ac-item {
   display: flex;
