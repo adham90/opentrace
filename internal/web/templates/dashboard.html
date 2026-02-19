@@ -268,10 +268,11 @@
 
   // ── Inline detail expand/collapse ────────────────────────
   document.addEventListener('click', function(e) {
-    var entry = e.target.closest('.term-entry');
-    if (!entry) return;
-    var line = entry.querySelector('.term-line');
+    // Only toggle when clicking the summary row, not the detail panel
+    var line = e.target.closest('.term-line');
     if (!line) return;
+    var entry = line.closest('.term-entry');
+    if (!entry) return;
     if (window.getSelection().toString()) return;
 
     var expanding = !line.classList.contains('expanded');
@@ -287,6 +288,7 @@
           .then(function(data) {
             if (data.error) { detail.innerHTML = '<div class="term-detail-row"><span class="term-detail-val" style="color:var(--red)">' + escH(data.error) + '</span></div>'; return; }
             entry.setAttribute('data-loaded', '1');
+            detail._logData = data;
             renderInlineDetail(detail, data);
           })
           .catch(function(err) { detail.innerHTML = '<div class="term-detail-row"><span class="term-detail-val" style="color:var(--red)">' + escH(err.message || 'Failed to load') + '</span></div>'; });
@@ -309,6 +311,7 @@
 
   function renderInlineDetail(el, log) {
     var html = '';
+    html += '<button class="term-copy-btn" onclick="copyLogDetail(this)" title="Copy log details">Copy</button>';
     html += '<div class="term-detail-section">';
     html += dRow('id', log.id);
     if (log.trace_id) html += dRow('trace_id', log.trace_id);
@@ -701,6 +704,21 @@
   window.clearFilters = clearAllFilters;
   syncHiddenFields(); renderFilterChips();
 })();
+
+// ── Copy log detail to clipboard ───────────────────────────
+function copyLogDetail(btn) {
+  var detail = btn.closest('.term-detail');
+  if (!detail || !detail._logData) return;
+  var text = JSON.stringify(detail._logData, null, 2);
+  navigator.clipboard.writeText(text).then(function() {
+    var orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(function() { btn.textContent = orig; }, 1500);
+  }).catch(function() {
+    btn.textContent = 'Failed';
+    setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
+  });
+}
 
 // ── Autocomplete ──────────────────────────────────────────
 (function(){
