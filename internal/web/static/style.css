@@ -344,6 +344,22 @@ button:focus-visible, .btn:focus-visible {
 .attention-clickable { cursor: pointer; }
 .attention-clickable .attention-desc { text-decoration: underline; text-decoration-color: transparent; transition: text-decoration-color 0.15s; }
 .attention-clickable:hover .attention-desc { text-decoration-color: var(--text-dim); }
+.attention-dismiss {
+  display: none;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 1px 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  line-height: 1.4;
+  transition: color 0.1s, border-color 0.1s;
+}
+.attention-item:hover .attention-dismiss { display: inline-block; }
+.attention-dismiss:hover { color: var(--red); border-color: var(--red); }
 /* Mobile: wrap attention items */
 @media (max-width: 639px) {
   .attention-item { padding: 5px 8px; font-size: 11px; }

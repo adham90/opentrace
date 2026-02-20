@@ -175,15 +175,61 @@
         html += '<span class="attention-dot"></span>';
         html += '<span class="attention-desc">' + escH(it.desc) + '</span>';
         html += '<span class="attention-time">' + getTimeAgo(it.time) + '</span>';
+        if (it.dismissId) {
+          html += '<button class="attention-dismiss" data-dismiss-type="' + escH(it.dismissType) + '" data-dismiss-id="' + escH(it.dismissId) + '" title="' + (it.dismissType === 'error' ? 'Resolve error' : 'Dismiss watch') + '">\u00d7</button>';
+        }
         html += '</div>';
       });
       list.innerHTML = html;
       zone.style.display = '';
       list.querySelectorAll('.attention-clickable').forEach(function(el) {
-        el.addEventListener('click', function() {
+        el.addEventListener('click', function(e) {
+          if (e.target.closest('.attention-dismiss')) return; // let dismiss handle it
           // Clear all filters first so attention clicks don't stack
           filters = { query: '', service: '', level: '', event_type: '', time_range: '', environment: '', commit_hash: '', request_id: '', exception_class: '', error_fingerprint: '', source_file: '', start: '', end: '', metadata: {} };
           setFilter(el.getAttribute('data-filter-key'), el.getAttribute('data-filter-value'));
+        });
+      });
+      list.querySelectorAll('.attention-dismiss').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var type = btn.getAttribute('data-dismiss-type');
+          var id = btn.getAttribute('data-dismiss-id');
+          var item = btn.closest('.attention-item');
+          btn.disabled = true;
+          btn.textContent = '...';
+          var req;
+          if (type === 'error') {
+            req = fetch('/api/errors/' + encodeURIComponent(id) + '/resolve', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ reason: 'dismissed from dashboard' })
+            });
+          } else {
+            req = fetch('/api/watches/' + encodeURIComponent(id), { method: 'DELETE' });
+          }
+          req.then(function(r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            item.style.transition = 'opacity 0.3s, max-height 0.3s';
+            item.style.opacity = '0';
+            item.style.maxHeight = item.offsetHeight + 'px';
+            setTimeout(function() {
+              item.style.maxHeight = '0';
+              item.style.overflow = 'hidden';
+              item.style.padding = '0 12px';
+              item.style.borderBottom = 'none';
+              item.style.minHeight = '0';
+            }, 50);
+            setTimeout(function() {
+              item.remove();
+              if (!document.querySelector('.attention-item')) {
+                document.getElementById('attention-zone').style.display = 'none';
+              }
+            }, 350);
+          }).catch(function() {
+            btn.disabled = false;
+            btn.textContent = '\u00d7';
+          });
         });
       });
     }
@@ -198,7 +244,9 @@
           desc: (eg.exception_class || 'Error') + (eg.occurrence_count > 1 ? ' (' + eg.occurrence_count + 'x)' : '') + (eg.service ? ' on ' + eg.service : ''),
           time: eg.last_seen_at || eg.last_seen || eg.created_at,
           filterKey: 'exception_class',
-          filterValue: eg.exception_class || ''
+          filterValue: eg.exception_class || '',
+          dismissType: 'error',
+          dismissId: eg.fingerprint || ''
         });
       });
       finish();
@@ -214,7 +262,9 @@
           desc: w.metric + (w.service ? ' on ' + w.service : ''),
           time: w.updated_at || w.created_at,
           filterKey: w.service ? 'service' : '',
-          filterValue: w.service || ''
+          filterValue: w.service || '',
+          dismissType: 'watch',
+          dismissId: w.id || ''
         });
       });
       finish();
