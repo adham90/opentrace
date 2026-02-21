@@ -33,8 +33,10 @@ var (
 	profileTmpl    *template.Template
 	settingsTmpl   *template.Template
 	setupTmpl      *template.Template
-	usersTmpl      *template.Template
-	onboardingTmpl *template.Template
+	usersTmpl       *template.Template
+	connectorsTmpl  *template.Template
+	toolsTmpl       *template.Template
+	onboardingTmpl  *template.Template
 )
 
 func init() {
@@ -53,6 +55,10 @@ func init() {
 		"templates/layout.html", "templates/setup.html"))
 	usersTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/users.html"))
+	connectorsTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/connectors.html"))
+	toolsTmpl = template.Must(template.ParseFS(templateFS,
+		"templates/layout.html", "templates/tools.html"))
 	onboardingTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout_minimal.html", "templates/onboarding.html"))
 }
@@ -129,6 +135,8 @@ type pageData struct {
 	MaxLogID       int64
 	User           *store.User
 	Users          []store.User
+	DataSources    []store.DataSource
+	ToolCategories interface{}
 	IsAdmin        bool
 	RetentionDays       int
 	MetricRetentionDays int
@@ -702,6 +710,75 @@ func (s *Server) handleUsersPage(w http.ResponseWriter, r *http.Request) {
 	tmpl := s.getTemplate(usersTmpl,
 		"internal/web/templates/layout.html",
 		"internal/web/templates/users.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleConnectorsPage(w http.ResponseWriter, r *http.Request) {
+	data := s.newPageData(r, "Connectors", "connectors")
+	if s.dsStore != nil {
+		ds, err := s.dsStore.List(r.Context(), store.ListDataSourceParams{})
+		if err == nil {
+			data.DataSources = ds
+		}
+	}
+	tmpl := s.getTemplate(connectorsTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/connectors.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleToolsPage(w http.ResponseWriter, r *http.Request) {
+	type toolInfo struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Access      string `json:"access"`
+		Requires    string `json:"requires,omitempty"`
+	}
+	type toolCategory struct {
+		Name        string     `json:"name"`
+		Description string     `json:"description"`
+		Tools       []toolInfo `json:"tools"`
+	}
+
+	var categories []toolCategory
+	if s.toolCatalog != nil {
+		for _, cat := range s.toolCatalog.Categories() {
+			tc := toolCategory{Name: cat.Name, Description: cat.Description}
+			for _, t := range cat.Tools {
+				tc.Tools = append(tc.Tools, toolInfo{
+					Name:        t.Name,
+					Description: t.Description,
+					Access:      t.Access,
+					Requires:    t.Requires,
+				})
+			}
+			categories = append(categories, tc)
+		}
+	}
+	if s.registry != nil {
+		dynamicTools := s.registry.AllTools()
+		if len(dynamicTools) > 0 {
+			dynCat := toolCategory{
+				Name:        "Connector Queries",
+				Description: "Dynamic tools registered by active database connectors",
+			}
+			for _, t := range dynamicTools {
+				dynCat.Tools = append(dynCat.Tools, toolInfo{
+					Name:        t.Name,
+					Description: t.Description,
+					Access:      "admin",
+					Requires:    "database connector",
+				})
+			}
+			categories = append(categories, dynCat)
+		}
+	}
+
+	data := s.newPageData(r, "Tools", "tools")
+	data.ToolCategories = categories
+	tmpl := s.getTemplate(toolsTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/tools.html")
 	tmpl.ExecuteTemplate(w, "layout", data)
 }
 

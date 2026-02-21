@@ -221,6 +221,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Get("/", srv.handleDashboardPage)
 		r.Get("/logs", srv.handleLogsFragment)
 		r.Get("/profile", srv.handleProfilePage)
+		r.Get("/connectors", srv.handleConnectorsPage)
+		r.Get("/tools", srv.handleToolsPage)
 	})
 
 	// Settings (admin)
