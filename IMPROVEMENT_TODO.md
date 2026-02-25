@@ -204,7 +204,7 @@ With `'unsafe-inline'` allowed for script attributes, the browser executes this.
 
 ---
 
-### 9. [ ] Add Retry Logic for Transient Failures
+### 9. [x] Add Retry Logic for Transient Failures
 
 **What it is:** When a webhook notification fails (network blip) or a database query times out (momentary lock contention), the operation fails permanently. There's no retry.
 
@@ -223,7 +223,7 @@ With `'unsafe-inline'` allowed for script attributes, the browser executes this.
 
 ---
 
-### 10. [ ] Prevent Audit Entry Loss Under Load
+### 10. [x] Prevent Audit Entry Loss Under Load
 
 **What it is:** The audit worker uses a buffered channel. If the channel fills up (system under heavy load, database slow), new audit entries are silently dropped rather than blocking the request.
 
@@ -255,7 +255,7 @@ User deletes a connector → audit("delete connector") → channel full → entr
 | 6 | Tighten CSP | Medium | Done | 2026-02-25 |
 | 7 | Prometheus metrics | Lower | Not Started | |
 | 8 | OpenAPI documentation | Lower | Not Started | |
-| 9 | Retry logic | Lower | Not Started | |
-| 10 | Audit entry loss prevention | Lower | Not Started | |
+| 9 | Retry logic | Lower | Done | 2026-02-25 |
+| 10 | Audit entry loss prevention | Lower | Done (Option C) | 2026-02-25 |
 
 **Estimated total effort:** ~20-25 hours

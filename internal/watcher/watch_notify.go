@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adham90/opentrace/internal/retry"
 	"github.com/adham90/opentrace/internal/store"
 )
 
@@ -67,23 +68,34 @@ func (n *WatchWebhookNotifier) NotifyWatchAlert(ctx context.Context, alert *stor
 		return fmt.Errorf("marshaling watch webhook payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.URL, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("creating watch webhook request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-OpenTrace-Event", "watch.alert")
+	return retry.Do(ctx, retry.Config{
+		MaxAttempts: 3,
+		BaseDelay:   1 * time.Second,
+		MaxDelay:    4 * time.Second,
+	}, func(ctx context.Context) error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.URL, bytes.NewReader(body))
+		if err != nil {
+			return fmt.Errorf("creating watch webhook request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-OpenTrace-Event", "watch.alert")
 
-	resp, err := n.Client.Do(req)
-	if err != nil {
-		return fmt.Errorf("sending watch webhook: %w", err)
-	}
-	defer resp.Body.Close()
+		resp, err := n.Client.Do(req)
+		if err != nil {
+			return fmt.Errorf("sending watch webhook: %w", err)
+		}
+		defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("watch webhook returned status %d", resp.StatusCode)
-	}
-	return nil
+		if resp.StatusCode >= 500 {
+			// 5xx errors are transient — retry
+			return fmt.Errorf("watch webhook returned status %d", resp.StatusCode)
+		}
+		if resp.StatusCode >= 400 {
+			// 4xx errors are not retryable (bad request, auth failure, etc.)
+			return retry.Permanent(fmt.Errorf("watch webhook returned status %d", resp.StatusCode))
+		}
+		return nil
+	})
 }
 
 // WatchLogNotifier logs watch alerts to slog (always-on fallback).
