@@ -23,7 +23,31 @@ func OpenSQLite(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("opening sqlite: %w", err)
 	}
 	db.SetMaxOpenConns(1) // SQLite handles one writer at a time
+
+	// Performance PRAGMAs — safe with WAL mode
+	if err := applySQLitePragmas(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("applying pragmas: %w", err)
+	}
+
 	return db, nil
+}
+
+// applySQLitePragmas sets performance-critical PRAGMAs on the database.
+// These are safe to use with WAL journal mode.
+func applySQLitePragmas(db *sql.DB) error {
+	pragmas := []string{
+		"PRAGMA cache_size = -64000",  // 64MB page cache (default: 2MB)
+		"PRAGMA synchronous = NORMAL", // safe with WAL, skips fsync per write
+		"PRAGMA mmap_size = 30000000", // 30MB memory-mapped I/O
+		"PRAGMA temp_store = MEMORY",  // temp tables in RAM
+	}
+	for _, p := range pragmas {
+		if _, err := db.Exec(p); err != nil {
+			return fmt.Errorf("executing %q: %w", p, err)
+		}
+	}
+	return nil
 }
 
 // RunSQLiteMigrations applies all pending SQLite migrations using a simple
