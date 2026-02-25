@@ -310,3 +310,244 @@ func TestDeleteUser_PreventSelfDeletion(t *testing.T) {
 		t.Fatalf("expected body to contain self-deletion error, got: %s", body)
 	}
 }
+
+// --- Lockout tests ---
+
+func TestLogin_LockoutAfterFailedAttempts(t *testing.T) {
+	srv, us, _ := newTestServer(t)
+	createTestUser(t, us, "lockme@example.com", "correctpassword", store.RoleAdmin, true)
+
+	// Fail 5 times.
+	for i := 0; i < maxFailedLogins; i++ {
+		form := url.Values{}
+		form.Set("email", "lockme@example.com")
+		form.Set("password", "wrongpassword")
+		req := postForm("/login", form)
+		rec := httptest.NewRecorder()
+		srv.Router.ServeHTTP(rec, req)
+	}
+
+	// 6th attempt with correct password should be locked.
+	form := url.Values{}
+	form.Set("email", "lockme@example.com")
+	form.Set("password", "correctpassword")
+	req := postForm("/login", form)
+	rec := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 (locked), got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "temporarily locked") {
+		t.Fatalf("expected lockout message, got: %s", rec.Body.String())
+	}
+}
+
+func TestLogin_LockoutExpires(t *testing.T) {
+	tracker := newLoginTracker()
+
+	// Record enough failures to lock.
+	for i := 0; i < maxFailedLogins; i++ {
+		tracker.recordFailure("expire@example.com")
+	}
+	if !tracker.isLocked("expire@example.com") {
+		t.Fatal("expected account to be locked")
+	}
+
+	// Simulate time passing by directly setting lockedAt in the past.
+	tracker.mu.Lock()
+	tracker.entries["expire@example.com"].lockedAt = time.Now().Add(-(lockoutDuration + time.Second))
+	tracker.mu.Unlock()
+
+	if tracker.isLocked("expire@example.com") {
+		t.Fatal("expected lockout to have expired")
+	}
+}
+
+func TestLogin_SuccessResetsFailureCount(t *testing.T) {
+	srv, us, _ := newTestServer(t)
+	createTestUser(t, us, "reset@example.com", "correctpassword", store.RoleAdmin, true)
+
+	// Fail 3 times (below lockout threshold).
+	for i := 0; i < 3; i++ {
+		form := url.Values{}
+		form.Set("email", "reset@example.com")
+		form.Set("password", "wrongpassword")
+		req := postForm("/login", form)
+		rec := httptest.NewRecorder()
+		srv.Router.ServeHTTP(rec, req)
+	}
+
+	// Succeed — should reset the counter.
+	form := url.Values{}
+	form.Set("email", "reset@example.com")
+	form.Set("password", "correctpassword")
+	req := postForm("/login", form)
+	rec := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected 302 (success), got %d", rec.Code)
+	}
+
+	// Now fail 4 more times — should NOT be locked (counter was reset).
+	for i := 0; i < maxFailedLogins-1; i++ {
+		form := url.Values{}
+		form.Set("email", "reset@example.com")
+		form.Set("password", "wrongpassword")
+		req := postForm("/login", form)
+		rec := httptest.NewRecorder()
+		srv.Router.ServeHTTP(rec, req)
+	}
+
+	// Should still be able to login (not locked yet).
+	form = url.Values{}
+	form.Set("email", "reset@example.com")
+	form.Set("password", "correctpassword")
+	req = postForm("/login", form)
+	rec = httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected 302 (not locked), got %d", rec.Code)
+	}
+}
+
+// --- Remember me ---
+
+func TestLogin_RememberMeExtendsSession(t *testing.T) {
+	srv, us, ss := newTestServer(t)
+	createTestUser(t, us, "remember@example.com", "correctpassword", store.RoleAdmin, true)
+
+	form := url.Values{}
+	form.Set("email", "remember@example.com")
+	form.Set("password", "correctpassword")
+	form.Set("remember", "on")
+	req := postForm("/login", form)
+	rec := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected 302, got %d", rec.Code)
+	}
+
+	// Check cookie max-age is roughly 7 days (not 1 day).
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookieName {
+			// 7 days = 604800 seconds, 1 day = 86400.
+			if c.MaxAge < 600000 {
+				t.Errorf("remember-me cookie MaxAge = %d, want ~604800", c.MaxAge)
+			}
+			break
+		}
+	}
+
+	// Verify session was created in the store.
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	if len(ss.sessions) == 0 {
+		t.Fatal("no session created")
+	}
+}
+
+// --- Password change ---
+
+func TestChangePassword_Success(t *testing.T) {
+	srv, us, ss := newTestServer(t)
+	user := createTestUser(t, us, "pw@example.com", "oldpassword12", store.RoleAdmin, true)
+	token := createTestSession(t, ss, user.ID)
+
+	form := url.Values{}
+	form.Set("current_password", "oldpassword12")
+	form.Set("new_password", "newpassword12")
+	req := postForm("/api/profile/password", form)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected 302 redirect, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestChangePassword_WrongCurrent(t *testing.T) {
+	srv, us, ss := newTestServer(t)
+	user := createTestUser(t, us, "pw2@example.com", "oldpassword12", store.RoleAdmin, true)
+	token := createTestSession(t, ss, user.ID)
+
+	form := url.Values{}
+	form.Set("current_password", "wrongpassword")
+	form.Set("new_password", "newpassword12")
+	req := postForm("/api/profile/password", form)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestChangePassword_TooShort(t *testing.T) {
+	srv, us, ss := newTestServer(t)
+	user := createTestUser(t, us, "pw3@example.com", "oldpassword12", store.RoleAdmin, true)
+	token := createTestSession(t, ss, user.ID)
+
+	form := url.Values{}
+	form.Set("current_password", "oldpassword12")
+	form.Set("new_password", "short")
+	req := postForm("/api/profile/password", form)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+// --- Registration authorization ---
+
+func TestRegister_NonAdminRejected(t *testing.T) {
+	srv, us, ss := newTestServer(t)
+
+	// Create a member (non-admin) user.
+	member := createTestUser(t, us, "member@example.com", "memberpassword", store.RoleMember, true)
+	token := createTestSession(t, ss, member.ID)
+
+	form := url.Values{}
+	form.Set("email", "new@example.com")
+	form.Set("password", "newpassword12")
+	req := postForm("/register", form)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	// Non-admin should be rejected (403 or redirect to login).
+	if rec.Code == http.StatusFound {
+		loc := rec.Header().Get("Location")
+		if loc == "/" || loc == "/users" {
+			t.Fatalf("non-admin should not be able to register users, but got redirect to %s", loc)
+		}
+	}
+}
+
+// --- Login with unknown email ---
+
+func TestLogin_UnknownEmail(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	form := url.Values{}
+	form.Set("email", "nobody@example.com")
+	form.Set("password", "somepassword12")
+	req := postForm("/login", form)
+	rec := httptest.NewRecorder()
+	srv.Router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 for unknown email, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "Invalid email or password") {
+		t.Fatal("expected generic error message (no email enumeration)")
+	}
+}

@@ -36,7 +36,7 @@ Your browser sends the request with your session cookie — OpenTrace thinks you
 
 ---
 
-### 2. [ ] Add Tests for Auth Handlers
+### 2. [x] Add Tests for Auth Handlers
 
 **What it is:** The authentication code (`auth_handlers.go`, 516 lines) handles login, registration, password changes, account lockout, and session management — but has zero tests. If someone refactors this code and accidentally breaks the lockout logic, nothing catches it.
 
@@ -248,7 +248,7 @@ User deletes a connector → audit("delete connector") → channel full → entr
 | # | Item | Priority | Status | Completed |
 |---|------|----------|--------|-----------|
 | 1 | CSRF protection | High | Done | 2026-02-25 |
-| 2 | Auth handler tests | High | Not Started | |
+| 2 | Auth handler tests | High | Done | 2026-02-25 |
 | 3 | Log silent errors | Medium | Not Started | |
 | 4 | Pagination on list endpoints | Medium | Not Started | |
 | 5 | Standardize error patterns | Medium | Not Started | |
