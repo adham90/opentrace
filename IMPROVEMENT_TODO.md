@@ -169,7 +169,7 @@ With `'unsafe-inline'` allowed for script attributes, the browser executes this.
 
 ## Lower Priority
 
-### 7. [ ] Add Prometheus Metrics
+### 7. [x] Add Prometheus Metrics
 
 **What it is:** OpenTrace monitors other systems but doesn't expose metrics about itself. There's no way to answer: "How many requests/sec is OpenTrace handling? What's the p99 latency? How many SQLite queries are slow?"
 
@@ -253,7 +253,7 @@ User deletes a connector → audit("delete connector") → channel full → entr
 | 4 | Pagination on list endpoints | Medium | Done | 2026-02-25 |
 | 5 | Standardize error patterns | Medium | Done | 2026-02-25 |
 | 6 | Tighten CSP | Medium | Done | 2026-02-25 |
-| 7 | Prometheus metrics | Lower | Not Started | |
+| 7 | Prometheus metrics | Lower | Done | 2026-02-25 |
 | 8 | OpenAPI documentation | Lower | Not Started | |
 | 9 | Retry logic | Lower | Done | 2026-02-25 |
 | 10 | Audit entry loss prevention | Lower | Done (Option C) | 2026-02-25 |

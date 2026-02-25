@@ -12,6 +12,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/metrics"
 	"github.com/adham90/opentrace/internal/store"
 	"github.com/adham90/opentrace/internal/watcher"
 )
@@ -188,10 +189,20 @@ var activityLogger *ActivityLogger
 // If activity logging is enabled, wraps the handler to record tool calls.
 func maybeAddTool(s *server.MCPServer, tool mcp.Tool, handler server.ToolHandlerFunc) {
 	if s != nil {
+		// Wrap with Prometheus metrics recording (always active).
+		handler = wrapWithMetrics(tool.Name, handler)
 		if activityStoreForLogging != nil {
 			handler = wrapWithActivityLog(activityStoreForLogging, tool.Name, handler)
 		}
 		s.AddTool(tool, handler)
+	}
+}
+
+// wrapWithMetrics wraps a tool handler to record Prometheus metrics for each call.
+func wrapWithMetrics(toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		metrics.RecordMCPToolCall(toolName)
+		return handler(ctx, request)
 	}
 }
 

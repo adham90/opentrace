@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/metrics"
 	"github.com/adham90/opentrace/internal/store"
 )
 
@@ -204,6 +205,11 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to insert logs")
 		return
+	}
+
+	// Record Prometheus metrics for ingested logs
+	if count > 0 {
+		metrics.RecordLogIngest(count)
 	}
 
 	// Record batch ID after successful insert

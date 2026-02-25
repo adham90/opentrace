@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adham90/opentrace/internal/metrics"
 	"github.com/adham90/opentrace/internal/store"
 )
 
@@ -141,12 +142,20 @@ func (s *WatchScheduler) evaluateWatch(ctx context.Context, w *store.Watch) {
 	if err != nil {
 		slog.Warn("watch evaluation failed", "watch_id", w.ID, "error", err)
 		_ = s.watchStore.FailRun(ctx, run.ID, err.Error())
+		metrics.RecordWatcherEvaluation("error")
 		return
 	}
 
 	// Complete the run
 	if err := s.watchStore.CompleteRun(ctx, run.ID, result.Value, result.Breached, result.Summary); err != nil {
 		slog.Error("watch scheduler: completing run", "watch_id", w.ID, "error", err)
+	}
+
+	// Record Prometheus metrics for watcher evaluation outcome
+	if result.HasAlert {
+		metrics.RecordWatcherEvaluation("alert")
+	} else {
+		metrics.RecordWatcherEvaluation("ok")
 	}
 
 	// If alert should fire, build evidence and create alert

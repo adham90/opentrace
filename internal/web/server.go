@@ -18,6 +18,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
@@ -199,6 +200,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Use(middleware.Logger)
 	router.Use(middleware.Recoverer)
 	router.Use(middleware.RequestID)
+	router.Use(PrometheusMiddleware)
 	router.Use(SecurityHeaders)
 	router.Use(skipCompressForSSE)     // must come before Compress — disables gzip for SSE
 	router.Use(middleware.Compress(5)) // gzip compression
@@ -286,6 +288,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Handle("/debug/pprof/block", pprof.Handler("block"))
 		r.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
 		r.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+		r.Handle("/debug/metrics", promhttp.Handler())
 	})
 
 	// API

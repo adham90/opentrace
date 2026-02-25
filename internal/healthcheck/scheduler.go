@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adham90/opentrace/internal/metrics"
 	"github.com/adham90/opentrace/internal/store"
 )
 
@@ -131,8 +132,12 @@ func (s *Scheduler) runCheck(ctx context.Context, hc store.HealthCheck) {
 			"name", hc.Name,
 			"error", err,
 		)
+		metrics.RecordHealthCheckRun("error")
 		return
 	}
+
+	// Record Prometheus metrics for health check result
+	metrics.RecordHealthCheckRun(string(result.Status))
 
 	if result.Status != store.HealthCheckUp {
 		slog.Warn("healthcheck probe failed",
