@@ -78,6 +78,21 @@ type Server struct {
 	secureCookies  bool
 	logsConnMu     sync.Mutex
 	metricsConnMu  sync.Mutex
+
+	// Bounded audit log channel with background worker
+	auditCh chan auditEntry
+	auditWg sync.WaitGroup
+}
+
+// auditEntry is an enqueued audit log event.
+type auditEntry struct {
+	userID     string
+	userEmail  string
+	action     string
+	targetType string
+	targetID   string
+	details    string
+	ipAddress  string
 }
 
 // ServerDeps holds all dependencies for the web server.
@@ -144,7 +159,12 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		journeyStore:       deps.JourneyStore,
 		errorImpactStore:   deps.ErrorImpactStore,
 		versionChecker:     newVersionChecker("adham90", "opentrace"),
+		auditCh:            make(chan auditEntry, 256),
 	}
+
+	// Start audit log worker
+	srv.auditWg.Add(1)
+	go srv.auditWorker()
 
 	cfg := deps.Cfg
 
@@ -448,6 +468,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.apiLimiter != nil {
 		s.apiLimiter.Stop()
 	}
+
+	// Drain audit log channel
+	if s.auditCh != nil {
+		close(s.auditCh)
+		s.auditWg.Wait()
+	}
+
 	if s.sseServer != nil {
 		return s.sseServer.Shutdown(ctx)
 	}
@@ -497,7 +524,8 @@ func (s *Server) getEffectiveAPIKey(ctx context.Context) string {
 	return ""
 }
 
-// audit logs an admin action asynchronously. Safe to call even if auditStore is nil.
+// audit logs an admin action asynchronously via a bounded channel.
+// Safe to call even if auditStore is nil.
 func (s *Server) audit(r *http.Request, action, targetType, targetID, details string) {
 	if s.auditStore == nil {
 		return
@@ -506,20 +534,37 @@ func (s *Server) audit(r *http.Request, action, targetType, targetID, details st
 	if user == nil {
 		return
 	}
-	// Fire-and-forget to avoid slowing down the request
-	go func() {
+	select {
+	case s.auditCh <- auditEntry{
+		userID:     user.ID,
+		userEmail:  user.Email,
+		action:     action,
+		targetType: targetType,
+		targetID:   targetID,
+		details:    details,
+		ipAddress:  r.RemoteAddr,
+	}:
+	default:
+		// Channel full — drop rather than block the request
+	}
+}
+
+// auditWorker drains the audit channel and writes to the store.
+func (s *Server) auditWorker() {
+	defer s.auditWg.Done()
+	for entry := range s.auditCh {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
 		_ = s.auditStore.Log(ctx, store.LogAuditParams{
-			UserID:     user.ID,
-			UserEmail:  user.Email,
-			Action:     action,
-			TargetType: targetType,
-			TargetID:   targetID,
-			Details:    details,
-			IPAddress:  r.RemoteAddr,
+			UserID:     entry.userID,
+			UserEmail:  entry.userEmail,
+			Action:     entry.action,
+			TargetType: entry.targetType,
+			TargetID:   entry.targetID,
+			Details:    entry.details,
+			IPAddress:  entry.ipAddress,
 		})
-	}()
+		cancel()
+	}
 }
 
 func (s *Server) handleAuditLog(w http.ResponseWriter, r *http.Request) {

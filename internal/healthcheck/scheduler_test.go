@@ -124,9 +124,17 @@ func TestChecker_HeadMethod(t *testing.T) {
 	}
 }
 
+func TestScheduler_SemaphoreCapacity(t *testing.T) {
+	s := NewScheduler(nil, 15*time.Second)
+	if cap(s.sem) != 16 {
+		t.Errorf("semaphore capacity = %d, want 16", cap(s.sem))
+	}
+}
+
 func TestScheduler_IsDue(t *testing.T) {
 	s := &Scheduler{
 		lastRun: make(map[string]time.Time),
+		sem:     make(chan struct{}, 16),
 	}
 
 	hc := store.HealthCheck{ID: "hc1", IntervalSecs: 60}

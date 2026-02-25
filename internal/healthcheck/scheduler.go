@@ -20,6 +20,9 @@ type Scheduler struct {
 	// mu protects lastRun map
 	mu      sync.Mutex
 	lastRun map[string]time.Time
+
+	// sem limits concurrent health check goroutines
+	sem chan struct{}
 }
 
 // NewScheduler creates a health check scheduler.
@@ -33,6 +36,7 @@ func NewScheduler(hcStore store.HealthCheckStore, pollInterval time.Duration) *S
 		checker: NewChecker(),
 		poll:    pollInterval,
 		lastRun: make(map[string]time.Time),
+		sem:     make(chan struct{}, 16),
 	}
 }
 
@@ -92,8 +96,17 @@ func (s *Scheduler) tick(ctx context.Context) {
 		s.lastRun[hc.ID] = now
 		s.mu.Unlock()
 
-		// Run check in a goroutine to avoid blocking the tick
-		go s.runCheck(ctx, hc)
+		// Run check in a goroutine with bounded concurrency
+		select {
+		case s.sem <- struct{}{}:
+			go func(hc store.HealthCheck) {
+				defer func() { <-s.sem }()
+				s.runCheck(ctx, hc)
+			}(hc)
+		default:
+			slog.Debug("healthcheck: concurrency limit reached, skipping",
+				"healthcheck_id", hc.ID, "name", hc.Name)
+		}
 	}
 }
 

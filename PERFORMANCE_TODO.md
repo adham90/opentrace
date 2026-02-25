@@ -33,7 +33,7 @@ db.Exec("PRAGMA temp_store = MEMORY")      // temp tables in RAM, not disk
 
 ---
 
-### 2. [ ] Bound Goroutines with Worker Pools
+### 2. [x] Bound Goroutines with Worker Pools
 
 **Impact:** Prevents OOM under load | **Effort:** 2-3 hrs
 
@@ -359,7 +359,7 @@ summaryLines[i] = b.String()
 | # | Item | Status | Completed Date |
 |---|------|--------|----------------|
 | 1 | SQLite PRAGMAs | Done | 2026-02-25 |
-| 2 | Bound goroutines with worker pools | Not Started | |
+| 2 | Bound goroutines with worker pools | Done | 2026-02-25 |
 | 3 | Fix journey store N+1 | Not Started | |
 | 4 | Propagate app context | Not Started | |
 | 5 | Add composite indexes | Not Started | |

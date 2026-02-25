@@ -19,6 +19,9 @@ type WatchStreamEvaluator struct {
 	mu       sync.Mutex
 	lastEval map[string]time.Time // watch ID → last evaluation time
 	minGap   time.Duration        // minimum gap between evaluations for the same watch
+
+	// Semaphore to limit concurrent evaluations
+	sem chan struct{}
 }
 
 // NewWatchStreamEvaluator creates a reactive stream evaluator.
@@ -33,6 +36,7 @@ func NewWatchStreamEvaluator(
 		evidenceBuilder: evidenceBuilder,
 		lastEval:        make(map[string]time.Time),
 		minGap:          10 * time.Second,
+		sem:             make(chan struct{}, 16),
 	}
 }
 
@@ -52,7 +56,15 @@ func (s *WatchStreamEvaluator) OnLogsReceived(entries []store.LogEntry) {
 		}
 	}
 
-	go s.evaluateMatching(services)
+	select {
+	case s.sem <- struct{}{}:
+		go func() {
+			defer func() { <-s.sem }()
+			s.evaluateMatching(services)
+		}()
+	default:
+		// Semaphore full — skip evaluation to prevent goroutine explosion
+	}
 }
 
 func (s *WatchStreamEvaluator) evaluateMatching(services map[string]bool) {
