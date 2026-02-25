@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -554,7 +555,7 @@ func (s *Server) audit(r *http.Request, action, targetType, targetID, details st
 		ipAddress:  r.RemoteAddr,
 	}:
 	default:
-		// Channel full — drop rather than block the request
+		slog.Warn("audit entry dropped (channel full)", "action", action)
 	}
 }
 
@@ -563,7 +564,7 @@ func (s *Server) auditWorker() {
 	defer s.auditWg.Done()
 	for entry := range s.auditCh {
 		ctx, cancel := context.WithTimeout(s.auditCtx, 5*time.Second)
-		_ = s.auditStore.Log(ctx, store.LogAuditParams{
+		if err := s.auditStore.Log(ctx, store.LogAuditParams{
 			UserID:     entry.userID,
 			UserEmail:  entry.userEmail,
 			Action:     entry.action,
@@ -571,7 +572,9 @@ func (s *Server) auditWorker() {
 			TargetID:   entry.targetID,
 			Details:    entry.details,
 			IPAddress:  entry.ipAddress,
-		})
+		}); err != nil {
+			slog.Warn("audit log write failed", "action", entry.action, "error", err)
+		}
 		cancel()
 	}
 }

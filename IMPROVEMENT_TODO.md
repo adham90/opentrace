@@ -65,7 +65,7 @@ Your browser sends the request with your session cookie — OpenTrace thinks you
 
 ## Medium Priority
 
-### 3. [ ] Log Silent Errors in Critical Paths
+### 3. [x] Log Silent Errors in Critical Paths
 
 **What it is:** Several places in the code discard errors with `_ = someFunction()`. This means if something fails (database timeout, disk full, connection reset), nobody knows. The operation silently disappears.
 
@@ -249,7 +249,7 @@ User deletes a connector → audit("delete connector") → channel full → entr
 |---|------|----------|--------|-----------|
 | 1 | CSRF protection | High | Done | 2026-02-25 |
 | 2 | Auth handler tests | High | Done | 2026-02-25 |
-| 3 | Log silent errors | Medium | Not Started | |
+| 3 | Log silent errors | Medium | Done | 2026-02-25 |
 | 4 | Pagination on list endpoints | Medium | Not Started | |
 | 5 | Standardize error patterns | Medium | Not Started | |
 | 6 | Tighten CSP | Medium | Not Started | |

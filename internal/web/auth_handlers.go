@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -376,7 +377,9 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	// Invalidate other sessions (keep current one)
 	sess := SessionFromContext(r.Context())
-	s.sessionStore.DeleteAllForUser(r.Context(), user.ID)
+	if err := s.sessionStore.DeleteAllForUser(r.Context(), user.ID); err != nil {
+		slog.Warn("failed to delete sessions after password change", "user_id", user.ID, "error", err)
+	}
 	if sess != nil {
 		token, _ := generateSessionToken()
 		expiresAt := time.Now().Add(sessionDuration)
@@ -487,7 +490,9 @@ func (s *Server) handleToggleUserActive(w http.ResponseWriter, r *http.Request) 
 
 	// Invalidate sessions for deactivated user
 	if !body.Active {
-		s.sessionStore.DeleteAllForUser(r.Context(), userID)
+		if err := s.sessionStore.DeleteAllForUser(r.Context(), userID); err != nil {
+			slog.Warn("failed to delete sessions for deactivated user", "user_id", userID, "error", err)
+		}
 	}
 
 	s.audit(r, "user.toggle_active", "user", userID, fmt.Sprintf("active=%t", body.Active))
@@ -539,7 +544,9 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Clean up sessions
-	s.sessionStore.DeleteAllForUser(r.Context(), userID)
+	if err := s.sessionStore.DeleteAllForUser(r.Context(), userID); err != nil {
+		slog.Warn("failed to delete sessions for deleted user", "user_id", userID, "error", err)
+	}
 
 	s.audit(r, "user.delete", "user", userID, "")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
