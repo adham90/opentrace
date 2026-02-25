@@ -203,7 +203,7 @@ Also: FTS5 triggers fire synchronously on every INSERT inside the batch transact
 
 ---
 
-### 7. [ ] Parallelize Aggregation Jobs with errgroup
+### 7. [x] Parallelize Aggregation Jobs with errgroup
 
 **Impact:** Aggregation cycle 3-5x faster | **Effort:** 30 min
 
@@ -364,7 +364,7 @@ summaryLines[i] = b.String()
 | 4 | Propagate app context | Not Started | |
 | 5 | Add composite indexes | Done | 2026-02-25 |
 | 6 | Eliminate duplicate metadata marshal | Done | 2026-02-25 |
-| 7 | Parallelize aggregation jobs | Not Started | |
+| 7 | Parallelize aggregation jobs | Done | 2026-02-25 |
 | 8 | Fix ActivityLogger shutdown | Not Started | |
 | 9 | Replace MarshalIndent with Marshal | Not Started | |
 | 10 | Slice pre-allocation + strings.Builder | Not Started | |

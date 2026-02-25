@@ -20,6 +20,7 @@ import (
 	"github.com/adham90/opentrace/internal/vmagent"
 	"github.com/adham90/opentrace/internal/watcher"
 	"github.com/adham90/opentrace/internal/web"
+	"golang.org/x/sync/errgroup"
 )
 
 // appDeps holds shared application dependencies initialized by initApp.
@@ -450,6 +451,7 @@ func run() error {
 	}()
 
 	// Background: aggregation jobs for trends, analytics, sessions, and impact scores (every 5 minutes)
+	// Jobs run concurrently via errgroup to interleave computation vs. I/O.
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
@@ -462,29 +464,46 @@ func run() error {
 
 			since := time.Now().UTC().Add(-10 * time.Minute)
 
+			g, gctx := errgroup.WithContext(ctx)
 			if deps.trendStore != nil {
-				if err := deps.trendStore.AggregateBuckets(ctx, "1h", since); err != nil {
-					slog.Warn("trend aggregation failed", "error", err)
-				}
+				g.Go(func() error {
+					if err := deps.trendStore.AggregateBuckets(gctx, "1h", since); err != nil {
+						slog.Warn("trend aggregation failed", "error", err)
+					}
+					return nil // don't cancel other jobs on error
+				})
 			}
 			if deps.analyticsStore != nil {
-				if err := deps.analyticsStore.AggregateEndpointStats(ctx, "1h", since); err != nil {
-					slog.Warn("endpoint stats aggregation failed", "error", err)
-				}
-				if err := deps.analyticsStore.UpdateTrafficHeatmap(ctx, since); err != nil {
-					slog.Warn("traffic heatmap update failed", "error", err)
-				}
+				g.Go(func() error {
+					if err := deps.analyticsStore.AggregateEndpointStats(gctx, "1h", since); err != nil {
+						slog.Warn("endpoint stats aggregation failed", "error", err)
+					}
+					return nil
+				})
+				g.Go(func() error {
+					if err := deps.analyticsStore.UpdateTrafficHeatmap(gctx, since); err != nil {
+						slog.Warn("traffic heatmap update failed", "error", err)
+					}
+					return nil
+				})
 			}
 			if deps.journeyStore != nil {
-				if err := deps.journeyStore.BuildSessions(ctx, since); err != nil {
-					slog.Warn("session building failed", "error", err)
-				}
+				g.Go(func() error {
+					if err := deps.journeyStore.BuildSessions(gctx, since); err != nil {
+						slog.Warn("session building failed", "error", err)
+					}
+					return nil
+				})
 			}
 			if deps.errorImpactStore != nil {
-				if err := deps.errorImpactStore.ComputeImpactScores(ctx); err != nil {
-					slog.Warn("impact score computation failed", "error", err)
-				}
+				g.Go(func() error {
+					if err := deps.errorImpactStore.ComputeImpactScores(gctx); err != nil {
+						slog.Warn("impact score computation failed", "error", err)
+					}
+					return nil
+				})
 			}
+			_ = g.Wait()
 		}
 	}()
 
