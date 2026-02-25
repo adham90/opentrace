@@ -1,0 +1,3553 @@
+openapi: 3.0.3
+info:
+  title: OpenTrace API
+  description: |
+    OpenTrace is a self-hosted observability platform for Ruby on Rails applications.
+    It provides log ingestion, error tracking, performance monitoring, health checks,
+    user journey analysis, and an AI-powered watch system.
+
+    ## Authentication
+
+    The API uses three authentication schemes:
+
+    - **ApiKeyAuth** -- Bearer token for log/metric ingestion endpoints. Configure via `OPENTRACE_API_KEY` or the Settings UI.
+    - **SessionAuth** -- Cookie-based session for browser access. Obtain by POSTing to `/login`.
+    - **MCPTokenAuth** -- Bearer token for MCP (Model Context Protocol) connections. Each user has a unique MCP token.
+  version: "1.0.0"
+  contact:
+    name: OpenTrace
+    url: https://github.com/adham90/opentrace
+
+servers:
+  - url: /
+
+tags:
+  - name: Auth
+    description: Login, registration, and logout
+  - name: Public
+    description: Unauthenticated health and version endpoints
+  - name: Ingestion
+    description: Log and metric ingestion (API key auth)
+  - name: Logs
+    description: Log reading and polling
+  - name: Connectors
+    description: Data source connector management
+  - name: Servers
+    description: Server and VM monitoring
+  - name: Watches
+    description: Agent-first metric threshold monitors
+  - name: Errors
+    description: Error group tracking and impact analysis
+  - name: HealthChecks
+    description: HTTP endpoint uptime monitoring
+  - name: Trends
+    description: Time-series trend data and deploy markers
+  - name: Analytics
+    description: Traffic analytics, endpoint stats, and heatmaps
+  - name: Journeys
+    description: User journey, session timeline, and funnel analysis
+  - name: MCP
+    description: MCP activity monitoring
+  - name: Users
+    description: User management (admin)
+  - name: Settings
+    description: System settings and audit log (admin)
+
+security: []
+
+paths:
+  # ── Auth ──────────────────────────────────────────────────────────────
+  /login:
+    post:
+      tags: [Auth]
+      summary: Log in
+      description: Authenticate with email and password. Sets a session cookie on success.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+                remember:
+                  type: string
+                  description: Set to "on" for a long-lived session
+      responses:
+        "302":
+          description: Redirect to dashboard on success or back to login on failure
+        "429":
+          description: Rate limited
+
+  /register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [email, password, display_name]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+                display_name:
+                  type: string
+      responses:
+        "302":
+          description: Redirect to dashboard on success
+
+  /logout:
+    post:
+      tags: [Auth]
+      summary: Log out
+      description: Destroys the current session.
+      responses:
+        "302":
+          description: Redirect to login page
+
+  # ── Public ────────────────────────────────────────────────────────────
+  /healthz:
+    get:
+      tags: [Public]
+      summary: Health check
+      description: Returns server health status including database connectivity.
+      responses:
+        "200":
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok, degraded]
+                  version:
+                    type: string
+                  database:
+                    type: string
+                    enum: [ok, error]
+        "503":
+          description: Server is degraded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /api/version:
+    get:
+      tags: [Public]
+      summary: Server version and capabilities
+      responses:
+        "200":
+          description: Version information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                  commit:
+                    type: string
+                  date:
+                    type: string
+                  is_docker:
+                    type: boolean
+                  api_version:
+                    type: integer
+                  min_client_api_version:
+                    type: integer
+                  capabilities:
+                    type: array
+                    items:
+                      type: string
+
+  /api/version/check:
+    get:
+      tags: [Public]
+      summary: Check for updates
+      parameters:
+        - name: force
+          in: query
+          schema:
+            type: string
+            enum: ["1"]
+          description: Set to "1" to bypass cache
+      responses:
+        "200":
+          description: Update check result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  current_version:
+                    type: string
+                  update_available:
+                    type: boolean
+                  latest_version:
+                    type: string
+                  release_url:
+                    type: string
+
+  /api/agent/install.sh:
+    get:
+      tags: [Public]
+      summary: Agent install script
+      description: Returns a bash script for installing the OpenTrace VM agent.
+      responses:
+        "200":
+          description: Bash install script
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  # ── Ingestion ─────────────────────────────────────────────────────────
+  /api/logs:
+    post:
+      tags: [Ingestion]
+      summary: Ingest logs
+      description: |
+        Accepts a single log object or an array of log objects.
+        Supports batch deduplication via the `X-Batch-ID` header.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: X-Batch-ID
+          in: header
+          schema:
+            type: string
+          description: Unique batch identifier for deduplication
+        - name: X-API-Version
+          in: header
+          schema:
+            type: integer
+          description: Client API version for compatibility checks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/LogIngest"
+                - type: array
+                  items:
+                    $ref: "#/components/schemas/LogIngest"
+      responses:
+        "201":
+          description: Logs ingested successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+        "200":
+          description: Batch deduplicated (already received)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  deduplicated:
+                    type: boolean
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/servers/register:
+    post:
+      tags: [Ingestion]
+      summary: Register a server
+      description: Register or update a server for metric collection.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterServerParams"
+      responses:
+        "200":
+          description: Server registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  server_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/servers/{id}/metrics:
+    post:
+      tags: [Ingestion]
+      summary: Push server metrics
+      description: Push metric samples for a registered server.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ServerID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [samples]
+              properties:
+                timestamp:
+                  type: string
+                  format: date-time
+                samples:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/MetricSample"
+      responses:
+        "200":
+          description: Metrics recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    get:
+      tags: [Servers]
+      summary: Query server metrics
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ServerID"
+        - name: name
+          in: query
+          schema:
+            type: string
+          description: Filter by metric name
+        - name: start
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: end
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Metric data points
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MetricPoint"
+
+  # ── Read API ──────────────────────────────────────────────────────────
+  /api/services:
+    get:
+      tags: [Logs]
+      summary: List distinct services
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: List of service names
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+
+  /api/event_types:
+    get:
+      tags: [Logs]
+      summary: List distinct event types
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: List of event type names
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+
+  /api/overview:
+    get:
+      tags: [Logs]
+      summary: Dashboard overview
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: Overview counts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: integer
+                  connectors:
+                    type: integer
+                  servers:
+                    type: integer
+
+  /api/tools:
+    get:
+      tags: [Logs]
+      summary: List available MCP tools
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: Tool catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    description:
+                      type: string
+                    access:
+                      type: string
+                    requires:
+                      type: string
+
+  /api/logs/poll:
+    get:
+      tags: [Logs]
+      summary: Poll for new logs
+      description: Long-poll endpoint for real-time log updates. Returns HTML fragments or empty 200.
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: since_id
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Return logs newer than this ID
+      responses:
+        "200":
+          description: New log entries (HTML) or empty if no new logs
+
+  /api/logs/{id}:
+    get:
+      tags: [Logs]
+      summary: Get log entry detail
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Log entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogEntry"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Connectors ────────────────────────────────────────────────────────
+  /api/connectors:
+    get:
+      tags: [Connectors]
+      summary: List connectors
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: List of data sources
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DataSource"
+    post:
+      tags: [Connectors]
+      summary: Create a connector
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDataSourceParams"
+      responses:
+        "201":
+          description: Connector created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataSource"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/connectors/{id}:
+    get:
+      tags: [Connectors]
+      summary: Get connector by ID
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ConnectorID"
+      responses:
+        "200":
+          description: Connector details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataSource"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Connectors]
+      summary: Update a connector
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ConnectorID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDataSourceParams"
+      responses:
+        "200":
+          description: Connector updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataSource"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Connectors]
+      summary: Delete a connector
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ConnectorID"
+      responses:
+        "204":
+          description: Connector deleted
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/connectors/{id}/test:
+    post:
+      tags: [Connectors]
+      summary: Test connector connectivity
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ConnectorID"
+      responses:
+        "200":
+          description: Connector test result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataSource"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Servers ───────────────────────────────────────────────────────────
+  /api/servers:
+    get:
+      tags: [Servers]
+      summary: List servers
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of servers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Server"
+
+  /api/servers/{id}:
+    get:
+      tags: [Servers]
+      summary: Get server by ID
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ServerID"
+      responses:
+        "200":
+          description: Server details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Server"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Servers]
+      summary: Update server
+      description: Admin only. Update display name or other user-facing fields.
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ServerID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateServerParams"
+      responses:
+        "200":
+          description: Server updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Server"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Servers]
+      summary: Delete server
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ServerID"
+      responses:
+        "204":
+          description: Server deleted
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ── Watches ───────────────────────────────────────────────────────────
+  /api/watches:
+    get:
+      tags: [Watches]
+      summary: List watches
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, triggered, resolved, expired]
+        - name: service
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of watches
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Watch"
+    post:
+      tags: [Watches]
+      summary: Create a watch
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWatchParams"
+      responses:
+        "201":
+          description: Watch created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Watch"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/watches/{id}:
+    get:
+      tags: [Watches]
+      summary: Get watch by ID
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WatchID"
+      responses:
+        "200":
+          description: Watch details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Watch"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Watches]
+      summary: Delete a watch
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WatchID"
+      responses:
+        "204":
+          description: Watch deleted
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/watches/{id}/runs:
+    get:
+      tags: [Watches]
+      summary: List watch runs
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WatchID"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: List of watch runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WatchRun"
+
+  /api/watches/{id}/alerts:
+    get:
+      tags: [Watches]
+      summary: List watch alerts
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WatchID"
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: List of watch alerts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WatchAlert"
+
+  /api/watches/alerts/{alertId}:
+    get:
+      tags: [Watches]
+      summary: Get a watch alert
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AlertID"
+      responses:
+        "200":
+          description: Watch alert details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WatchAlert"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/watches/alerts/count:
+    get:
+      tags: [Watches]
+      summary: Count active alerts
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: Alert count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+
+  /api/watches/alerts/{alertId}/dismiss:
+    post:
+      tags: [Watches]
+      summary: Dismiss an alert
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AlertID"
+      responses:
+        "204":
+          description: Alert dismissed
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/watches/alerts/{alertId}/acknowledge:
+    post:
+      tags: [Watches]
+      summary: Acknowledge an alert
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AlertID"
+      responses:
+        "204":
+          description: Alert acknowledged
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Error Groups ──────────────────────────────────────────────────────
+  /api/errors:
+    get:
+      tags: [Errors]
+      summary: List error groups
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [unresolved, resolved, ignored]
+        - name: service
+          in: query
+          schema:
+            type: string
+        - name: environment
+          in: query
+          schema:
+            type: string
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [occurrence_count, last_seen_at, first_seen_at]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: List of error groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ErrorGroup"
+
+  /api/errors/{fingerprint}:
+    get:
+      tags: [Errors]
+      summary: Get error group with events
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Fingerprint"
+      responses:
+        "200":
+          description: Error group with lifecycle events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorGroup"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/errors/{fingerprint}/resolve:
+    post:
+      tags: [Errors]
+      summary: Resolve an error group
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Fingerprint"
+      responses:
+        "200":
+          description: Error resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: resolved
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/errors/{fingerprint}/ignore:
+    post:
+      tags: [Errors]
+      summary: Ignore an error group
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Fingerprint"
+      responses:
+        "200":
+          description: Error ignored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ignored
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/errors/impact/top:
+    get:
+      tags: [Errors]
+      summary: Top errors by user impact
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [unresolved, resolved, ignored]
+        - name: service
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [impact_score, unique_users, occurrence_count, last_seen]
+      responses:
+        "200":
+          description: Error groups ranked by impact
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ErrorImpact"
+
+  /api/errors/user/{userID}:
+    get:
+      tags: [Errors]
+      summary: Errors affecting a specific user
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Error summaries for the user
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ErrorSummary"
+
+  /api/errors/{fingerprint}/impact:
+    get:
+      tags: [Errors]
+      summary: Get impact details for an error
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Fingerprint"
+      responses:
+        "200":
+          description: Error impact details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorImpact"
+
+  /api/errors/{fingerprint}/affected-users:
+    get:
+      tags: [Errors]
+      summary: List users affected by an error
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Fingerprint"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Affected users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AffectedUser"
+
+  # ── Health Checks ─────────────────────────────────────────────────────
+  /api/healthchecks:
+    get:
+      tags: [HealthChecks]
+      summary: List health checks
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of health checks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HealthCheck"
+    post:
+      tags: [HealthChecks]
+      summary: Create a health check
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateHealthCheckParams"
+      responses:
+        "201":
+          description: Health check created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthCheck"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/healthchecks/{id}/results:
+    get:
+      tags: [HealthChecks]
+      summary: Get health check results
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Health check probe results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HealthCheckResult"
+
+  /api/healthchecks/uptime:
+    get:
+      tags: [HealthChecks]
+      summary: Uptime summary
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: hours
+          in: query
+          schema:
+            type: integer
+            default: 24
+      responses:
+        "200":
+          description: Uptime summaries per health check
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UptimeSummary"
+
+  /api/healthchecks/{id}:
+    delete:
+      tags: [HealthChecks]
+      summary: Delete a health check
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Health check deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: deleted
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ── Trends ────────────────────────────────────────────────────────────
+  /api/trends:
+    get:
+      tags: [Trends]
+      summary: Query trend buckets
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: service
+          in: query
+          schema:
+            type: string
+        - name: endpoint
+          in: query
+          schema:
+            type: string
+        - name: environment
+          in: query
+          schema:
+            type: string
+        - name: interval
+          in: query
+          schema:
+            type: string
+            enum: ["5m", "15m", "1h", "1d"]
+        - name: metric
+          in: query
+          schema:
+            type: string
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: until
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Trend data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  buckets:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MetricBucket"
+                  params:
+                    type: object
+
+  /api/trends/deploys:
+    get:
+      tags: [Trends]
+      summary: List deploy markers
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: service
+          in: query
+          schema:
+            type: string
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Deploy markers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeployMarker"
+
+  # ── Analytics ─────────────────────────────────────────────────────────
+  /api/analytics/summary:
+    get:
+      tags: [Analytics]
+      summary: Traffic summary
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: service
+          in: query
+          schema:
+            type: string
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Traffic summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_requests:
+                    type: integer
+                  total_errors:
+                    type: integer
+                  avg_duration_ms:
+                    type: number
+                    format: double
+
+  /api/analytics/endpoints:
+    get:
+      tags: [Analytics]
+      summary: Top endpoints
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: service
+          in: query
+          schema:
+            type: string
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [request_count, error_rate, avg_duration, p95_duration]
+      responses:
+        "200":
+          description: Endpoint statistics
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EndpointStat"
+
+  /api/analytics/heatmap:
+    get:
+      tags: [Analytics]
+      summary: Traffic heatmap
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: service
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 24x7 traffic heatmap cells
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HeatmapCell"
+
+  # ── User Journeys ────────────────────────────────────────────────────
+  /api/journeys/sessions:
+    get:
+      tags: [Journeys]
+      summary: List user sessions
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: user_id
+          in: query
+          schema:
+            type: string
+        - name: service
+          in: query
+          schema:
+            type: string
+        - name: has_error
+          in: query
+          schema:
+            type: boolean
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: User sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UserSession"
+
+  /api/journeys/sessions/{sessionID}:
+    get:
+      tags: [Journeys]
+      summary: Get session details
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserSession"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/journeys/sessions/{sessionID}/requests:
+    get:
+      tags: [Journeys]
+      summary: List requests in a session
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Request steps
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RequestStep"
+
+  /api/journeys/sessions/{sessionID}/timeline:
+    get:
+      tags: [Journeys]
+      summary: Session timeline events
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Timeline events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TimelineEvent"
+
+  /api/journeys/user/{userID}:
+    get:
+      tags: [Journeys]
+      summary: User journey steps
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Journey steps
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RequestStep"
+
+  /api/journeys/paths:
+    get:
+      tags: [Journeys]
+      summary: Path frequency analysis
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: service
+          in: query
+          schema:
+            type: string
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: min_occurrences
+          in: query
+          schema:
+            type: integer
+        - name: path_length
+          in: query
+          schema:
+            type: integer
+        - name: error_paths_only
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Common navigation paths
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PathFrequency"
+
+  /api/journeys/funnels:
+    get:
+      tags: [Journeys]
+      summary: List funnels
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: Defined funnels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Funnel"
+    post:
+      tags: [Journeys]
+      summary: Create a funnel
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, steps]
+              properties:
+                name:
+                  type: string
+                service:
+                  type: string
+                steps:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/FunnelStep"
+      responses:
+        "201":
+          description: Funnel created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Funnel"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/journeys/funnels/{funnelID}:
+    get:
+      tags: [Journeys]
+      summary: Analyze a funnel
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: funnelID
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Funnel analysis results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FunnelResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Journeys]
+      summary: Delete a funnel
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: funnelID
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Funnel deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: boolean
+                    example: true
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/journeys/timeline/{logID}:
+    get:
+      tags: [Journeys]
+      summary: Request timeline for a log entry
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: logID
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Request timeline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestTimeline"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── MCP Activity ──────────────────────────────────────────────────────
+  /api/mcp/activity/stats:
+    get:
+      tags: [MCP]
+      summary: MCP activity statistics
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: Activity stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MCPActivityStats"
+
+  /api/mcp/activity:
+    get:
+      tags: [MCP]
+      summary: Recent MCP activity
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Activity events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MCPActivityEvent"
+
+  # ── User Profile ──────────────────────────────────────────────────────
+  /api/profile/password:
+    post:
+      tags: [Users]
+      summary: Change own password
+      security:
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password:
+                  type: string
+                  format: password
+                new_password:
+                  type: string
+                  format: password
+      responses:
+        "200":
+          description: Password changed
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/profile/mcp-token:
+    get:
+      tags: [Users]
+      summary: Get own MCP token
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: MCP token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mcp_token:
+                    type: string
+
+  # ── User Management (Admin) ──────────────────────────────────────────
+  /api/users/{id}/role:
+    post:
+      tags: [Users]
+      summary: Update user role
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  type: string
+                  enum: [admin, member]
+      responses:
+        "200":
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/users/{id}/mcp:
+    post:
+      tags: [Users]
+      summary: Toggle MCP access
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        "200":
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/users/{id}/active:
+    post:
+      tags: [Users]
+      summary: Toggle user active status
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [active]
+              properties:
+                active:
+                  type: boolean
+      responses:
+        "200":
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/users/{id}/mcp-token:
+    post:
+      tags: [Users]
+      summary: Regenerate MCP token for a user
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      responses:
+        "200":
+          description: New MCP token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mcp_token:
+                    type: string
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/users/{id}:
+    delete:
+      tags: [Users]
+      summary: Delete a user
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      responses:
+        "200":
+          description: User deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: deleted
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ── Settings (Admin) ─────────────────────────────────────────────────
+  /api/settings/retention:
+    get:
+      tags: [Settings]
+      summary: Get retention settings
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: Retention settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  retention_days:
+                    type: integer
+                  metric_retention_days:
+                    type: integer
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      tags: [Settings]
+      summary: Update retention settings
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                retention_days:
+                  type: integer
+                metric_retention_days:
+                  type: integer
+      responses:
+        "200":
+          description: Retention settings updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  retention_days:
+                    type: integer
+                  metric_retention_days:
+                    type: integer
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/settings/api-key:
+    get:
+      tags: [Settings]
+      summary: Get current API key
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: API key info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_key:
+                    type: string
+                  env_override:
+                    type: boolean
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Settings]
+      summary: Regenerate API key
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: New API key
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_key:
+                    type: string
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/settings/cors:
+    get:
+      tags: [Settings]
+      summary: Get CORS settings
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: CORS settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cors_origins:
+                    type: string
+                  env_override:
+                    type: boolean
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      tags: [Settings]
+      summary: Update CORS settings
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cors_origins:
+                  type: string
+      responses:
+        "200":
+          description: CORS settings updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cors_origins:
+                    type: string
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/settings/query-guardrails:
+    get:
+      tags: [Settings]
+      summary: Get query guardrail settings
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: Query guardrail settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  max_query_rows:
+                    type: integer
+                  statement_timeout_ms:
+                    type: integer
+                  env_override:
+                    type: boolean
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      tags: [Settings]
+      summary: Update query guardrail settings
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                max_query_rows:
+                  type: integer
+                statement_timeout_ms:
+                  type: integer
+      responses:
+        "200":
+          description: Query guardrails updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  max_query_rows:
+                    type: integer
+                  statement_timeout_ms:
+                    type: integer
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/settings/mcp-name:
+    get:
+      tags: [Settings]
+      summary: Get MCP server name
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: MCP name settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mcp_name:
+                    type: string
+                  env_override:
+                    type: boolean
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      tags: [Settings]
+      summary: Update MCP server name
+      description: Admin only.
+      security:
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mcp_name:
+                  type: string
+      responses:
+        "200":
+          description: MCP name updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mcp_name:
+                    type: string
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/audit-log:
+    get:
+      tags: [Settings]
+      summary: Get recent audit log entries
+      description: Admin only. Returns the 100 most recent entries.
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditEntry"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: http
+      scheme: bearer
+      description: API key for log/metric ingestion. Set via OPENTRACE_API_KEY env var or Settings UI.
+    SessionAuth:
+      type: apiKey
+      in: cookie
+      name: session_token
+      description: Session cookie obtained by logging in via POST /login.
+    MCPTokenAuth:
+      type: http
+      scheme: bearer
+      description: Per-user MCP token for Model Context Protocol connections.
+
+  parameters:
+    ConnectorID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ServerID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    WatchID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    AlertID:
+      name: alertId
+      in: path
+      required: true
+      schema:
+        type: string
+    Fingerprint:
+      name: fingerprint
+      in: path
+      required: true
+      schema:
+        type: string
+    UserID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Missing or invalid authentication
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Insufficient permissions (admin required)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+        version:
+          type: string
+        database:
+          type: string
+
+    LogIngest:
+      type: object
+      required: [timestamp, level, message]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        level:
+          type: string
+          enum: [debug, info, warn, error, fatal]
+        service:
+          type: string
+        environment:
+          type: string
+        commit_hash:
+          type: string
+        message:
+          type: string
+        event_type:
+          type: string
+        exception_class:
+          type: string
+        error_fingerprint:
+          type: string
+        trace_id:
+          type: string
+        span_id:
+          type: string
+        parent_span_id:
+          type: string
+        request_id:
+          type: string
+        user_id:
+          type: string
+        session_id:
+          type: string
+        source_file:
+          type: string
+        source_line:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
+        request_summary:
+          $ref: "#/components/schemas/RequestSummaryIngest"
+
+    RequestSummaryIngest:
+      type: object
+      properties:
+        controller:
+          type: string
+        action:
+          type: string
+        method:
+          type: string
+        path:
+          type: string
+        status:
+          type: integer
+        duration_ms:
+          type: number
+          format: double
+        db_time_ms:
+          type: number
+          format: double
+        view_time_ms:
+          type: number
+          format: double
+        sql_count:
+          type: integer
+        sql_total_ms:
+          type: number
+          format: double
+        sql_slowest_ms:
+          type: number
+          format: double
+        sql_slowest_name:
+          type: string
+        n_plus_one:
+          type: boolean
+        view_count:
+          type: integer
+        view_total_ms:
+          type: number
+          format: double
+        view_slowest_ms:
+          type: number
+          format: double
+        view_slowest_template:
+          type: string
+        cache_reads:
+          type: integer
+        cache_hits:
+          type: integer
+        cache_writes:
+          type: integer
+        cache_hit_ratio:
+          type: number
+          format: double
+        http_external_count:
+          type: integer
+        http_external_total_ms:
+          type: number
+          format: double
+        http_slowest_ms:
+          type: number
+          format: double
+        http_slowest_host:
+          type: string
+        memory_before_mb:
+          type: number
+          format: double
+        memory_after_mb:
+          type: number
+          format: double
+        memory_delta_mb:
+          type: number
+          format: double
+        timeline:
+          type: object
+          description: JSON timeline data
+        time_breakdown:
+          type: object
+          description: JSON time breakdown
+        duplicate_queries:
+          type: integer
+        worst_duplicate_count:
+          type: integer
+        top_duplicates:
+          type: object
+          description: JSON top duplicates
+
+    LogEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        timestamp:
+          type: string
+          format: date-time
+        level:
+          type: string
+        service:
+          type: string
+        environment:
+          type: string
+        commit_hash:
+          type: string
+        trace_id:
+          type: string
+        span_id:
+          type: string
+        parent_span_id:
+          type: string
+        request_id:
+          type: string
+        user_id:
+          type: string
+        session_id:
+          type: string
+        message:
+          type: string
+        event_type:
+          type: string
+        exception_class:
+          type: string
+        error_fingerprint:
+          type: string
+        source_file:
+          type: string
+        source_line:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
+        request_summary:
+          $ref: "#/components/schemas/RequestSummary"
+        created_at:
+          type: string
+          format: date-time
+
+    RequestSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        log_id:
+          type: integer
+          format: int64
+        controller:
+          type: string
+        action:
+          type: string
+        method:
+          type: string
+        path:
+          type: string
+        status:
+          type: integer
+        duration_ms:
+          type: number
+          format: double
+        db_time_ms:
+          type: number
+          format: double
+        view_time_ms:
+          type: number
+          format: double
+        sql_count:
+          type: integer
+        sql_total_ms:
+          type: number
+          format: double
+        sql_slowest_ms:
+          type: number
+          format: double
+        sql_slowest_name:
+          type: string
+        n_plus_one:
+          type: boolean
+        view_count:
+          type: integer
+        view_total_ms:
+          type: number
+          format: double
+        view_slowest_ms:
+          type: number
+          format: double
+        view_slowest_template:
+          type: string
+        cache_reads:
+          type: integer
+        cache_hits:
+          type: integer
+        cache_writes:
+          type: integer
+        cache_hit_ratio:
+          type: number
+          format: double
+        http_external_count:
+          type: integer
+        http_external_total_ms:
+          type: number
+          format: double
+        http_slowest_ms:
+          type: number
+          format: double
+        http_slowest_host:
+          type: string
+        memory_before_mb:
+          type: number
+          format: double
+        memory_after_mb:
+          type: number
+          format: double
+        memory_delta_mb:
+          type: number
+          format: double
+        timeline:
+          type: string
+        time_breakdown:
+          type: string
+        duplicate_queries:
+          type: integer
+        worst_duplicate_count:
+          type: integer
+        top_duplicates:
+          type: string
+
+    DataSource:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [logs, database, monitoring, server_metrics]
+        name:
+          type: string
+        config:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+          enum: [connected, disconnected, error]
+        status_message:
+          type: string
+        last_tested_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateDataSourceParams:
+      type: object
+      required: [type, name, config]
+      properties:
+        type:
+          type: string
+          enum: [logs, database, monitoring, server_metrics]
+        name:
+          type: string
+        config:
+          type: object
+          additionalProperties: true
+
+    UpdateDataSourceParams:
+      type: object
+      properties:
+        name:
+          type: string
+        config:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+          enum: [connected, disconnected, error]
+        status_message:
+          type: string
+
+    Server:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        hostname:
+          type: string
+        display_name:
+          type: string
+        ip_address:
+          type: string
+        os:
+          type: string
+        arch:
+          type: string
+        agent_version:
+          type: string
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        status:
+          type: string
+          enum: [online, offline, unknown]
+        last_seen_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    RegisterServerParams:
+      type: object
+      required: [hostname]
+      properties:
+        hostname:
+          type: string
+        ip_address:
+          type: string
+        os:
+          type: string
+        arch:
+          type: string
+        agent_version:
+          type: string
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+
+    UpdateServerParams:
+      type: object
+      properties:
+        display_name:
+          type: string
+
+    MetricPoint:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        server_id:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+        metric_name:
+          type: string
+        metric_value:
+          type: number
+          format: double
+        unit:
+          type: string
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+
+    MetricSample:
+      type: object
+      required: [name, value]
+      properties:
+        name:
+          type: string
+        value:
+          type: number
+          format: double
+        unit:
+          type: string
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+
+    Watch:
+      type: object
+      properties:
+        id:
+          type: string
+        metric:
+          type: string
+          enum: [error_rate, response_time, p95_response, log_count, error_count, heartbeat, sql_count, cache_hit_rate]
+        operator:
+          type: string
+          enum: [gt, gte, lt, lte, eq, neq]
+        threshold:
+          type: number
+          format: double
+        service:
+          type: string
+        endpoint:
+          type: string
+        environment:
+          type: string
+        commit_hash:
+          type: string
+        duration:
+          type: string
+        urgency:
+          type: string
+          enum: [low, normal, high, critical]
+        check_interval:
+          type: string
+        baseline_window:
+          type: string
+        min_consecutive:
+          type: integer
+        status:
+          type: string
+          enum: [active, triggered, resolved, expired]
+        baseline:
+          $ref: "#/components/schemas/WatchBaseline"
+        consecutive_breaches:
+          type: integer
+        current_value:
+          type: number
+          format: double
+        expires_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+        session_id:
+          type: string
+        last_checked_at:
+          type: string
+          format: date-time
+        next_check_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateWatchParams:
+      type: object
+      required: [metric, operator, threshold]
+      properties:
+        metric:
+          type: string
+          enum: [error_rate, response_time, p95_response, log_count, error_count, heartbeat, sql_count, cache_hit_rate]
+        operator:
+          type: string
+          enum: [gt, gte, lt, lte, eq, neq]
+        threshold:
+          type: number
+          format: double
+        service:
+          type: string
+        endpoint:
+          type: string
+        environment:
+          type: string
+        commit_hash:
+          type: string
+        duration:
+          type: string
+        urgency:
+          type: string
+          enum: [low, normal, high, critical]
+        check_interval:
+          type: string
+        baseline_window:
+          type: string
+        min_consecutive:
+          type: integer
+        created_by:
+          type: string
+        session_id:
+          type: string
+
+    WatchBaseline:
+      type: object
+      properties:
+        error_rate:
+          type: number
+          format: double
+        avg_response_ms:
+          type: number
+          format: double
+        p95_response_ms:
+          type: number
+          format: double
+        log_count:
+          type: integer
+        error_count:
+          type: integer
+        sql_count:
+          type: number
+          format: double
+        cache_hit_rate:
+          type: number
+          format: double
+        exception_classes:
+          type: array
+          items:
+            type: string
+        captured_at:
+          type: string
+          format: date-time
+        window_duration:
+          type: string
+
+    WatchRun:
+      type: object
+      properties:
+        id:
+          type: string
+        watch_id:
+          type: string
+        status:
+          type: string
+        metric_value:
+          type: number
+          format: double
+        breached:
+          type: boolean
+        summary:
+          type: string
+        error_message:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+
+    WatchAlert:
+      type: object
+      properties:
+        id:
+          type: string
+        watch_id:
+          type: string
+        run_id:
+          type: string
+        urgency:
+          type: string
+          enum: [low, normal, high, critical]
+        summary:
+          type: string
+        trigger_metric:
+          type: string
+        trigger_value:
+          type: number
+          format: double
+        threshold_value:
+          type: number
+          format: double
+        evidence:
+          type: object
+          description: Evidence bundle collected when alert fired
+        status:
+          type: string
+        dismiss_reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ErrorGroup:
+      type: object
+      properties:
+        fingerprint:
+          type: string
+        service:
+          type: string
+        environment:
+          type: string
+        exception_class:
+          type: string
+        message:
+          type: string
+        source_file:
+          type: string
+        source_line:
+          type: integer
+        status:
+          type: string
+          enum: [unresolved, resolved, ignored]
+        first_seen_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        occurrence_count:
+          type: integer
+        last_log_id:
+          type: integer
+          format: int64
+        reopened_count:
+          type: integer
+        resolved_at:
+          type: string
+          format: date-time
+        ignored_at:
+          type: string
+          format: date-time
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/ErrorGroupEvent"
+        unique_users:
+          type: integer
+        impact_score:
+          type: number
+          format: double
+        common_context:
+          type: object
+          additionalProperties: true
+
+    ErrorGroupEvent:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        fingerprint:
+          type: string
+        action:
+          type: string
+          enum: [resolved, ignored, reopened]
+        reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ErrorImpact:
+      type: object
+      properties:
+        fingerprint:
+          type: string
+        unique_users:
+          type: integer
+        total_occurrences:
+          type: integer
+        impact_score:
+          type: number
+          format: double
+        common_traits:
+          type: object
+          additionalProperties: true
+
+    ErrorSummary:
+      type: object
+      properties:
+        fingerprint:
+          type: string
+        exception_class:
+          type: string
+        message:
+          type: string
+        occurrence_count:
+          type: integer
+        first_seen_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [unresolved, resolved, ignored]
+
+    AffectedUser:
+      type: object
+      properties:
+        user_id:
+          type: string
+        occurrence_count:
+          type: integer
+        first_seen_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        last_context:
+          type: object
+          additionalProperties: true
+
+    HealthCheck:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+        method:
+          type: string
+        interval_secs:
+          type: integer
+        timeout_secs:
+          type: integer
+        expected_status:
+          type: integer
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    CreateHealthCheckParams:
+      type: object
+      required: [name, url]
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        method:
+          type: string
+          default: GET
+        interval_secs:
+          type: integer
+          default: 60
+        timeout_secs:
+          type: integer
+          default: 10
+        expected_status:
+          type: integer
+          default: 200
+
+    HealthCheckResult:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        healthcheck_id:
+          type: string
+        status:
+          type: string
+          enum: [up, down, degraded]
+        status_code:
+          type: integer
+        response_ms:
+          type: integer
+        error:
+          type: string
+        checked_at:
+          type: string
+          format: date-time
+
+    UptimeSummary:
+      type: object
+      properties:
+        healthcheck_id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+        current_status:
+          type: string
+        uptime_pct:
+          type: number
+          format: double
+        avg_response_ms:
+          type: number
+          format: double
+        total_checks:
+          type: integer
+        down_checks:
+          type: integer
+
+    MetricBucket:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        bucket_start:
+          type: string
+          format: date-time
+        bucket_interval:
+          type: string
+        service:
+          type: string
+        endpoint:
+          type: string
+        environment:
+          type: string
+        request_count:
+          type: integer
+        error_count:
+          type: integer
+        log_count:
+          type: integer
+        avg_duration_ms:
+          type: number
+          format: double
+        p50_duration_ms:
+          type: number
+          format: double
+        p95_duration_ms:
+          type: number
+          format: double
+        p99_duration_ms:
+          type: number
+          format: double
+        max_duration_ms:
+          type: number
+          format: double
+        avg_sql_count:
+          type: number
+          format: double
+        avg_db_time_ms:
+          type: number
+          format: double
+        avg_cache_hit_ratio:
+          type: number
+          format: double
+        avg_http_external_ms:
+          type: number
+          format: double
+        created_at:
+          type: string
+          format: date-time
+
+    DeployMarker:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        service:
+          type: string
+        environment:
+          type: string
+        commit_hash:
+          type: string
+        first_seen_at:
+          type: string
+          format: date-time
+        request_count:
+          type: integer
+
+    EndpointStat:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        period:
+          type: string
+        period_start:
+          type: string
+          format: date-time
+        service:
+          type: string
+        method:
+          type: string
+        controller:
+          type: string
+        action:
+          type: string
+        path_pattern:
+          type: string
+        request_count:
+          type: integer
+        error_count:
+          type: integer
+        client_error_count:
+          type: integer
+        avg_duration_ms:
+          type: number
+          format: double
+        p95_duration_ms:
+          type: number
+          format: double
+        max_duration_ms:
+          type: number
+          format: double
+        avg_sql_count:
+          type: number
+          format: double
+        status_2xx:
+          type: integer
+        status_3xx:
+          type: integer
+        status_4xx:
+          type: integer
+        status_5xx:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    HeatmapCell:
+      type: object
+      properties:
+        service:
+          type: string
+        day_of_week:
+          type: integer
+          description: 0=Sunday
+        hour_of_day:
+          type: integer
+          description: 0-23
+        request_count:
+          type: integer
+        error_count:
+          type: integer
+        avg_duration_ms:
+          type: number
+          format: double
+
+    UserSession:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        session_id:
+          type: string
+        user_id:
+          type: string
+        service:
+          type: string
+        environment:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        request_count:
+          type: integer
+        error_count:
+          type: integer
+        total_duration_ms:
+          type: number
+          format: double
+        entry_path:
+          type: string
+        exit_path:
+          type: string
+        exit_status:
+          type: integer
+        has_error:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    RequestStep:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        controller:
+          type: string
+        action:
+          type: string
+        path:
+          type: string
+        method:
+          type: string
+        status:
+          type: integer
+        duration_ms:
+          type: number
+          format: double
+        sql_count:
+          type: integer
+        has_error:
+          type: boolean
+        error_class:
+          type: string
+        request_id:
+          type: string
+        log_id:
+          type: integer
+          format: int64
+
+    PathFrequency:
+      type: object
+      properties:
+        steps:
+          type: array
+          items:
+            type: string
+        count:
+          type: integer
+        avg_total_duration_ms:
+          type: number
+          format: double
+        error_rate:
+          type: number
+          format: double
+
+    Funnel:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        service:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/FunnelStep"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    FunnelStep:
+      type: object
+      properties:
+        controller:
+          type: string
+        action:
+          type: string
+        label:
+          type: string
+
+    FunnelResult:
+      type: object
+      properties:
+        funnel_name:
+          type: string
+        total_entered:
+          type: integer
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/FunnelStepResult"
+        overall_conversion:
+          type: number
+          format: double
+
+    FunnelStepResult:
+      type: object
+      properties:
+        label:
+          type: string
+        count:
+          type: integer
+        pct:
+          type: number
+          format: double
+        drop_off:
+          type: integer
+
+    RequestTimeline:
+      type: object
+      properties:
+        log_id:
+          type: integer
+          format: int64
+        request_id:
+          type: string
+        controller:
+          type: string
+        action:
+          type: string
+        path:
+          type: string
+        status:
+          type: integer
+        duration_ms:
+          type: number
+          format: double
+        started_at:
+          type: string
+          format: date-time
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimelineEvent"
+        bottleneck:
+          $ref: "#/components/schemas/TimelineEvent"
+
+    TimelineEvent:
+      type: object
+      properties:
+        type:
+          type: string
+        name:
+          type: string
+        start_ms:
+          type: number
+          format: double
+        duration_ms:
+          type: number
+          format: double
+        details:
+          type: object
+          additionalProperties: true
+
+    MCPActivityStats:
+      type: object
+      properties:
+        active_sessions:
+          type: integer
+        calls_last_hour:
+          type: integer
+        errors_last_hour:
+          type: integer
+        last_activity:
+          type: string
+          format: date-time
+
+    MCPActivityEvent:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        session_id:
+          type: string
+        user_id:
+          type: string
+        tool_name:
+          type: string
+        arguments:
+          type: string
+        result_preview:
+          type: string
+        is_error:
+          type: boolean
+        duration_ms:
+          type: integer
+          format: int64
+        event_type:
+          type: string
+          enum: [tool_call, connect, disconnect]
+        created_at:
+          type: string
+          format: date-time
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        role:
+          type: string
+          enum: [admin, member]
+        mcp_enabled:
+          type: boolean
+        mcp_token:
+          type: string
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AuditEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        user_id:
+          type: string
+        user_email:
+          type: string
+        action:
+          type: string
+        target_type:
+          type: string
+        target_id:
+          type: string
+        details:
+          type: string
+        ip_address:
+          type: string
+        created_at:
+          type: string
+          format: date-time

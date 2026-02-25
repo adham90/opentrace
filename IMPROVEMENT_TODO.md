@@ -191,7 +191,7 @@ With `'unsafe-inline'` allowed for script attributes, the browser executes this.
 
 ---
 
-### 8. [ ] Add OpenAPI / Swagger Documentation
+### 8. [x] Add OpenAPI / Swagger Documentation
 
 **What it is:** The REST API has no machine-readable documentation. Developers integrating with OpenTrace have to read Go source code to understand endpoints, parameters, and response shapes.
 
@@ -254,7 +254,7 @@ User deletes a connector → audit("delete connector") → channel full → entr
 | 5 | Standardize error patterns | Medium | Done | 2026-02-25 |
 | 6 | Tighten CSP | Medium | Done | 2026-02-25 |
 | 7 | Prometheus metrics | Lower | Done | 2026-02-25 |
-| 8 | OpenAPI documentation | Lower | Not Started | |
+| 8 | OpenAPI documentation | Lower | Done | 2026-02-25 |
 | 9 | Retry logic | Lower | Done | 2026-02-25 |
 | 10 | Audit entry loss prevention | Lower | Done (Option C) | 2026-02-25 |
 

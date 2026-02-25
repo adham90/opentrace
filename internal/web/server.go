@@ -212,6 +212,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Get("/api/version", srv.handleVersion)
 	router.Get("/api/version/check", srv.handleVersionCheck)
 	router.Get("/api/version/banner", srv.handleVersionBanner)
+	router.Get("/api/docs", srv.handleSwaggerUI)
+	router.Get("/api/docs/openapi.yaml", srv.handleOpenAPISpec)
 
 	// MCP SSE transport — authenticated via Bearer token (MCP token).
 	if srv.userStore != nil && srv.registry != nil {
