@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -552,7 +553,7 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*LogEntry, error) {
 		&entry.TraceID, &spanID, &parentSpanID, &requestID,
 		&entry.Message, &eventType, &exceptionClass, &errorFingerprint,
 		&sourceFile, &sourceLine, &metaJSON); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("getting log by id: %w", err)
@@ -771,7 +772,7 @@ func (s *logStore) GetBatch(ctx context.Context, batchID string) (*BatchRecord, 
 		`SELECT batch_id, log_count, received_at FROM ingest_batches WHERE batch_id = ?`,
 		batchID,
 	).Scan(&rec.BatchID, &rec.LogCount, &tsStr)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {

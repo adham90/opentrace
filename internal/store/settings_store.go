@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -30,7 +31,7 @@ func (s *settingsStore) GetRetention(ctx context.Context) (*RetentionSettings, e
 	err := s.db.QueryRowContext(ctx,
 		`SELECT value FROM app_config WHERE key = ?`, retentionKey,
 	).Scan(&raw)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return &RetentionSettings{RetentionDays: 30}, nil
 	}
 	if err != nil {
@@ -65,7 +66,7 @@ func (s *settingsStore) GetAPIKey(ctx context.Context) (string, error) {
 	err := s.db.QueryRowContext(ctx,
 		`SELECT value FROM app_config WHERE key = ?`, apiKeyKey,
 	).Scan(&val)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	if err != nil {
@@ -91,7 +92,7 @@ func (s *settingsStore) GetAutoUpdate(ctx context.Context) (bool, error) {
 	err := s.db.QueryRowContext(ctx,
 		`SELECT value FROM app_config WHERE key = ?`, autoUpdateKey,
 	).Scan(&val)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
@@ -121,7 +122,7 @@ func (s *settingsStore) GetCORSOrigins(ctx context.Context) (string, error) {
 	err := s.db.QueryRowContext(ctx,
 		`SELECT value FROM app_config WHERE key = ?`, corsOriginsKey,
 	).Scan(&val)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	if err != nil {
@@ -163,7 +164,7 @@ func (s *settingsStore) GetMCPName(ctx context.Context) (string, error) {
 	err := s.db.QueryRowContext(ctx,
 		`SELECT value FROM app_config WHERE key = ?`, mcpNameKey,
 	).Scan(&val)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	if err != nil {
@@ -190,7 +191,7 @@ func (s *settingsStore) getIntSetting(ctx context.Context, key string, defaultVa
 	err := s.db.QueryRowContext(ctx,
 		`SELECT value FROM app_config WHERE key = ?`, key,
 	).Scan(&val)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return defaultVal, nil
 	}
 	if err != nil {

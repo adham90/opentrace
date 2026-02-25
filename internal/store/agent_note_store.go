@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -39,7 +40,7 @@ func (s *agentNoteStore) Get(ctx context.Context, entityType, entityID string) (
 	var n AgentNote
 	var createdStr, updatedStr string
 	err := row.Scan(&n.ID, &n.EntityType, &n.EntityID, &n.Note, &createdStr, &updatedStr)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {

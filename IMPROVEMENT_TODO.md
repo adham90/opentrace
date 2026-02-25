@@ -114,7 +114,7 @@ Your browser sends the request with your session cookie — OpenTrace thinks you
 
 ---
 
-### 5. [ ] Standardize Error Checking Patterns
+### 5. [x] Standardize Error Checking Patterns
 
 **What it is:** The codebase mixes two ways of checking for "not found" errors:
 
@@ -251,7 +251,7 @@ User deletes a connector → audit("delete connector") → channel full → entr
 | 2 | Auth handler tests | High | Done | 2026-02-25 |
 | 3 | Log silent errors | Medium | Done | 2026-02-25 |
 | 4 | Pagination on list endpoints | Medium | Not Started | |
-| 5 | Standardize error patterns | Medium | Not Started | |
+| 5 | Standardize error patterns | Medium | Done | 2026-02-25 |
 | 6 | Tighten CSP | Medium | Not Started | |
 | 7 | Prometheus metrics | Lower | Not Started | |
 | 8 | OpenAPI documentation | Lower | Not Started | |

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -61,7 +62,7 @@ func (s *healthCheckStore) Get(ctx context.Context, id string) (*HealthCheck, er
 	err := row.Scan(&hc.ID, &hc.Name, &hc.URL, &hc.Method,
 		&hc.IntervalSecs, &hc.TimeoutSecs, &hc.ExpectedStatus,
 		&enabledInt, &createdStr)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {

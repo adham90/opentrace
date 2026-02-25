@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -157,7 +158,7 @@ func (s *journeyStore) GetSession(ctx context.Context, sessionID string) (*UserS
 	`, sessionID).Scan(&us.ID, &us.SessionID, &us.UserID, &us.Service, &us.Environment,
 		&startStr, &endStr, &us.RequestCount, &us.ErrorCount, &us.TotalDurationMs,
 		&us.EntryPath, &us.ExitPath, &us.ExitStatus, &hasError, &createdStr)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
@@ -495,7 +496,7 @@ func (s *journeyStore) GetFunnel(ctx context.Context, id int64) (*Funnel, error)
 		SELECT id, name, service, steps, created_at, updated_at
 		FROM funnels WHERE id = ?
 	`, id).Scan(&f.ID, &f.Name, &f.Service, &stepsJSON, &createdStr, &updatedStr)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
@@ -659,7 +660,7 @@ func (s *journeyStore) GetRequestTimeline(ctx context.Context, logID int64) (*Re
 		WHERE l.id = ?
 	`, logID).Scan(&rt.LogID, &rt.RequestID, &rt.Controller, &rt.Action, &path,
 		&rt.Status, &rt.DurationMs, &tsStr, &timeline)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {

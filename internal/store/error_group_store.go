@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -51,7 +52,7 @@ func (s *errorGroupStore) Upsert(ctx context.Context, entry LogEntry) error {
 		lastLogID = entry.ID
 	}
 
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		// New error group.
 		_, err = tx.ExecContext(ctx,
 			`INSERT INTO error_groups (fingerprint, service, environment, exception_class,
@@ -117,7 +118,7 @@ func (s *errorGroupStore) Get(ctx context.Context, fingerprint string) (*ErrorGr
 		 FROM error_groups WHERE fingerprint = ?`, fingerprint)
 
 	eg, err := scanErrorGroup(row)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	return eg, err
