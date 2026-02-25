@@ -22,7 +22,7 @@ func (m *mockMCPActivityStore) Log(_ context.Context, _ store.LogMCPActivityPara
 
 func TestActivityLogger_DrainOnClose(t *testing.T) {
 	mock := &mockMCPActivityStore{}
-	al := NewActivityLogger(mock, 100, 2)
+	al := NewActivityLogger(context.Background(), mock, 100, 2)
 
 	// Enqueue several entries
 	for i := 0; i < 10; i++ {
@@ -46,6 +46,7 @@ func TestActivityLogger_DropWhenFull(t *testing.T) {
 	al := &ActivityLogger{
 		ch:    make(chan store.LogMCPActivityParams, 2),
 		store: mock,
+		ctx:   context.Background(),
 	}
 
 	// Fill the buffer
@@ -62,7 +63,7 @@ func TestActivityLogger_DropWhenFull(t *testing.T) {
 
 func TestActivityLogger_CloseWaitsForWorkers(t *testing.T) {
 	mock := &mockMCPActivityStore{}
-	al := NewActivityLogger(mock, 10, 1)
+	al := NewActivityLogger(context.Background(), mock, 10, 1)
 
 	al.Log(store.LogMCPActivityParams{ToolName: "test"})
 
@@ -82,4 +83,20 @@ func TestActivityLogger_CloseWaitsForWorkers(t *testing.T) {
 	if mock.count.Load() != 1 {
 		t.Errorf("processed %d entries, want 1", mock.count.Load())
 	}
+}
+
+func TestActivityLogger_CancelledContextStopsWorker(t *testing.T) {
+	mock := &mockMCPActivityStore{}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Cancel immediately — workers should still drain, but writes get cancelled ctx
+	cancel()
+
+	al := NewActivityLogger(ctx, mock, 10, 1)
+	al.Log(store.LogMCPActivityParams{ToolName: "test"})
+	al.Close()
+
+	// The write was attempted (worker drained the channel) but the context was cancelled
+	// so the store.Log call received a cancelled context. The worker still runs to drain.
+	// We just verify Close() returns promptly and doesn't hang.
 }

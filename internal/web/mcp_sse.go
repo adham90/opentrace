@@ -67,6 +67,7 @@ func (s *Server) MCPTokenAuth(next http.Handler) http.Handler {
 func (s *Server) setupMCPSSE() *server.SSEServer {
 	// Build MCP deps from the web server's stores.
 	deps := mcpserver.Deps{
+		Ctx:              s.auditCtx,
 		Registry:         s.registry,
 		ServerStore:      s.serverStore,
 		MetricStore:      s.metricStore,

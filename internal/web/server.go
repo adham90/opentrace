@@ -80,8 +80,9 @@ type Server struct {
 	metricsConnMu  sync.Mutex
 
 	// Bounded audit log channel with background worker
-	auditCh chan auditEntry
-	auditWg sync.WaitGroup
+	auditCh  chan auditEntry
+	auditWg  sync.WaitGroup
+	auditCtx context.Context // parent context for audit write timeouts
 }
 
 // auditEntry is an enqueued audit log event.
@@ -97,6 +98,7 @@ type auditEntry struct {
 
 // ServerDeps holds all dependencies for the web server.
 type ServerDeps struct {
+	Ctx           context.Context // app lifecycle context; nil defaults to Background
 	DB            *sql.DB
 	DSStore       store.DataSourceStore
 	LogStore      store.LogStore
@@ -160,6 +162,12 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		errorImpactStore:   deps.ErrorImpactStore,
 		versionChecker:     newVersionChecker("adham90", "opentrace"),
 		auditCh:            make(chan auditEntry, 256),
+	}
+
+	// Set audit context — used as parent for per-write timeouts
+	srv.auditCtx = deps.Ctx
+	if srv.auditCtx == nil {
+		srv.auditCtx = context.Background()
 	}
 
 	// Start audit log worker
@@ -553,7 +561,7 @@ func (s *Server) audit(r *http.Request, action, targetType, targetID, details st
 func (s *Server) auditWorker() {
 	defer s.auditWg.Done()
 	for entry := range s.auditCh {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(s.auditCtx, 5*time.Second)
 		_ = s.auditStore.Log(ctx, store.LogAuditParams{
 			UserID:     entry.userID,
 			UserEmail:  entry.userEmail,

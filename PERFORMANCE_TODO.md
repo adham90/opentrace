@@ -126,7 +126,7 @@ GROUP BY l.session_id, l.service
 
 ---
 
-### 4. [ ] Propagate App Context Instead of `context.Background()`
+### 4. [x] Propagate App Context Instead of `context.Background()`
 
 **Impact:** Graceful shutdown actually works | **Effort:** 3-4 hrs
 
@@ -361,7 +361,7 @@ summaryLines[i] = b.String()
 | 1 | SQLite PRAGMAs | Done | 2026-02-25 |
 | 2 | Bound goroutines with worker pools | Done | 2026-02-25 |
 | 3 | Fix journey store N+1 | Done | 2026-02-25 |
-| 4 | Propagate app context | Not Started | |
+| 4 | Propagate app context | Done | 2026-02-25 |
 | 5 | Add composite indexes | Done | 2026-02-25 |
 | 6 | Eliminate duplicate metadata marshal | Done | 2026-02-25 |
 | 7 | Parallelize aggregation jobs | Done | 2026-02-25 |

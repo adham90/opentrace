@@ -182,6 +182,7 @@ func runMCP() error {
 	}
 
 	return mcpserver.Serve(mcpserver.Deps{
+		Ctx:              ctx,
 		Registry:         deps.registry,
 		LogStore:         deps.logStore,
 		ServerStore:      deps.serverStore,
@@ -247,6 +248,7 @@ func run() error {
 
 	// Build MCP tool catalog for the /tools page (auto-detected from MCP registrations).
 	toolCatalog := mcpserver.BuildCatalog(mcpserver.Deps{
+		Ctx:             ctx,
 		Registry:        deps.registry,
 		LogStore:        deps.logStore,
 		ServerStore:     deps.serverStore,
@@ -269,10 +271,11 @@ func run() error {
 	// Agent-first watch evaluator + stream (reactive on log ingestion)
 	watchEvaluator := watcher.NewWatchEvaluator(watchMetrics, deps.watchStore)
 	watchEvidenceBuilder := watcher.NewWatchEvidenceBuilder(deps.logStore, watchMetrics)
-	watchStream := watcher.NewWatchStreamEvaluator(deps.watchStore, watchEvaluator, watchEvidenceBuilder)
+	watchStream := watcher.NewWatchStreamEvaluator(ctx, deps.watchStore, watchEvaluator, watchEvidenceBuilder)
 
 	// Create server
 	srv := web.NewServerWithDeps(web.ServerDeps{
+		Ctx:              ctx,
 		DB:               deps.db,
 		DSStore:          deps.dsStore,
 		LogStore:         deps.logStore,

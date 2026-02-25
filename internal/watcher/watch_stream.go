@@ -15,6 +15,10 @@ type WatchStreamEvaluator struct {
 	evaluator       *WatchEvaluator
 	evidenceBuilder *WatchEvidenceBuilder
 
+	// Parent context for deriving per-evaluation timeouts.
+	// When cancelled (e.g. app shutdown), in-flight evaluations stop promptly.
+	ctx context.Context
+
 	// Sliding window: per-watch counters to avoid over-evaluation
 	mu       sync.Mutex
 	lastEval map[string]time.Time // watch ID → last evaluation time
@@ -25,12 +29,18 @@ type WatchStreamEvaluator struct {
 }
 
 // NewWatchStreamEvaluator creates a reactive stream evaluator.
+// The provided ctx is used as the parent for all evaluation timeouts.
 func NewWatchStreamEvaluator(
+	ctx context.Context,
 	watchStore store.WatchStore,
 	evaluator *WatchEvaluator,
 	evidenceBuilder *WatchEvidenceBuilder,
 ) *WatchStreamEvaluator {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return &WatchStreamEvaluator{
+		ctx:             ctx,
 		watchStore:      watchStore,
 		evaluator:       evaluator,
 		evidenceBuilder: evidenceBuilder,
@@ -68,7 +78,7 @@ func (s *WatchStreamEvaluator) OnLogsReceived(entries []store.LogEntry) {
 }
 
 func (s *WatchStreamEvaluator) evaluateMatching(services map[string]bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
 	defer cancel()
 
 	watches, err := s.watchStore.List(ctx, store.ListWatchParams{Status: store.WatchStatusActive})

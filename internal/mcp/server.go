@@ -54,6 +54,7 @@ Use add_note / get_notes to save and recall persistent context about services, q
 
 // Deps holds the dependencies for the MCP server.
 type Deps struct {
+	Ctx             context.Context // app lifecycle context for background workers
 	Registry        *connector.Registry
 	ServerStore     store.ServerStore
 	MetricStore     store.MetricStore
@@ -105,7 +106,11 @@ func NewConfiguredServer(deps Deps, isAdmin bool) *server.MCPServer {
 	// Set the package-level activity store for tool logging.
 	activityStoreForLogging = deps.MCPActivityStore
 	if deps.MCPActivityStore != nil {
-		activityLogger = NewActivityLogger(deps.MCPActivityStore, 256, 2)
+		alCtx := deps.Ctx
+		if alCtx == nil {
+			alCtx = context.Background()
+		}
+		activityLogger = NewActivityLogger(alCtx, deps.MCPActivityStore, 256, 2)
 	}
 
 	s := server.NewMCPServer(
@@ -143,7 +148,11 @@ func Serve(deps Deps) error {
 	hasAccess := true
 
 	if deps.UserStore != nil && deps.MCPToken != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		parentCtx := deps.Ctx
+		if parentCtx == nil {
+			parentCtx = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(parentCtx, 10*time.Second)
 		user, err := deps.UserStore.GetByMCPToken(ctx, deps.MCPToken)
 		cancel()
 		if err != nil || user == nil {

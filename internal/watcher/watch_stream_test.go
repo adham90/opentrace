@@ -34,6 +34,7 @@ func (m *mockWatchStore) FailRun(_ context.Context, _ string, _ string) error {
 func TestWatchStreamEvaluator_SemaphoreBounded(t *testing.T) {
 	ws := &mockWatchStore{}
 	evaluator := &WatchStreamEvaluator{
+		ctx:      context.Background(),
 		watchStore: ws,
 		lastEval:   make(map[string]time.Time),
 		minGap:     10 * time.Second,
@@ -72,9 +73,29 @@ func TestWatchStreamEvaluator_SemaphoreBounded(t *testing.T) {
 
 func TestWatchStreamEvaluator_NewHasSemaphore(t *testing.T) {
 	ws := &mockWatchStore{}
-	evaluator := NewWatchStreamEvaluator(ws, nil, nil)
+	evaluator := NewWatchStreamEvaluator(context.Background(), ws, nil, nil)
 
 	if cap(evaluator.sem) != 16 {
 		t.Errorf("semaphore capacity = %d, want 16", cap(evaluator.sem))
+	}
+}
+
+func TestWatchStreamEvaluator_NilCtxDefaultsToBackground(t *testing.T) {
+	ws := &mockWatchStore{}
+	evaluator := NewWatchStreamEvaluator(nil, ws, nil, nil)
+
+	if evaluator.ctx == nil {
+		t.Error("expected non-nil context when nil passed to constructor")
+	}
+}
+
+func TestWatchStreamEvaluator_StoresParentContext(t *testing.T) {
+	ws := &mockWatchStore{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	evaluator := NewWatchStreamEvaluator(ctx, ws, nil, nil)
+	if evaluator.ctx != ctx {
+		t.Error("expected evaluator to store the provided parent context")
 	}
 }
