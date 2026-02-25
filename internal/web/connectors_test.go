@@ -26,6 +26,7 @@ func TestCreateConnector_Success(t *testing.T) {
 	body := `{"type":"logs","name":"Test Logs","config":{"endpoint":"http://localhost"}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/connectors", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -54,6 +55,7 @@ func TestCreateConnector_InvalidBody(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/connectors", bytes.NewBufferString("{invalid"))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -69,6 +71,7 @@ func TestCreateConnector_MissingRequiredFields(t *testing.T) {
 	body := `{"config":{}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/connectors", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -133,6 +136,7 @@ func TestTestConnector_Success(t *testing.T) {
 
 	url := fmt.Sprintf("/api/connectors/%s/test", ds.ID)
 	req := httptest.NewRequest(http.MethodPost, url, nil)
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -147,6 +151,7 @@ func TestTestConnector_NotFound(t *testing.T) {
 
 	url := fmt.Sprintf("/api/connectors/%s/test", uuid.New())
 	req := httptest.NewRequest(http.MethodPost, url, nil)
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -167,6 +172,7 @@ func TestDeleteConnector_Success(t *testing.T) {
 
 	url := fmt.Sprintf("/api/connectors/%s", ds.ID)
 	req := httptest.NewRequest(http.MethodDelete, url, nil)
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -181,6 +187,7 @@ func TestDeleteConnector_NotFound(t *testing.T) {
 
 	url := fmt.Sprintf("/api/connectors/%s", uuid.New())
 	req := httptest.NewRequest(http.MethodDelete, url, nil)
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -248,6 +255,7 @@ func TestUpdateConnector_Success(t *testing.T) {
 	url := fmt.Sprintf("/api/connectors/%s", ds.ID)
 	req := httptest.NewRequest(http.MethodPut, url, bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -272,6 +280,7 @@ func TestUpdateConnector_NotFound(t *testing.T) {
 	url := fmt.Sprintf("/api/connectors/%s", uuid.New())
 	req := httptest.NewRequest(http.MethodPut, url, bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -294,6 +303,7 @@ func TestUpdateConnector_EmptyName(t *testing.T) {
 	url := fmt.Sprintf("/api/connectors/%s", ds.ID)
 	req := httptest.NewRequest(http.MethodPut, url, bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -309,6 +319,7 @@ func TestUpdateConnector_InvalidBody(t *testing.T) {
 	url := fmt.Sprintf("/api/connectors/%s", uuid.New())
 	req := httptest.NewRequest(http.MethodPut, url, bytes.NewBufferString("{invalid"))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -322,6 +333,7 @@ func TestDeleteConnector_InvalidUUID(t *testing.T) {
 	srv, _ := setupTestServer()
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/connectors/not-a-uuid", nil)
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)

@@ -64,10 +64,12 @@ func createTestSession(t *testing.T, ss *mockSessionStore, userID string) string
 	return token
 }
 
-// postForm builds an application/x-www-form-urlencoded POST request.
+// postForm builds an application/x-www-form-urlencoded POST request with CSRF token.
 func postForm(target string, values url.Values) *http.Request {
+	values.Set("_csrf", testCSRFToken)
 	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(values.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(csrfCookie())
 	return req
 }
 
@@ -256,7 +258,7 @@ func TestLogout_ClearsCookie(t *testing.T) {
 	user := createTestUser(t, us, "logout@example.com", "password123", store.RoleMember, true)
 	token := createTestSession(t, ss, user.ID)
 
-	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	req := withCSRF(httptest.NewRequest(http.MethodPost, "/logout", nil))
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
 	rec := httptest.NewRecorder()
 	srv.Router.ServeHTTP(rec, req)
@@ -294,7 +296,7 @@ func TestDeleteUser_PreventSelfDeletion(t *testing.T) {
 	admin := createTestUser(t, us, "admin@example.com", "adminpass123", store.RoleAdmin, true)
 	token := createTestSession(t, ss, admin.ID)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/users/"+admin.ID, nil)
+	req := withCSRF(httptest.NewRequest(http.MethodDelete, "/api/users/"+admin.ID, nil))
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
 	rec := httptest.NewRecorder()
 	srv.Router.ServeHTTP(rec, req)

@@ -27,6 +27,7 @@ func TestHandleRegisterServer(t *testing.T) {
 	body := `{"hostname":"web-01","ip_address":"10.0.1.5","os":"linux","arch":"amd64"}`
 	req := httptest.NewRequest("POST", "/api/servers/register", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -48,6 +49,7 @@ func TestHandleRegisterServer_MissingHostname(t *testing.T) {
 	body := `{"os":"linux"}`
 	req := httptest.NewRequest("POST", "/api/servers/register", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -64,6 +66,7 @@ func TestHandleListServers(t *testing.T) {
 	body := `{"hostname":"web-01"}`
 	req := httptest.NewRequest("POST", "/api/servers/register", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)
 
@@ -90,6 +93,7 @@ func TestHandlePushMetrics(t *testing.T) {
 	body := `{"hostname":"web-01"}`
 	req := httptest.NewRequest("POST", "/api/servers/register", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)
 
@@ -107,6 +111,7 @@ func TestHandlePushMetrics(t *testing.T) {
 	}`
 	req = httptest.NewRequest("POST", "/api/servers/"+serverID+"/metrics", bytes.NewBufferString(metricsBody))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w = httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)
 
@@ -128,6 +133,7 @@ func TestHandleGetServer(t *testing.T) {
 	body := `{"hostname":"detail-test","os":"linux","arch":"amd64"}`
 	req := httptest.NewRequest("POST", "/api/servers/register", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)
 
@@ -158,6 +164,7 @@ func TestHandleDeleteServer(t *testing.T) {
 	body := `{"hostname":"del-test"}`
 	req := httptest.NewRequest("POST", "/api/servers/register", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)
 
@@ -167,6 +174,7 @@ func TestHandleDeleteServer(t *testing.T) {
 
 	// Delete
 	req = httptest.NewRequest("DELETE", "/api/servers/"+serverID, nil)
+	withCSRF(req)
 	w = httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)
 
@@ -361,6 +369,7 @@ func TestUpdateServer(t *testing.T) {
 	body := `{"hostname":"rename-test"}`
 	req := httptest.NewRequest("POST", "/api/servers/register", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)
 
@@ -372,6 +381,7 @@ func TestUpdateServer(t *testing.T) {
 	updateBody := `{"display_name":"My Server"}`
 	req = httptest.NewRequest("PUT", "/api/servers/"+serverID, bytes.NewBufferString(updateBody))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w = httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)
 
@@ -395,6 +405,7 @@ func TestUpdateServer_NotFound(t *testing.T) {
 	body := `{"display_name":"ghost"}`
 	req := httptest.NewRequest("PUT", "/api/servers/00000000-0000-0000-0000-000000000000", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)
 
@@ -410,6 +421,7 @@ func TestHandleQueryMetrics(t *testing.T) {
 	body := `{"hostname":"query-test"}`
 	req := httptest.NewRequest("POST", "/api/servers/register", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)
 
@@ -420,6 +432,7 @@ func TestHandleQueryMetrics(t *testing.T) {
 	metricsBody := `{"timestamp":"2024-01-15T10:00:00Z","samples":[{"name":"cpu.usage_percent","value":55.0}]}`
 	req = httptest.NewRequest("POST", "/api/servers/"+serverID+"/metrics", bytes.NewBufferString(metricsBody))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w = httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)
 

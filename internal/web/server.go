@@ -203,6 +203,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Use(middleware.Compress(5)) // gzip compression
 	router.Use(MaxBodySize(10 << 20))  // 10 MB global body limit
 	router.Use(srv.SessionAuth)        // skips /static/ and /healthz paths internally
+	router.Use(CSRFProtect)            // double-submit cookie CSRF protection
 
 	router.Get("/healthz", srv.handleHealthCheck)
 	router.Get("/api/version", srv.handleVersion)

@@ -50,6 +50,7 @@ func TestIngestLogs_Success(t *testing.T) {
 	]`
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -74,6 +75,7 @@ func TestIngestLogs_EmptyArray(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString("[]"))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -94,6 +96,7 @@ func TestIngestLogs_InvalidJSON(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString("{not json"))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -110,6 +113,7 @@ func TestIngestLogs_MissingFields(t *testing.T) {
 	body := `[{"message":"test"}]`
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -125,6 +129,7 @@ func TestIngestLogs_SingleObject(t *testing.T) {
 	body := `{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","service":"api","message":"single entry"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -185,6 +190,7 @@ func TestAPIKeyAuth_MissingHeader(t *testing.T) {
 	body := `{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","message":"hello"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -200,6 +206,7 @@ func TestAPIKeyAuth_Disabled(t *testing.T) {
 	body := `{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","message":"hello"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	// No auth header — should pass because APIKey is empty
 	w := httptest.NewRecorder()
 
@@ -243,6 +250,7 @@ func TestIngestLogs_AutoCreatesLogsConnector(t *testing.T) {
 	body := `{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","message":"auto-register test"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -287,6 +295,7 @@ func TestIngestLogs_AutoCreate_AlreadyExists(t *testing.T) {
 	body := `{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","message":"already exists test"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -319,6 +328,7 @@ func TestIngestLogs_BatchDedup(t *testing.T) {
 	req1 := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req1.Header.Set("Content-Type", "application/json")
 	req1.Header.Set("X-Batch-ID", "batch-uuid-123")
+	withCSRF(req1)
 	w1 := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w1, req1)
 
@@ -333,6 +343,7 @@ func TestIngestLogs_BatchDedup(t *testing.T) {
 	req2 := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req2.Header.Set("Content-Type", "application/json")
 	req2.Header.Set("X-Batch-ID", "batch-uuid-123")
+	withCSRF(req2)
 	w2 := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w2, req2)
 
@@ -361,6 +372,7 @@ func TestIngestLogs_NoBatchID(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 		req.Header.Set("Content-Type", "application/json")
+		withCSRF(req)
 		w := httptest.NewRecorder()
 		srv.Router.ServeHTTP(w, req)
 
@@ -390,6 +402,7 @@ func TestIngestLogs_GzipCompressed(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", &buf)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -418,6 +431,7 @@ func TestIngestLogs_InvalidGzip(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString("not gzip data"))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -458,6 +472,7 @@ func TestIngestLogs_WithRequestSummary(t *testing.T) {
 	}`
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -514,6 +529,7 @@ func TestIngestLogs_WithoutRequestSummary(t *testing.T) {
 	body := `{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","message":"no summary"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -791,6 +807,7 @@ func TestIngestLogs_MetadataContextFields(t *testing.T) {
 	}`
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -851,6 +868,7 @@ func TestIngestLogs_MetadataWithRequestSummary(t *testing.T) {
 	}`
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -912,6 +930,7 @@ func TestIngestLogs_MetadataWithTraceContext(t *testing.T) {
 	}`
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -993,6 +1012,7 @@ func TestIngestLogs_FullRubyGemPayload(t *testing.T) {
 	}`
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)
@@ -1076,6 +1096,7 @@ func TestIngestLogs_EmptyMetadata(t *testing.T) {
 	body := `{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","message":"no meta"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	withCSRF(req)
 	w := httptest.NewRecorder()
 
 	srv.Router.ServeHTTP(w, req)

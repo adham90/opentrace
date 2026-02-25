@@ -79,10 +79,12 @@ func TestOnboardingSubmit_CreatesAdminAndAPIKey(t *testing.T) {
 	form := url.Values{
 		"email":    {"admin@test.com"},
 		"password": {"password12345"},
+		"_csrf":    {testCSRFToken},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/onboarding",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(csrfCookie())
 	rec := httptest.NewRecorder()
 	srv.Router.ServeHTTP(rec, req)
 
@@ -158,10 +160,12 @@ func TestOnboardingSubmit_RejectsWhenUsersExist(t *testing.T) {
 	form := url.Values{
 		"email":    {"new@test.com"},
 		"password": {"password12345"},
+		"_csrf":    {testCSRFToken},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/onboarding",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(csrfCookie())
 	rec := httptest.NewRecorder()
 	srv.Router.ServeHTTP(rec, req)
 
@@ -195,10 +199,12 @@ func TestOnboardingSubmit_ValidationErrors(t *testing.T) {
 			form := url.Values{
 				"email":    {tt.email},
 				"password": {tt.password},
+				"_csrf":    {testCSRFToken},
 			}
 			req := httptest.NewRequest(http.MethodPost, "/onboarding",
 				strings.NewReader(form.Encode()))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.AddCookie(csrfCookie())
 			rec := httptest.NewRecorder()
 			srv.Router.ServeHTTP(rec, req)
 

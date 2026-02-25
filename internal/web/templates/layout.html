@@ -12,6 +12,30 @@
     }
   })();
   </script>
+  <script nonce="{{.CSPNonce}}">
+  // CSRF token for fetch requests — reads from cookie set by CSRFProtect middleware.
+  window.__csrfToken = (function() {
+    var m = document.cookie.match('(?:^|;)\\s*opentrace_csrf=([^;]+)');
+    return m ? decodeURIComponent(m[1]) : '{{.CSRFToken}}';
+  })();
+  // Patch fetch to auto-include CSRF header on same-origin state-changing requests.
+  (function(){
+    var _fetch = window.fetch;
+    window.fetch = function(url, opts) {
+      opts = opts || {};
+      var method = (opts.method || 'GET').toUpperCase();
+      if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+        if (!opts.headers) opts.headers = {};
+        if (typeof opts.headers.set === 'function') {
+          if (!opts.headers.has('X-CSRF-Token')) opts.headers.set('X-CSRF-Token', window.__csrfToken);
+        } else {
+          if (!opts.headers['X-CSRF-Token']) opts.headers['X-CSRF-Token'] = window.__csrfToken;
+        }
+      }
+      return _fetch.call(this, url, opts);
+    };
+  })();
+  </script>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/htmx.min.js"></script>
 </head>

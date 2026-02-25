@@ -30,6 +30,94 @@ func CSPNonce(ctx context.Context) string {
 	return ""
 }
 
+// ctxKeyCSRFToken is the context key for the per-request CSRF token.
+type csrfTokenKeyType struct{}
+
+var ctxKeyCSRFToken = csrfTokenKeyType{}
+
+// CSRFToken returns the CSRF token stored in the request context.
+func CSRFToken(ctx context.Context) string {
+	if v, ok := ctx.Value(ctxKeyCSRFToken).(string); ok {
+		return v
+	}
+	return ""
+}
+
+const csrfCookieName = "opentrace_csrf"
+const csrfTokenLen = 32
+
+// generateCSRFToken creates a cryptographically random CSRF token.
+func generateCSRFToken() (string, error) {
+	b := make([]byte, csrfTokenLen)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
+}
+
+// CSRFProtect is middleware that implements double-submit cookie CSRF protection.
+// On every request it ensures a CSRF cookie exists and stores the token in context.
+// On state-changing methods (POST/PUT/DELETE) it validates that the submitted token
+// (from header or form field) matches the cookie value.
+//
+// Skipped for:
+//   - Requests with Bearer Authorization (API/MCP token auth — no cookies involved)
+//   - Paths under /api/logs and /api/servers/metrics (machine-to-machine ingestion)
+//   - Paths under /mcp/ (MCP protocol, authenticated via Bearer token)
+func CSRFProtect(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip CSRF for token-authenticated requests (API keys, MCP tokens).
+		if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Skip for machine-to-machine ingestion endpoints.
+		if strings.HasPrefix(r.URL.Path, "/mcp/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Ensure CSRF cookie exists; generate if missing.
+		cookie, err := r.Cookie(csrfCookieName)
+		var token string
+		if err != nil || cookie.Value == "" {
+			token, err = generateCSRFToken()
+			if err != nil {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			http.SetCookie(w, &http.Cookie{
+				Name:     csrfCookieName,
+				Value:    token,
+				Path:     "/",
+				HttpOnly: false, // JS needs to read this
+				SameSite: http.SameSiteStrictMode,
+			})
+		} else {
+			token = cookie.Value
+		}
+
+		// Store token in context for templates.
+		ctx := context.WithValue(r.Context(), ctxKeyCSRFToken, token)
+		r = r.WithContext(ctx)
+
+		// Validate on state-changing methods.
+		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete || r.Method == http.MethodPatch {
+			submitted := r.Header.Get("X-CSRF-Token")
+			if submitted == "" {
+				submitted = r.FormValue("_csrf")
+			}
+			if subtle.ConstantTimeCompare([]byte(submitted), []byte(token)) != 1 {
+				http.Error(w, "invalid or missing CSRF token", http.StatusForbidden)
+				return
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 // SecurityHeaders adds standard security headers to all responses.
 // It generates a per-request cryptographic nonce for inline scripts/styles.
 func SecurityHeaders(next http.Handler) http.Handler {

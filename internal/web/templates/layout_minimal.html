@@ -12,6 +12,12 @@
     }
   })();
   </script>
+  <script nonce="{{.CSPNonce}}">
+  window.__csrfToken = (function() {
+    var m = document.cookie.match('(?:^|;)\\s*opentrace_csrf=([^;]+)');
+    return m ? decodeURIComponent(m[1]) : '{{.CSRFToken}}';
+  })();
+  </script>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>

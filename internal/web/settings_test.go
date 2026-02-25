@@ -40,6 +40,10 @@ func settingsRequest(t *testing.T, srv *Server, method, path, body string) *http
 	} else {
 		req = httptest.NewRequest(method, path, nil)
 	}
+	// Add CSRF token for unsafe methods
+	if method != "GET" && method != "HEAD" && method != "OPTIONS" {
+		withCSRF(req)
+	}
 	// Inject admin user into context so RequireAdmin passes
 	admin := &store.User{ID: "admin1", Role: store.RoleAdmin, IsActive: true}
 	ctx := context.WithValue(req.Context(), ctxKeyUser, admin)
