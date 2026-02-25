@@ -148,7 +148,7 @@ GROUP BY l.session_id, l.service
 
 ## High Priority
 
-### 5. [ ] Add Missing Composite Indexes
+### 5. [x] Add Missing Composite Indexes
 
 **Impact:** 10-100x faster aggregation queries | **Effort:** 30 min
 
@@ -362,7 +362,7 @@ summaryLines[i] = b.String()
 | 2 | Bound goroutines with worker pools | Done | 2026-02-25 |
 | 3 | Fix journey store N+1 | Done | 2026-02-25 |
 | 4 | Propagate app context | Not Started | |
-| 5 | Add composite indexes | Not Started | |
+| 5 | Add composite indexes | Done | 2026-02-25 |
 | 6 | Eliminate duplicate metadata marshal | Not Started | |
 | 7 | Parallelize aggregation jobs | Not Started | |
 | 8 | Fix ActivityLogger shutdown | Not Started | |

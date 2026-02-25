@@ -61,6 +61,27 @@ func TestOpenSQLite_PragmasApplied(t *testing.T) {
 	}
 }
 
+func TestPerformanceIndexesExist(t *testing.T) {
+	db := setupTestDB(t)
+
+	indexes := []string{
+		"idx_metrics_server_name_ts",
+		"idx_logs_ts_service_env",
+		"idx_logs_ts_level",
+		"idx_logs_session_service_ts",
+	}
+
+	for _, idx := range indexes {
+		var name string
+		err := db.QueryRow(
+			`SELECT name FROM sqlite_master WHERE type='index' AND name=?`, idx,
+		).Scan(&name)
+		if err != nil {
+			t.Errorf("index %s not found: %v", idx, err)
+		}
+	}
+}
+
 func TestOpenSQLite_MaxOpenConns(t *testing.T) {
 	db, err := OpenSQLite(":memory:")
 	if err != nil {
