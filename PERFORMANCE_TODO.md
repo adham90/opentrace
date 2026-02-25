@@ -78,7 +78,7 @@ for _, hc := range checks {
 
 ---
 
-### 3. [ ] Fix Journey Store N+1 Query
+### 3. [x] Fix Journey Store N+1 Query
 
 **Impact:** 2000 queries → 1 query | **Effort:** 1 hr
 
@@ -360,7 +360,7 @@ summaryLines[i] = b.String()
 |---|------|--------|----------------|
 | 1 | SQLite PRAGMAs | Done | 2026-02-25 |
 | 2 | Bound goroutines with worker pools | Done | 2026-02-25 |
-| 3 | Fix journey store N+1 | Not Started | |
+| 3 | Fix journey store N+1 | Done | 2026-02-25 |
 | 4 | Propagate app context | Not Started | |
 | 5 | Add composite indexes | Not Started | |
 | 6 | Eliminate duplicate metadata marshal | Not Started | |

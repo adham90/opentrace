@@ -19,31 +19,68 @@ func NewJourneyStore(db *sql.DB) JourneyStore {
 }
 
 // BuildSessions scans logs with session_id and builds/updates user_sessions.
+// Uses a single query with subqueries to fetch aggregates + entry/exit paths,
+// eliminating the N+1 query pattern (previously 2N+1 queries for N sessions).
 func (s *journeyStore) BuildSessions(ctx context.Context, since time.Time) error {
 	sinceStr := since.Format(time.RFC3339)
 
-	// Collect session aggregates from logs + request_summaries
+	// Single query: aggregates + entry/exit paths via correlated subqueries
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT l.session_id,
-		       COALESCE(l.user_id, '') as user_id,
-		       COALESCE(l.service, '') as service,
-		       COALESCE(l.environment, '') as env,
-		       MIN(l.timestamp) as started_at,
-		       MAX(l.timestamp) as ended_at,
-		       COUNT(DISTINCT rs.id) as request_count,
-		       SUM(CASE WHEN rs.status >= 500 THEN 1 ELSE 0 END) as error_count,
-		       COALESCE(SUM(rs.duration_ms), 0) as total_duration_ms
-		FROM logs l
-		LEFT JOIN request_summaries rs ON rs.log_id = l.id
-		WHERE l.session_id != ''
-		  AND l.timestamp >= ?
-		GROUP BY l.session_id, l.service
+		SELECT
+			agg.session_id,
+			agg.user_id,
+			agg.service,
+			agg.env,
+			agg.started_at,
+			agg.ended_at,
+			agg.request_count,
+			agg.error_count,
+			agg.total_duration_ms,
+			COALESCE((
+				SELECT COALESCE(rs2.controller || '#' || rs2.action, rs2.path, '')
+				FROM logs l2
+				JOIN request_summaries rs2 ON rs2.log_id = l2.id
+				WHERE l2.session_id = agg.session_id AND l2.service = agg.service
+				ORDER BY l2.timestamp ASC
+				LIMIT 1
+			), '') AS entry_path,
+			COALESCE((
+				SELECT COALESCE(rs3.controller || '#' || rs3.action, rs3.path, '')
+				FROM logs l3
+				JOIN request_summaries rs3 ON rs3.log_id = l3.id
+				WHERE l3.session_id = agg.session_id AND l3.service = agg.service
+				ORDER BY l3.timestamp DESC
+				LIMIT 1
+			), '') AS exit_path,
+			COALESCE((
+				SELECT COALESCE(rs4.status, 0)
+				FROM logs l4
+				JOIN request_summaries rs4 ON rs4.log_id = l4.id
+				WHERE l4.session_id = agg.session_id AND l4.service = agg.service
+				ORDER BY l4.timestamp DESC
+				LIMIT 1
+			), 0) AS exit_status
+		FROM (
+			SELECT l.session_id,
+			       COALESCE(l.user_id, '') as user_id,
+			       COALESCE(l.service, '') as service,
+			       COALESCE(l.environment, '') as env,
+			       MIN(l.timestamp) as started_at,
+			       MAX(l.timestamp) as ended_at,
+			       COUNT(DISTINCT rs.id) as request_count,
+			       SUM(CASE WHEN rs.status >= 500 THEN 1 ELSE 0 END) as error_count,
+			       COALESCE(SUM(rs.duration_ms), 0) as total_duration_ms
+			FROM logs l
+			LEFT JOIN request_summaries rs ON rs.log_id = l.id
+			WHERE l.session_id != ''
+			  AND l.timestamp >= ?
+			GROUP BY l.session_id, l.service
+		) agg
 	`, sinceStr)
 	if err != nil {
 		return fmt.Errorf("querying sessions: %w", err)
 	}
-
-	type sessionAgg struct {
+	type sessionRow struct {
 		sessionID       string
 		userID          string
 		service         string
@@ -53,54 +90,29 @@ func (s *journeyStore) BuildSessions(ctx context.Context, since time.Time) error
 		requestCount    int
 		errorCount      int
 		totalDurationMs float64
+		entryPath       string
+		exitPath        string
+		exitStatus      int
 	}
-	var aggs []sessionAgg
+
+	// Collect all rows first, then close — required because MaxOpenConns(1)
+	// means we can't hold a query result set open while executing writes.
+	var sessions []sessionRow
 	for rows.Next() {
-		var a sessionAgg
-		if err := rows.Scan(&a.sessionID, &a.userID, &a.service, &a.env,
-			&a.startedAt, &a.endedAt, &a.requestCount, &a.errorCount, &a.totalDurationMs); err != nil {
+		var r sessionRow
+		if err := rows.Scan(&r.sessionID, &r.userID, &r.service, &r.env,
+			&r.startedAt, &r.endedAt, &r.requestCount, &r.errorCount, &r.totalDurationMs,
+			&r.entryPath, &r.exitPath, &r.exitStatus); err != nil {
 			rows.Close()
-			return fmt.Errorf("scanning session agg: %w", err)
+			return fmt.Errorf("scanning session row: %w", err)
 		}
-		aggs = append(aggs, a)
+		sessions = append(sessions, r)
 	}
 	rows.Close()
 
-	// For each session, get entry/exit paths
-	for _, a := range aggs {
-		// Entry path: first request
-		var entryPath string
-		var exitPath string
-		var exitStatus int
-
-		err := s.db.QueryRowContext(ctx, `
-			SELECT COALESCE(rs.controller || '#' || rs.action, rs.path, '') as path
-			FROM logs l
-			JOIN request_summaries rs ON rs.log_id = l.id
-			WHERE l.session_id = ? AND l.service = ?
-			ORDER BY l.timestamp ASC
-			LIMIT 1
-		`, a.sessionID, a.service).Scan(&entryPath)
-		if err != nil && err != sql.ErrNoRows {
-			return fmt.Errorf("querying entry path: %w", err)
-		}
-
-		// Exit path: last request
-		err = s.db.QueryRowContext(ctx, `
-			SELECT COALESCE(rs.controller || '#' || rs.action, rs.path, '') as path,
-			       COALESCE(rs.status, 0) as status
-			FROM logs l
-			JOIN request_summaries rs ON rs.log_id = l.id
-			WHERE l.session_id = ? AND l.service = ?
-			ORDER BY l.timestamp DESC
-			LIMIT 1
-		`, a.sessionID, a.service).Scan(&exitPath, &exitStatus)
-		if err != nil && err != sql.ErrNoRows {
-			return fmt.Errorf("querying exit path: %w", err)
-		}
-
+	for _, r := range sessions {
 		hasError := 0
-		if a.errorCount > 0 {
+		if r.errorCount > 0 {
 			hasError = 1
 		}
 
@@ -120,9 +132,9 @@ func (s *journeyStore) BuildSessions(ctx context.Context, since time.Time) error
 				exit_path = excluded.exit_path,
 				exit_status = excluded.exit_status,
 				has_error = excluded.has_error
-		`, a.sessionID, a.userID, a.service, a.env,
-			a.startedAt, a.endedAt, a.requestCount, a.errorCount, a.totalDurationMs,
-			entryPath, exitPath, exitStatus, hasError)
+		`, r.sessionID, r.userID, r.service, r.env,
+			r.startedAt, r.endedAt, r.requestCount, r.errorCount, r.totalDurationMs,
+			r.entryPath, r.exitPath, r.exitStatus, hasError)
 		if err != nil {
 			return fmt.Errorf("upserting session: %w", err)
 		}
