@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -105,16 +106,27 @@ func (c *LogsConnector) handleLogSearch(ctx context.Context, args map[string]any
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Found %d log entries:\n\n", len(results)))
+	sb.Grow(len(results) * 128)
+	sb.WriteString("Found ")
+	sb.WriteString(strconv.Itoa(len(results)))
+	sb.WriteString(" log entries:\n\n")
 	for _, entry := range results {
-		sb.WriteString(fmt.Sprintf("[%s] %s", entry.Timestamp.Format("2006-01-02 15:04:05"), entry.Level))
+		sb.WriteString("[")
+		sb.WriteString(entry.Timestamp.Format("2006-01-02 15:04:05"))
+		sb.WriteString("] ")
+		sb.WriteString(entry.Level)
 		if entry.Service != "" {
-			sb.WriteString(fmt.Sprintf(" [%s]", entry.Service))
+			sb.WriteString(" [")
+			sb.WriteString(entry.Service)
+			sb.WriteString("]")
 		}
 		if entry.TraceID != "" {
-			sb.WriteString(fmt.Sprintf(" trace=%s", entry.TraceID))
+			sb.WriteString(" trace=")
+			sb.WriteString(entry.TraceID)
 		}
-		sb.WriteString(fmt.Sprintf(": %s\n", entry.Message))
+		sb.WriteString(": ")
+		sb.WriteString(entry.Message)
+		sb.WriteString("\n")
 	}
 
 	return sb.String(), nil

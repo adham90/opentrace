@@ -322,7 +322,7 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 	}
 	defer rows.Close()
 
-	result := make([]LogEntry, 0)
+	result := make([]LogEntry, 0, limit)
 	for rows.Next() {
 		var entry LogEntry
 		var tsStr string

@@ -314,7 +314,7 @@ Also in `server.go:199` — activity logging marshals args just to truncate to 5
 
 ---
 
-### 10. [ ] Slice Pre-allocation and strings.Builder
+### 10. [x] Slice Pre-allocation and strings.Builder
 
 **Impact:** Minor GC pressure reduction | **Effort:** 30 min
 
@@ -367,7 +367,7 @@ summaryLines[i] = b.String()
 | 7 | Parallelize aggregation jobs | Done | 2026-02-25 |
 | 8 | Fix ActivityLogger shutdown | Done | 2026-02-25 |
 | 9 | Replace MarshalIndent with Marshal | Done | 2026-02-25 |
-| 10 | Slice pre-allocation + strings.Builder | Not Started | |
+| 10 | Slice pre-allocation + strings.Builder | Done | 2026-02-25 |
 
 **Estimated total effort:** ~10-12 hours
 **Estimated performance gain:** 2-3x write throughput (item 1), prevent OOM (item 2), eliminate N+1 (item 3), 15-25% fewer allocations across hot paths (items 6, 9, 10)

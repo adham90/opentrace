@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -209,7 +210,7 @@ func logSearchHandler(ls store.LogStore, egs store.ErrorGroupStore) server.ToolH
 
 		// Build a compact one-line-per-entry text summary so the AI agent
 		// can quickly scan results without parsing full JSON.
-		var summaryLines []string
+		summaryLines := make([]string, 0, len(entries))
 		for _, e := range entries {
 			ts := e.Timestamp.Format("2006-01-02 15:04:05")
 			msg := e.Message
@@ -217,16 +218,26 @@ func logSearchHandler(ls store.LogStore, egs store.ErrorGroupStore) server.ToolH
 				msg = msg[:120] + "..."
 			}
 
-			line := fmt.Sprintf("[%s] %s [%s]", ts, e.Level, e.Service)
+			var b strings.Builder
+			b.Grow(128)
+			b.WriteString("[")
+			b.WriteString(ts)
+			b.WriteString("] ")
+			b.WriteString(e.Level)
+			b.WriteString(" [")
+			b.WriteString(e.Service)
+			b.WriteString("]")
 
 			// Surface exception info prominently in the summary line.
 			if e.ExceptionClass != "" {
-				line += fmt.Sprintf(" %s", e.ExceptionClass)
+				b.WriteString(" ")
+				b.WriteString(e.ExceptionClass)
 				if e.SourceFile != "" {
+					b.WriteString(" at ")
+					b.WriteString(e.SourceFile)
 					if e.SourceLine > 0 {
-						line += fmt.Sprintf(" at %s:%d", e.SourceFile, e.SourceLine)
-					} else {
-						line += fmt.Sprintf(" at %s", e.SourceFile)
+						b.WriteString(":")
+						b.WriteString(strconv.Itoa(e.SourceLine))
 					}
 				}
 				// Include exception_message from metadata if available.
@@ -235,18 +246,21 @@ func logSearchHandler(ls store.LogStore, egs store.ErrorGroupStore) server.ToolH
 					if len(excMsg) > 100 {
 						excMsg = excMsg[:100] + "..."
 					}
-					line += fmt.Sprintf(": %s", excMsg)
+					b.WriteString(": ")
+					b.WriteString(excMsg)
 				}
 			} else {
-				line += fmt.Sprintf(": %s", msg)
+				b.WriteString(": ")
+				b.WriteString(msg)
 			}
 
 			// Append trace_id if present for easy correlation.
 			if e.TraceID != "" {
-				line += fmt.Sprintf(" trace=%s", e.TraceID)
+				b.WriteString(" trace=")
+				b.WriteString(e.TraceID)
 			}
 
-			summaryLines = append(summaryLines, line)
+			summaryLines = append(summaryLines, b.String())
 		}
 
 		resp := map[string]any{

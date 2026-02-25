@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -83,14 +84,30 @@ func (c *MetricsConnector) handleListServers(ctx context.Context, args map[strin
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Monitored servers (%d):\n\n", len(servers)))
+	sb.Grow(len(servers) * 128)
+	sb.WriteString("Monitored servers (")
+	sb.WriteString(strconv.Itoa(len(servers)))
+	sb.WriteString("):\n\n")
 	for _, s := range servers {
 		lastSeen := "never"
 		if s.LastSeenAt != nil {
 			lastSeen = s.LastSeenAt.Format("2006-01-02 15:04:05 UTC")
 		}
-		sb.WriteString(fmt.Sprintf("- %s (ID: %s)\n  Status: %s | IP: %s | OS: %s/%s | Last seen: %s\n",
-			s.Hostname, s.ID, s.Status, s.IPAddress, s.OS, s.Arch, lastSeen))
+		sb.WriteString("- ")
+		sb.WriteString(s.Hostname)
+		sb.WriteString(" (ID: ")
+		sb.WriteString(s.ID.String())
+		sb.WriteString(")\n  Status: ")
+		sb.WriteString(string(s.Status))
+		sb.WriteString(" | IP: ")
+		sb.WriteString(s.IPAddress)
+		sb.WriteString(" | OS: ")
+		sb.WriteString(s.OS)
+		sb.WriteString("/")
+		sb.WriteString(s.Arch)
+		sb.WriteString(" | Last seen: ")
+		sb.WriteString(lastSeen)
+		sb.WriteString("\n")
 	}
 	return sb.String(), nil
 }
