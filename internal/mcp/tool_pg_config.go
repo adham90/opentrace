@@ -105,7 +105,7 @@ func pgConfigCheckHandler(registry *connector.Registry) server.ToolHandlerFunc {
 			}
 		}
 
-		data, err := json.MarshalIndent(resp, "", "  ")
+		data, err := json.Marshal(resp)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal config: %v", err)), nil
 		}

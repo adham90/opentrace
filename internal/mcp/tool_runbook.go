@@ -164,7 +164,7 @@ func runbookSlowDB(ctx context.Context, registry *connector.Registry) (*mcp.Call
 		"diagnosis": diagnosis,
 	}
 
-	data, _ := json.MarshalIndent(resp, "", "  ")
+	data, _ := json.Marshal(resp)
 	return mcp.NewToolResultText(string(data)), nil
 }
 
@@ -233,7 +233,7 @@ func runbookConnExhaustion(ctx context.Context, registry *connector.Registry) (*
 	}
 
 	resp := map[string]any{"playbook": "connection_exhaustion", "sections": sections, "diagnosis": diagnosis}
-	data, _ := json.MarshalIndent(resp, "", "  ")
+	data, _ := json.Marshal(resp)
 	return mcp.NewToolResultText(string(data)), nil
 }
 
@@ -289,7 +289,7 @@ func runbookDiskPressure(ctx context.Context, registry *connector.Registry) (*mc
 	}
 
 	resp := map[string]any{"playbook": "disk_pressure", "sections": sections, "diagnosis": diagnosis}
-	data, _ := json.MarshalIndent(resp, "", "  ")
+	data, _ := json.Marshal(resp)
 	return mcp.NewToolResultText(string(data)), nil
 }
 
@@ -356,7 +356,7 @@ func runbookReplicationLag(ctx context.Context, registry *connector.Registry) (*
 	}
 
 	resp := map[string]any{"playbook": "replication_lag", "sections": sections, "diagnosis": diagnosis}
-	data, _ := json.MarshalIndent(resp, "", "  ")
+	data, _ := json.Marshal(resp)
 	return mcp.NewToolResultText(string(data)), nil
 }
 
@@ -419,6 +419,6 @@ func runbookErrorSpike(ctx context.Context, logStore store.LogStore) (*mcp.CallT
 	}
 
 	resp := map[string]any{"playbook": "error_spike", "sections": sections, "diagnosis": diagnosis}
-	data, _ := json.MarshalIndent(resp, "", "  ")
+	data, _ := json.Marshal(resp)
 	return mcp.NewToolResultText(string(data)), nil
 }

@@ -83,7 +83,7 @@ func diskUsageHandler(registry *connector.Registry) server.ToolHandlerFunc {
 			resp["database_bytes"] = dbResult.Rows[0][2]
 		}
 
-		data, err := json.MarshalIndent(resp, "", "  ")
+		data, err := json.Marshal(resp)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal: %v", err)), nil
 		}

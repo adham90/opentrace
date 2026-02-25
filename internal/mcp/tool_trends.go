@@ -162,7 +162,7 @@ func trendsHandler(ts store.TrendStore) server.ToolHandlerFunc {
 			}),
 		)
 
-		data, _ := json.MarshalIndent(resp, "", "  ")
+		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }
@@ -301,7 +301,7 @@ func topMoversHandler(ts store.TrendStore) server.ToolHandlerFunc {
 			"movers":   movers,
 		}
 
-		data, _ := json.MarshalIndent(resp, "", "  ")
+		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }

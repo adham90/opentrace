@@ -298,7 +298,7 @@ func incidentTimelineHandler(d timelineDeps) server.ToolHandlerFunc {
 		}
 		withSuggestions(resp, suggestions...)
 
-		data, err := json.MarshalIndent(resp, "", "  ")
+		data, err := json.Marshal(resp)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal timeline: %v", err)), nil
 		}

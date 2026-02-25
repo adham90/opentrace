@@ -74,7 +74,7 @@ func dbIndexAnalysisHandler(registry *connector.Registry) server.ToolHandlerFunc
 			"total_unused_size_human": humanSize(totalUnusedSize),
 		}
 
-		data, _ := json.MarshalIndent(resp, "", "  ")
+		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }

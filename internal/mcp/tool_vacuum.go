@@ -121,7 +121,7 @@ func vacuumReportHandler(registry *connector.Registry) server.ToolHandlerFunc {
 			"autovacuum_settings": avSettings,
 		}
 
-		data, err := json.MarshalIndent(resp, "", "  ")
+		data, err := json.Marshal(resp)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal report: %v", err)), nil
 		}

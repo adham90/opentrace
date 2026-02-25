@@ -89,7 +89,7 @@ func sequenceHealthHandler(registry *connector.Registry) server.ToolHandlerFunc 
 			"warnings":       warnings,
 		}
 
-		data, err := json.MarshalIndent(resp, "", "  ")
+		data, err := json.Marshal(resp)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal: %v", err)), nil
 		}

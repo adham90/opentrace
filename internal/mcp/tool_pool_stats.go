@@ -131,7 +131,7 @@ func connectionPoolStatsHandler(registry *connector.Registry) server.ToolHandler
 			"connectors": []any{connectorInfo},
 		}
 
-		data, _ := json.MarshalIndent(resp, "", "  ")
+		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }

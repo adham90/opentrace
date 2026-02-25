@@ -160,7 +160,7 @@ func logContextHandler(ls store.LogStore) server.ToolHandlerFunc {
 			"entries":      entries,
 		}
 
-		data, _ := json.MarshalIndent(resp, "", "  ")
+		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }

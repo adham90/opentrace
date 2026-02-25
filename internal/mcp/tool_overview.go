@@ -155,7 +155,7 @@ func systemOverviewHandler(d overviewDeps) server.ToolHandlerFunc {
 		suggestions = append(suggestions, suggest("diagnose", "Deep dive into a specific service", nil))
 		withSuggestions(overview, suggestions...)
 
-		data, err := json.MarshalIndent(overview, "", "  ")
+		data, err := json.Marshal(overview)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal overview: %v", err)), nil
 		}
@@ -341,7 +341,7 @@ func triageAlertsHandler(d overviewDeps) server.ToolHandlerFunc {
 		}
 		withSuggestions(resp, suggestions...)
 
-		data, err := json.MarshalIndent(resp, "", "  ")
+		data, err := json.Marshal(resp)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal triage: %v", err)), nil
 		}

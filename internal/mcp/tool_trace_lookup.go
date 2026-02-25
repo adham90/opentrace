@@ -49,7 +49,7 @@ func traceLookupHandler(ls store.LogStore) server.ToolHandlerFunc {
 				"total_entries": 0,
 				"message":       "No log entries found for this trace ID",
 			}
-			data, _ := json.MarshalIndent(resp, "", "  ")
+			data, _ := json.Marshal(resp)
 			return mcp.NewToolResultText(string(data)), nil
 		}
 
@@ -200,7 +200,7 @@ func traceLookupHandler(ls store.LogStore) server.ToolHandlerFunc {
 			resp["warnings"] = warnings
 		}
 
-		data, _ := json.MarshalIndent(resp, "", "  ")
+		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }

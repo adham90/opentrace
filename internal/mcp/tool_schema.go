@@ -116,7 +116,7 @@ func schemaAllTables(ctx context.Context, qe connector.QueryExecutor, schema str
 		resp["dependencies"] = deps
 	}
 
-	data, err := json.MarshalIndent(resp, "", "  ")
+	data, err := json.Marshal(resp)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal schema: %v", err)), nil
 	}
@@ -224,7 +224,7 @@ func schemaTableDetail(ctx context.Context, qe connector.QueryExecutor, schema, 
 		"foreign_keys": foreignKeys,
 	}
 
-	data, err := json.MarshalIndent(resp, "", "  ")
+	data, err := json.Marshal(resp)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal table detail: %v", err)), nil
 	}

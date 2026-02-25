@@ -41,7 +41,7 @@ func getAuditLogHandler(as store.AuditStore) server.ToolHandlerFunc {
 			return mcp.NewToolResultText("No audit log entries found."), nil
 		}
 
-		data, err := json.MarshalIndent(entries, "", "  ")
+		data, err := json.Marshal(entries)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal audit log: %v", err)), nil
 		}

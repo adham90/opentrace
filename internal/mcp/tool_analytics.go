@@ -67,7 +67,7 @@ func webAnalyticsHandler(as store.AnalyticsStore) server.ToolHandlerFunc {
 			suggest("error_groups", "See current application errors", nil),
 		)
 
-		data, _ := json.MarshalIndent(resp, "", "  ")
+		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }
@@ -168,7 +168,7 @@ func topEndpointsHandler(as store.AnalyticsStore) server.ToolHandlerFunc {
 			}),
 		)
 
-		data, _ := json.MarshalIndent(resp, "", "  ")
+		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }
@@ -234,7 +234,7 @@ func trafficHeatmapHandler(as store.AnalyticsStore) server.ToolHandlerFunc {
 			resp["quietest"] = quietest
 		}
 
-		data, _ := json.MarshalIndent(resp, "", "  ")
+		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }

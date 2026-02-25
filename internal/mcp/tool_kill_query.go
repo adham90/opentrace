@@ -105,7 +105,7 @@ func killQueryHandler(registry *connector.Registry) server.ToolHandlerFunc {
 			resp["hint"] = "Query was cancelled gracefully. If the process doesn't stop, use force=true to terminate it."
 		}
 
-		data, err := json.MarshalIndent(resp, "", "  ")
+		data, err := json.Marshal(resp)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 		}

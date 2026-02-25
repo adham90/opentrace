@@ -99,7 +99,7 @@ func userJourneyHandler(js store.JourneyStore) server.ToolHandlerFunc {
 			suggest("path_analysis", "See common navigation patterns", map[string]any{"since": sinceStr}),
 		)
 
-		data, _ := json.MarshalIndent(resp, "", "  ")
+		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }
@@ -168,7 +168,7 @@ func pathAnalysisHandler(js store.JourneyStore) server.ToolHandlerFunc {
 			suggest("funnel_analysis", "Define and analyze conversion funnels", map[string]any{"action": "list"}),
 		)
 
-		data, _ := json.MarshalIndent(resp, "", "  ")
+		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }
@@ -220,7 +220,7 @@ func funnelAnalysisHandler(js store.JourneyStore) server.ToolHandlerFunc {
 				"name":      funnel.Name,
 				"steps":     funnel.Steps,
 			}
-			data, _ := json.MarshalIndent(resp, "", "  ")
+			data, _ := json.Marshal(resp)
 			return mcp.NewToolResultText(string(data)), nil
 
 		case "analyze":
@@ -250,7 +250,7 @@ func funnelAnalysisHandler(js store.JourneyStore) server.ToolHandlerFunc {
 				"steps":              result.Steps,
 				"overall_conversion": result.OverallConversion,
 			}
-			data, _ := json.MarshalIndent(resp, "", "  ")
+			data, _ := json.Marshal(resp)
 			return mcp.NewToolResultText(string(data)), nil
 
 		case "list":
@@ -274,7 +274,7 @@ func funnelAnalysisHandler(js store.JourneyStore) server.ToolHandlerFunc {
 			}
 
 			resp := map[string]any{"funnels": list}
-			data, _ := json.MarshalIndent(resp, "", "  ")
+			data, _ := json.Marshal(resp)
 			return mcp.NewToolResultText(string(data)), nil
 
 		case "delete":
@@ -285,7 +285,7 @@ func funnelAnalysisHandler(js store.JourneyStore) server.ToolHandlerFunc {
 			if err := js.DeleteFunnel(ctx, int64(funnelID)); err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("failed to delete funnel: %v", err)), nil
 			}
-			data, _ := json.MarshalIndent(map[string]any{"deleted": true}, "", "  ")
+			data, _ := json.Marshal(map[string]any{"deleted": true})
 			return mcp.NewToolResultText(string(data)), nil
 
 		default:
@@ -391,7 +391,7 @@ func requestTimelineHandler(js store.JourneyStore) server.ToolHandlerFunc {
 			suggest("log_context", "View surrounding log entries", map[string]any{"log_id": int64(logID)}),
 		)
 
-		data, _ := json.MarshalIndent(resp, "", "  ")
+		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }
@@ -462,7 +462,7 @@ func sessionWaterfallHandler(js store.JourneyStore) server.ToolHandlerFunc {
 			suggest("request_timeline", "Drill into a specific request", map[string]any{}),
 		)
 
-		data, _ := json.MarshalIndent(resp, "", "  ")
+		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }

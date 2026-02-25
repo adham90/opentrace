@@ -95,7 +95,7 @@ func watchHandler(watchStore store.WatchStore, logStore store.LogStore, metrics 
 			w, _ = watchStore.GetByID(ctx, w.ID)
 		}
 
-		data, _ := json.MarshalIndent(w, "", "  ")
+		data, _ := json.Marshal(w)
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }
@@ -209,7 +209,7 @@ func watchStatusHandler(watchStore store.WatchStore) func(ctx context.Context, r
 		}
 		withSuggestions(result, suggestions...)
 
-		data, _ := json.MarshalIndent(result, "", "  ")
+		data, _ := json.Marshal(result)
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }
@@ -258,7 +258,7 @@ func investigateHandler(watchStore store.WatchStore, logStore store.LogStore, me
 			}
 			withSuggestions(resp, suggestions...)
 
-			data, _ := json.MarshalIndent(resp, "", "  ")
+			data, _ := json.Marshal(resp)
 			return mcp.NewToolResultText(string(data)), nil
 		}
 
@@ -373,7 +373,7 @@ func investigateHandler(watchStore store.WatchStore, logStore store.LogStore, me
 		}
 		withSuggestions(resp, suggestions...)
 
-		data, _ := json.MarshalIndent(resp, "", "  ")
+		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }

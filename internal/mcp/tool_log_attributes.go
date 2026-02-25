@@ -57,7 +57,7 @@ func listLogAttributesHandler(ls store.LogStore) server.ToolHandlerFunc {
 				"values": keys,
 				"hint":   "Use these keys with the metadata_filter parameter in log_search (e.g. metadata_filter: {\"host\": \"server-01\"}).",
 			}
-			data, _ := json.MarshalIndent(resp, "", "  ")
+			data, _ := json.Marshal(resp)
 			return mcp.NewToolResultText(string(data)), nil
 		}
 
@@ -75,7 +75,7 @@ func listLogAttributesHandler(ls store.LogStore) server.ToolHandlerFunc {
 			"count":  len(values),
 			"values": values,
 		}
-		data, _ := json.MarshalIndent(resp, "", "  ")
+		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }

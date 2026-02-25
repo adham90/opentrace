@@ -134,7 +134,7 @@ LIMIT 50`
 		resp["message"] = "No blocking lock chains found — the database has no lock contention."
 	}
 
-	data, err := json.MarshalIndent(resp, "", "  ")
+	data, err := json.Marshal(resp)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 	}
@@ -198,7 +198,7 @@ LIMIT 100`
 		resp["message"] = "No locks currently held."
 	}
 
-	data, err := json.MarshalIndent(resp, "", "  ")
+	data, err := json.Marshal(resp)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 	}

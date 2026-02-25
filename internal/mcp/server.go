@@ -1193,7 +1193,7 @@ func listConnectorsHandler(registry *connector.Registry, dsStore store.DataSourc
 				entries = append(entries, e)
 			}
 
-			data, err := json.MarshalIndent(entries, "", "  ")
+			data, err := json.Marshal(entries)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("failed to marshal connectors: %v", err)), nil
 			}
@@ -1226,7 +1226,7 @@ func listServersHandler(ss store.ServerStore) server.ToolHandlerFunc {
 		if len(servers) == 0 {
 			return mcp.NewToolResultText("No monitored servers."), nil
 		}
-		data, err := json.MarshalIndent(servers, "", "  ")
+		data, err := json.Marshal(servers)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal servers: %v", err)), nil
 		}
@@ -1275,7 +1275,7 @@ func queryMetricsHandler(ss store.ServerStore, ms store.MetricStore) server.Tool
 			return mcp.NewToolResultText("No metrics found matching the given criteria."), nil
 		}
 
-		data, err := json.MarshalIndent(points, "", "  ")
+		data, err := json.Marshal(points)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal metrics: %v", err)), nil
 		}
@@ -1312,7 +1312,7 @@ func serverHealthHandler(ss store.ServerStore, ms store.MetricStore) server.Tool
 			"server":  srv,
 			"metrics": latest,
 		}
-		data, err := json.MarshalIndent(result, "", "  ")
+		data, err := json.Marshal(result)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal: %v", err)), nil
 		}

@@ -290,7 +290,7 @@ func (al *ActivityLogger) Close() {
 
 ## Medium Priority
 
-### 9. [ ] Replace MarshalIndent with Marshal in MCP Tools
+### 9. [x] Replace MarshalIndent with Marshal in MCP Tools
 
 **Impact:** 20-30% fewer allocations in MCP tool responses | **Effort:** 15 min
 
@@ -366,7 +366,7 @@ summaryLines[i] = b.String()
 | 6 | Eliminate duplicate metadata marshal | Done | 2026-02-25 |
 | 7 | Parallelize aggregation jobs | Done | 2026-02-25 |
 | 8 | Fix ActivityLogger shutdown | Done | 2026-02-25 |
-| 9 | Replace MarshalIndent with Marshal | Not Started | |
+| 9 | Replace MarshalIndent with Marshal | Done | 2026-02-25 |
 | 10 | Slice pre-allocation + strings.Builder | Not Started | |
 
 **Estimated total effort:** ~10-12 hours

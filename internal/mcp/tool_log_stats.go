@@ -140,7 +140,7 @@ func logStatsByLevel(ctx context.Context, ls store.LogStore, params store.LogCou
 		resp["warnings"] = warnings
 	}
 
-	data, _ := json.MarshalIndent(resp, "", "  ")
+	data, _ := json.Marshal(resp)
 	return mcp.NewToolResultText(string(data)), nil
 }
 
@@ -194,7 +194,7 @@ func logStatsByService(ctx context.Context, ls store.LogStore, params store.LogC
 		resp["warnings"] = warnings
 	}
 
-	data, _ := json.MarshalIndent(resp, "", "  ")
+	data, _ := json.Marshal(resp)
 	return mcp.NewToolResultText(string(data)), nil
 }
 
@@ -319,7 +319,7 @@ func logStatsByPattern(ctx context.Context, ls store.LogStore, since, until time
 		resp["warnings"] = warnings
 	}
 
-	data, _ := json.MarshalIndent(resp, "", "  ")
+	data, _ := json.Marshal(resp)
 	return mcp.NewToolResultText(string(data)), nil
 }
 

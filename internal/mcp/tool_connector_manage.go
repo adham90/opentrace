@@ -169,7 +169,7 @@ func getConnectorHandler(dsStore store.DataSourceStore) server.ToolHandlerFunc {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to fetch connector: %v", err)), nil
 		}
 
-		data, err := json.MarshalIndent(ds, "", "  ")
+		data, err := json.Marshal(ds)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal connector: %v", err)), nil
 		}

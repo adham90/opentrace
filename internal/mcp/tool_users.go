@@ -49,7 +49,7 @@ func listUsersHandler(us store.UserStore) server.ToolHandlerFunc {
 			}
 		}
 
-		data, err := json.MarshalIndent(summaries, "", "  ")
+		data, err := json.Marshal(summaries)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal users: %v", err)), nil
 		}
@@ -94,7 +94,7 @@ func updateUserRoleHandler(us store.UserStore) server.ToolHandlerFunc {
 			"role":    string(user.Role),
 		}
 
-		data, err := json.MarshalIndent(result, "", "  ")
+		data, err := json.Marshal(result)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 		}
@@ -143,7 +143,7 @@ func toggleUserActiveHandler(us store.UserStore) server.ToolHandlerFunc {
 			"is_active": user.IsActive,
 		}
 
-		data, err := json.MarshalIndent(result, "", "  ")
+		data, err := json.Marshal(result)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 		}
@@ -185,7 +185,7 @@ func deleteUserHandler(us store.UserStore) server.ToolHandlerFunc {
 			"email":   user.Email,
 		}
 
-		data, err := json.MarshalIndent(result, "", "  ")
+		data, err := json.Marshal(result)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 		}

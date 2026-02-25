@@ -152,7 +152,7 @@ func compareErrors(ctx context.Context, ls store.LogStore, curStart, curEnd, bas
 		resp["warnings"] = warnings
 	}
 
-	data, _ := json.MarshalIndent(resp, "", "  ")
+	data, _ := json.Marshal(resp)
 	return mcp.NewToolResultText(string(data)), nil
 }
 
@@ -219,7 +219,7 @@ func compareLogVolume(ctx context.Context, ls store.LogStore, curStart, curEnd, 
 		},
 	}
 
-	data, _ := json.MarshalIndent(resp, "", "  ")
+	data, _ := json.Marshal(resp)
 	return mcp.NewToolResultText(string(data)), nil
 }
 
