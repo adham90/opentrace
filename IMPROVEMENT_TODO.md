@@ -143,7 +143,7 @@ Go's `errors.Is()` unwraps error chains. If someone later wraps an error with `f
 
 ---
 
-### 6. [ ] Tighten Content Security Policy
+### 6. [x] Tighten Content Security Policy
 
 **What it is:** The CSP header controls what scripts/styles the browser is allowed to run. Currently, `script-src-attr 'unsafe-inline'` is set, which allows inline event handlers like `onclick="doSomething()"` in HTML. This weakens XSS protection.
 
@@ -252,7 +252,7 @@ User deletes a connector → audit("delete connector") → channel full → entr
 | 3 | Log silent errors | Medium | Done | 2026-02-25 |
 | 4 | Pagination on list endpoints | Medium | Done | 2026-02-25 |
 | 5 | Standardize error patterns | Medium | Done | 2026-02-25 |
-| 6 | Tighten CSP | Medium | Not Started | |
+| 6 | Tighten CSP | Medium | Done | 2026-02-25 |
 | 7 | Prometheus metrics | Lower | Not Started | |
 | 8 | OpenAPI documentation | Lower | Not Started | |
 | 9 | Retry logic | Lower | Not Started | |

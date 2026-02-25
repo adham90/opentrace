@@ -17,7 +17,7 @@
       <div id="ver-status" style="margin-bottom:0.75rem"></div>
 
       <div id="ver-update-actions" style="display:none;margin-bottom:0.75rem">
-        <button class="btn btn-primary" onclick="performUpdate()" id="ver-update-btn" style="margin-right:0.5rem">Update now</button>
+        <button class="btn btn-primary" id="ver-update-btn" style="margin-right:0.5rem">Update now</button>
         <span id="ver-update-status" style="font-size:0.9rem"></span>
       </div>
 
@@ -32,13 +32,13 @@
       </div>
 
       <div style="margin-top:0.75rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
-        <button class="btn" onclick="checkForUpdates()" id="ver-check-btn">Check for updates</button>
+        <button class="btn" id="ver-check-btn">Check for updates</button>
         <span id="ver-check-status" style="font-size:0.9rem"></span>
       </div>
 
       <div id="ver-auto-update" style="display:none;margin-top:0.75rem">
         <label class="checkbox-label">
-          <input type="checkbox" id="auto-update-toggle" onchange="toggleAutoUpdate(this.checked)">
+          <input type="checkbox" id="auto-update-toggle">
           <span>Auto-update (check every hour and apply automatically)</span>
         </label>
       </div>
@@ -57,11 +57,11 @@
     </div>
     {{end}}
     <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.75rem">
-      <code id="api-key-value" style="flex:1;padding:0.5rem;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;word-break:break-all;font-size:0.85rem;cursor:pointer" onclick="toggleKeyVisibility()">Loading...</code>
-      <button class="btn btn-primary" onclick="copyAPIKey()" style="white-space:nowrap">Copy</button>
+      <code id="api-key-value" style="flex:1;padding:0.5rem;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;word-break:break-all;font-size:0.85rem;cursor:pointer">Loading...</code>
+      <button class="btn btn-primary" id="copy-api-key-btn" style="white-space:nowrap">Copy</button>
     </div>
     {{if not .EnvKeyOverride}}
-    <button class="btn" onclick="confirmRegenerate()" id="regen-btn">Regenerate Key</button>
+    <button class="btn" id="regen-btn">Regenerate Key</button>
     <span id="regen-status" style="margin-left:1em;font-size:0.9rem"></span>
     {{end}}
   </div>
@@ -72,7 +72,7 @@
     <p class="text-dim" style="font-size:0.85rem;margin-bottom:0.75rem">
       How long logs, watcher runs, and alerts are kept. Set to <strong>0</strong> to keep forever. Default: 30 days.
     </p>
-    <form id="retention-form" onsubmit="return saveRetention(event)">
+    <form id="retention-form">
       <div class="form-group">
         <label for="retention-days">Retention period (days)</label>
         <input type="number" id="retention-days" name="retention_days"
@@ -107,7 +107,7 @@
       CORS origins are set via <code>OPENTRACE_CORS_ORIGINS</code> environment variable. UI management is disabled.
     </div>
     {{end}}
-    <form id="cors-form" onsubmit="return saveCORS(event)">
+    <form id="cors-form">
       <div class="form-group">
         <label for="cors-origins">Allowed origins</label>
         <input type="text" id="cors-origins" name="cors_origins"
@@ -134,7 +134,7 @@
       Query guardrails are set via <code>OPENTRACE_MAX_QUERY_ROWS</code> / <code>OPENTRACE_STATEMENT_TIMEOUT_MS</code> environment variables. UI management is disabled.
     </div>
     {{end}}
-    <form id="guardrails-form" onsubmit="return saveGuardrails(event)">
+    <form id="guardrails-form">
       <div style="display:flex;gap:1rem;flex-wrap:wrap">
         <div class="form-group">
           <label for="max-query-rows">Max rows</label>
@@ -169,7 +169,7 @@
       MCP name is set via <code>OPENTRACE_MCP_NAME</code> environment variable. UI management is disabled.
     </div>
     {{end}}
-    <form id="mcp-name-form" onsubmit="return saveMCPName(event)">
+    <form id="mcp-name-form">
       <div class="form-group">
         <label for="mcp-name">Server name</label>
         <input type="text" id="mcp-name" name="mcp_name"
@@ -496,6 +496,21 @@ function toggleAutoUpdate(enabled) {
 }
 
 loadVersion();
+
+// ---- Bind event listeners (CSP-safe) ----
+document.getElementById('ver-update-btn').addEventListener('click', performUpdate);
+document.getElementById('ver-check-btn').addEventListener('click', checkForUpdates);
+document.getElementById('auto-update-toggle').addEventListener('change', function() {
+  toggleAutoUpdate(this.checked);
+});
+document.getElementById('api-key-value').addEventListener('click', toggleKeyVisibility);
+document.getElementById('copy-api-key-btn').addEventListener('click', copyAPIKey);
+var regenBtn = document.getElementById('regen-btn');
+if (regenBtn) regenBtn.addEventListener('click', confirmRegenerate);
+document.getElementById('retention-form').addEventListener('submit', saveRetention);
+document.getElementById('cors-form').addEventListener('submit', saveCORS);
+document.getElementById('guardrails-form').addEventListener('submit', saveGuardrails);
+document.getElementById('mcp-name-form').addEventListener('submit', saveMCPName);
 </script>
 
 <style nonce="{{.CSPNonce}}">

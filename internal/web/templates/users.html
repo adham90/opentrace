@@ -28,26 +28,26 @@
             <td>{{.Email}}</td>
             <td>{{.DisplayName}}</td>
             <td>
-              <select class="role-select" onchange="updateRole('{{.ID}}', this.value)" {{if not $.IsAdmin}}disabled{{end}}>
+              <select class="role-select" data-user-id="{{.ID}}" {{if not $.IsAdmin}}disabled{{end}}>
                 <option value="admin" {{if eq (print .Role) "admin"}}selected{{end}}>admin</option>
                 <option value="member" {{if eq (print .Role) "member"}}selected{{end}}>member</option>
               </select>
             </td>
             <td>
               <label class="toggle-label">
-                <input type="checkbox" {{if .MCPEnabled}}checked{{end}} onchange="toggleMCP('{{.ID}}', this.checked)">
+                <input type="checkbox" {{if .MCPEnabled}}checked{{end}} data-toggle="mcp" data-user-id="{{.ID}}">
                 <span class="toggle-text">{{if .MCPEnabled}}on{{else}}off{{end}}</span>
               </label>
             </td>
             <td>
               <label class="toggle-label">
-                <input type="checkbox" {{if .IsActive}}checked{{end}} onchange="toggleActive('{{.ID}}', this.checked)">
+                <input type="checkbox" {{if .IsActive}}checked{{end}} data-toggle="active" data-user-id="{{.ID}}">
                 <span class="toggle-text">{{if .IsActive}}yes{{else}}no{{end}}</span>
               </label>
             </td>
             <td class="actions-cell">
-              <button class="btn btn-sm" onclick="regenToken('{{.ID}}')">Regen Token</button>
-              <button class="btn btn-sm btn-danger" onclick="deleteUser('{{.ID}}', '{{.Email}}')">Delete</button>
+              <button class="btn btn-sm btn-regen" data-user-id="{{.ID}}">Regen Token</button>
+              <button class="btn btn-sm btn-danger btn-delete-user" data-user-id="{{.ID}}" data-email="{{.Email}}">Delete</button>
             </td>
           </tr>
           {{end}}
@@ -118,6 +118,33 @@ function deleteUser(id, email) {
     if (typeof showToast === 'function') showToast('Error: ' + e.message, 'error');
   });
 }
+
+// ---- Bind event listeners (CSP-safe) ----
+document.querySelectorAll('.role-select').forEach(function(sel) {
+  sel.addEventListener('change', function() {
+    updateRole(sel.getAttribute('data-user-id'), sel.value);
+  });
+});
+document.querySelectorAll('[data-toggle="mcp"]').forEach(function(cb) {
+  cb.addEventListener('change', function() {
+    toggleMCP(cb.getAttribute('data-user-id'), cb.checked);
+  });
+});
+document.querySelectorAll('[data-toggle="active"]').forEach(function(cb) {
+  cb.addEventListener('change', function() {
+    toggleActive(cb.getAttribute('data-user-id'), cb.checked);
+  });
+});
+document.querySelectorAll('.btn-regen').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    regenToken(btn.getAttribute('data-user-id'));
+  });
+});
+document.querySelectorAll('.btn-delete-user').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    deleteUser(btn.getAttribute('data-user-id'), btn.getAttribute('data-email'));
+  });
+});
 </script>
 
 <style nonce="{{.CSPNonce}}">

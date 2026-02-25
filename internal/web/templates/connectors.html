@@ -31,9 +31,9 @@
             </td>
             <td class="conn-tested">{{if .LastTestedAt}}{{.LastTestedAt.Format "Jan 02, 15:04"}}{{else}}<span class="text-dim">never</span>{{end}}</td>
             {{if $.IsAdmin}}
-            <td class="actions-cell" onclick="event.stopPropagation()">
-              <button class="btn btn-sm" onclick="testConnector('{{.ID}}')" id="test-btn-{{.ID}}">Test</button>
-              <button class="btn btn-sm btn-danger" onclick="deleteConnector('{{.ID}}', '{{.Name}}')">Delete</button>
+            <td class="actions-cell">
+              <button class="btn btn-sm btn-test" data-id="{{.ID}}" id="test-btn-{{.ID}}">Test</button>
+              <button class="btn btn-sm btn-danger btn-delete-conn" data-id="{{.ID}}" data-name="{{.Name}}">Delete</button>
             </td>
             {{end}}
           </tr>
@@ -158,6 +158,20 @@ function deleteConnector(id, name) {
   });
 }
 {{end}}
+// ---- Bind event listeners (CSP-safe) ----
+document.querySelectorAll('.actions-cell').forEach(function(cell) {
+  cell.addEventListener('click', function(e) { e.stopPropagation(); });
+});
+document.querySelectorAll('.btn-test').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    testConnector(btn.getAttribute('data-id'));
+  });
+});
+document.querySelectorAll('.btn-delete-conn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    deleteConnector(btn.getAttribute('data-id'), btn.getAttribute('data-name'));
+  });
+});
 </script>
 
 <style nonce="{{.CSPNonce}}">

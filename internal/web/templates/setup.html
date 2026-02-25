@@ -11,7 +11,7 @@
     <div class="setup-step-body">
       <h3 class="setup-step-title">Install</h3>
       <div class="code-block">
-        <button class="copy-btn" onclick="copyCode(this)">copy</button>
+        <button class="copy-btn">copy</button>
         <pre><code>go install github.com/adham90/opentrace/cmd/opentrace@latest</code></pre>
       </div>
     </div>
@@ -24,16 +24,16 @@
       <h3 class="setup-step-title">Connect your MCP client</h3>
 
       <div class="setup-client-picker" id="client-picker">
-        <button class="setup-client-btn active" onclick="pickClient('claude', this)">Claude Code</button>
-        <button class="setup-client-btn" onclick="pickClient('cursor', this)">Cursor</button>
-        <button class="setup-client-btn" onclick="pickClient('windsurf', this)">Windsurf</button>
-        <button class="setup-client-btn" onclick="pickClient('other', this)">Other</button>
+        <button class="setup-client-btn active" data-client="claude">Claude Code</button>
+        <button class="setup-client-btn" data-client="cursor">Cursor</button>
+        <button class="setup-client-btn" data-client="windsurf">Windsurf</button>
+        <button class="setup-client-btn" data-client="other">Other</button>
       </div>
 
       <p class="setup-client-hint" id="client-hint">Add to <code>.mcp.json</code> or <code>~/.claude.json</code></p>
 
       <div class="code-block">
-        <button class="copy-btn" onclick="copyCode(this)">copy</button>
+        <button class="copy-btn">copy</button>
         <pre><code id="mcp-config">{
   "mcpServers": {
     "opentrace": {
@@ -64,7 +64,7 @@
       <div class="setup-extra-body">
         <p class="setup-step-desc">Collect CPU, memory, disk, network and load metrics from your servers.</p>
         <div class="code-block">
-          <button class="copy-btn" onclick="copyInstallCmd(this)">copy</button>
+          <button class="copy-btn" data-copy="install">copy</button>
           <pre><code id="agent-install-cmd">loading...</code></pre>
         </div>
 
@@ -73,13 +73,13 @@
           <div style="margin-top:0.75rem">
             <p class="setup-step-desc">Run the agent manually:</p>
             <div class="code-block">
-              <button class="copy-btn" onclick="copyManualRunCmd(this)">copy</button>
+              <button class="copy-btn" data-copy="manual">copy</button>
               <pre><code id="agent-manual-cmd">loading...</code></pre>
             </div>
 
             <p class="setup-step-desc" style="margin-top:1rem">Systemd unit file:</p>
             <div class="code-block">
-              <button class="copy-btn" onclick="copySystemdCmd(this)">copy</button>
+              <button class="copy-btn" data-copy="systemd">copy</button>
               <pre><code id="agent-systemd-cmd">loading...</code></pre>
             </div>
 
@@ -98,12 +98,12 @@
       <div class="setup-extra-body">
         <p class="setup-step-desc">Capture JavaScript errors and forward them to OpenTrace.</p>
         <div class="code-block">
-          <button class="copy-btn" onclick="copyJSSnippet(this)">copy</button>
+          <button class="copy-btn" data-copy="js-snippet">copy</button>
           <pre><code id="js-snippet">loading...</code></pre>
         </div>
         <p class="setup-step-desc" style="margin-top:0.75rem">Optional: add a meta tag to correlate with server requests:</p>
         <div class="code-block">
-          <button class="copy-btn" onclick="copyCode(this)">copy</button>
+          <button class="copy-btn">copy</button>
           <pre><code>&lt;meta name="opentrace-rid" content="&lt;%= request.request_id %&gt;"&gt;</code></pre>
         </div>
 
@@ -121,7 +121,7 @@
               <div class="setup-env-row"><code>enabled</code> <span>Kill switch (default: true)</span></div>
             </div>
             <div class="code-block" style="margin-top:1rem">
-              <button class="copy-btn" onclick="copyCode(this)">copy</button>
+              <button class="copy-btn">copy</button>
               <pre><code>OpenTrace.captureError(error, { userId: 42 });
 OpenTrace.log('warn', 'Retry attempted', { orderId: 123 });
 OpenTrace.setContext({ userId: 42, plan: 'pro' });</code></pre>
@@ -148,7 +148,7 @@ OpenTrace.setContext({ userId: 42, plan: 'pro' });</code></pre>
         </div>
         <p class="setup-step-desc" style="margin-top:1rem">Pass env vars to the MCP server:</p>
         <div class="code-block">
-          <button class="copy-btn" onclick="copyCode(this)">copy</button>
+          <button class="copy-btn">copy</button>
           <pre><code>{
   "mcpServers": {
     "opentrace": {
@@ -247,6 +247,23 @@ function copyAndFlash(btn, text) {
     setTimeout(function() { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 2000);
   });
 }
+
+// ---- Bind event listeners (CSP-safe) ----
+document.querySelectorAll('.copy-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var action = btn.getAttribute('data-copy');
+    if (action === 'install') copyInstallCmd(btn);
+    else if (action === 'manual') copyManualRunCmd(btn);
+    else if (action === 'systemd') copySystemdCmd(btn);
+    else if (action === 'js-snippet') copyJSSnippet(btn);
+    else copyCode(btn);
+  });
+});
+document.querySelectorAll('.setup-client-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    pickClient(btn.getAttribute('data-client'), btn);
+  });
+});
 </script>
 
 <style nonce="{{.CSPNonce}}">

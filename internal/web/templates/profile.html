@@ -32,7 +32,7 @@
       {{if .User.MCPEnabled}}
       <p class="text-dim" style="font-size:0.85rem;margin:0 0 1rem 0">Your personal MCP token for connecting AI tools to OpenTrace.</p>
       <div class="code-block" style="position:relative">
-        <button class="copy-btn" id="mcp-reveal-btn" onclick="revealToken()">reveal</button>
+        <button class="copy-btn" id="mcp-reveal-btn">reveal</button>
         <pre><code id="mcp-token-display">mcp_****...****</code></pre>
       </div>
 
@@ -42,13 +42,13 @@
       </p>
 
       <div class="mcp-config-tabs" style="margin-bottom:0.5rem">
-        <button class="mcp-tab active" onclick="switchMCPTab('remote', this)" id="mcp-tab-remote">Remote (URL)</button>
-        <button class="mcp-tab" onclick="switchMCPTab('local', this)" id="mcp-tab-local">Local (stdio)</button>
+        <button class="mcp-tab active" data-tab="remote" id="mcp-tab-remote">Remote (URL)</button>
+        <button class="mcp-tab" data-tab="local" id="mcp-tab-local">Local (stdio)</button>
       </div>
 
       <div id="mcp-config-remote">
         <div class="code-block" style="position:relative">
-          <button class="copy-btn" id="mcp-config-remote-copy-btn" onclick="copyMCPConfig('remote', this)" disabled>copy</button>
+          <button class="copy-btn" id="mcp-config-remote-copy-btn" data-config="remote" disabled>copy</button>
           <pre><code id="mcp-config-remote-display">{
   "mcpServers": {
     "opentrace": {
@@ -68,7 +68,7 @@
 
       <div id="mcp-config-local" style="display:none">
         <div class="code-block" style="position:relative">
-          <button class="copy-btn" id="mcp-config-local-copy-btn" onclick="copyMCPConfig('local', this)" disabled>copy</button>
+          <button class="copy-btn" id="mcp-config-local-copy-btn" data-config="local" disabled>copy</button>
           <pre><code id="mcp-config-local-display">{
   "mcpServers": {
     "opentrace": {
@@ -94,7 +94,7 @@
   <!-- Change Password -->
   <div class="settings-section">
     <h3 class="settings-section-title"><span class="dim">#</span> Change Password</h3>
-    <form id="password-form" onsubmit="return changePassword(event)">
+    <form id="password-form">
       <div class="form-group">
         <label for="current_password">Current Password</label>
         <input type="password" id="current_password" name="current_password" required style="max-width:400px">
@@ -242,6 +242,23 @@ function changePassword(e) {
   });
   return false;
 }
+
+// ---- Bind event listeners (CSP-safe) ----
+var revealBtn = document.getElementById('mcp-reveal-btn');
+if (revealBtn) revealBtn.addEventListener('click', revealToken);
+
+document.querySelectorAll('.mcp-tab').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    switchMCPTab(btn.getAttribute('data-tab'), btn);
+  });
+});
+document.querySelectorAll('[data-config]').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    copyMCPConfig(btn.getAttribute('data-config'), btn);
+  });
+});
+var pwForm = document.getElementById('password-form');
+if (pwForm) pwForm.addEventListener('submit', changePassword);
 </script>
 
 <style nonce="{{.CSPNonce}}">

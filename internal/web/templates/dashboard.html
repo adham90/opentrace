@@ -16,12 +16,12 @@
     <div class="status-bar-right">
       {{if .User}}
       <div class="user-menu" id="user-menu">
-        <button class="user-menu-trigger" onclick="toggleUserMenu()">
+        <button class="user-menu-trigger" id="user-menu-trigger-btn">
           {{.User.DisplayName}}
           <svg width="8" height="5" viewBox="0 0 8 5" fill="currentColor"><path d="M0 0l4 5 4-5z"/></svg>
         </button>
         <div class="user-menu-dropdown" id="user-menu-dropdown">
-          <button class="user-menu-item" onclick="cycleTheme(); updateDropdownTheme();">theme: <span id="dropdown-theme-label">system</span></button>
+          <button class="user-menu-item" id="theme-toggle-btn">theme: <span id="dropdown-theme-label">system</span></button>
           <div class="user-menu-divider"></div>
           <a href="/profile" class="user-menu-item">Profile</a>
           <a href="/settings" class="user-menu-item">Settings</a>
@@ -30,7 +30,7 @@
           <a href="/tools" class="user-menu-item">Tools</a>
           {{if .IsAdmin}}<a href="/users" class="user-menu-item">Users</a>{{end}}
           <div class="user-menu-divider"></div>
-          <a href="/logout" class="user-menu-item user-menu-item-danger" onclick="return confirm('Log out?')">Logout</a>
+          <a href="/logout" class="user-menu-item user-menu-item-danger" id="logout-link">Logout</a>
         </div>
       </div>
       {{end}}
@@ -73,13 +73,13 @@
       </div>
     </div>
 
-    <div class="term-new-indicator" id="new-indicator" style="display:none" onclick="scrollToBottom()">
+    <div class="term-new-indicator" id="new-indicator" style="display:none">
       <span id="new-indicator-count">0</span> new logs
     </div>
   </div>
 
   <!-- ── Command Line ───────────────────────────────────────── -->
-  <form id="filter-form" class="term-cmdline" autocomplete="off" onsubmit="return false;">
+  <form id="filter-form" class="term-cmdline" autocomplete="off">
     <input type="hidden" name="service" id="f-service" value="{{.LogFilters.Service}}">
     <input type="hidden" name="level" id="f-level" value="{{.LogFilters.Level}}">
     <input type="hidden" name="event_type" id="f-event-type" value="{{.LogFilters.EventType}}">
@@ -96,7 +96,7 @@
       <span class="term-prompt-symbol">$</span>
       <div class="term-active-filters" id="active-filters"></div>
       <input type="text" id="cmd-input" class="term-cmd-input" placeholder="level:error service:api-svc or search text" spellcheck="false">
-      <div class="term-live-badge" id="live-badge" onclick="window.toggleLive()" title="toggle live tail (p)">
+      <div class="term-live-badge" id="live-badge" title="toggle live tail (p)">
         <span class="term-live-dot" id="live-dot"></span>
         <span id="live-label">LIVE</span>
       </div>
@@ -380,7 +380,7 @@
 
   function renderInlineDetail(el, log) {
     var html = '';
-    html += '<button class="term-copy-btn" onclick="copyLogDetail(this)" title="Copy log details">Copy</button>';
+    html += '<button class="term-copy-btn" title="Copy log details">Copy</button>';
     html += '<div class="term-detail-section">';
     html += dRow('id', log.id);
     if (log.trace_id) html += dRow('trace_id', log.trace_id);
@@ -788,6 +788,25 @@
 
   window.clearFilters = clearAllFilters;
   syncHiddenFields(); renderFilterChips();
+
+  // ── Event bindings (replacing inline handlers) ────────────
+  var userMenuTrigger = document.getElementById('user-menu-trigger-btn');
+  if (userMenuTrigger) {
+    userMenuTrigger.addEventListener('click', function() { toggleUserMenu(); });
+  }
+  var themeToggleBtn = document.getElementById('theme-toggle-btn');
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener('click', function() { cycleTheme(); updateDropdownTheme(); });
+  }
+  var logoutLink = document.getElementById('logout-link');
+  if (logoutLink) {
+    logoutLink.addEventListener('click', function(e) {
+      if (!confirm('Log out?')) { e.preventDefault(); }
+    });
+  }
+  newIndicator.addEventListener('click', function() { scrollToBottom(); });
+  form.addEventListener('submit', function(e) { e.preventDefault(); });
+  liveBadge.addEventListener('click', function() { window.toggleLive(); });
 })();
 
 // ── Copy log detail to clipboard ───────────────────────────
@@ -804,6 +823,11 @@ function copyLogDetail(btn) {
     setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
   });
 }
+document.addEventListener('click', function(e) {
+  if (e.target.classList.contains('term-copy-btn')) {
+    copyLogDetail(e.target);
+  }
+});
 
 // ── Autocomplete ──────────────────────────────────────────
 (function(){

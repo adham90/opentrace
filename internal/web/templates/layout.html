@@ -44,7 +44,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- Keyboard shortcut overlay -->
-  <div id="shortcut-overlay" class="shortcut-overlay" style="display:none" onclick="if(event.target===this)toggleShortcuts()">
+  <div id="shortcut-overlay" class="shortcut-overlay" style="display:none">
     <div class="shortcut-dialog">
       <div class="shortcut-title">Keyboard Shortcuts</div>
       <div class="shortcut-section">
@@ -105,8 +105,12 @@
       var toast = document.createElement('div');
       toast.className = 'toast toast-' + type;
       toast.innerHTML = '<span class="toast-icon">' + (icons[type] || 'i') + '</span>' +
-        '<span class="toast-body">' + escapeHtmlGlobal(message) + '</span>' +
-        '<button class="toast-close" onclick="dismissToast(this.parentElement)">\u00d7</button>';
+        '<span class="toast-body">' + escapeHtmlGlobal(message) + '</span>';
+      var closeBtn = document.createElement('button');
+      closeBtn.className = 'toast-close';
+      closeBtn.textContent = '\u00d7';
+      closeBtn.addEventListener('click', function() { dismissToast(toast); });
+      toast.appendChild(closeBtn);
       container.appendChild(toast);
       if (duration > 0) {
         setTimeout(function() { dismissToast(toast); }, duration);
@@ -189,6 +193,10 @@
       var overlay = document.getElementById('shortcut-overlay');
       if (overlay) overlay.style.display = overlay.style.display === 'none' ? 'flex' : 'none';
     };
+
+    document.getElementById('shortcut-overlay').addEventListener('click', function(e) {
+      if (e.target === this) toggleShortcuts();
+    });
 
     document.addEventListener('keydown', function(e) {
       var tag = e.target.tagName;
