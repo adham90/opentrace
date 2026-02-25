@@ -179,7 +179,7 @@ CREATE INDEX IF NOT EXISTS idx_logs_session_service_ts
 
 ---
 
-### 6. [ ] Eliminate Duplicate Metadata Marshal in Log Ingestion
+### 6. [x] Eliminate Duplicate Metadata Marshal in Log Ingestion
 
 **Impact:** ~50% fewer allocations on hottest path | **Effort:** 1 hr
 
@@ -363,7 +363,7 @@ summaryLines[i] = b.String()
 | 3 | Fix journey store N+1 | Done | 2026-02-25 |
 | 4 | Propagate app context | Not Started | |
 | 5 | Add composite indexes | Done | 2026-02-25 |
-| 6 | Eliminate duplicate metadata marshal | Not Started | |
+| 6 | Eliminate duplicate metadata marshal | Done | 2026-02-25 |
 | 7 | Parallelize aggregation jobs | Not Started | |
 | 8 | Fix ActivityLogger shutdown | Not Started | |
 | 9 | Replace MarshalIndent with Marshal | Not Started | |

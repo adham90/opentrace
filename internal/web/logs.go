@@ -133,6 +133,14 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 
 	logEntries := make([]store.LogEntry, len(entries))
 	for i, e := range entries {
+		// Pre-marshal metadata once to avoid double marshal in the store layer
+		var metadataJSON string
+		if e.Metadata != nil {
+			if raw, err := json.Marshal(e.Metadata); err == nil {
+				metadataJSON = string(raw)
+			}
+		}
+
 		logEntries[i] = store.LogEntry{
 			Timestamp:        e.Timestamp,
 			Level:            e.Level,
@@ -150,6 +158,7 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 			SourceFile:       e.SourceFile,
 			SourceLine:       e.SourceLine,
 			Metadata:         e.Metadata,
+			MetadataJSON:     metadataJSON,
 		}
 		if e.RequestSummary != nil {
 			rs := e.RequestSummary

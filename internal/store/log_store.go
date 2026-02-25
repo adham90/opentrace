@@ -51,16 +51,21 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []LogEntry) (int, er
 		// Extract promoted fields from metadata as fallback
 		promoteFromMetadata(&e)
 
-		meta, err := json.Marshal(e.Metadata)
-		if err != nil {
-			return 0, fmt.Errorf("marshaling metadata: %w", err)
+		// Use pre-marshaled metadata if available; otherwise marshal now
+		metaStr := e.MetadataJSON
+		if metaStr == "" {
+			meta, err := json.Marshal(e.Metadata)
+			if err != nil {
+				return 0, fmt.Errorf("marshaling metadata: %w", err)
+			}
+			metaStr = string(meta)
 		}
 		ts := e.Timestamp.UTC().Format(time.RFC3339Nano)
 		res, err := stmt.ExecContext(ctx, ts, e.Level, e.Service, e.Environment, e.CommitHash,
 			e.TraceID, e.SpanID, e.ParentSpanID, e.RequestID,
 			e.UserID, e.SessionID,
 			e.Message, e.EventType, e.ExceptionClass, e.ErrorFingerprint,
-			e.SourceFile, e.SourceLine, string(meta))
+			e.SourceFile, e.SourceLine, metaStr)
 		if err != nil {
 			return 0, fmt.Errorf("inserting log entry: %w", err)
 		}

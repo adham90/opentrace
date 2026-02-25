@@ -75,6 +75,7 @@ type LogEntry struct {
 	SourceFile       string          `json:"source_file,omitempty"`
 	SourceLine       int             `json:"source_line,omitempty"`
 	Metadata         map[string]any  `json:"metadata,omitempty"`
+	MetadataJSON     string          `json:"-"` // pre-marshaled metadata; avoids double marshal on hot path
 	RequestSummary   *RequestSummary `json:"request_summary,omitempty"`
 	CreatedAt        time.Time       `json:"created_at"`
 }

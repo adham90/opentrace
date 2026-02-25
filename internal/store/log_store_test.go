@@ -355,6 +355,77 @@ func TestSearchRequestSummaries_Filters(t *testing.T) {
 	}
 }
 
+func TestBatchInsert_MetadataJSONSkipsMarshal(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewLogStore(db)
+	ctx := context.Background()
+
+	// When MetadataJSON is set, it should be used directly instead of marshaling Metadata
+	entries := []LogEntry{
+		{
+			Timestamp:    time.Now(),
+			Level:        "INFO",
+			Service:      "api",
+			Message:      "pre-marshaled",
+			Metadata:     map[string]any{"key": "should-be-ignored"},
+			MetadataJSON: `{"key":"pre-marshaled-value"}`,
+		},
+	}
+
+	count, err := s.BatchInsert(ctx, entries)
+	if err != nil {
+		t.Fatalf("BatchInsert: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("count = %d, want 1", count)
+	}
+
+	results, err := s.Search(ctx, LogSearchParams{Limit: 1})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("len = %d, want 1", len(results))
+	}
+	// The pre-marshaled value should be stored
+	if v, ok := results[0].Metadata["key"].(string); !ok || v != "pre-marshaled-value" {
+		t.Errorf("metadata key = %v, want pre-marshaled-value", results[0].Metadata["key"])
+	}
+}
+
+func TestBatchInsert_MetadataFallbackMarshal(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewLogStore(db)
+	ctx := context.Background()
+
+	// When MetadataJSON is empty, Metadata map should be marshaled as before
+	entries := []LogEntry{
+		{
+			Timestamp: time.Now(),
+			Level:     "INFO",
+			Service:   "api",
+			Message:   "normal marshal",
+			Metadata:  map[string]any{"key": "normal-value"},
+		},
+	}
+
+	count, err := s.BatchInsert(ctx, entries)
+	if err != nil {
+		t.Fatalf("BatchInsert: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("count = %d, want 1", count)
+	}
+
+	results, err := s.Search(ctx, LogSearchParams{Limit: 1})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if v, ok := results[0].Metadata["key"].(string); !ok || v != "normal-value" {
+		t.Errorf("metadata key = %v, want normal-value", results[0].Metadata["key"])
+	}
+}
+
 func TestLogStore_Prune(t *testing.T) {
 	db := setupTestDB(t)
 	s := NewLogStore(db)
