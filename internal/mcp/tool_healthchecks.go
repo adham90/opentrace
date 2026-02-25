@@ -19,7 +19,7 @@ func listHealthchecksHandler(hcs store.HealthCheckStore) server.ToolHandlerFunc 
 			return mcp.NewToolResultError("HealthCheckStore not configured"), nil
 		}
 
-		checks, err := hcs.List(ctx)
+		checks, err := hcs.List(ctx, store.ListHealthCheckParams{})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to list health checks: %v", err)), nil
 		}

@@ -72,13 +72,25 @@ func (m *mockHealthCheckStore) Get(_ context.Context, id string) (*store.HealthC
 	return hc, nil
 }
 
-func (m *mockHealthCheckStore) List(_ context.Context) ([]store.HealthCheck, error) {
+func (m *mockHealthCheckStore) List(_ context.Context, params store.ListHealthCheckParams) ([]store.HealthCheck, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
 	var result []store.HealthCheck
 	for _, hc := range m.checks {
 		result = append(result, *hc)
+	}
+	// Apply pagination
+	if params.Limit > 0 {
+		start := params.Offset
+		if start > len(result) {
+			start = len(result)
+		}
+		end := start + params.Limit
+		if end > len(result) {
+			end = len(result)
+		}
+		result = result[start:end]
 	}
 	return result, nil
 }

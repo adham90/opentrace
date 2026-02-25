@@ -84,7 +84,7 @@ func TestHealthCheckStore_List(t *testing.T) {
 	s.Create(ctx, CreateHealthCheckParams{Name: "A", URL: "https://a.com"})
 	s.Create(ctx, CreateHealthCheckParams{Name: "B", URL: "https://b.com"})
 
-	list, err := s.List(ctx)
+	list, err := s.List(ctx, ListHealthCheckParams{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -280,6 +280,58 @@ func TestHealthCheckStore_PruneResults(t *testing.T) {
 	results, _ := s.LatestResults(ctx, hc.ID, 10)
 	if len(results) != 1 {
 		t.Errorf("remaining = %d, want 1", len(results))
+	}
+}
+
+func TestHealthCheckStore_List_Pagination(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewHealthCheckStore(db)
+	ctx := context.Background()
+
+	// Create 4 health checks
+	for _, name := range []string{"A", "B", "C", "D"} {
+		s.Create(ctx, CreateHealthCheckParams{Name: name, URL: "https://" + name + ".com"})
+	}
+
+	// No limit returns all
+	all, err := s.List(ctx, ListHealthCheckParams{})
+	if err != nil {
+		t.Fatalf("List all: %v", err)
+	}
+	if len(all) != 4 {
+		t.Fatalf("List all len = %d, want 4", len(all))
+	}
+
+	// Limit=2 returns 2
+	page1, err := s.List(ctx, ListHealthCheckParams{Limit: 2})
+	if err != nil {
+		t.Fatalf("List page1: %v", err)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("page1 len = %d, want 2", len(page1))
+	}
+
+	// Limit=2, Offset=2 returns next 2
+	page2, err := s.List(ctx, ListHealthCheckParams{Limit: 2, Offset: 2})
+	if err != nil {
+		t.Fatalf("List page2: %v", err)
+	}
+	if len(page2) != 2 {
+		t.Fatalf("page2 len = %d, want 2", len(page2))
+	}
+
+	// No overlap between pages
+	if page1[0].ID == page2[0].ID {
+		t.Error("page1 and page2 should not overlap")
+	}
+
+	// Offset past end returns empty
+	page3, err := s.List(ctx, ListHealthCheckParams{Limit: 10, Offset: 10})
+	if err != nil {
+		t.Fatalf("List page3: %v", err)
+	}
+	if len(page3) != 0 {
+		t.Errorf("page3 len = %d, want 0", len(page3))
 	}
 }
 

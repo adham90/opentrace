@@ -49,7 +49,7 @@ type BatchRecord struct {
 type ServerStore interface {
 	Register(ctx context.Context, params RegisterServerParams) (*Server, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*Server, error)
-	List(ctx context.Context) ([]Server, error)
+	List(ctx context.Context, params ListServerParams) ([]Server, error)
 	Update(ctx context.Context, id uuid.UUID, params UpdateServerParams) (*Server, error)
 	UpdateHeartbeat(ctx context.Context, id uuid.UUID) error
 	Delete(ctx context.Context, id uuid.UUID) error
@@ -146,7 +146,7 @@ type ErrorGroupStore interface {
 type HealthCheckStore interface {
 	Create(ctx context.Context, params CreateHealthCheckParams) (*HealthCheck, error)
 	Get(ctx context.Context, id string) (*HealthCheck, error)
-	List(ctx context.Context) ([]HealthCheck, error)
+	List(ctx context.Context, params ListHealthCheckParams) ([]HealthCheck, error)
 	Delete(ctx context.Context, id string) error
 	SetEnabled(ctx context.Context, id string, enabled bool) error
 	RecordResult(ctx context.Context, result HealthCheckResult) error

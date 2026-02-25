@@ -120,7 +120,7 @@ func systemOverviewHandler(d overviewDeps) server.ToolHandlerFunc {
 
 		// Servers
 		if d.serverStore != nil {
-			servers, err := d.serverStore.List(ctx)
+			servers, err := d.serverStore.List(ctx, store.ListServerParams{})
 			if err == nil {
 				sStats := map[string]int{"total": len(servers), "online": 0, "offline": 0}
 				for _, srv := range servers {
@@ -278,7 +278,7 @@ func triageAlertsHandler(d overviewDeps) server.ToolHandlerFunc {
 
 		// Offline servers
 		if d.serverStore != nil {
-			servers, err := d.serverStore.List(ctx)
+			servers, err := d.serverStore.List(ctx, store.ListServerParams{})
 			if err == nil {
 				for _, srv := range servers {
 					if srv.Status == store.ServerOffline {

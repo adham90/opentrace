@@ -78,7 +78,7 @@ func TestServerStore_RegisterUpsert(t *testing.T) {
 	}
 
 	// List should have exactly one server
-	all, err := ss.List(ctx)
+	all, err := ss.List(ctx, ListServerParams{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestServerStore_List(t *testing.T) {
 		}
 	}
 
-	all, err := ss.List(ctx)
+	all, err := ss.List(ctx, ListServerParams{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -231,5 +231,72 @@ func TestServerStore_GetByID_NotFound(t *testing.T) {
 	_, err := ss.GetByID(ctx, [16]byte{})
 	if err != ErrNotFound {
 		t.Errorf("GetByID: got err=%v, want ErrNotFound", err)
+	}
+}
+
+func TestServerStore_List_Pagination(t *testing.T) {
+	db := setupTestDB(t)
+	ss := NewServerStore(db)
+	ctx := context.Background()
+
+	// Create 5 servers with alphabetical hostnames
+	for _, h := range []string{"alpha", "bravo", "charlie", "delta", "echo"} {
+		if _, err := ss.Register(ctx, RegisterServerParams{Hostname: h}); err != nil {
+			t.Fatalf("Register %s: %v", h, err)
+		}
+	}
+
+	// No pagination (Limit=0) returns all
+	all, err := ss.List(ctx, ListServerParams{})
+	if err != nil {
+		t.Fatalf("List all: %v", err)
+	}
+	if len(all) != 5 {
+		t.Fatalf("List all len = %d, want 5", len(all))
+	}
+
+	// Limit=2 returns first 2
+	page1, err := ss.List(ctx, ListServerParams{Limit: 2})
+	if err != nil {
+		t.Fatalf("List page1: %v", err)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("page1 len = %d, want 2", len(page1))
+	}
+	if page1[0].Hostname != "alpha" || page1[1].Hostname != "bravo" {
+		t.Errorf("page1 = [%s, %s], want [alpha, bravo]", page1[0].Hostname, page1[1].Hostname)
+	}
+
+	// Limit=2, Offset=2 returns next 2
+	page2, err := ss.List(ctx, ListServerParams{Limit: 2, Offset: 2})
+	if err != nil {
+		t.Fatalf("List page2: %v", err)
+	}
+	if len(page2) != 2 {
+		t.Fatalf("page2 len = %d, want 2", len(page2))
+	}
+	if page2[0].Hostname != "charlie" || page2[1].Hostname != "delta" {
+		t.Errorf("page2 = [%s, %s], want [charlie, delta]", page2[0].Hostname, page2[1].Hostname)
+	}
+
+	// Limit=2, Offset=4 returns last 1
+	page3, err := ss.List(ctx, ListServerParams{Limit: 2, Offset: 4})
+	if err != nil {
+		t.Fatalf("List page3: %v", err)
+	}
+	if len(page3) != 1 {
+		t.Fatalf("page3 len = %d, want 1", len(page3))
+	}
+	if page3[0].Hostname != "echo" {
+		t.Errorf("page3[0] = %s, want echo", page3[0].Hostname)
+	}
+
+	// Offset past end returns empty
+	page4, err := ss.List(ctx, ListServerParams{Limit: 10, Offset: 10})
+	if err != nil {
+		t.Fatalf("List page4: %v", err)
+	}
+	if len(page4) != 0 {
+		t.Errorf("page4 len = %d, want 0", len(page4))
 	}
 }

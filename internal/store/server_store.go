@@ -134,11 +134,19 @@ func (s *serverStore) GetByID(ctx context.Context, id uuid.UUID) (*Server, error
 	return srv, nil
 }
 
-func (s *serverStore) List(ctx context.Context) ([]Server, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, hostname, display_name, ip_address, os, arch, agent_version, labels, status, last_seen_at, created_at, updated_at
-		 FROM servers ORDER BY hostname ASC`,
-	)
+func (s *serverStore) List(ctx context.Context, params ListServerParams) ([]Server, error) {
+	query := `SELECT id, hostname, display_name, ip_address, os, arch, agent_version, labels, status, last_seen_at, created_at, updated_at
+		 FROM servers ORDER BY hostname ASC`
+	var args []any
+	if params.Limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, params.Limit)
+		if params.Offset > 0 {
+			query += ` OFFSET ?`
+			args = append(args, params.Offset)
+		}
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying servers: %w", err)
 	}

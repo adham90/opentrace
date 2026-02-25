@@ -26,7 +26,7 @@ func NewMetricsConnector(ss store.ServerStore, ms store.MetricStore) *MetricsCon
 func (c *MetricsConnector) Type() ConnectorType { return ConnectorServerMetrics }
 
 func (c *MetricsConnector) TestConnection(ctx context.Context) error {
-	_, err := c.serverStore.List(ctx)
+	_, err := c.serverStore.List(ctx, store.ListServerParams{})
 	return err
 }
 
@@ -74,7 +74,7 @@ Useful for quickly assessing server health without specifying individual metric 
 func (c *MetricsConnector) Close() error { return nil }
 
 func (c *MetricsConnector) handleListServers(ctx context.Context, args map[string]any) (string, error) {
-	servers, err := c.serverStore.List(ctx)
+	servers, err := c.serverStore.List(ctx, store.ListServerParams{})
 	if err != nil {
 		return "", fmt.Errorf("listing servers: %w", err)
 	}

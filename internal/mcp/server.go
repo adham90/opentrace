@@ -1228,7 +1228,7 @@ func listConnectorsHandler(registry *connector.Registry, dsStore store.DataSourc
 // listServersHandler returns a handler that lists all monitored servers.
 func listServersHandler(ss store.ServerStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		servers, err := ss.List(ctx)
+		servers, err := ss.List(ctx, store.ListServerParams{})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to list servers: %v", err)), nil
 		}

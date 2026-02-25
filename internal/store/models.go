@@ -555,11 +555,25 @@ type CreateWatchParams struct {
 	SessionID      string        `json:"session_id,omitempty"`
 }
 
+// ListServerParams controls pagination for server listing.
+type ListServerParams struct {
+	Limit  int `json:"limit,omitempty"`
+	Offset int `json:"offset,omitempty"`
+}
+
+// ListHealthCheckParams controls pagination for health check listing.
+type ListHealthCheckParams struct {
+	Limit  int `json:"limit,omitempty"`
+	Offset int `json:"offset,omitempty"`
+}
+
 // ListWatchParams defines filters for listing watches.
 type ListWatchParams struct {
 	Status    WatchStatus `json:"status,omitempty"`
 	Service   string      `json:"service,omitempty"`
 	SessionID string      `json:"session_id,omitempty"`
+	Limit     int         `json:"limit,omitempty"`
+	Offset    int         `json:"offset,omitempty"`
 }
 
 // WatchRun represents a single evaluation of a watch.

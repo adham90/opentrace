@@ -74,10 +74,19 @@ func (s *healthCheckStore) Get(ctx context.Context, id string) (*HealthCheck, er
 	return &hc, nil
 }
 
-func (s *healthCheckStore) List(ctx context.Context) ([]HealthCheck, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, url, method, interval_secs, timeout_secs, expected_status, enabled, created_at
-		 FROM healthchecks ORDER BY created_at DESC`)
+func (s *healthCheckStore) List(ctx context.Context, params ListHealthCheckParams) ([]HealthCheck, error) {
+	query := `SELECT id, name, url, method, interval_secs, timeout_secs, expected_status, enabled, created_at
+		 FROM healthchecks ORDER BY created_at DESC`
+	var args []any
+	if params.Limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, params.Limit)
+		if params.Offset > 0 {
+			query += ` OFFSET ?`
+			args = append(args, params.Offset)
+		}
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

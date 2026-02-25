@@ -588,7 +588,7 @@ func (s *Server) handleOverviewAPI(w http.ResponseWriter, r *http.Request) {
 
 	// Servers stats
 	if s.serverStore != nil {
-		servers, err := s.serverStore.List(ctx)
+		servers, err := s.serverStore.List(ctx, store.ListServerParams{})
 		if err == nil {
 			stats.Servers["total"] = len(servers)
 			for _, srv := range servers {

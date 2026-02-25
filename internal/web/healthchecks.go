@@ -12,7 +12,18 @@ import (
 )
 
 func (s *Server) handleListHealthChecks(w http.ResponseWriter, r *http.Request) {
-	checks, err := s.healthCheckStore.List(r.Context())
+	params := store.ListHealthCheckParams{}
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			params.Limit = n
+		}
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			params.Offset = n
+		}
+	}
+	checks, err := s.healthCheckStore.List(r.Context(), params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list health checks")
 		return

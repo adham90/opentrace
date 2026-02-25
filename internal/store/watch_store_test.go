@@ -396,6 +396,67 @@ func TestWatchStore_AlertCRUD(t *testing.T) {
 	}
 }
 
+func TestWatchStore_List_Pagination(t *testing.T) {
+	db := setupTestDB(t)
+	ws := NewWatchStore(db)
+	ctx := context.Background()
+
+	// Create 4 watches
+	for _, svc := range []string{"api", "web", "worker", "scheduler"} {
+		_, err := ws.Create(ctx, CreateWatchParams{
+			Metric:    "error_rate",
+			Operator:  ">",
+			Threshold: 5.0,
+			Service:   svc,
+			Duration:  "24h",
+		})
+		if err != nil {
+			t.Fatalf("Create %s: %v", svc, err)
+		}
+	}
+
+	// No limit returns all
+	all, err := ws.List(ctx, ListWatchParams{})
+	if err != nil {
+		t.Fatalf("List all: %v", err)
+	}
+	if len(all) != 4 {
+		t.Fatalf("List all len = %d, want 4", len(all))
+	}
+
+	// Limit=2 returns 2
+	page1, err := ws.List(ctx, ListWatchParams{Limit: 2})
+	if err != nil {
+		t.Fatalf("List page1: %v", err)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("page1 len = %d, want 2", len(page1))
+	}
+
+	// Limit=2, Offset=2 returns next 2
+	page2, err := ws.List(ctx, ListWatchParams{Limit: 2, Offset: 2})
+	if err != nil {
+		t.Fatalf("List page2: %v", err)
+	}
+	if len(page2) != 2 {
+		t.Fatalf("page2 len = %d, want 2", len(page2))
+	}
+
+	// Pages should not overlap
+	if page1[0].ID == page2[0].ID {
+		t.Error("page1 and page2 should not overlap")
+	}
+
+	// Limit with filter
+	filtered, err := ws.List(ctx, ListWatchParams{Service: "api", Limit: 10})
+	if err != nil {
+		t.Fatalf("List filtered: %v", err)
+	}
+	if len(filtered) != 1 {
+		t.Errorf("filtered len = %d, want 1", len(filtered))
+	}
+}
+
 func TestWatchStore_NotFound(t *testing.T) {
 	db := setupTestDB(t)
 	ws := NewWatchStore(db)

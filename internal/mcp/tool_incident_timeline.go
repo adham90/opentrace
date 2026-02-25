@@ -187,7 +187,7 @@ func incidentTimelineHandler(d timelineDeps) server.ToolHandlerFunc {
 
 		// 4. Healthcheck status changes.
 		if d.healthCheckStore != nil {
-			checks, err := d.healthCheckStore.List(ctx)
+			checks, err := d.healthCheckStore.List(ctx, store.ListHealthCheckParams{})
 			if err == nil {
 				for _, hc := range checks {
 					results, err := d.healthCheckStore.LatestResults(ctx, hc.ID, 50)

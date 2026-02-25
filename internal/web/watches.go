@@ -30,6 +30,16 @@ func (s *Server) handleListWatches(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("session_id"); v != "" {
 		params.SessionID = v
 	}
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			params.Limit = n
+		}
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			params.Offset = n
+		}
+	}
 
 	watches, err := s.watchStore.List(r.Context(), params)
 	if err != nil {

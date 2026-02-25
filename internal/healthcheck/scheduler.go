@@ -77,7 +77,7 @@ func (s *Scheduler) run(ctx context.Context) {
 }
 
 func (s *Scheduler) tick(ctx context.Context) {
-	checks, err := s.store.List(ctx)
+	checks, err := s.store.List(ctx, store.ListHealthCheckParams{})
 	if err != nil {
 		slog.Warn("healthcheck scheduler: failed to list checks", "error", err)
 		return

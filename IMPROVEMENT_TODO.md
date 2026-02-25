@@ -85,7 +85,7 @@ Your browser sends the request with your session cookie — OpenTrace thinks you
 
 ---
 
-### 4. [ ] Add Pagination to Unbounded List Endpoints
+### 4. [x] Add Pagination to Unbounded List Endpoints
 
 **What it is:** Some API endpoints return ALL records with no limit. If you have 10,000 services or 50,000 event types, these endpoints dump everything into one response — slow, memory-heavy, and can crash the browser.
 
@@ -250,7 +250,7 @@ User deletes a connector → audit("delete connector") → channel full → entr
 | 1 | CSRF protection | High | Done | 2026-02-25 |
 | 2 | Auth handler tests | High | Done | 2026-02-25 |
 | 3 | Log silent errors | Medium | Done | 2026-02-25 |
-| 4 | Pagination on list endpoints | Medium | Not Started | |
+| 4 | Pagination on list endpoints | Medium | Done | 2026-02-25 |
 | 5 | Standardize error patterns | Medium | Done | 2026-02-25 |
 | 6 | Tighten CSP | Medium | Not Started | |
 | 7 | Prometheus metrics | Lower | Not Started | |

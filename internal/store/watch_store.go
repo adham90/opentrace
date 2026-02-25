@@ -171,6 +171,15 @@ func (s *watchStore) List(ctx context.Context, params ListWatchParams) ([]Watch,
 	}
 	query += ` ORDER BY created_at DESC`
 
+	if params.Limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, params.Limit)
+		if params.Offset > 0 {
+			query += ` OFFSET ?`
+			args = append(args, params.Offset)
+		}
+	}
+
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying watches: %w", err)

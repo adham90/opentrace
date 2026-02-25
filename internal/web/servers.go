@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -84,7 +85,18 @@ func (s *Server) handlePushMetrics(w http.ResponseWriter, r *http.Request) {
 
 // handleListServers handles GET /api/servers.
 func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
-	servers, err := s.serverStore.List(r.Context())
+	params := store.ListServerParams{}
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			params.Limit = n
+		}
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			params.Offset = n
+		}
+	}
+	servers, err := s.serverStore.List(r.Context(), params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list servers")
 		return

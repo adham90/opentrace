@@ -236,12 +236,24 @@ func (m *mockServerStore) GetByID(ctx context.Context, id uuid.UUID) (*store.Ser
 	return s, nil
 }
 
-func (m *mockServerStore) List(ctx context.Context) ([]store.Server, error) {
+func (m *mockServerStore) List(ctx context.Context, params store.ListServerParams) ([]store.Server, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	result := make([]store.Server, 0, len(m.servers))
 	for _, s := range m.servers {
 		result = append(result, *s)
+	}
+	// Apply pagination
+	if params.Limit > 0 {
+		start := params.Offset
+		if start > len(result) {
+			start = len(result)
+		}
+		end := start + params.Limit
+		if end > len(result) {
+			end = len(result)
+		}
+		result = result[start:end]
 	}
 	return result, nil
 }
