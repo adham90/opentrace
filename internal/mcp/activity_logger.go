@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/adham90/opentrace/internal/store"
@@ -13,7 +14,7 @@ import (
 type ActivityLogger struct {
 	ch    chan store.LogMCPActivityParams
 	store store.MCPActivityStore
-	done  chan struct{}
+	wg    sync.WaitGroup
 }
 
 // NewActivityLogger creates an ActivityLogger with the given buffer size and worker count.
@@ -23,9 +24,9 @@ func NewActivityLogger(s store.MCPActivityStore, bufSize int, workers int) *Acti
 	al := &ActivityLogger{
 		ch:    make(chan store.LogMCPActivityParams, bufSize),
 		store: s,
-		done:  make(chan struct{}),
 	}
 	for i := 0; i < workers; i++ {
+		al.wg.Add(1)
 		go al.worker()
 	}
 	return al
@@ -41,6 +42,7 @@ func (al *ActivityLogger) Log(params store.LogMCPActivityParams) {
 }
 
 func (al *ActivityLogger) worker() {
+	defer al.wg.Done()
 	for params := range al.ch {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = al.store.Log(ctx, params)
@@ -49,6 +51,8 @@ func (al *ActivityLogger) worker() {
 }
 
 // Close shuts down the logger, draining remaining entries.
+// It waits for all workers to finish processing before returning.
 func (al *ActivityLogger) Close() {
 	close(al.ch)
+	al.wg.Wait()
 }

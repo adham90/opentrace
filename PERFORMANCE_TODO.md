@@ -245,7 +245,7 @@ go func() {
 
 ---
 
-### 8. [ ] Fix ActivityLogger Shutdown with WaitGroup
+### 8. [x] Fix ActivityLogger Shutdown with WaitGroup
 
 **Impact:** No data loss on shutdown | **Effort:** 15 min
 
@@ -365,7 +365,7 @@ summaryLines[i] = b.String()
 | 5 | Add composite indexes | Done | 2026-02-25 |
 | 6 | Eliminate duplicate metadata marshal | Done | 2026-02-25 |
 | 7 | Parallelize aggregation jobs | Done | 2026-02-25 |
-| 8 | Fix ActivityLogger shutdown | Not Started | |
+| 8 | Fix ActivityLogger shutdown | Done | 2026-02-25 |
 | 9 | Replace MarshalIndent with Marshal | Not Started | |
 | 10 | Slice pre-allocation + strings.Builder | Not Started | |
 
