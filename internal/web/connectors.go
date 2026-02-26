@@ -79,24 +79,34 @@ func (s *Server) handleTestConnectorAPI(w http.ResponseWriter, r *http.Request) 
 	now := time.Now()
 	if err != nil {
 		status := store.StatusError
+		friendlyMsg := connector.FriendlyError(err)
+		errCode := connector.ClassifyError(err)
 		msg := sanitizeConnectorError(err)
 		slog.Warn("connector init failed", "connector_id", ds.ID, "error", err)
 		s.dsStore.Update(r.Context(), ds.ID, store.UpdateDataSourceParams{
 			Status: &status, StatusMessage: &msg, LastTestedAt: &now,
 		})
-		writeError(w, http.StatusUnprocessableEntity, "connector test failed: unable to initialize connector")
+		writeDetailedError(w, http.StatusUnprocessableEntity, friendlyMsg, string(errCode), map[string]any{
+			"suggestion": connector.FriendlyMessage(errCode),
+			"phase":      "initialization",
+		})
 		return
 	}
 
 	if err := c.TestConnection(r.Context()); err != nil {
 		c.Close()
 		status := store.StatusError
+		friendlyMsg := connector.FriendlyError(err)
+		errCode := connector.ClassifyError(err)
 		msg := sanitizeConnectorError(err)
 		slog.Warn("connector test failed", "connector_id", ds.ID, "error", err)
 		s.dsStore.Update(r.Context(), ds.ID, store.UpdateDataSourceParams{
 			Status: &status, StatusMessage: &msg, LastTestedAt: &now,
 		})
-		writeError(w, http.StatusUnprocessableEntity, "connector test failed: unable to connect")
+		writeDetailedError(w, http.StatusUnprocessableEntity, friendlyMsg, string(errCode), map[string]any{
+			"suggestion": connector.FriendlyMessage(errCode),
+			"phase":      "connection_test",
+		})
 		return
 	}
 

@@ -31,7 +31,7 @@ type DatabaseConnector struct {
 func NewDatabaseConnector(ctx context.Context, connStr string, maxRows, stmtTimeoutMS int) (*DatabaseConnector, error) {
 	cfg, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
-		return nil, fmt.Errorf("parsing connection string: %w", err)
+		return nil, fmt.Errorf("parsing connection string: %s", FriendlyError(err))
 	}
 
 	cfg.ConnConfig.RuntimeParams["default_transaction_read_only"] = "on"
@@ -39,12 +39,12 @@ func NewDatabaseConnector(ctx context.Context, connStr string, maxRows, stmtTime
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("connecting to target DB: %w", err)
+		return nil, fmt.Errorf("connecting to target DB: %s", FriendlyError(err))
 	}
 
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("pinging target DB: %w", err)
+		return nil, fmt.Errorf("pinging target DB: %s", FriendlyError(err))
 	}
 
 	if maxRows <= 0 {
@@ -73,7 +73,7 @@ func (c *DatabaseConnector) TestConnection(ctx context.Context) error {
 		if c.cb != nil {
 			c.cb.RecordFailure()
 		}
-		return err
+		return fmt.Errorf("%s", FriendlyError(err))
 	}
 	if c.cb != nil {
 		c.cb.RecordSuccess()
