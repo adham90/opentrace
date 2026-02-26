@@ -2,11 +2,23 @@ package healthcheck
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/adham90/opentrace/internal/store"
 )
+
+// maxBodyReadBytes limits how much of the response body we read for body matching (1 MB).
+const maxBodyReadBytes = 1 << 20
+
+// defaultRetries is used when hc.Retries is 0 (backward compatible — no retries).
+const defaultRetries = 0
+
+// retryDelays defines the sleep durations between retry attempts.
+var retryDelays = []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second}
 
 // Checker performs a single HTTP health check probe.
 type Checker struct {
@@ -25,7 +37,50 @@ func NewChecker() *Checker {
 }
 
 // Check probes the given health check endpoint and returns a result.
+// If the health check has retries configured, failed checks are retried
+// with short delays before declaring the endpoint down. Only the final
+// result is recorded — retries are transparent.
 func (c *Checker) Check(ctx context.Context, hc store.HealthCheck) store.HealthCheckResult {
+	maxAttempts := hc.Retries + 1
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+
+	var result store.HealthCheckResult
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		result = c.singleCheck(ctx, hc)
+
+		// If the check passed, return immediately.
+		if result.Status == store.HealthCheckUp || result.Status == store.HealthCheckDegraded {
+			return result
+		}
+
+		// If this isn't the last attempt, sleep before retrying.
+		if attempt < maxAttempts {
+			delay := retryDelays[0]
+			if attempt-1 < len(retryDelays) {
+				delay = retryDelays[attempt-1]
+			}
+			slog.Debug("healthcheck retry",
+				"name", hc.Name,
+				"id", hc.ID,
+				"attempt", attempt,
+				"max_attempts", maxAttempts,
+				"error", result.Error,
+			)
+			select {
+			case <-ctx.Done():
+				return result
+			case <-time.After(delay):
+			}
+		}
+	}
+
+	return result
+}
+
+// singleCheck performs one HTTP probe (no retries).
+func (c *Checker) singleCheck(ctx context.Context, hc store.HealthCheck) store.HealthCheckResult {
 	timeout := time.Duration(hc.TimeoutSecs) * time.Second
 	if timeout <= 0 {
 		timeout = 10 * time.Second
@@ -68,7 +123,7 @@ func (c *Checker) Check(ctx context.Context, hc store.HealthCheck) store.HealthC
 		CheckedAt:     time.Now().UTC(),
 	}
 
-	// Determine status
+	// Determine status from HTTP status code.
 	switch {
 	case code == hc.ExpectedStatus:
 		result.Status = store.HealthCheckUp
@@ -77,6 +132,21 @@ func (c *Checker) Check(ctx context.Context, hc store.HealthCheck) store.HealthC
 		result.Status = store.HealthCheckDegraded
 	default:
 		result.Status = store.HealthCheckDown
+	}
+
+	// Response body matching: if configured, verify the body contains the expected string.
+	if hc.ExpectedBody != "" && result.Status == store.HealthCheckUp {
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBodyReadBytes))
+		if readErr != nil {
+			result.Status = store.HealthCheckDown
+			result.Error = "failed to read response body: " + readErr.Error()
+			return result
+		}
+		if !strings.Contains(string(body), hc.ExpectedBody) {
+			result.Status = store.HealthCheckDown
+			result.Error = "response body did not contain expected string"
+			return result
+		}
 	}
 
 	// Slow response → degraded (>5s or >50% of timeout)

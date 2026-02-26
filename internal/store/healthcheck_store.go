@@ -39,10 +39,14 @@ func (s *healthCheckStore) Create(ctx context.Context, params CreateHealthCheckP
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+	retries := params.Retries
+	if retries < 0 {
+		retries = 0
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO healthchecks (id, name, url, method, interval_secs, timeout_secs, expected_status, enabled, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)`,
-		id, params.Name, params.URL, method, interval, timeout, expected, now,
+		`INSERT INTO healthchecks (id, name, url, method, interval_secs, timeout_secs, expected_status, expected_body, retries, enabled, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+		id, params.Name, params.URL, method, interval, timeout, expected, params.ExpectedBody, retries, now,
 	)
 	if err != nil {
 		return nil, err
@@ -53,7 +57,7 @@ func (s *healthCheckStore) Create(ctx context.Context, params CreateHealthCheckP
 
 func (s *healthCheckStore) Get(ctx context.Context, id string) (*HealthCheck, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, url, method, interval_secs, timeout_secs, expected_status, enabled, created_at
+		`SELECT id, name, url, method, interval_secs, timeout_secs, expected_status, expected_body, retries, enabled, created_at
 		 FROM healthchecks WHERE id = ?`, id)
 
 	var hc HealthCheck
@@ -61,6 +65,7 @@ func (s *healthCheckStore) Get(ctx context.Context, id string) (*HealthCheck, er
 	var createdStr string
 	err := row.Scan(&hc.ID, &hc.Name, &hc.URL, &hc.Method,
 		&hc.IntervalSecs, &hc.TimeoutSecs, &hc.ExpectedStatus,
+		&hc.ExpectedBody, &hc.Retries,
 		&enabledInt, &createdStr)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -75,7 +80,7 @@ func (s *healthCheckStore) Get(ctx context.Context, id string) (*HealthCheck, er
 }
 
 func (s *healthCheckStore) List(ctx context.Context, params ListHealthCheckParams) ([]HealthCheck, error) {
-	query := `SELECT id, name, url, method, interval_secs, timeout_secs, expected_status, enabled, created_at
+	query := `SELECT id, name, url, method, interval_secs, timeout_secs, expected_status, expected_body, retries, enabled, created_at
 		 FROM healthchecks ORDER BY created_at DESC`
 	var args []any
 	if params.Limit > 0 {
@@ -99,6 +104,7 @@ func (s *healthCheckStore) List(ctx context.Context, params ListHealthCheckParam
 		var createdStr string
 		if err := rows.Scan(&hc.ID, &hc.Name, &hc.URL, &hc.Method,
 			&hc.IntervalSecs, &hc.TimeoutSecs, &hc.ExpectedStatus,
+			&hc.ExpectedBody, &hc.Retries,
 			&enabledInt, &createdStr); err != nil {
 			return nil, err
 		}

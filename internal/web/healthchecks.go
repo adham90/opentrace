@@ -71,6 +71,14 @@ func (s *Server) handleUptimeSummary(w http.ResponseWriter, r *http.Request) {
 	if summaries == nil {
 		summaries = []store.UptimeSummary{}
 	}
+
+	// Enrich with reliability data from the in-memory rolling window.
+	if s.reliabilityProvider != nil {
+		for i := range summaries {
+			summaries[i].Reliability = s.reliabilityProvider.Reliability(summaries[i].HealthCheckID)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, summaries)
 }
 

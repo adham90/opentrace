@@ -10,6 +10,67 @@ import (
 	"github.com/adham90/opentrace/internal/store"
 )
 
+// recentResultsWindow is the number of recent results kept per check for reliability calculation.
+const recentResultsWindow = 5
+
+// maxBackoffMultiplier caps the backoff at 4x the configured interval.
+const maxBackoffMultiplier = 4
+
+// backoffThreshold is the number of consecutive failures before backoff kicks in.
+const backoffThreshold = 3
+
+// backoffState tracks exponential backoff for a failing health check.
+type backoffState struct {
+	consecutiveFailures int
+}
+
+// resultRing is a circular buffer of recent health check statuses.
+type resultRing struct {
+	results [recentResultsWindow]store.HealthCheckStatus
+	count   int
+	pos     int
+}
+
+// add appends a status to the ring buffer.
+func (r *resultRing) add(status store.HealthCheckStatus) {
+	r.results[r.pos%recentResultsWindow] = status
+	r.pos++
+	if r.count < recentResultsWindow {
+		r.count++
+	}
+}
+
+// recentResults returns the stored results (oldest first).
+func (r *resultRing) recentResults() []store.HealthCheckStatus {
+	if r.count == 0 {
+		return nil
+	}
+	out := make([]store.HealthCheckStatus, r.count)
+	start := 0
+	if r.count == recentResultsWindow {
+		start = r.pos % recentResultsWindow
+	}
+	for i := 0; i < r.count; i++ {
+		out[i] = r.results[(start+i)%recentResultsWindow]
+	}
+	return out
+}
+
+// reliability returns the percentage of "up" results (0-100).
+func (r *resultRing) reliability() float64 {
+	if r.count == 0 {
+		return 0
+	}
+	upCount := 0
+	results := r.recentResults()
+	for _, s := range results {
+		if s == store.HealthCheckUp {
+			upCount++
+		}
+	}
+	return float64(upCount) / float64(r.count) * 100.0
+}
+
 // Scheduler polls enabled health checks and runs probes at their configured intervals.
 type Scheduler struct {
 	store   store.HealthCheckStore
@@ -31,6 +92,14 @@ type Scheduler struct {
 	// statusMu protects lastStatus map for transition detection
 	statusMu   sync.Mutex
 	lastStatus map[string]store.HealthCheckStatus
+
+	// backoffMu protects the backoff state map
+	backoffMu sync.Mutex
+	backoff   map[string]*backoffState
+
+	// recentMu protects the recent results ring buffers
+	recentMu sync.Mutex
+	recent   map[string]*resultRing
 }
 
 // NewScheduler creates a health check scheduler.
@@ -51,6 +120,8 @@ func NewScheduler(hcStore store.HealthCheckStore, pollInterval time.Duration, no
 		sem:        make(chan struct{}, 16),
 		notifiers:  notifiers,
 		lastStatus: make(map[string]store.HealthCheckStatus),
+		backoff:    make(map[string]*backoffState),
+		recent:     make(map[string]*resultRing),
 	}
 }
 
@@ -71,6 +142,28 @@ func (s *Scheduler) Stop() {
 		s.cancel()
 	}
 	s.wg.Wait()
+}
+
+// RecentResults returns the last N statuses for the given check ID.
+func (s *Scheduler) RecentResults(checkID string) []store.HealthCheckStatus {
+	s.recentMu.Lock()
+	defer s.recentMu.Unlock()
+	ring, ok := s.recent[checkID]
+	if !ok {
+		return nil
+	}
+	return ring.recentResults()
+}
+
+// Reliability returns the recent reliability percentage (0-100) for the given check ID.
+func (s *Scheduler) Reliability(checkID string) float64 {
+	s.recentMu.Lock()
+	defer s.recentMu.Unlock()
+	ring, ok := s.recent[checkID]
+	if !ok {
+		return 0
+	}
+	return ring.reliability()
 }
 
 func (s *Scheduler) run(ctx context.Context) {
@@ -132,8 +225,43 @@ func (s *Scheduler) isDue(hc store.HealthCheck, now time.Time) bool {
 	if !ok {
 		return true // never run
 	}
+
 	interval := time.Duration(hc.IntervalSecs) * time.Second
+
+	// Apply exponential backoff for checks that have consecutive failures.
+	s.backoffMu.Lock()
+	bs, hasBackoff := s.backoff[hc.ID]
+	s.backoffMu.Unlock()
+	if hasBackoff && bs.consecutiveFailures >= backoffThreshold {
+		// Double the interval for every failure past the threshold, up to 4x.
+		multiplier := 1 << (bs.consecutiveFailures - backoffThreshold + 1) // 2, 4, 8, ...
+		if multiplier > maxBackoffMultiplier {
+			multiplier = maxBackoffMultiplier
+		}
+		interval = time.Duration(multiplier) * interval
+	}
+
 	return now.Sub(last) >= interval
+}
+
+// EffectiveInterval returns the current interval for a check, accounting for backoff.
+// Exported for testing.
+func (s *Scheduler) EffectiveInterval(hc store.HealthCheck) time.Duration {
+	interval := time.Duration(hc.IntervalSecs) * time.Second
+
+	s.backoffMu.Lock()
+	bs, hasBackoff := s.backoff[hc.ID]
+	s.backoffMu.Unlock()
+
+	if hasBackoff && bs.consecutiveFailures >= backoffThreshold {
+		multiplier := 1 << (bs.consecutiveFailures - backoffThreshold + 1)
+		if multiplier > maxBackoffMultiplier {
+			multiplier = maxBackoffMultiplier
+		}
+		interval = time.Duration(multiplier) * interval
+	}
+
+	return interval
 }
 
 func (s *Scheduler) runCheck(ctx context.Context, hc store.HealthCheck) {
@@ -161,6 +289,30 @@ func (s *Scheduler) runCheck(ctx context.Context, hc store.HealthCheck) {
 			"error", result.Error,
 		)
 	}
+
+	// Update backoff state.
+	s.backoffMu.Lock()
+	bs, ok := s.backoff[hc.ID]
+	if !ok {
+		bs = &backoffState{}
+		s.backoff[hc.ID] = bs
+	}
+	if result.Status == store.HealthCheckUp {
+		bs.consecutiveFailures = 0
+	} else {
+		bs.consecutiveFailures++
+	}
+	s.backoffMu.Unlock()
+
+	// Update rolling window of recent results.
+	s.recentMu.Lock()
+	ring, ok := s.recent[hc.ID]
+	if !ok {
+		ring = &resultRing{}
+		s.recent[hc.ID] = ring
+	}
+	ring.add(result.Status)
+	s.recentMu.Unlock()
 
 	// Check for status transition and fire notifications
 	s.statusMu.Lock()
