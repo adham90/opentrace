@@ -46,6 +46,12 @@ var serverCapabilities = []string{
 	"trace_context",
 }
 
+// ReliabilityProvider returns recent reliability data for health checks.
+// Implemented by healthcheck.Scheduler.
+type ReliabilityProvider interface {
+	Reliability(checkID string) float64
+}
+
 // Server holds the HTTP server and its dependencies.
 type Server struct {
 	Router        chi.Router
@@ -72,6 +78,8 @@ type Server struct {
 	analyticsStore     store.AnalyticsStore
 	journeyStore       store.JourneyStore
 	errorImpactStore   store.ErrorImpactStore
+	traceStore         store.TraceStore
+	reliabilityProvider ReliabilityProvider
 	versionChecker     *versionChecker
 	sseServer      *mcpgoserver.SSEServer
 	loginLimiter   *RateLimiter
@@ -80,6 +88,9 @@ type Server struct {
 	secureCookies  bool
 	logsConnMu     sync.Mutex
 	metricsConnMu  sync.Mutex
+
+	// Async log ingestion queue (nil = synchronous fallback)
+	ingestQueue *IngestQueue
 
 	// Bounded audit log channel with background worker
 	auditCh  chan auditEntry
@@ -124,6 +135,9 @@ type ServerDeps struct {
 	AnalyticsStore       store.AnalyticsStore
 	JourneyStore         store.JourneyStore
 	ErrorImpactStore     store.ErrorImpactStore
+	TraceStore           store.TraceStore
+	IngestQueue          *IngestQueue
+	ReliabilityProvider  ReliabilityProvider
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
@@ -162,7 +176,10 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		analyticsStore:     deps.AnalyticsStore,
 		journeyStore:       deps.JourneyStore,
 		errorImpactStore:   deps.ErrorImpactStore,
-		versionChecker:     newVersionChecker("adham90", "opentrace"),
+		traceStore:          deps.TraceStore,
+		ingestQueue:         deps.IngestQueue,
+		reliabilityProvider: deps.ReliabilityProvider,
+		versionChecker:      newVersionChecker("adham90", "opentrace"),
 		auditCh:            make(chan auditEntry, 256),
 	}
 
@@ -378,6 +395,12 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 				r.Get("/journeys/timeline/{logID}", srv.handleRequestTimelineAPI)
 			}
 
+			// Distributed Trace Reassembly
+			if srv.traceStore != nil {
+				r.Get("/traces/recent", srv.handleListRecentTraces)
+				r.Get("/traces/{traceID}/status", srv.handleGetTraceStatus)
+			}
+
 			// MCP activity
 			if srv.mcpActivityStore != nil {
 				r.Get("/mcp/activity/stats", srv.handleMCPActivityStats)
@@ -484,6 +507,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	if s.apiLimiter != nil {
 		s.apiLimiter.Stop()
+	}
+
+	// Flush and stop the ingest queue before closing other resources
+	if s.ingestQueue != nil {
+		s.ingestQueue.Stop()
 	}
 
 	// Drain audit log channel

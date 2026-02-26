@@ -716,3 +716,68 @@ func (m *mockMCPActivityStore) Prune(_ context.Context, _ time.Duration) (int64,
 	return 0, nil
 }
 
+// mockTraceStore implements store.TraceStore for testing.
+type mockTraceStore struct {
+	mu     sync.Mutex
+	traces map[string]*store.TraceStatus
+}
+
+func newMockTraceStore() *mockTraceStore {
+	return &mockTraceStore{traces: make(map[string]*store.TraceStatus)}
+}
+
+func (m *mockTraceStore) UpsertTraceStatus(_ context.Context, traceID string, entry store.LogEntry) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if traceID == "" {
+		return nil
+	}
+	ts, ok := m.traces[traceID]
+	if !ok {
+		ts = &store.TraceStatus{
+			TraceID:       traceID,
+			SpanCount:     0,
+			Services:      []string{},
+			FirstSeenAt:   entry.Timestamp,
+			LastUpdatedAt: time.Now(),
+			Status:        "partial",
+		}
+		m.traces[traceID] = ts
+	}
+	ts.SpanCount++
+	ts.LastUpdatedAt = time.Now()
+	return nil
+}
+
+func (m *mockTraceStore) GetTraceStatus(_ context.Context, traceID string) (*store.TraceStatus, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ts, ok := m.traces[traceID]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return ts, nil
+}
+
+func (m *mockTraceStore) ListRecentTraces(_ context.Context, limit, offset int) ([]store.TraceStatus, int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []store.TraceStatus
+	for _, ts := range m.traces {
+		result = append(result, *ts)
+	}
+	total := len(result)
+	if offset > len(result) {
+		offset = len(result)
+	}
+	result = result[offset:]
+	if limit > 0 && limit < len(result) {
+		result = result[:limit]
+	}
+	return result, total, nil
+}
+
+func (m *mockTraceStore) MarkStaleTraces(_ context.Context, _ time.Duration) (int, error) {
+	return 0, nil
+}
+

@@ -408,6 +408,8 @@ type HealthCheck struct {
 	IntervalSecs   int       `json:"interval_secs"`
 	TimeoutSecs    int       `json:"timeout_secs"`
 	ExpectedStatus int       `json:"expected_status"`
+	ExpectedBody   string    `json:"expected_body,omitempty"`
+	Retries        int       `json:"retries,omitempty"`
 	Enabled        bool      `json:"enabled"`
 	CreatedAt      time.Time `json:"created_at"`
 }
@@ -431,6 +433,8 @@ type CreateHealthCheckParams struct {
 	IntervalSecs   int    `json:"interval_secs,omitempty"`
 	TimeoutSecs    int    `json:"timeout_secs,omitempty"`
 	ExpectedStatus int    `json:"expected_status,omitempty"`
+	ExpectedBody   string `json:"expected_body,omitempty"`
+	Retries        int    `json:"retries,omitempty"`
 }
 
 // UptimeSummary aggregates uptime stats for a single health check.
@@ -443,6 +447,7 @@ type UptimeSummary struct {
 	AvgResponseMs float64 `json:"avg_response_ms"`
 	TotalChecks   int     `json:"total_checks"`
 	DownChecks    int     `json:"down_checks"`
+	Reliability   float64 `json:"reliability,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -983,4 +988,21 @@ type SamplingRule struct {
 	Service    string  `json:"service"`     // service name, or "*" for default
 	Rate       float64 `json:"rate"`        // 0.0-1.0 (1.0 = keep all)
 	KeepErrors bool    `json:"keep_errors"` // always keep error/warn/fatal logs
+}
+
+// ---------------------------------------------------------------------------
+// Distributed Trace Reassembly
+// ---------------------------------------------------------------------------
+
+// TraceStatus tracks the reassembly status of a distributed trace.
+type TraceStatus struct {
+	TraceID       string   `json:"trace_id"`
+	SpanCount     int      `json:"span_count"`
+	RootSpanID    string   `json:"root_span_id,omitempty"`
+	Services      []string `json:"services"`
+	FirstSeenAt   time.Time `json:"first_seen_at"`
+	LastUpdatedAt time.Time `json:"last_updated_at"`
+	DurationMs    float64  `json:"duration_ms"`
+	Status        string   `json:"status"`     // "partial", "complete", "timeout"
+	HasErrors     bool     `json:"has_errors"`
 }

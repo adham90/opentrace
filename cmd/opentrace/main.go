@@ -45,6 +45,7 @@ type appDeps struct {
 	analyticsStore     store.AnalyticsStore
 	journeyStore       store.JourneyStore
 	errorImpactStore   store.ErrorImpactStore
+	traceStore         store.TraceStore
 	registry           *connector.Registry
 	cfg              *config.Config
 }
@@ -152,6 +153,7 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	analyticsStore := store.NewAnalyticsStore(db)
 	journeyStore := store.NewJourneyStore(db)
 	errorImpactStore := store.NewErrorImpactStore(db)
+	traceStore := store.NewTraceStore(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
@@ -176,6 +178,7 @@ func initApp(ctx context.Context) (*appDeps, error) {
 		analyticsStore:     analyticsStore,
 		journeyStore:       journeyStore,
 		errorImpactStore:   errorImpactStore,
+		traceStore:         traceStore,
 		registry:           registry,
 		cfg:                cfg,
 	}, nil
@@ -298,6 +301,9 @@ func run() error {
 	watchEvidenceBuilder := watcher.NewWatchEvidenceBuilder(deps.logStore, watchMetrics)
 	watchStream := watcher.NewWatchStreamEvaluator(ctx, deps.watchStore, watchEvaluator, watchEvidenceBuilder)
 
+	// Create health check scheduler early so we can inject its reliability data into the web server.
+	hcSched := healthcheck.NewScheduler(deps.healthCheckStore, 0)
+
 	// Create server
 	srv := web.NewServerWithDeps(web.ServerDeps{
 		Ctx:              ctx,
@@ -324,6 +330,8 @@ func run() error {
 		AnalyticsStore:       deps.analyticsStore,
 		JourneyStore:         deps.journeyStore,
 		ErrorImpactStore:     deps.errorImpactStore,
+		TraceStore:           deps.traceStore,
+		ReliabilityProvider:  hcSched,
 	})
 
 	httpServer := &http.Server{
@@ -349,8 +357,7 @@ func run() error {
 	})
 	watchSched.Start(ctx)
 
-	// Start health check scheduler
-	hcSched := healthcheck.NewScheduler(deps.healthCheckStore, 0)
+	// Start health check scheduler (created above for injection into web server)
 	hcSched.Start(ctx)
 
 	// Background: clean expired sessions every 15 minutes
@@ -392,6 +399,28 @@ func run() error {
 			}
 		}
 	}()
+
+	// Background: mark stale partial traces as timeout every 60s
+	if deps.traceStore != nil {
+		bgWg.Add(1)
+		go func() {
+			defer bgWg.Done()
+			ticker := time.NewTicker(60 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if n, err := deps.traceStore.MarkStaleTraces(ctx, 30*time.Second); err != nil {
+						slog.Warn("MarkStaleTraces failed", "error", err)
+					} else if n > 0 {
+						slog.Info("marked stale traces as timeout", "count", n)
+					}
+				}
+			}
+		}()
+	}
 
 	// Background: unified data retention job every hour
 	bgWg.Add(1)

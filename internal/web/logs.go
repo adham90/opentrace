@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/adham90/opentrace/internal/connector"
@@ -109,21 +110,41 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 	if len(trimmed) > 0 && trimmed[0] == '{' {
 		var single ingestLogEntry
 		if err := json.Unmarshal(trimmed, &single); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			writeError(w, http.StatusBadRequest, formatJSONError(err, "object"))
 			return
 		}
 		entries = []ingestLogEntry{single}
 	} else {
 		if err := json.Unmarshal(trimmed, &entries); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			writeError(w, http.StatusBadRequest, formatJSONError(err, "array"))
 			return
 		}
 	}
 
 	// Validate required fields
+	validLevels := map[string]bool{
+		"debug": true, "info": true, "warn": true, "warning": true,
+		"error": true, "fatal": true,
+		"DEBUG": true, "INFO": true, "WARN": true, "WARNING": true,
+		"ERROR": true, "FATAL": true,
+	}
 	for i, e := range entries {
-		if e.Timestamp.IsZero() || e.Level == "" || e.Message == "" {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("entry %d: timestamp, level, and message are required", i))
+		var missing []string
+		if e.Timestamp.IsZero() {
+			missing = append(missing, "timestamp")
+		}
+		if e.Level == "" {
+			missing = append(missing, "level")
+		}
+		if e.Message == "" {
+			missing = append(missing, "message")
+		}
+		if len(missing) > 0 {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("entry %d: missing required field(s): %s", i, strings.Join(missing, ", ")))
+			return
+		}
+		if !validLevels[e.Level] {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("entry %d: 'level' must be one of: debug, info, warn, error, fatal (got %q)", i, e.Level))
 			return
 		}
 	}
@@ -223,7 +244,13 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	count, err := s.logStore.BatchInsert(r.Context(), logEntries)
+	// Use async ingest queue if available; otherwise fall back to synchronous insert
+	var count int
+	if s.ingestQueue != nil {
+		count, err = s.ingestQueue.Enqueue(r.Context(), logEntries)
+	} else {
+		count, err = s.logStore.BatchInsert(r.Context(), logEntries)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to insert logs")
 		return
@@ -253,6 +280,14 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 					if s.errorImpactStore != nil && e.UserID != "" {
 						_ = s.errorImpactStore.TrackImpact(r.Context(), e.ErrorFingerprint, e.UserID, e.Metadata, e.ID, e.Service)
 					}
+				}
+			}
+		}
+		// Update distributed trace reassembly status for entries with a trace_id.
+		if s.traceStore != nil {
+			for _, e := range logEntries {
+				if e.TraceID != "" {
+					_ = s.traceStore.UpsertTraceStatus(r.Context(), e.TraceID, e)
 				}
 			}
 		}
