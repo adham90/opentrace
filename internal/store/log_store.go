@@ -22,6 +22,15 @@ func NewLogStore(db *sql.DB) LogStore {
 	return &logStore{db: db}
 }
 
+// BatchInsert inserts log entries in a single transaction using prepared
+// statements. This is already optimized:
+//   - Single BEGIN/COMMIT wrapping the entire batch (one fsync)
+//   - Prepared statement reused across all inserts within the transaction
+//   - Summary statement prepared lazily (only if any entry has a request_summary)
+//
+// No further optimization needed for the insert path itself. The IngestQueue
+// in internal/web/ingest_queue.go handles batching at the HTTP layer to reduce
+// write contention on SQLite's single-writer lock.
 func (s *logStore) BatchInsert(ctx context.Context, entries []LogEntry) (int, error) {
 	if len(entries) == 0 {
 		return 0, nil
