@@ -1,50 +1,50 @@
 {{define "content"}}
 <div class="app-shell">
   <!-- ── Status Bar ─────────────────────────────────────────── -->
-  <header class="status-bar">
+  <header class="status-bar" role="banner">
     <div class="status-bar-left">
       <a href="/" class="status-brand">opentrace</a>
-      <span class="status-health" id="status-health">
+      <span class="status-health" id="status-health" role="status" aria-live="polite">
         <span class="status-dot status-dot-ok" id="status-dot"></span>
         <span class="status-health-text" id="status-health-text">OK</span>
       </span>
-      <span class="status-stats" id="status-stats">
+      <span class="status-stats" id="status-stats" role="status" aria-live="polite">
         <span class="status-stat" id="stat-rate" title="logs/hour">-/hr</span>
         <span class="status-stat status-stat-err" id="stat-errors" title="errors/hour">0 err</span>
       </span>
     </div>
     <div class="status-bar-right">
       {{if .User}}
-      <div class="user-menu" id="user-menu">
-        <button class="user-menu-trigger" id="user-menu-trigger-btn">
+      <nav class="user-menu" id="user-menu" aria-label="User menu">
+        <button class="user-menu-trigger" id="user-menu-trigger-btn" aria-expanded="false" aria-haspopup="true" aria-label="User menu for {{.User.DisplayName}}">
           {{.User.DisplayName}}
-          <svg width="8" height="5" viewBox="0 0 8 5" fill="currentColor"><path d="M0 0l4 5 4-5z"/></svg>
+          <svg width="8" height="5" viewBox="0 0 8 5" fill="currentColor" aria-hidden="true"><path d="M0 0l4 5 4-5z"/></svg>
         </button>
-        <div class="user-menu-dropdown" id="user-menu-dropdown">
-          <button class="user-menu-item" id="theme-toggle-btn">theme: <span id="dropdown-theme-label">system</span></button>
-          <div class="user-menu-divider"></div>
-          <a href="/profile" class="user-menu-item">Profile</a>
-          <a href="/settings" class="user-menu-item">Settings</a>
-          <a href="/setup" class="user-menu-item">Setup</a>
-          <a href="/connectors" class="user-menu-item">Connectors</a>
-          <a href="/tools" class="user-menu-item">Tools</a>
-          {{if .IsAdmin}}<a href="/users" class="user-menu-item">Users</a>{{end}}
-          <div class="user-menu-divider"></div>
-          <a href="/logout" class="user-menu-item user-menu-item-danger" id="logout-link">Logout</a>
+        <div class="user-menu-dropdown" id="user-menu-dropdown" role="menu">
+          <button class="user-menu-item" id="theme-toggle-btn" role="menuitem" aria-label="Toggle theme">theme: <span id="dropdown-theme-label">system</span></button>
+          <div class="user-menu-divider" role="separator"></div>
+          <a href="/profile" class="user-menu-item" role="menuitem">Profile</a>
+          <a href="/settings" class="user-menu-item" role="menuitem">Settings</a>
+          <a href="/setup" class="user-menu-item" role="menuitem">Setup</a>
+          <a href="/connectors" class="user-menu-item" role="menuitem">Connectors</a>
+          <a href="/tools" class="user-menu-item" role="menuitem">Tools</a>
+          {{if .IsAdmin}}<a href="/users" class="user-menu-item" role="menuitem">Users</a>{{end}}
+          <div class="user-menu-divider" role="separator"></div>
+          <a href="/logout" class="user-menu-item user-menu-item-danger" id="logout-link" role="menuitem">Logout</a>
         </div>
-      </div>
+      </nav>
       {{end}}
     </div>
   </header>
 
   <!-- ── Attention Zone ─────────────────────────────────────── -->
-  <div class="attention-zone" id="attention-zone" style="display:none">
+  <div class="attention-zone" id="attention-zone" style="display:none" aria-live="polite" role="region" aria-label="Alerts and attention items">
     <div class="attention-list" id="attention-list"></div>
   </div>
 
   <!-- ── Log Stream ─────────────────────────────────────────── -->
-  <div class="log-stream" id="log-stream">
-    <div class="term-output" id="term-output">
+  <div class="log-stream" id="log-stream" role="region" aria-label="Log stream">
+    <div class="term-output" id="term-output" aria-live="polite" aria-relevant="additions">
       <div id="logs-list" data-max-id="{{.MaxLogID}}">
       {{if .Logs}}
       <div class="log-list">
@@ -73,13 +73,13 @@
       </div>
     </div>
 
-    <div class="term-new-indicator" id="new-indicator" style="display:none">
+    <button class="term-new-indicator" id="new-indicator" style="display:none" aria-live="polite" aria-label="Scroll to new logs">
       <span id="new-indicator-count">0</span> new logs
-    </div>
+    </button>
   </div>
 
   <!-- ── Command Line ───────────────────────────────────────── -->
-  <form id="filter-form" class="term-cmdline" autocomplete="off">
+  <form id="filter-form" class="term-cmdline" autocomplete="off" role="search" aria-label="Log filter">
     <input type="hidden" name="service" id="f-service" value="{{.LogFilters.Service}}">
     <input type="hidden" name="level" id="f-level" value="{{.LogFilters.Level}}">
     <input type="hidden" name="event_type" id="f-event-type" value="{{.LogFilters.EventType}}">
@@ -93,14 +93,14 @@
     <input type="hidden" name="source_file" id="f-source-file" value="{{.LogFilters.SourceFile}}">
 
     <div class="term-cmdline-inner">
-      <span class="term-prompt-symbol">$</span>
-      <div class="term-active-filters" id="active-filters"></div>
-      <input type="text" id="cmd-input" class="term-cmd-input" placeholder="level:error service:api-svc or search text" spellcheck="false">
-      <div class="term-live-badge" id="live-badge" title="toggle live tail (p)">
-        <span class="term-live-dot" id="live-dot"></span>
+      <span class="term-prompt-symbol" aria-hidden="true">$</span>
+      <div class="term-active-filters" id="active-filters" aria-label="Active filters"></div>
+      <input type="text" id="cmd-input" class="term-cmd-input" placeholder="level:error service:api-svc or search text" spellcheck="false" aria-label="Log filter command line" aria-autocomplete="list" aria-controls="ac-dropdown">
+      <button type="button" class="term-live-badge" id="live-badge" title="toggle live tail (p)" aria-label="Toggle live tail" aria-pressed="true">
+        <span class="term-live-dot" id="live-dot" aria-hidden="true"></span>
         <span id="live-label">LIVE</span>
-      </div>
-      <div class="ac-dropdown" id="ac-dropdown" style="display:none"></div>
+      </button>
+      <div class="ac-dropdown" id="ac-dropdown" style="display:none" role="listbox" aria-label="Filter suggestions"></div>
     </div>
   </form>
 </div>
@@ -178,7 +178,7 @@
         html += '<span class="attention-desc">' + escH(it.desc) + '</span>';
         html += '<span class="attention-time">' + getTimeAgo(it.time) + '</span>';
         if (it.dismissId) {
-          html += '<button class="attention-dismiss" data-dismiss-type="' + escH(it.dismissType) + '" data-dismiss-id="' + escH(it.dismissId) + '" title="' + (it.dismissType === 'error' ? 'Resolve error' : 'Dismiss watch') + '">\u00d7</button>';
+          html += '<button class="attention-dismiss" data-dismiss-type="' + escH(it.dismissType) + '" data-dismiss-id="' + escH(it.dismissId) + '" title="' + (it.dismissType === 'error' ? 'Resolve error' : 'Dismiss watch') + '" aria-label="' + (it.dismissType === 'error' ? 'Resolve error' : 'Dismiss watch') + '">\u00d7</button>';
         }
         html += '</div>';
       });
@@ -279,7 +279,10 @@
 
   // ── User Menu ─────────────────────────────────────────────
   window.toggleUserMenu = function() {
-    document.getElementById('user-menu-dropdown').classList.toggle('user-menu-open');
+    var dd = document.getElementById('user-menu-dropdown');
+    dd.classList.toggle('user-menu-open');
+    var trigger = document.getElementById('user-menu-trigger-btn');
+    if (trigger) trigger.setAttribute('aria-expanded', dd.classList.contains('user-menu-open') ? 'true' : 'false');
   };
   window.updateDropdownTheme = function() {
     var el = document.getElementById('dropdown-theme-label');
@@ -290,6 +293,8 @@
     var menu = document.getElementById('user-menu');
     if (menu && !menu.contains(e.target)) {
       document.getElementById('user-menu-dropdown').classList.remove('user-menu-open');
+      var trigger = document.getElementById('user-menu-trigger-btn');
+      if (trigger) trigger.setAttribute('aria-expanded', 'false');
     }
   });
 
@@ -380,7 +385,7 @@
 
   function renderInlineDetail(el, log) {
     var html = '';
-    html += '<button class="term-copy-btn" title="Copy log details">Copy</button>';
+    html += '<button class="term-copy-btn" title="Copy log details" aria-label="Copy log details">Copy</button>';
     html += '<div class="term-detail-section">';
     html += dRow('id', log.id);
     if (log.trace_id) html += dRow('trace_id', log.trace_id);
@@ -716,9 +721,11 @@
     live = !live;
     if (live) {
       liveBadge.classList.remove('live-off'); liveBadge.classList.add('live-on');
+      liveBadge.setAttribute('aria-pressed', 'true');
       liveLabel.textContent = 'LIVE'; startPolling(); scrollToBottom();
     } else {
       liveBadge.classList.remove('live-on'); liveBadge.classList.add('live-off');
+      liveBadge.setAttribute('aria-pressed', 'false');
       liveLabel.textContent = 'PAUSED'; stopPolling();
     }
   };

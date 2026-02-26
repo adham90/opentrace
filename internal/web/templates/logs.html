@@ -1,17 +1,17 @@
 {{define "content"}}
-<div id="toast-container"></div>
-<div class="term-container" id="term-container">
-  <div class="term-output" id="term-output">
+<div id="toast-container" aria-live="polite" role="status"></div>
+<div class="term-container" id="term-container" role="region" aria-label="Log viewer">
+  <div class="term-output" id="term-output" aria-live="polite" aria-relevant="additions">
     <div id="logs-list" data-max-id="{{.MaxLogID}}">
     {{template "logs-list" .}}
     </div>
   </div>
 
-  <div class="term-new-indicator" id="new-indicator" style="display:none">
+  <button class="term-new-indicator" id="new-indicator" style="display:none" aria-live="polite" aria-label="Scroll to new logs">
     <span id="new-indicator-count">0</span> new logs
-  </div>
+  </button>
 
-  <form id="filter-form" class="term-cmdline" autocomplete="off"
+  <form id="filter-form" class="term-cmdline" autocomplete="off" role="search" aria-label="Log filter"
         hx-get="/logs" hx-target="#logs-list" hx-swap="innerHTML" hx-trigger="submit" hx-push-url="false">
     <input type="hidden" name="service" id="f-service" value="{{.LogFilters.Service}}">
     <input type="hidden" name="level" id="f-level" value="{{.LogFilters.Level}}">
@@ -26,14 +26,14 @@
     <input type="hidden" name="source_file" id="f-source-file" value="{{.LogFilters.SourceFile}}">
 
     <div class="term-cmdline-inner">
-      <span class="term-prompt-symbol">$</span>
-      <div class="term-active-filters" id="active-filters"></div>
-      <input type="text" id="cmd-input" class="term-cmd-input" placeholder="type a command... level:error service:my-app time:1h or search text" spellcheck="false">
-      <div class="term-live-badge" id="live-badge" title="toggle live tail (p)">
-        <span class="term-live-dot" id="live-dot"></span>
+      <span class="term-prompt-symbol" aria-hidden="true">$</span>
+      <div class="term-active-filters" id="active-filters" aria-label="Active filters"></div>
+      <input type="text" id="cmd-input" class="term-cmd-input" placeholder="type a command... level:error service:my-app time:1h or search text" spellcheck="false" aria-label="Log filter command line" aria-autocomplete="list" aria-controls="ac-dropdown">
+      <button type="button" class="term-live-badge" id="live-badge" title="toggle live tail (p)" aria-label="Toggle live tail" aria-pressed="true">
+        <span class="term-live-dot" id="live-dot" aria-hidden="true"></span>
         <span id="live-label">LIVE</span>
-      </div>
-      <div class="ac-dropdown" id="ac-dropdown" style="display:none"></div>
+      </button>
+      <div class="ac-dropdown" id="ac-dropdown" style="display:none" role="listbox" aria-label="Filter suggestions"></div>
     </div>
   </form>
 </div>
@@ -266,10 +266,12 @@
   align-items: center;
   gap: 5px;
   padding: 2px 10px;
+  background: transparent;
   border: 1px solid var(--border);
   border-radius: 3px;
   font-size: 10px;
   font-family: var(--font-mono);
+  color: inherit;
   cursor: pointer;
   user-select: none;
   flex-shrink: 0;
@@ -566,7 +568,7 @@
     var html = '';
 
     // Copy button
-    html += '<button class="term-copy-btn" title="Copy log details">Copy</button>';
+    html += '<button class="term-copy-btn" title="Copy log details" aria-label="Copy log details">Copy</button>';
 
     // Identity row
     html += '<div class="term-detail-section">';
@@ -1204,12 +1206,14 @@
     if (live) {
       liveBadge.classList.remove('live-off');
       liveBadge.classList.add('live-on');
+      liveBadge.setAttribute('aria-pressed', 'true');
       liveLabel.textContent = 'LIVE';
       startPolling();
       scrollToBottom();
     } else {
       liveBadge.classList.remove('live-on');
       liveBadge.classList.add('live-off');
+      liveBadge.setAttribute('aria-pressed', 'false');
       liveLabel.textContent = 'PAUSED';
       stopPolling();
     }

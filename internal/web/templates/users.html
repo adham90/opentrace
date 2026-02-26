@@ -5,21 +5,21 @@
     <div class="actions">
       <a href="/register" class="btn btn-primary btn-sm">+ Invite User</a>
     </div>
-    <a href="/" class="page-close" title="Back to dashboard">&times;</a>
+    <a href="/" class="page-close" title="Back to dashboard" aria-label="Back to dashboard">&times;</a>
   </div>
 
   <div id="users-list">
     {{if .Users}}
     <div class="table-wrap">
-      <table class="data-table">
+      <table class="data-table" aria-label="Users">
         <thead>
           <tr>
-            <th>Email</th>
-            <th>Display Name</th>
-            <th>Role</th>
-            <th>MCP</th>
-            <th>Active</th>
-            <th>Actions</th>
+            <th scope="col">Email</th>
+            <th scope="col">Display Name</th>
+            <th scope="col">Role</th>
+            <th scope="col">MCP</th>
+            <th scope="col">Active</th>
+            <th scope="col">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -28,26 +28,26 @@
             <td>{{.Email}}</td>
             <td>{{.DisplayName}}</td>
             <td>
-              <select class="role-select" data-user-id="{{.ID}}" {{if not $.IsAdmin}}disabled{{end}}>
+              <select class="role-select" data-user-id="{{.ID}}" {{if not $.IsAdmin}}disabled{{end}} aria-label="Role for {{.Email}}">
                 <option value="admin" {{if eq (print .Role) "admin"}}selected{{end}}>admin</option>
                 <option value="member" {{if eq (print .Role) "member"}}selected{{end}}>member</option>
               </select>
             </td>
             <td>
               <label class="toggle-label">
-                <input type="checkbox" {{if .MCPEnabled}}checked{{end}} data-toggle="mcp" data-user-id="{{.ID}}">
+                <input type="checkbox" {{if .MCPEnabled}}checked{{end}} data-toggle="mcp" data-user-id="{{.ID}}" aria-label="MCP access for {{.Email}}">
                 <span class="toggle-text">{{if .MCPEnabled}}on{{else}}off{{end}}</span>
               </label>
             </td>
             <td>
               <label class="toggle-label">
-                <input type="checkbox" {{if .IsActive}}checked{{end}} data-toggle="active" data-user-id="{{.ID}}">
+                <input type="checkbox" {{if .IsActive}}checked{{end}} data-toggle="active" data-user-id="{{.ID}}" aria-label="Active status for {{.Email}}">
                 <span class="toggle-text">{{if .IsActive}}yes{{else}}no{{end}}</span>
               </label>
             </td>
             <td class="actions-cell">
-              <button class="btn btn-sm btn-regen" data-user-id="{{.ID}}">Regen Token</button>
-              <button class="btn btn-sm btn-danger btn-delete-user" data-user-id="{{.ID}}" data-email="{{.Email}}">Delete</button>
+              <button class="btn btn-sm btn-regen" data-user-id="{{.ID}}" aria-label="Regenerate MCP token for {{.Email}}">Regen Token</button>
+              <button class="btn btn-sm btn-danger btn-delete-user" data-user-id="{{.ID}}" data-email="{{.Email}}" aria-label="Delete user {{.Email}}">Delete</button>
             </td>
           </tr>
           {{end}}

@@ -113,6 +113,34 @@ body:has(.logs-page) {
 a { color: var(--green); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
+/* Skip to content link for keyboard navigation */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  z-index: -1;
+}
+.skip-link:focus {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  z-index: 10000;
+  background: var(--bg-secondary);
+  color: var(--green);
+  padding: 8px 16px;
+  border: 2px solid var(--green);
+  border-radius: 0 0 4px 0;
+  font-size: 14px;
+  font-family: var(--font-mono);
+  text-decoration: none;
+}
+
 /* Focus-visible for keyboard accessibility */
 :focus-visible {
   outline: 2px solid var(--green);
@@ -659,7 +687,10 @@ button:focus-visible, .btn:focus-visible {
   padding: 3px 10px;
   font-size: 11px;
   font-weight: 600;
+  font-family: var(--font-mono);
   color: var(--green);
+  background: transparent;
+  border: none;
   cursor: pointer;
   border-radius: 3px;
   flex-shrink: 0;

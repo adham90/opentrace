@@ -32,7 +32,7 @@
       <p class="help-text">Use this key to authenticate agents sending logs and metrics.</p>
       <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.5rem">
         <code id="api-key-display" style="flex:1;padding:0.5rem;background:var(--bg-secondary,#1a1a2e);border:1px solid var(--border,#333);border-radius:4px;word-break:break-all;font-size:0.85rem">{{.APIKey}}</code>
-        <button class="btn btn-primary" data-copy-target="api-key-display" style="white-space:nowrap">Copy</button>
+        <button class="btn btn-primary" data-copy-target="api-key-display" style="white-space:nowrap" aria-label="Copy API key">Copy</button>
       </div>
     </div>
 
@@ -41,7 +41,7 @@
       <p class="help-text">Install the OpenTrace agent on your servers:</p>
       <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.5rem">
         <code id="agent-cmd" style="flex:1;padding:0.5rem;background:var(--bg-secondary,#1a1a2e);border:1px solid var(--border,#333);border-radius:4px;word-break:break-all;font-size:0.85rem">curl -sSL {{.BaseURL}}/api/agent/install.sh | OPENTRACE_URL={{.BaseURL}} OPENTRACE_API_KEY={{.APIKey}} bash</code>
-        <button class="btn btn-primary" data-copy-target="agent-cmd" style="white-space:nowrap">Copy</button>
+        <button class="btn btn-primary" data-copy-target="agent-cmd" style="white-space:nowrap" aria-label="Copy agent setup command">Copy</button>
       </div>
     </div>
 
@@ -57,7 +57,7 @@
     }
   }
 }</pre>
-        <button class="btn btn-primary" data-copy-target="mcp-config" style="white-space:nowrap">Copy</button>
+        <button class="btn btn-primary" data-copy-target="mcp-config" style="white-space:nowrap" aria-label="Copy MCP configuration">Copy</button>
       </div>
     </div>
 

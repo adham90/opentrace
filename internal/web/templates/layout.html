@@ -40,13 +40,14 @@
   <script src="/static/htmx.min.js"></script>
 </head>
 <body>
+  <a href="#main-content" class="skip-link">Skip to main content</a>
   <div hx-get="/api/version/banner" hx-trigger="load" hx-swap="innerHTML" id="version-banner-container"></div>
-  <div class="toast-container" id="toast-container"></div>
+  <div class="toast-container" id="toast-container" aria-live="polite" role="status"></div>
 
   <!-- Keyboard shortcut overlay -->
-  <div id="shortcut-overlay" class="shortcut-overlay" style="display:none">
+  <div id="shortcut-overlay" class="shortcut-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="shortcut-dialog-title">
     <div class="shortcut-dialog">
-      <div class="shortcut-title">Keyboard Shortcuts</div>
+      <div class="shortcut-title" id="shortcut-dialog-title">Keyboard Shortcuts</div>
       <div class="shortcut-section">
         <div class="shortcut-section-label">Log Filters</div>
         <div class="shortcut-row"><kbd>/</kbd><span>Focus command line</span></div>
@@ -63,7 +64,7 @@
   </div>
 
   <div class="layout-container">
-    <main class="main-content{{if eq .Nav "dashboard"}} dashboard-page{{end}}{{if eq .Nav "logs"}} logs-page{{end}}">
+    <main id="main-content" class="main-content{{if eq .Nav "dashboard"}} dashboard-page{{end}}{{if eq .Nav "logs"}} logs-page{{end}}" tabindex="-1">
       {{template "content" .}}
     </main>
   </div>
@@ -109,6 +110,7 @@
       var closeBtn = document.createElement('button');
       closeBtn.className = 'toast-close';
       closeBtn.textContent = '\u00d7';
+      closeBtn.setAttribute('aria-label', 'Dismiss notification');
       closeBtn.addEventListener('click', function() { dismissToast(toast); });
       toast.appendChild(closeBtn);
       container.appendChild(toast);
@@ -218,6 +220,8 @@
         var userMenu = document.getElementById('user-menu-dropdown');
         if (userMenu && userMenu.classList.contains('user-menu-open')) {
           userMenu.classList.remove('user-menu-open');
+          var menuTrigger = document.getElementById('user-menu-trigger-btn');
+          if (menuTrigger) menuTrigger.setAttribute('aria-expanded', 'false');
           return;
         }
         var modals = document.querySelectorAll('.modal[style*="flex"]');
