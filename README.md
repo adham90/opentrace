@@ -207,7 +207,7 @@ Official client libraries handle async dispatch, batching, PII scrubbing, and gr
 
 | Client | Platform | Install |
 |---|---|---|
-| [**@opentrace/node**](https://github.com/adham90/opentrace_node) | Node.js (Express, Fastify, Hono) | `npm install @opentrace/node` |
+| [**@opentrace-sdk/node**](https://github.com/adham90/opentrace_node) | Node.js (Express, Fastify, Hono) | `npm install @opentrace-sdk/node` |
 | [**opentrace**](https://github.com/adham90/opentrace_ruby) | Ruby / Rails | `gem 'opentrace'` |
 | [**opentrace.js**](https://github.com/adham90/opentrace_browser) | Browser | `<script src="opentrace.min.js">` |
 
