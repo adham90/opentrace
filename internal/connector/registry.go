@@ -70,6 +70,21 @@ func (r *Registry) HasDataConnectors() bool {
 	return len(r.connectors) > 0
 }
 
+// ConnectorStatus returns the circuit breaker state for the given connector type.
+// Returns CircuitClosed if the connector is not registered or has no circuit breaker.
+func (r *Registry) ConnectorStatus(ct ConnectorType) CircuitState {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	c, ok := r.connectors[ct]
+	if !ok {
+		return CircuitClosed
+	}
+	if dc, ok := c.(*DatabaseConnector); ok && dc.cb != nil {
+		return dc.cb.State()
+	}
+	return CircuitClosed
+}
+
 // AllTools aggregates tools from all registered connectors.
 // Returns an empty slice (not nil) if no connectors are registered.
 func (r *Registry) AllTools() []Tool {

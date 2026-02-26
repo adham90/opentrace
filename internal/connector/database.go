@@ -24,6 +24,7 @@ type DatabaseConnector struct {
 	cacheMu     sync.RWMutex
 	schemaCache map[string]schemaCacheEntry // key: "" for table list, "tablename" for columns
 	cacheTTL    time.Duration
+	cb          *CircuitBreaker
 }
 
 // NewDatabaseConnector creates a new DatabaseConnector with a connection to the target DB.
@@ -55,13 +56,29 @@ func NewDatabaseConnector(ctx context.Context, connStr string, maxRows, stmtTime
 		maxRows:     maxRows,
 		schemaCache: make(map[string]schemaCacheEntry),
 		cacheTTL:    5 * time.Minute,
+		cb:          NewCircuitBreaker(connStr, DefaultCircuitBreakerConfig()),
 	}, nil
 }
 
 func (c *DatabaseConnector) Type() ConnectorType { return ConnectorDatabase }
 
 func (c *DatabaseConnector) TestConnection(ctx context.Context) error {
-	return c.pool.Ping(ctx)
+	if c.cb != nil {
+		if err := c.cb.Allow(); err != nil {
+			return fmt.Errorf("connector: %w", err)
+		}
+	}
+	err := c.pool.Ping(ctx)
+	if err != nil {
+		if c.cb != nil {
+			c.cb.RecordFailure()
+		}
+		return err
+	}
+	if c.cb != nil {
+		c.cb.RecordSuccess()
+	}
+	return nil
 }
 
 func (c *DatabaseConnector) Tools() []Tool {
@@ -102,6 +119,21 @@ Tips:
 	}
 }
 
+// CircuitBreakerState returns the current circuit breaker state for this connector.
+func (c *DatabaseConnector) CircuitBreakerState() CircuitState {
+	if c.cb != nil {
+		return c.cb.State()
+	}
+	return CircuitClosed
+}
+
+// ResetCircuitBreaker resets the circuit breaker to closed state.
+func (c *DatabaseConnector) ResetCircuitBreaker() {
+	if c.cb != nil {
+		c.cb.Reset()
+	}
+}
+
 func (c *DatabaseConnector) Close() error {
 	c.pool.Close()
 	return nil
@@ -109,6 +141,12 @@ func (c *DatabaseConnector) Close() error {
 
 // ExecuteReadQuery runs a read-only SQL query and returns structured results.
 func (c *DatabaseConnector) ExecuteReadQuery(ctx context.Context, query string) (*QueryResult, error) {
+	if c.cb != nil {
+		if err := c.cb.Allow(); err != nil {
+			return nil, fmt.Errorf("connector: %w", err)
+		}
+	}
+
 	// Validate SQL is read-only
 	if err := guardrail.ValidateReadOnly(query); err != nil {
 		return nil, fmt.Errorf("query rejected: %w", err)
@@ -122,6 +160,9 @@ func (c *DatabaseConnector) ExecuteReadQuery(ctx context.Context, query string) 
 
 	rows, err := c.pool.Query(ctx, limitedQuery)
 	if err != nil {
+		if c.cb != nil {
+			c.cb.RecordFailure()
+		}
 		return nil, fmt.Errorf("executing query: %w", err)
 	}
 	defer rows.Close()
@@ -136,12 +177,22 @@ func (c *DatabaseConnector) ExecuteReadQuery(ctx context.Context, query string) 
 	for rows.Next() {
 		values, err := rows.Values()
 		if err != nil {
+			if c.cb != nil {
+				c.cb.RecordFailure()
+			}
 			return nil, fmt.Errorf("reading row: %w", err)
 		}
 		resultRows = append(resultRows, values)
 	}
 	if err := rows.Err(); err != nil {
+		if c.cb != nil {
+			c.cb.RecordFailure()
+		}
 		return nil, fmt.Errorf("iterating rows: %w", err)
+	}
+
+	if c.cb != nil {
+		c.cb.RecordSuccess()
 	}
 
 	return &QueryResult{
@@ -153,17 +204,35 @@ func (c *DatabaseConnector) ExecuteReadQuery(ctx context.Context, query string) 
 
 // Ping checks connectivity and measures latency.
 func (c *DatabaseConnector) Ping(ctx context.Context) PingResult {
+	if c.cb != nil {
+		if err := c.cb.Allow(); err != nil {
+			return PingResult{Reachable: false, Error: err.Error()}
+		}
+	}
+
 	start := time.Now()
 	err := c.pool.Ping(ctx)
 	latency := time.Since(start).Milliseconds()
 
 	if err != nil {
+		if c.cb != nil {
+			c.cb.RecordFailure()
+		}
 		return PingResult{Reachable: false, LatencyMS: latency, Error: err.Error()}
+	}
+	if c.cb != nil {
+		c.cb.RecordSuccess()
 	}
 	return PingResult{Reachable: true, LatencyMS: latency}
 }
 
 func (c *DatabaseConnector) handleDbSearch(ctx context.Context, args map[string]any) (string, error) {
+	if c.cb != nil {
+		if err := c.cb.Allow(); err != nil {
+			return "", fmt.Errorf("connector: %w", err)
+		}
+	}
+
 	query, ok := args["query"].(string)
 	if !ok || query == "" {
 		return "", fmt.Errorf("query parameter is required")
@@ -182,6 +251,9 @@ func (c *DatabaseConnector) handleDbSearch(ctx context.Context, args map[string]
 
 	rows, err := c.pool.Query(ctx, limitedQuery)
 	if err != nil {
+		if c.cb != nil {
+			c.cb.RecordFailure()
+		}
 		return "", fmt.Errorf("executing query: %w", err)
 	}
 	defer rows.Close()
@@ -202,6 +274,9 @@ func (c *DatabaseConnector) handleDbSearch(ctx context.Context, args map[string]
 	for rows.Next() {
 		values, err := rows.Values()
 		if err != nil {
+			if c.cb != nil {
+				c.cb.RecordFailure()
+			}
 			return "", fmt.Errorf("reading row: %w", err)
 		}
 
@@ -220,7 +295,14 @@ func (c *DatabaseConnector) handleDbSearch(ctx context.Context, args map[string]
 	}
 
 	if err := rows.Err(); err != nil {
+		if c.cb != nil {
+			c.cb.RecordFailure()
+		}
 		return "", fmt.Errorf("iterating rows: %w", err)
+	}
+
+	if c.cb != nil {
+		c.cb.RecordSuccess()
 	}
 
 	if rowCount == 0 {
@@ -245,10 +327,23 @@ func (c *DatabaseConnector) handleDbSchema(ctx context.Context, args map[string]
 		c.cacheMu.RUnlock()
 	}
 
-	// Cache miss — query the database
+	// Cache miss — check circuit breaker before querying the database
+	if c.cb != nil {
+		if err := c.cb.Allow(); err != nil {
+			return "", fmt.Errorf("connector: %w", err)
+		}
+	}
+
 	result, err := c.querySchema(ctx, table)
 	if err != nil {
+		if c.cb != nil {
+			c.cb.RecordFailure()
+		}
 		return "", err
+	}
+
+	if c.cb != nil {
+		c.cb.RecordSuccess()
 	}
 
 	// Store in cache
