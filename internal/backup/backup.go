@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -34,8 +35,10 @@ func Backup(ctx context.Context, dbPath string, destPath string) error {
 	}
 	defer db.Close()
 
-	// VACUUM INTO creates a clean standalone copy (no WAL needed)
-	_, err = db.ExecContext(ctx, fmt.Sprintf(`VACUUM INTO '%s'`, destPath))
+	// VACUUM INTO creates a clean standalone copy (no WAL needed).
+	// Escape single quotes in path to prevent SQL injection.
+	safePath := strings.ReplaceAll(destPath, "'", "''")
+	_, err = db.ExecContext(ctx, fmt.Sprintf(`VACUUM INTO '%s'`, safePath))
 	if err != nil {
 		// Clean up partial file
 		os.Remove(destPath)
@@ -48,13 +51,12 @@ func Backup(ctx context.Context, dbPath string, destPath string) error {
 		return fmt.Errorf("backup verification failed: %w", err)
 	}
 
-	info, _ := os.Stat(destPath)
 	elapsed := time.Since(start)
-	slog.Info("backup completed",
-		"destination", destPath,
-		"size_mb", info.Size()/(1024*1024),
-		"elapsed_ms", elapsed.Milliseconds(),
-	)
+	logAttrs := []any{"destination", destPath, "elapsed_ms", elapsed.Milliseconds()}
+	if info, err := os.Stat(destPath); err == nil {
+		logAttrs = append(logAttrs, "size_mb", info.Size()/(1024*1024))
+	}
+	slog.Info("backup completed", logAttrs...)
 
 	return nil
 }

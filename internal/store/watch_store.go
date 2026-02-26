@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -56,24 +57,29 @@ func scanWatch(sc interface{ Scan(...any) error }) (*Watch, error) {
 		w.CurrentValue = &currentVal.Float64
 	}
 	if expiresAt.Valid {
-		t, _ := time.Parse(time.RFC3339, expiresAt.String)
+		t := parseTime(expiresAt.String)
 		w.ExpiresAt = &t
 	}
 	if lastChecked.Valid {
-		t, _ := time.Parse(time.RFC3339, lastChecked.String)
+		t := parseTime(lastChecked.String)
 		w.LastCheckedAt = &t
 	}
 	if nextCheck.Valid {
-		t, _ := time.Parse(time.RFC3339, nextCheck.String)
+		t := parseTime(nextCheck.String)
 		w.NextCheckAt = &t
 	}
-	w.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	w.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+	w.CreatedAt = parseTime(createdAt)
+	w.UpdatedAt = parseTime(updatedAt)
 
 	return w, nil
 }
 
 func (s *watchStore) Create(ctx context.Context, params CreateWatchParams) (*Watch, error) {
+	// Validate threshold is a finite number
+	if math.IsNaN(params.Threshold) || math.IsInf(params.Threshold, 0) {
+		return nil, fmt.Errorf("threshold must be a finite number")
+	}
+
 	id := uuid.New().String()
 	now := time.Now().UTC()
 	nowStr := now.Format(time.RFC3339)
@@ -103,15 +109,22 @@ func (s *watchStore) Create(ctx context.Context, params CreateWatchParams) (*Wat
 	// Calculate expires_at from duration
 	var expiresAtStr *string
 	dur, err := time.ParseDuration(duration)
-	if err == nil && dur > 0 {
-		ea := now.Add(dur).Format(time.RFC3339)
-		expiresAtStr = &ea
+	if err != nil {
+		return nil, fmt.Errorf("invalid duration %q: %w", duration, err)
 	}
+	if dur <= 0 {
+		return nil, fmt.Errorf("duration must be positive, got %s", duration)
+	}
+	ea := now.Add(dur).Format(time.RFC3339)
+	expiresAtStr = &ea
 
 	// Calculate next_check_at from check_interval
 	var nextCheckStr *string
 	ci, err := time.ParseDuration(checkInterval)
-	if err == nil && ci > 0 {
+	if err != nil {
+		return nil, fmt.Errorf("invalid check_interval %q: %w", checkInterval, err)
+	}
+	if ci > 0 {
 		nc := now.Add(ci).Format(time.RFC3339)
 		nextCheckStr = &nc
 	}

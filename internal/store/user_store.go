@@ -272,8 +272,8 @@ func (s *userStore) scanUser(row *sql.Row) (*User, error) {
 	if mcpToken.Valid {
 		u.MCPToken = &mcpToken.String
 	}
-	u.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	u.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+	u.CreatedAt = parseTime(createdAt)
+	u.UpdatedAt = parseTime(updatedAt)
 	return u, nil
 }
 
@@ -296,7 +296,7 @@ func (s *userStore) scanUserRow(rows *sql.Rows) (*User, error) {
 	if mcpToken.Valid {
 		u.MCPToken = &mcpToken.String
 	}
-	u.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	u.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+	u.CreatedAt = parseTime(createdAt)
+	u.UpdatedAt = parseTime(updatedAt)
 	return u, nil
 }

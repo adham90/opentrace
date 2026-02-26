@@ -56,8 +56,8 @@ func (s *sessionStore) GetByToken(ctx context.Context, token string) (*Session, 
 		return nil, fmt.Errorf("querying session: %w", err)
 	}
 
-	sess.ExpiresAt, _ = time.Parse(time.RFC3339, expiresAt)
-	sess.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	sess.ExpiresAt = parseTime(expiresAt)
+	sess.CreatedAt = parseTime(createdAt)
 	return sess, nil
 }
 

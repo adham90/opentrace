@@ -157,7 +157,7 @@ func (a *Agent) collectAndPush(ctx context.Context) {
 		slog.Warn("push error", "error", err)
 		return
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
 		slog.Warn("push returned unexpected status", "status", resp.StatusCode)

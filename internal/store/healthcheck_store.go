@@ -75,7 +75,7 @@ func (s *healthCheckStore) Get(ctx context.Context, id string) (*HealthCheck, er
 	}
 
 	hc.Enabled = enabledInt != 0
-	hc.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
+	hc.CreatedAt = parseTime(createdStr)
 	return &hc, nil
 }
 
@@ -109,7 +109,7 @@ func (s *healthCheckStore) List(ctx context.Context, params ListHealthCheckParam
 			return nil, err
 		}
 		hc.Enabled = enabledInt != 0
-		hc.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
+		hc.CreatedAt = parseTime(createdStr)
 		checks = append(checks, hc)
 	}
 	return checks, rows.Err()
@@ -181,7 +181,7 @@ func (s *healthCheckStore) LatestResults(ctx context.Context, healthcheckID stri
 			return nil, err
 		}
 		r.Status = HealthCheckStatus(statusStr)
-		r.CheckedAt, _ = time.Parse(time.RFC3339, checkedStr)
+		r.CheckedAt = parseTime(checkedStr)
 		results = append(results, r)
 	}
 	return results, rows.Err()

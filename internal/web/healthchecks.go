@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -90,6 +91,23 @@ func (s *Server) handleCreateHealthCheck(w http.ResponseWriter, r *http.Request)
 	}
 	if params.Name == "" || params.URL == "" {
 		writeError(w, http.StatusBadRequest, "name and url are required")
+		return
+	}
+	if len(params.URL) > 2048 {
+		writeError(w, http.StatusBadRequest, "URL too long (max 2048 characters)")
+		return
+	}
+	u, parseErr := url.Parse(params.URL)
+	if parseErr != nil || u.Host == "" {
+		writeError(w, http.StatusBadRequest, "invalid URL format")
+		return
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		writeError(w, http.StatusBadRequest, "only http and https URL schemes are allowed")
+		return
+	}
+	if params.ExpectedStatus != 0 && (params.ExpectedStatus < 100 || params.ExpectedStatus > 599) {
+		writeError(w, http.StatusBadRequest, "expected_status must be between 100 and 599")
 		return
 	}
 

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -28,28 +29,30 @@ func Restore(ctx context.Context, srcPath string, dbPath string) error {
 		return fmt.Errorf("backup file is invalid: %w", err)
 	}
 
-	// Create a safety backup of current database if it exists
+	// Create a safety backup of current database if it exists.
+	// Abort restore if the safety backup cannot be created.
 	if _, err := os.Stat(dbPath); err == nil {
 		safetyPath := dbPath + ".pre-restore." + time.Now().Format("20060102-150405")
 		slog.Info("creating safety backup of current database", "path", safetyPath)
-		// Use VACUUM INTO for the safety backup (clean, standalone copy)
+
+		safetyCreated := false
 		safetyDB, oerr := sql.Open("sqlite", dbPath+"?mode=ro&_journal_mode=WAL")
 		if oerr == nil {
-			_, execErr := safetyDB.ExecContext(ctx, fmt.Sprintf(`VACUUM INTO '%s'`, safetyPath))
+			safePath := strings.ReplaceAll(safetyPath, "'", "''")
+			_, execErr := safetyDB.ExecContext(ctx, fmt.Sprintf(`VACUUM INTO '%s'`, safePath))
 			safetyDB.Close()
-			if execErr != nil {
-				slog.Warn("could not create safety backup via VACUUM INTO, falling back to file copy",
-					"error", execErr)
-				if cpErr := copyFile(dbPath, safetyPath); cpErr != nil {
-					slog.Warn("safety backup file copy also failed", "error", cpErr)
-				}
-			}
-		} else {
-			// Fallback: plain file copy
-			if cpErr := copyFile(dbPath, safetyPath); cpErr != nil {
-				slog.Warn("safety backup file copy failed", "error", cpErr)
+			if execErr == nil {
+				safetyCreated = true
+			} else {
+				slog.Warn("VACUUM INTO safety backup failed, trying file copy", "error", execErr)
 			}
 		}
+		if !safetyCreated {
+			if cpErr := copyFile(dbPath, safetyPath); cpErr != nil {
+				return fmt.Errorf("restore aborted: cannot create safety backup: %w", cpErr)
+			}
+		}
+		slog.Info("safety backup created", "path", safetyPath)
 	}
 
 	// Remove WAL and SHM files for the destination
