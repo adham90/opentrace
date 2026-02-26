@@ -11,6 +11,9 @@ type ConnectorType string
 const (
 	ConnectorLogs          ConnectorType = "logs"
 	ConnectorDatabase      ConnectorType = "database"
+	ConnectorMySQL         ConnectorType = "mysql"
+	ConnectorRedis         ConnectorType = "redis"
+	ConnectorTurso         ConnectorType = "turso"
 	ConnectorMonitoring    ConnectorType = "monitoring"
 	ConnectorServerMetrics ConnectorType = "server_metrics"
 )

@@ -956,14 +956,15 @@ func addWriteTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 	if deps.DataSourceStore != nil {
 		maybeAddTool(s,
 			mcp.NewTool("create_connector",
-				mcp.WithDescription("Create a new database or log connector. After creating, use test_connector to verify the connection and activate it."),
+				mcp.WithDescription("Create a new connector. Supported types: database (PostgreSQL), mysql, redis, turso (libSQL), logs. After creating, use test_connector to verify the connection and activate it."),
 				mcp.WithString("name", mcp.Required(), mcp.Description("Display name for the connector")),
-				mcp.WithString("type", mcp.Required(), mcp.Description("Connector type: 'database' or 'logs'")),
-				mcp.WithString("connection_string", mcp.Description("PostgreSQL connection string (required for database type)")),
+				mcp.WithString("type", mcp.Required(), mcp.Description("Connector type: 'database', 'mysql', 'redis', 'turso', or 'logs'")),
+				mcp.WithString("connection_string", mcp.Description("Connection string (required for database, mysql, redis, turso). Format: PostgreSQL DSN, MySQL DSN or mysql:// URL, redis:// URL, or libsql:// URL")),
+				mcp.WithString("auth_token", mcp.Description("Auth token (required for Turso connectors)")),
 			),
 			createConnectorHandler(deps.DataSourceStore),
 		)
-		b.Add("create_connector", "Create a new database or log connector", "Connectors", "admin", "")
+		b.Add("create_connector", "Create a new connector (database, mysql, redis, turso, logs)", "Connectors", "admin", "")
 
 		if deps.Registry != nil && deps.Config != nil {
 			maybeAddTool(s,

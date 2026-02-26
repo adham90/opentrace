@@ -26,17 +26,31 @@ func createConnectorHandler(dsStore store.DataSourceStore) server.ToolHandlerFun
 
 		dsType, _ := args["type"].(string)
 		if dsType == "" {
-			return mcp.NewToolResultError("type is required (database or logs)"), nil
+			return mcp.NewToolResultError("type is required (database, mysql, redis, turso, or logs)"), nil
 		}
-		if dsType != "database" && dsType != "logs" {
-			return mcp.NewToolResultError("type must be 'database' or 'logs'"), nil
+		validTypes := map[string]bool{
+			"database": true, "mysql": true, "redis": true, "turso": true, "logs": true,
+		}
+		if !validTypes[dsType] {
+			return mcp.NewToolResultError("type must be one of: database, mysql, redis, turso, logs"), nil
+		}
+
+		needsConnStr := map[string]bool{
+			"database": true, "mysql": true, "redis": true, "turso": true,
 		}
 
 		cfg := make(map[string]any)
 		if connStr, ok := args["connection_string"].(string); ok && connStr != "" {
 			cfg["connection_string"] = connStr
-		} else if dsType == "database" {
-			return mcp.NewToolResultError("connection_string is required for database connectors"), nil
+		} else if needsConnStr[dsType] {
+			return mcp.NewToolResultError(fmt.Sprintf("connection_string is required for %s connectors", dsType)), nil
+		}
+
+		// Turso also accepts auth_token
+		if dsType == "turso" {
+			if authToken, ok := args["auth_token"].(string); ok && authToken != "" {
+				cfg["auth_token"] = authToken
+			}
 		}
 
 		ds, err := dsStore.Create(ctx, store.CreateDataSourceParams{
