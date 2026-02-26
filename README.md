@@ -203,7 +203,15 @@ curl -X POST http://localhost:8080/api/logs \
   }'
 ```
 
-A [Ruby gem](https://github.com/adham90/opentrace_ruby) is available for Rails apps — auto-captures request summaries, SQL counts, N+1 queries, cache hit rates, and ActiveJob events.
+Official client libraries handle async dispatch, batching, PII scrubbing, and graceful shutdown — your app never blocks or crashes due to OpenTrace:
+
+| Client | Platform | Install |
+|---|---|---|
+| [**@opentrace/node**](https://github.com/adham90/opentrace_node) | Node.js (Express, Fastify, Hono) | `npm install @opentrace/node` |
+| [**opentrace**](https://github.com/adham90/opentrace_ruby) | Ruby / Rails | `gem 'opentrace'` |
+| [**opentrace.js**](https://github.com/adham90/opentrace_browser) | Browser | `<script src="opentrace.min.js">` |
+
+All three clients share the same safety-first design: never raise/throw to the host app, bounded queues, smart truncation, and W3C trace context propagation.
 
 ### Postgres Connector
 
