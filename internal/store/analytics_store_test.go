@@ -204,7 +204,8 @@ func TestAnalyticsStore_TrafficHeatmap(t *testing.T) {
 	as := NewAnalyticsStore(db)
 	ctx := context.Background()
 
-	now := time.Now().UTC()
+	// Use a fixed time in the middle of an hour so both entries land in the same cell
+	now := time.Now().UTC().Truncate(time.Hour).Add(30 * time.Minute)
 	entries := []LogEntry{
 		{Timestamp: now.Add(-10 * time.Minute), Level: "INFO", Service: "api", Message: "req1",
 			RequestSummary: &RequestSummary{Controller: "A", Action: "b", Status: 200, DurationMs: 100}},
