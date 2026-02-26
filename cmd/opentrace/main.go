@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/adham90/opentrace/internal/backup"
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/healthcheck"
@@ -58,6 +59,10 @@ func main() {
 			err = runAgent()
 		case "seed":
 			err = runSeed()
+		case "backup":
+			err = runBackup()
+		case "restore":
+			err = runRestore()
 		case "version":
 			fmt.Println("opentrace " + version.Full())
 			return
@@ -67,9 +72,20 @@ func main() {
 			fmt.Println("Commands:")
 			fmt.Println("  (none)    Start the web server")
 			fmt.Println("  agent     Run the metrics collection agent")
+			fmt.Println("  backup    Create a database backup")
 			fmt.Println("  mcp       Start the MCP stdio server")
+			fmt.Println("  restore   Restore database from a backup")
 			fmt.Println("  seed      Initialize sample data")
 			fmt.Println("  version   Print version information")
+			fmt.Println()
+			fmt.Println("Backup options:")
+			fmt.Println("  opentrace backup [-o <path>] [-f]")
+			fmt.Println("    -o, --output   Output file (default: opentrace-backup-TIMESTAMP.db)")
+			fmt.Println("    -f, --force    Overwrite destination if it exists")
+			fmt.Println()
+			fmt.Println("Restore options:")
+			fmt.Println("  opentrace restore --from <backup-file>")
+			fmt.Println("    -f, --from     Backup file to restore from (required)")
 			return
 		default:
 			err = run()
@@ -595,6 +611,72 @@ func run() error {
 	}
 
 	return nil
+}
+
+// runBackup creates a safe backup of the SQLite database.
+func runBackup() error {
+	config.LoadEnvFile(".env")
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	dbPath := cfg.DatabasePath()
+
+	// Parse args
+	destPath := ""
+	force := false
+	for i := 2; i < len(os.Args); i++ {
+		switch os.Args[i] {
+		case "--output", "-o":
+			if i+1 < len(os.Args) {
+				destPath = os.Args[i+1]
+				i++
+			}
+		case "--force", "-f":
+			force = true
+		}
+	}
+
+	if destPath == "" {
+		destPath = fmt.Sprintf("opentrace-backup-%s.db", time.Now().Format("20060102-150405"))
+	}
+
+	ctx := context.Background()
+	if force {
+		return backup.BackupForce(ctx, dbPath, destPath)
+	}
+	return backup.Backup(ctx, dbPath, destPath)
+}
+
+// runRestore restores the SQLite database from a backup file.
+func runRestore() error {
+	config.LoadEnvFile(".env")
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	dbPath := cfg.DatabasePath()
+
+	// Parse args
+	srcPath := ""
+	for i := 2; i < len(os.Args); i++ {
+		switch os.Args[i] {
+		case "--from", "-f":
+			if i+1 < len(os.Args) {
+				srcPath = os.Args[i+1]
+				i++
+			}
+		}
+	}
+
+	if srcPath == "" {
+		return fmt.Errorf("usage: opentrace restore --from <backup-file>")
+	}
+
+	ctx := context.Background()
+	return backup.Restore(ctx, srcPath, dbPath)
 }
 
 // reconnectConnectors re-registers connectors that were previously connected.
