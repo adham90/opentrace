@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adham90/opentrace/internal/httpclient"
 	"github.com/adham90/opentrace/internal/retry"
 	"github.com/adham90/opentrace/internal/store"
 )
@@ -43,10 +44,8 @@ type WatchWebhookPayload struct {
 // NewWatchWebhookNotifier creates a new webhook notifier for watch alerts.
 func NewWatchWebhookNotifier(url string) *WatchWebhookNotifier {
 	return &WatchWebhookNotifier{
-		URL: url,
-		Client: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		URL:    url,
+		Client: httpclient.New(10 * time.Second),
 	}
 }
 

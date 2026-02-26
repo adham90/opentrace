@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/adham90/opentrace/internal/httpclient"
 	"github.com/adham90/opentrace/internal/store"
 )
 
@@ -25,14 +26,11 @@ type Checker struct {
 	client *http.Client
 }
 
-// NewChecker creates a Checker with a default transport (no redirects followed).
+// NewChecker creates a Checker backed by a shared HTTP connection pool.
+// Redirects are not followed so the raw status code is visible.
 func NewChecker() *Checker {
 	return &Checker{
-		client: &http.Client{
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
+		client: httpclient.NewNoRedirect(0), // per-request timeout set via context
 	}
 }
 

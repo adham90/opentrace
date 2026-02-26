@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adham90/opentrace/internal/httpclient"
 	"github.com/adham90/opentrace/internal/version"
 )
 
@@ -102,7 +103,7 @@ func (vc *versionChecker) getLatestRelease() (*releaseInfo, error) {
 	} else {
 		url = fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", vc.owner, vc.repo)
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := httpclient.New(5 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("fetching latest release: %w", err)

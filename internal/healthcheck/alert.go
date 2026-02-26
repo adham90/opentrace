@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adham90/opentrace/internal/httpclient"
 	"github.com/adham90/opentrace/internal/retry"
 	"github.com/adham90/opentrace/internal/store"
 )
@@ -71,10 +72,8 @@ type HealthCheckWebhookPayload struct {
 // NewHealthCheckWebhookNotifier creates a new webhook notifier for health check alerts.
 func NewHealthCheckWebhookNotifier(url string) *HealthCheckWebhookNotifier {
 	return &HealthCheckWebhookNotifier{
-		URL: url,
-		Client: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		URL:    url,
+		Client: httpclient.New(10 * time.Second),
 	}
 }
 
