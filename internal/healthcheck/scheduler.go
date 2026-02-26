@@ -24,20 +24,33 @@ type Scheduler struct {
 
 	// sem limits concurrent health check goroutines
 	sem chan struct{}
+
+	// notifiers receive alerts on status transitions
+	notifiers []HealthCheckAlertNotifier
+
+	// statusMu protects lastStatus map for transition detection
+	statusMu   sync.Mutex
+	lastStatus map[string]store.HealthCheckStatus
 }
 
 // NewScheduler creates a health check scheduler.
 // pollInterval controls how often we scan for due checks (default 15s).
-func NewScheduler(hcStore store.HealthCheckStore, pollInterval time.Duration) *Scheduler {
+// notifiers receive alerts on status transitions; if none are provided a log notifier is used.
+func NewScheduler(hcStore store.HealthCheckStore, pollInterval time.Duration, notifiers ...HealthCheckAlertNotifier) *Scheduler {
 	if pollInterval <= 0 {
 		pollInterval = 15 * time.Second
 	}
+	if len(notifiers) == 0 {
+		notifiers = []HealthCheckAlertNotifier{&HealthCheckLogNotifier{}}
+	}
 	return &Scheduler{
-		store:   hcStore,
-		checker: NewChecker(),
-		poll:    pollInterval,
-		lastRun: make(map[string]time.Time),
-		sem:     make(chan struct{}, 16),
+		store:      hcStore,
+		checker:    NewChecker(),
+		poll:       pollInterval,
+		lastRun:    make(map[string]time.Time),
+		sem:        make(chan struct{}, 16),
+		notifiers:  notifiers,
+		lastStatus: make(map[string]store.HealthCheckStatus),
 	}
 }
 
@@ -147,5 +160,26 @@ func (s *Scheduler) runCheck(ctx context.Context, hc store.HealthCheck) {
 			"status", string(result.Status),
 			"error", result.Error,
 		)
+	}
+
+	// Check for status transition and fire notifications
+	s.statusMu.Lock()
+	prev, known := s.lastStatus[hc.ID]
+	s.lastStatus[hc.ID] = result.Status
+	s.statusMu.Unlock()
+
+	if known && prev != result.Status {
+		alert := &HealthCheckAlert{
+			HealthCheckID:   hc.ID,
+			HealthCheckName: hc.Name,
+			URL:             hc.URL,
+			PreviousStatus:  prev,
+			CurrentStatus:   result.Status,
+			StatusCode:      result.StatusCode,
+			ResponseMs:      result.ResponseMs,
+			ErrorMessage:    result.Error,
+			Timestamp:       time.Now(),
+		}
+		NotifyAllHealthCheck(ctx, s.notifiers, alert)
 	}
 }
