@@ -113,6 +113,8 @@ type SettingsStore interface {
 	SetStatementTimeout(ctx context.Context, val int) error
 	GetMCPName(ctx context.Context) (string, error)
 	SetMCPName(ctx context.Context, name string) error
+	GetSamplingRules(ctx context.Context) ([]SamplingRule, error)
+	SetSamplingRules(ctx context.Context, rules []SamplingRule) error
 }
 
 // MCPActivityStore tracks MCP tool calls and connection events.

@@ -973,3 +973,14 @@ type ErrorGroupWithImpact struct {
 	ErrorGroup
 	TopAffectedUsers []AffectedUser `json:"top_affected_users,omitempty"`
 }
+
+// ---------------------------------------------------------------------------
+// Log Sampling
+// ---------------------------------------------------------------------------
+
+// SamplingRule defines a per-service log sampling policy.
+type SamplingRule struct {
+	Service    string  `json:"service"`     // service name, or "*" for default
+	Rate       float64 `json:"rate"`        // 0.0-1.0 (1.0 = keep all)
+	KeepErrors bool    `json:"keep_errors"` // always keep error/warn/fatal logs
+}

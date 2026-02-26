@@ -25,6 +25,7 @@ const corsOriginsKey = "cors_origins"
 const maxQueryRowsKey = "max_query_rows"
 const statementTimeoutKey = "statement_timeout"
 const mcpNameKey = "mcp_name"
+const samplingRulesKey = "sampling_rules"
 
 func (s *settingsStore) GetRetention(ctx context.Context) (*RetentionSettings, error) {
 	var raw string
@@ -213,6 +214,40 @@ func (s *settingsStore) setIntSetting(ctx context.Context, key string, val int) 
 	)
 	if err != nil {
 		return fmt.Errorf("upserting %s: %w", key, err)
+	}
+	return nil
+}
+
+func (s *settingsStore) GetSamplingRules(ctx context.Context) ([]SamplingRule, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT value FROM app_config WHERE key = ?`, samplingRulesKey,
+	).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) || raw == "" {
+		return nil, nil // no sampling configured
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying sampling_rules: %w", err)
+	}
+	var rules []SamplingRule
+	if err := json.Unmarshal([]byte(raw), &rules); err != nil {
+		return nil, fmt.Errorf("unmarshaling sampling_rules: %w", err)
+	}
+	return rules, nil
+}
+
+func (s *settingsStore) SetSamplingRules(ctx context.Context, rules []SamplingRule) error {
+	raw, err := json.Marshal(rules)
+	if err != nil {
+		return fmt.Errorf("marshaling sampling_rules: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO app_config (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		samplingRulesKey, string(raw),
+	)
+	if err != nil {
+		return fmt.Errorf("upserting sampling_rules: %w", err)
 	}
 	return nil
 }

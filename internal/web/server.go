@@ -443,6 +443,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Put("/settings/query-guardrails", srv.handleUpdateQueryGuardrails)
 			r.Get("/settings/mcp-name", srv.handleGetMCPName)
 			r.Put("/settings/mcp-name", srv.handleUpdateMCPName)
+			r.Get("/settings/sampling", srv.handleGetSamplingRules)
+			r.Put("/settings/sampling", srv.handleUpdateSamplingRules)
 			if srv.auditStore != nil {
 				r.Get("/audit-log", srv.handleAuditLog)
 			}

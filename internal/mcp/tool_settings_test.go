@@ -43,6 +43,12 @@ func (m *mockSettingsStore) GetStatementTimeout(_ context.Context) (int, error) 
 func (m *mockSettingsStore) SetStatementTimeout(_ context.Context, _ int) error   { return nil }
 func (m *mockSettingsStore) GetMCPName(_ context.Context) (string, error)         { return "", nil }
 func (m *mockSettingsStore) SetMCPName(_ context.Context, _ string) error         { return nil }
+func (m *mockSettingsStore) GetSamplingRules(_ context.Context) ([]store.SamplingRule, error) {
+	return nil, nil
+}
+func (m *mockSettingsStore) SetSamplingRules(_ context.Context, _ []store.SamplingRule) error {
+	return nil
+}
 
 // --- get_settings tests ---
 

@@ -574,6 +574,7 @@ type mockSettingsStore struct {
 	maxQueryRows     int
 	statementTimeout int
 	mcpName          string
+	samplingRules    []store.SamplingRule
 }
 
 func newMockSettingsStore() *mockSettingsStore {
@@ -658,6 +659,19 @@ func (m *mockSettingsStore) SetMCPName(ctx context.Context, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.mcpName = name
+	return nil
+}
+
+func (m *mockSettingsStore) GetSamplingRules(ctx context.Context) ([]store.SamplingRule, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.samplingRules, nil
+}
+
+func (m *mockSettingsStore) SetSamplingRules(ctx context.Context, rules []store.SamplingRule) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.samplingRules = rules
 	return nil
 }
 

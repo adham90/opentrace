@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -236,6 +237,40 @@ func (s *Server) handleUpdateMCPName(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"mcp_name": req.MCPName})
+}
+
+func (s *Server) handleGetSamplingRules(w http.ResponseWriter, r *http.Request) {
+	rules, err := s.settingsStore.GetSamplingRules(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get sampling rules")
+		return
+	}
+	if rules == nil {
+		rules = []store.SamplingRule{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sampling_rules": rules})
+}
+
+func (s *Server) handleUpdateSamplingRules(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Rules []store.SamplingRule `json:"sampling_rules"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	// Validate
+	for i, rule := range body.Rules {
+		if rule.Rate < 0 || rule.Rate > 1 {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("rule %d: rate must be between 0 and 1", i))
+			return
+		}
+	}
+	if err := s.settingsStore.SetSamplingRules(r.Context(), body.Rules); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save sampling rules")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sampling_rules": body.Rules})
 }
 
 // maskAPIKey returns a masked version of an API key for safe display.

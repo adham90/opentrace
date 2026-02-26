@@ -214,6 +214,15 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Apply sampling rules
+	originalCount := len(logEntries)
+	if s.settingsStore != nil {
+		rules, _ := s.settingsStore.GetSamplingRules(r.Context())
+		if len(rules) > 0 {
+			logEntries = applySamplingRules(logEntries, rules)
+		}
+	}
+
 	count, err := s.logStore.BatchInsert(r.Context(), logEntries)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to insert logs")
@@ -253,7 +262,11 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 	if count == 0 {
 		status = http.StatusOK
 	}
-	writeJSON(w, status, map[string]int{"count": count})
+	resp := map[string]any{"count": count}
+	if len(logEntries) < originalCount {
+		resp["sampled"] = true
+	}
+	writeJSON(w, status, resp)
 }
 
 // ensureLogsConnector auto-creates and registers a logs connector if one
