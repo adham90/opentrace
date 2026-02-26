@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -15,6 +16,14 @@ import (
 	"github.com/adham90/opentrace/internal/metrics"
 	"github.com/adham90/opentrace/internal/store"
 )
+
+// batchIDPattern matches a UUID in 8-4-4-4-12 hex format.
+var batchIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// isValidBatchID checks whether the given string is a valid UUID format.
+func isValidBatchID(id string) bool {
+	return batchIDPattern.MatchString(id)
+}
 
 type ingestLogEntry struct {
 	Timestamp        time.Time              `json:"timestamp"`
@@ -122,6 +131,10 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 	// Check for duplicate batch
 	batchID := r.Header.Get("X-Batch-ID")
 	if batchID != "" {
+		if !isValidBatchID(batchID) {
+			writeError(w, http.StatusBadRequest, "invalid X-Batch-ID format (expected UUID)")
+			return
+		}
 		existing, err := s.logStore.GetBatch(r.Context(), batchID)
 		if err == nil && existing != nil {
 			writeJSON(w, http.StatusOK, map[string]any{

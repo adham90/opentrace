@@ -140,7 +140,12 @@ func (s *WatchScheduler) evaluateWatch(ctx context.Context, w *store.Watch) {
 
 	result, err := s.evaluator.Evaluate(ctx, w)
 	if err != nil {
-		slog.Warn("watch evaluation failed", "watch_id", w.ID, "error", err)
+		slog.Warn("watch evaluation failed",
+			"watch_id", w.ID,
+			"metric", w.Metric,
+			"service", w.Service,
+			"error", err,
+		)
 		_ = s.watchStore.FailRun(ctx, run.ID, err.Error())
 		metrics.RecordWatcherEvaluation("error")
 		return

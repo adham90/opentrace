@@ -208,8 +208,8 @@ func TestOnboardingSubmit_ValidationErrors(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.Router.ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusUnprocessableEntity {
-				t.Fatalf("expected 422, got %d", rec.Code)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d", rec.Code)
 			}
 			if !strings.Contains(rec.Body.String(), tt.errMsg) {
 				t.Fatalf("expected error %q in body", tt.errMsg)

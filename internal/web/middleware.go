@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -299,6 +300,7 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 				retryAfter = 1
 			}
 			rl.mu.Unlock()
+			slog.Warn("rate limit exceeded", "ip", ip, "path", r.URL.Path, "limit", rl.limit)
 			w.Header().Set("Retry-After", fmt.Sprintf("%d", int(retryAfter)))
 			writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 			return

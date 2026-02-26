@@ -481,6 +481,8 @@ func (s *logStore) DistinctValues(ctx context.Context, field string, params LogC
 		return nil, fmt.Errorf("unsupported field %q", field)
 	}
 
+	// Safe: col is whitelist-validated by the switch above; it can only be a
+	// hardcoded column name literal, never user-supplied input.
 	query := fmt.Sprintf(`SELECT DISTINCT %s FROM logs WHERE %s != '' AND timestamp >= ? AND timestamp < ?`, col, col)
 	args := []any{params.Since.UTC().Format(time.RFC3339Nano), params.Until.UTC().Format(time.RFC3339Nano)}
 

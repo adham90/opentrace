@@ -179,7 +179,7 @@ func (s *Server) renderLoginError(w http.ResponseWriter, r *http.Request, msg st
 		pageData: s.newPageData(r, "Login", ""),
 		Error:    msg,
 	}
-	w.WriteHeader(http.StatusUnprocessableEntity)
+	w.WriteHeader(http.StatusBadRequest)
 	tmpl := s.getTemplate(loginTmpl,
 		"internal/web/templates/layout.html",
 		"internal/web/templates/login.html")
@@ -303,7 +303,7 @@ func (s *Server) renderRegisterError(w http.ResponseWriter, r *http.Request, msg
 		pageData: s.newPageData(r, "Register", ""),
 		Error:    msg,
 	}
-	w.WriteHeader(http.StatusUnprocessableEntity)
+	w.WriteHeader(http.StatusBadRequest)
 	tmpl := s.getTemplate(registerTmpl,
 		"internal/web/templates/layout.html",
 		"internal/web/templates/register.html")

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -108,6 +109,12 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	if err := store.RunSQLiteMigrations(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("running migrations: %w", err)
+	}
+
+	// Verify database is responsive before proceeding
+	if err := db.PingContext(ctx); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("database health check failed: %w", err)
 	}
 	slog.Info("database ready")
 
@@ -237,6 +244,8 @@ func run() error {
 	ctx, cancelCtx := context.WithCancel(context.Background())
 	defer cancelCtx()
 
+	var bgWg sync.WaitGroup
+
 	deps, err := initApp(ctx)
 	if err != nil {
 		return err
@@ -329,7 +338,9 @@ func run() error {
 	hcSched.Start(ctx)
 
 	// Background: clean expired sessions every 15 minutes
+	bgWg.Add(1)
 	go func() {
+		defer bgWg.Done()
 		ticker := time.NewTicker(15 * time.Minute)
 		defer ticker.Stop()
 		for {
@@ -347,7 +358,9 @@ func run() error {
 	}()
 
 	// Background: mark stale servers offline every 60s
+	bgWg.Add(1)
 	go func() {
+		defer bgWg.Done()
 		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -365,7 +378,9 @@ func run() error {
 	}()
 
 	// Background: unified data retention job every hour
+	bgWg.Add(1)
 	go func() {
+		defer bgWg.Done()
 		// Env var override for metric retention (checked once at startup, same as before).
 		envMetricRetentionDays := 0
 		if v := os.Getenv("OPENTRACE_METRIC_RETENTION_DAYS"); v != "" {
@@ -455,7 +470,11 @@ func run() error {
 
 	// Background: aggregation jobs for trends, analytics, sessions, and impact scores (every 5 minutes)
 	// Jobs run concurrently via errgroup to interleave computation vs. I/O.
+	// Uses a mutex to prevent overlapping runs if aggregation takes longer than 5 minutes.
+	bgWg.Add(1)
 	go func() {
+		defer bgWg.Done()
+		var running sync.Mutex
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for {
@@ -463,6 +482,11 @@ func run() error {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+			}
+
+			if !running.TryLock() {
+				slog.Debug("aggregation still running, skipping tick")
+				continue
 			}
 
 			since := time.Now().UTC().Add(-10 * time.Minute)
@@ -507,8 +531,19 @@ func run() error {
 				})
 			}
 			_ = g.Wait()
+			running.Unlock()
 		}
 	}()
+
+	// Validate TLS certificate and key files exist if configured
+	if deps.cfg.TLSCert != "" && deps.cfg.TLSKey != "" {
+		if _, err := os.Stat(deps.cfg.TLSCert); err != nil {
+			return fmt.Errorf("TLS certificate file: %w", err)
+		}
+		if _, err := os.Stat(deps.cfg.TLSKey); err != nil {
+			return fmt.Errorf("TLS key file: %w", err)
+		}
+	}
 
 	go func() {
 		if deps.cfg.TLSCert != "" && deps.cfg.TLSKey != "" {
@@ -532,6 +567,20 @@ func run() error {
 	cancelCtx()
 	watchSched.Stop()
 	hcSched.Stop()
+
+	// Wait for background goroutines with timeout
+	bgDone := make(chan struct{})
+	go func() {
+		bgWg.Wait()
+		close(bgDone)
+	}()
+	select {
+	case <-bgDone:
+		slog.Info("background jobs stopped")
+	case <-time.After(5 * time.Second):
+		slog.Warn("timed out waiting for background jobs")
+	}
+
 	deps.registry.CloseAll()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)

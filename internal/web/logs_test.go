@@ -327,7 +327,7 @@ func TestIngestLogs_BatchDedup(t *testing.T) {
 	// First request with X-Batch-ID — should insert
 	req1 := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req1.Header.Set("Content-Type", "application/json")
-	req1.Header.Set("X-Batch-ID", "batch-uuid-123")
+	req1.Header.Set("X-Batch-ID", "550e8400-e29b-41d4-a716-446655440000")
 	withCSRF(req1)
 	w1 := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w1, req1)
@@ -342,7 +342,7 @@ func TestIngestLogs_BatchDedup(t *testing.T) {
 	// Second request with same X-Batch-ID — should be deduplicated
 	req2 := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
 	req2.Header.Set("Content-Type", "application/json")
-	req2.Header.Set("X-Batch-ID", "batch-uuid-123")
+	req2.Header.Set("X-Batch-ID", "550e8400-e29b-41d4-a716-446655440000")
 	withCSRF(req2)
 	w2 := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w2, req2)
@@ -383,6 +383,23 @@ func TestIngestLogs_NoBatchID(t *testing.T) {
 
 	if len(ls.entries) != 2 {
 		t.Fatalf("stored entries = %d, want 2", len(ls.entries))
+	}
+}
+
+func TestIngestLogs_InvalidBatchID(t *testing.T) {
+	srv, _ := setupTestServerWithLogStore()
+
+	body := `[{"timestamp":"2024-01-01T00:00:00Z","level":"INFO","service":"api","message":"bad batch id"}]`
+
+	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Batch-ID", "not-a-valid-uuid")
+	withCSRF(req)
+	w := httptest.NewRecorder()
+	srv.Router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d. Body: %s", w.Code, http.StatusBadRequest, w.Body.String())
 	}
 }
 

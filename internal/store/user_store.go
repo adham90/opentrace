@@ -40,7 +40,7 @@ func (s *userStore) Create(ctx context.Context, params CreateUserParams) (*User,
 		id, params.Email, params.PasswordHash, params.DisplayName, string(role), mcpToken, nowStr, nowStr,
 	)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed: users.email") {
+		if isUniqueConstraintError(err, "users.email") {
 			return nil, ErrEmailTaken
 		}
 		return nil, fmt.Errorf("creating user: %w", err)
@@ -146,6 +146,7 @@ func (s *userStore) Update(ctx context.Context, id string, params UpdateUserPara
 	}
 
 	args = append(args, id)
+	// sets contains only hardcoded column names from the switch cases above — safe for interpolation.
 	query := fmt.Sprintf("UPDATE users SET %s WHERE id = ?", strings.Join(sets, ", "))
 	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {

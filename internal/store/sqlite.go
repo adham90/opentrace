@@ -6,8 +6,10 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"sort"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -100,9 +102,11 @@ func RunSQLiteMigrations(db *sql.DB) error {
 			return fmt.Errorf("reading migration %s: %w", name, err)
 		}
 
+		start := time.Now()
 		if err := applyMigration(db, name, string(content), version); err != nil {
 			return err
 		}
+		slog.Info("migration applied", "name", name, "version", version, "elapsed_ms", time.Since(start).Milliseconds())
 	}
 
 	return nil

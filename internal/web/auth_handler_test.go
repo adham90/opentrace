@@ -138,8 +138,8 @@ func TestLoginSubmit_InvalidPassword(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.Router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422, got %d", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
 	}
 }
 
@@ -155,8 +155,8 @@ func TestLoginSubmit_InactiveUser(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.Router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422, got %d", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
 	}
 
 	body := rec.Body.String()
@@ -219,8 +219,8 @@ func TestRegisterSubmit_DuplicateEmail(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.Router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422 for duplicate email, got %d", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for duplicate email, got %d", rec.Code)
 	}
 
 	body := rec.Body.String()
@@ -240,8 +240,8 @@ func TestRegisterSubmit_ShortPassword(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.Router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422 for short password, got %d", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for short password, got %d", rec.Code)
 	}
 
 	body := rec.Body.String()
@@ -335,8 +335,8 @@ func TestLogin_LockoutAfterFailedAttempts(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.Router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422 (locked), got %d", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 (locked), got %d", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "temporarily locked") {
 		t.Fatalf("expected lockout message, got: %s", rec.Body.String())
@@ -544,8 +544,8 @@ func TestLogin_UnknownEmail(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.Router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422 for unknown email, got %d", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown email, got %d", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "Invalid email or password") {
 		t.Fatal("expected generic error message (no email enumeration)")

@@ -88,6 +88,20 @@ func (s *WatchStreamEvaluator) evaluateMatching(services map[string]bool) {
 	}
 
 	now := time.Now()
+
+	// Clean up stale entries from lastEval for deleted watches
+	s.mu.Lock()
+	activeIDs := make(map[string]bool, len(watches))
+	for _, w := range watches {
+		activeIDs[w.ID] = true
+	}
+	for id, t := range s.lastEval {
+		if !activeIDs[id] || time.Since(t) > 5*time.Minute {
+			delete(s.lastEval, id)
+		}
+	}
+	s.mu.Unlock()
+
 	for _, w := range watches {
 		// Only evaluate watches matching incoming services
 		if w.Service != "" && !services[w.Service] {

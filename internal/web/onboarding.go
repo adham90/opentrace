@@ -161,7 +161,7 @@ func (s *Server) renderOnboardingError(w http.ResponseWriter, r *http.Request, m
 		Error:    msg,
 		Step:     1,
 	}
-	w.WriteHeader(http.StatusUnprocessableEntity)
+	w.WriteHeader(http.StatusBadRequest)
 	tmpl := s.getTemplate(onboardingTmpl,
 		"internal/web/templates/layout_minimal.html",
 		"internal/web/templates/onboarding.html")
