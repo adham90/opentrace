@@ -35,6 +35,16 @@ func collectSignals(sess *store.InvestigationSession) []OutcomeSignal {
 	var signals []OutcomeSignal
 
 	// Strong positive signals — something was created/resolved.
+	if len(sess.ResolvedErrorGroupIDs) > 0 {
+		signals = append(signals, OutcomeSignal{"errors_resolved", "resolved", 0.9})
+	}
+	if len(sess.CreatedWatcherIDs) > 0 {
+		signals = append(signals, OutcomeSignal{"watchers_created", "resolved", 0.7})
+	}
+	if len(sess.CreatedHealthcheckIDs) > 0 {
+		signals = append(signals, OutcomeSignal{"healthchecks_created", "resolved", 0.7})
+	}
+
 	if sess.Summary != "" {
 		signals = append(signals, OutcomeSignal{"summary_provided", "resolved", 0.9})
 	}

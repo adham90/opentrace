@@ -299,6 +299,26 @@ func triageAlertsHandler(d overviewDeps) server.ToolHandlerFunc {
 			}
 		}
 
+		// Link triggered entities to investigation session from triage.
+		if recurrenceDetector != nil && sessionTracker != nil {
+			if sid := sessionTracker.CurrentSessionID(); sid != "" {
+				for _, item := range items {
+					switch item.Type {
+					case "watch_alert":
+						// item.ID is alert ID; look up the watch ID from alert.
+						if d.watchStore != nil {
+							if alert, err := d.watchStore.GetAlert(ctx, item.ID); err == nil {
+								recurrenceDetector.LinkTriggeredWatcher(ctx, sid, alert.WatchID)
+							}
+						}
+					case "healthcheck":
+						recurrenceDetector.LinkTriggeredHealthcheck(ctx, sid, item.ID)
+					}
+					break // only link the top item
+				}
+			}
+		}
+
 		// Sort by severity then time
 		sort.Slice(items, func(i, j int) bool {
 			si, sj := sevOrder(items[i].Severity), sevOrder(items[j].Severity)

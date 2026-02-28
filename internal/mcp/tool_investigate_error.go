@@ -52,6 +52,13 @@ func investigateErrorHandler(ls store.LogStore, egs store.ErrorGroupStore) serve
 			return mcp.NewToolResultError("Either log_id (positive integer) or trace_id (string) is required"), nil
 		}
 
+		// Link investigated error to investigation session.
+		if anchor.ErrorFingerprint != "" && recurrenceDetector != nil && sessionTracker != nil {
+			if sid := sessionTracker.CurrentSessionID(); sid != "" {
+				recurrenceDetector.LinkInvestigatedError(ctx, sid, anchor.ErrorFingerprint)
+			}
+		}
+
 		resp := make(map[string]any)
 
 		// 1. Core log entry.
@@ -226,6 +233,14 @@ func investigateErrorHandler(ls store.LogStore, egs store.ErrorGroupStore) serve
 					"first_seen_at":    eg.FirstSeenAt.Format(time.RFC3339),
 					"last_seen_at":     eg.LastSeenAt.Format(time.RFC3339),
 					"reopened_count":   eg.ReopenedCount,
+				}
+
+				// Detect and inject recurrence context for reopened errors.
+				if eg.ReopenedCount > 0 && recurrenceDetector != nil && sessionTracker != nil {
+					if sid := sessionTracker.CurrentSessionID(); sid != "" {
+						recurrenceDetector.DetectErrorRecurrence(ctx, sid, anchor.ErrorFingerprint, eg.ReopenedCount)
+						recurrenceDetector.InjectRecurrenceContext(ctx, sid, resp)
+					}
 				}
 			}
 		}

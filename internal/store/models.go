@@ -1039,6 +1039,14 @@ type InvestigationSession struct {
 	EndedAt         *time.Time `json:"ended_at,omitempty"`
 	DurationSeconds int        `json:"duration_seconds"`
 
+	// Subsystem Links
+	CreatedWatcherIDs             []string `json:"created_watcher_ids,omitempty"`
+	TriggeredByWatcherID          *string  `json:"triggered_by_watcher_id,omitempty"`
+	ResolvedErrorGroupIDs         []string `json:"resolved_error_group_ids,omitempty"`
+	InvestigatedErrorFingerprints []string `json:"investigated_error_fingerprints,omitempty"`
+	CreatedHealthcheckIDs         []string `json:"created_healthcheck_ids,omitempty"`
+	TriggeredByHealthcheckID      *string  `json:"triggered_by_healthcheck_id,omitempty"`
+
 	// Recurrence
 	RecurrenceGroup      *string `json:"recurrence_group,omitempty"`
 	RecurrenceCount      int     `json:"recurrence_count"`
@@ -1073,6 +1081,20 @@ type UpdateInvestigationSessionParams struct {
 	ToolSequence        []string                    `json:"tool_sequence,omitempty"`
 	ToolFingerprint     *string                     `json:"tool_fingerprint,omitempty"`
 	ArgSignature        *string                     `json:"arg_signature,omitempty"`
+
+	// Subsystem links
+	CreatedWatcherIDs             []string `json:"created_watcher_ids,omitempty"`
+	TriggeredByWatcherID          *string  `json:"triggered_by_watcher_id,omitempty"`
+	ResolvedErrorGroupIDs         []string `json:"resolved_error_group_ids,omitempty"`
+	InvestigatedErrorFingerprints []string `json:"investigated_error_fingerprints,omitempty"`
+	CreatedHealthcheckIDs         []string `json:"created_healthcheck_ids,omitempty"`
+	TriggeredByHealthcheckID      *string  `json:"triggered_by_healthcheck_id,omitempty"`
+
+	// Recurrence
+	RecurrenceGroup      *string `json:"recurrence_group,omitempty"`
+	RecurrenceCount      *int    `json:"recurrence_count,omitempty"`
+	PreviousSessionID    *string `json:"previous_session_id,omitempty"`
+	FixDurabilitySeconds *int    `json:"fix_durability_seconds,omitempty"`
 }
 
 // FindRecentSessionParams defines criteria for finding a recent resumable session.

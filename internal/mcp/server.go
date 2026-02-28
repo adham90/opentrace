@@ -196,6 +196,7 @@ func Serve(deps Deps) error {
 	if deps.InvestigationSessionStore != nil {
 		sessionTracker = NewSessionTracker(appCtx, deps.InvestigationSessionStore, authUser, "stdio")
 		sessionTracker.RegisterHooks(hooks)
+		recurrenceDetector = NewRecurrenceDetector(deps.InvestigationSessionStore)
 	}
 
 	s := NewConfiguredServer(deps, isAdmin, hooks)
@@ -223,6 +224,11 @@ var activityLogger *ActivityLogger
 // InvestigationSessionStore is available. Used by wrapWithActivityLog to
 // tag activity with real session/user identity.
 var sessionTracker *SessionTracker
+
+// recurrenceDetector is set alongside sessionTracker when an
+// InvestigationSessionStore is available. Used by tool handlers
+// to link subsystem entities and detect recurring investigations.
+var recurrenceDetector *RecurrenceDetector
 
 // maybeAddTool registers a tool on the MCP server if s is non-nil.
 // When s is nil (catalog-only mode), this is a no-op.
