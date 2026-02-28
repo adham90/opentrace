@@ -281,6 +281,11 @@ type InvestigationSessionStore interface {
 
 	// Step tracking
 	RecordStep(ctx context.Context, sessionID string, toolName string, isError bool) error
+
+	// Subsystem link lookups (return nil, nil when not found)
+	FindByCreatedWatcher(ctx context.Context, watcherID string) (*InvestigationSession, error)
+	FindByResolvedError(ctx context.Context, fingerprint string) (*InvestigationSession, error)
+	FindByCreatedHealthcheck(ctx context.Context, healthcheckID string) (*InvestigationSession, error)
 }
 
 // TraceStore manages distributed trace reassembly status.

@@ -113,6 +113,36 @@ func diagnoseHandler(d diagnoseDeps) server.ToolHandlerFunc {
 
 		wg.Wait()
 
+		// Link triggered entities to investigation session from diagnose.
+		if recurrenceDetector != nil && sessionTracker != nil {
+			if sid := sessionTracker.CurrentSessionID(); sid != "" {
+				// Link first down health check.
+				if hcSection, ok := resp["healthcheck_status"].(map[string]any); ok {
+					if endpoints, ok := hcSection["endpoints"].([]map[string]any); ok {
+						for _, ep := range endpoints {
+							if status, _ := ep["status"].(string); status == "down" {
+								if id, _ := ep["id"].(string); id != "" {
+									recurrenceDetector.LinkTriggeredHealthcheck(ctx, sid, id)
+									break
+								}
+							}
+						}
+					}
+				}
+				// Link first triggered watch.
+				if waSection, ok := resp["watch_alerts"].(map[string]any); ok {
+					if alerts, ok := waSection["alerts"].([]map[string]any); ok {
+						for _, a := range alerts {
+							if id, _ := a["id"].(string); id != "" {
+								recurrenceDetector.LinkTriggeredWatcher(ctx, sid, id)
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+
 		// Build suggested next tools
 		resp["suggested_tools"] = d.buildSuggestions(resp, service)
 

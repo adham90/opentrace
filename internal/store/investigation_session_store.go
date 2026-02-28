@@ -11,6 +11,18 @@ import (
 	"github.com/google/uuid"
 )
 
+// investigationSessionColumns is the canonical column list for SELECT queries.
+const investigationSessionColumns = `id, user_id, user_email, user_role,
+		client_name, client_version, workspace, transport, connection_id,
+		intent, intent_detail, primary_service, primary_datasource_id,
+		status, summary, root_cause, fix_description,
+		created_watcher_ids, triggered_by_watcher_id,
+		resolved_error_group_ids, investigated_error_fingerprints,
+		created_healthcheck_ids, triggered_by_healthcheck_id,
+		total_steps, total_errors, tool_sequence, tool_fingerprint, arg_signature,
+		started_at, last_activity_at, ended_at, duration_seconds,
+		recurrence_group, recurrence_count, previous_session_id, fix_durability_seconds`
+
 type investigationSessionStore struct {
 	db *sql.DB
 }
@@ -47,13 +59,7 @@ func (s *investigationSessionStore) Create(ctx context.Context, params CreateInv
 
 func (s *investigationSessionStore) GetByID(ctx context.Context, id string) (*InvestigationSession, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, user_id, user_email, user_role,
-		        client_name, client_version, workspace, transport, connection_id,
-		        intent, intent_detail, primary_service, primary_datasource_id,
-		        status, summary, root_cause, fix_description,
-		        total_steps, total_errors, tool_sequence, tool_fingerprint, arg_signature,
-		        started_at, last_activity_at, ended_at, duration_seconds,
-		        recurrence_group, recurrence_count, previous_session_id, fix_durability_seconds
+		`SELECT `+investigationSessionColumns+`
 		 FROM investigation_sessions
 		 WHERE id = ?`, id)
 
@@ -157,6 +163,54 @@ func (s *investigationSessionStore) Update(ctx context.Context, id string, param
 		args = append(args, *params.ArgSignature)
 	}
 
+	// Subsystem links
+	if params.CreatedWatcherIDs != nil {
+		j, _ := json.Marshal(params.CreatedWatcherIDs)
+		sets = append(sets, "created_watcher_ids = ?")
+		args = append(args, string(j))
+	}
+	if params.TriggeredByWatcherID != nil {
+		sets = append(sets, "triggered_by_watcher_id = ?")
+		args = append(args, *params.TriggeredByWatcherID)
+	}
+	if params.ResolvedErrorGroupIDs != nil {
+		j, _ := json.Marshal(params.ResolvedErrorGroupIDs)
+		sets = append(sets, "resolved_error_group_ids = ?")
+		args = append(args, string(j))
+	}
+	if params.InvestigatedErrorFingerprints != nil {
+		j, _ := json.Marshal(params.InvestigatedErrorFingerprints)
+		sets = append(sets, "investigated_error_fingerprints = ?")
+		args = append(args, string(j))
+	}
+	if params.CreatedHealthcheckIDs != nil {
+		j, _ := json.Marshal(params.CreatedHealthcheckIDs)
+		sets = append(sets, "created_healthcheck_ids = ?")
+		args = append(args, string(j))
+	}
+	if params.TriggeredByHealthcheckID != nil {
+		sets = append(sets, "triggered_by_healthcheck_id = ?")
+		args = append(args, *params.TriggeredByHealthcheckID)
+	}
+
+	// Recurrence
+	if params.RecurrenceGroup != nil {
+		sets = append(sets, "recurrence_group = ?")
+		args = append(args, *params.RecurrenceGroup)
+	}
+	if params.RecurrenceCount != nil {
+		sets = append(sets, "recurrence_count = ?")
+		args = append(args, *params.RecurrenceCount)
+	}
+	if params.PreviousSessionID != nil {
+		sets = append(sets, "previous_session_id = ?")
+		args = append(args, *params.PreviousSessionID)
+	}
+	if params.FixDurabilitySeconds != nil {
+		sets = append(sets, "fix_durability_seconds = ?")
+		args = append(args, *params.FixDurabilitySeconds)
+	}
+
 	if len(sets) == 0 {
 		return nil
 	}
@@ -187,13 +241,7 @@ func (s *investigationSessionStore) FindRecent(ctx context.Context, params FindR
 	}
 
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, user_id, user_email, user_role,
-		        client_name, client_version, workspace, transport, connection_id,
-		        intent, intent_detail, primary_service, primary_datasource_id,
-		        status, summary, root_cause, fix_description,
-		        total_steps, total_errors, tool_sequence, tool_fingerprint, arg_signature,
-		        started_at, last_activity_at, ended_at, duration_seconds,
-		        recurrence_group, recurrence_count, previous_session_id, fix_durability_seconds
+		`SELECT `+investigationSessionColumns+`
 		 FROM investigation_sessions
 		 WHERE user_id = ? AND workspace = ? AND status = ? AND last_activity_at > ?
 		 ORDER BY last_activity_at DESC
@@ -247,13 +295,7 @@ func (s *investigationSessionStore) List(ctx context.Context, params ListInvesti
 	}
 
 	query := fmt.Sprintf(
-		`SELECT id, user_id, user_email, user_role,
-		        client_name, client_version, workspace, transport, connection_id,
-		        intent, intent_detail, primary_service, primary_datasource_id,
-		        status, summary, root_cause, fix_description,
-		        total_steps, total_errors, tool_sequence, tool_fingerprint, arg_signature,
-		        started_at, last_activity_at, ended_at, duration_seconds,
-		        recurrence_group, recurrence_count, previous_session_id, fix_durability_seconds
+		`SELECT `+investigationSessionColumns+`
 		 FROM investigation_sessions
 		 %s
 		 ORDER BY started_at DESC
@@ -393,12 +435,74 @@ func (s *investigationSessionStore) RecordStep(ctx context.Context, sessionID st
 	return tx.Commit()
 }
 
+// FindByCreatedWatcher finds the most recent session that created the given watcher.
+// Returns nil, nil if no matching session is found.
+func (s *investigationSessionStore) FindByCreatedWatcher(ctx context.Context, watcherID string) (*InvestigationSession, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+investigationSessionColumns+`
+		 FROM investigation_sessions
+		 WHERE created_watcher_ids LIKE '%"' || ? || '"%'
+		 ORDER BY ended_at DESC
+		 LIMIT 1`, watcherID)
+
+	sess, err := scanSession(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("finding session by created watcher: %w", err)
+	}
+	return sess, nil
+}
+
+// FindByResolvedError finds the most recent session that resolved the given error fingerprint.
+// Returns nil, nil if no matching session is found.
+func (s *investigationSessionStore) FindByResolvedError(ctx context.Context, fingerprint string) (*InvestigationSession, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+investigationSessionColumns+`
+		 FROM investigation_sessions
+		 WHERE resolved_error_group_ids LIKE '%"' || ? || '"%'
+		 ORDER BY ended_at DESC
+		 LIMIT 1`, fingerprint)
+
+	sess, err := scanSession(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("finding session by resolved error: %w", err)
+	}
+	return sess, nil
+}
+
+// FindByCreatedHealthcheck finds the most recent session that created the given health check.
+// Returns nil, nil if no matching session is found.
+func (s *investigationSessionStore) FindByCreatedHealthcheck(ctx context.Context, healthcheckID string) (*InvestigationSession, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+investigationSessionColumns+`
+		 FROM investigation_sessions
+		 WHERE created_healthcheck_ids LIKE '%"' || ? || '"%'
+		 ORDER BY ended_at DESC
+		 LIMIT 1`, healthcheckID)
+
+	sess, err := scanSession(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("finding session by created healthcheck: %w", err)
+	}
+	return sess, nil
+}
+
 // scanSession scans a single row into an InvestigationSession.
 func scanSession(row *sql.Row) (*InvestigationSession, error) {
 	var sess InvestigationSession
 	var dsID sql.NullInt64
 	var seqJSON, startedAt, lastActivityAt string
 	var endedAt sql.NullString
+	var createdWatcherJSON, resolvedErrorJSON, investigatedErrorJSON, createdHCJSON string
+	var triggeredByWatcher, triggeredByHC sql.NullString
 	var recurrenceGroup, previousSessionID sql.NullString
 	var fixDurability sql.NullInt64
 
@@ -407,6 +511,9 @@ func scanSession(row *sql.Row) (*InvestigationSession, error) {
 		&sess.ClientName, &sess.ClientVersion, &sess.Workspace, &sess.Transport, &sess.ConnectionID,
 		&sess.Intent, &sess.IntentDetail, &sess.PrimaryService, &dsID,
 		&sess.Status, &sess.Summary, &sess.RootCause, &sess.FixDescription,
+		&createdWatcherJSON, &triggeredByWatcher,
+		&resolvedErrorJSON, &investigatedErrorJSON,
+		&createdHCJSON, &triggeredByHC,
 		&sess.TotalSteps, &sess.TotalErrors, &seqJSON, &sess.ToolFingerprint, &sess.ArgSignature,
 		&startedAt, &lastActivityAt, &endedAt, &sess.DurationSeconds,
 		&recurrenceGroup, &sess.RecurrenceCount, &previousSessionID, &fixDurability,
@@ -419,10 +526,37 @@ func scanSession(row *sql.Row) (*InvestigationSession, error) {
 		v := int(dsID.Int64)
 		sess.PrimaryDatasourceID = &v
 	}
+
+	// JSON array columns
 	json.Unmarshal([]byte(seqJSON), &sess.ToolSequence)
 	if sess.ToolSequence == nil {
 		sess.ToolSequence = []string{}
 	}
+	json.Unmarshal([]byte(createdWatcherJSON), &sess.CreatedWatcherIDs)
+	if sess.CreatedWatcherIDs == nil {
+		sess.CreatedWatcherIDs = []string{}
+	}
+	json.Unmarshal([]byte(resolvedErrorJSON), &sess.ResolvedErrorGroupIDs)
+	if sess.ResolvedErrorGroupIDs == nil {
+		sess.ResolvedErrorGroupIDs = []string{}
+	}
+	json.Unmarshal([]byte(investigatedErrorJSON), &sess.InvestigatedErrorFingerprints)
+	if sess.InvestigatedErrorFingerprints == nil {
+		sess.InvestigatedErrorFingerprints = []string{}
+	}
+	json.Unmarshal([]byte(createdHCJSON), &sess.CreatedHealthcheckIDs)
+	if sess.CreatedHealthcheckIDs == nil {
+		sess.CreatedHealthcheckIDs = []string{}
+	}
+
+	// Nullable TEXT columns
+	if triggeredByWatcher.Valid {
+		sess.TriggeredByWatcherID = &triggeredByWatcher.String
+	}
+	if triggeredByHC.Valid {
+		sess.TriggeredByHealthcheckID = &triggeredByHC.String
+	}
+
 	sess.StartedAt, _ = time.Parse(time.RFC3339, startedAt)
 	sess.LastActivityAt, _ = time.Parse(time.RFC3339, lastActivityAt)
 	if endedAt.Valid {
@@ -451,6 +585,8 @@ func scanSessionRow(rows *sql.Rows) (*InvestigationSession, error) {
 	var dsID sql.NullInt64
 	var seqJSON, startedAt, lastActivityAt string
 	var endedAt sql.NullString
+	var createdWatcherJSON, resolvedErrorJSON, investigatedErrorJSON, createdHCJSON string
+	var triggeredByWatcher, triggeredByHC sql.NullString
 	var recurrenceGroup, previousSessionID sql.NullString
 	var fixDurability sql.NullInt64
 
@@ -459,6 +595,9 @@ func scanSessionRow(rows *sql.Rows) (*InvestigationSession, error) {
 		&sess.ClientName, &sess.ClientVersion, &sess.Workspace, &sess.Transport, &sess.ConnectionID,
 		&sess.Intent, &sess.IntentDetail, &sess.PrimaryService, &dsID,
 		&sess.Status, &sess.Summary, &sess.RootCause, &sess.FixDescription,
+		&createdWatcherJSON, &triggeredByWatcher,
+		&resolvedErrorJSON, &investigatedErrorJSON,
+		&createdHCJSON, &triggeredByHC,
 		&sess.TotalSteps, &sess.TotalErrors, &seqJSON, &sess.ToolFingerprint, &sess.ArgSignature,
 		&startedAt, &lastActivityAt, &endedAt, &sess.DurationSeconds,
 		&recurrenceGroup, &sess.RecurrenceCount, &previousSessionID, &fixDurability,
@@ -471,10 +610,37 @@ func scanSessionRow(rows *sql.Rows) (*InvestigationSession, error) {
 		v := int(dsID.Int64)
 		sess.PrimaryDatasourceID = &v
 	}
+
+	// JSON array columns
 	json.Unmarshal([]byte(seqJSON), &sess.ToolSequence)
 	if sess.ToolSequence == nil {
 		sess.ToolSequence = []string{}
 	}
+	json.Unmarshal([]byte(createdWatcherJSON), &sess.CreatedWatcherIDs)
+	if sess.CreatedWatcherIDs == nil {
+		sess.CreatedWatcherIDs = []string{}
+	}
+	json.Unmarshal([]byte(resolvedErrorJSON), &sess.ResolvedErrorGroupIDs)
+	if sess.ResolvedErrorGroupIDs == nil {
+		sess.ResolvedErrorGroupIDs = []string{}
+	}
+	json.Unmarshal([]byte(investigatedErrorJSON), &sess.InvestigatedErrorFingerprints)
+	if sess.InvestigatedErrorFingerprints == nil {
+		sess.InvestigatedErrorFingerprints = []string{}
+	}
+	json.Unmarshal([]byte(createdHCJSON), &sess.CreatedHealthcheckIDs)
+	if sess.CreatedHealthcheckIDs == nil {
+		sess.CreatedHealthcheckIDs = []string{}
+	}
+
+	// Nullable TEXT columns
+	if triggeredByWatcher.Valid {
+		sess.TriggeredByWatcherID = &triggeredByWatcher.String
+	}
+	if triggeredByHC.Valid {
+		sess.TriggeredByHealthcheckID = &triggeredByHC.String
+	}
+
 	sess.StartedAt, _ = time.Parse(time.RFC3339, startedAt)
 	sess.LastActivityAt, _ = time.Parse(time.RFC3339, lastActivityAt)
 	if endedAt.Valid {

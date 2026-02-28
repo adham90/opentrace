@@ -291,3 +291,189 @@ func TestInvestigationSessionStore_GetNotFound(t *testing.T) {
 		t.Errorf("GetByID should return ErrNotFound, got %v", err)
 	}
 }
+
+func TestInvestigationSessionStore_UpdateSubsystemLinks(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewInvestigationSessionStore(db)
+	ctx := context.Background()
+
+	sess, err := s.Create(ctx, CreateInvestigationSessionParams{
+		UserID:    "user-1",
+		Transport: "stdio",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	watcherID := "w-123"
+	hcID := "hc-456"
+	fingerprint := "fp-abc"
+	group := "watcher:w-123"
+	prevID := "prev-session"
+	count := 2
+	durability := 3600
+
+	err = s.Update(ctx, sess.ID, UpdateInvestigationSessionParams{
+		CreatedWatcherIDs:             []string{watcherID},
+		TriggeredByWatcherID:          &watcherID,
+		ResolvedErrorGroupIDs:         []string{fingerprint},
+		InvestigatedErrorFingerprints: []string{fingerprint},
+		CreatedHealthcheckIDs:         []string{hcID},
+		TriggeredByHealthcheckID:      &hcID,
+		RecurrenceGroup:               &group,
+		RecurrenceCount:               &count,
+		PreviousSessionID:             &prevID,
+		FixDurabilitySeconds:          &durability,
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	got, err := s.GetByID(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if len(got.CreatedWatcherIDs) != 1 || got.CreatedWatcherIDs[0] != watcherID {
+		t.Errorf("CreatedWatcherIDs = %v, want [%s]", got.CreatedWatcherIDs, watcherID)
+	}
+	if got.TriggeredByWatcherID == nil || *got.TriggeredByWatcherID != watcherID {
+		t.Errorf("TriggeredByWatcherID = %v, want %s", got.TriggeredByWatcherID, watcherID)
+	}
+	if len(got.ResolvedErrorGroupIDs) != 1 || got.ResolvedErrorGroupIDs[0] != fingerprint {
+		t.Errorf("ResolvedErrorGroupIDs = %v, want [%s]", got.ResolvedErrorGroupIDs, fingerprint)
+	}
+	if len(got.InvestigatedErrorFingerprints) != 1 || got.InvestigatedErrorFingerprints[0] != fingerprint {
+		t.Errorf("InvestigatedErrorFingerprints = %v, want [%s]", got.InvestigatedErrorFingerprints, fingerprint)
+	}
+	if len(got.CreatedHealthcheckIDs) != 1 || got.CreatedHealthcheckIDs[0] != hcID {
+		t.Errorf("CreatedHealthcheckIDs = %v, want [%s]", got.CreatedHealthcheckIDs, hcID)
+	}
+	if got.TriggeredByHealthcheckID == nil || *got.TriggeredByHealthcheckID != hcID {
+		t.Errorf("TriggeredByHealthcheckID = %v, want %s", got.TriggeredByHealthcheckID, hcID)
+	}
+	if got.RecurrenceGroup == nil || *got.RecurrenceGroup != group {
+		t.Errorf("RecurrenceGroup = %v, want %s", got.RecurrenceGroup, group)
+	}
+	if got.RecurrenceCount != count {
+		t.Errorf("RecurrenceCount = %d, want %d", got.RecurrenceCount, count)
+	}
+	if got.PreviousSessionID == nil || *got.PreviousSessionID != prevID {
+		t.Errorf("PreviousSessionID = %v, want %s", got.PreviousSessionID, prevID)
+	}
+	if got.FixDurabilitySeconds == nil || *got.FixDurabilitySeconds != durability {
+		t.Errorf("FixDurabilitySeconds = %v, want %d", got.FixDurabilitySeconds, durability)
+	}
+}
+
+func TestInvestigationSessionStore_FindByCreatedWatcher(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewInvestigationSessionStore(db)
+	ctx := context.Background()
+
+	sess, _ := s.Create(ctx, CreateInvestigationSessionParams{
+		UserID:    "user-1",
+		Transport: "stdio",
+	})
+
+	// Update with a created watcher.
+	err := s.Update(ctx, sess.ID, UpdateInvestigationSessionParams{
+		CreatedWatcherIDs: []string{"w-abc"},
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	found, err := s.FindByCreatedWatcher(ctx, "w-abc")
+	if err != nil {
+		t.Fatalf("FindByCreatedWatcher: %v", err)
+	}
+	if found == nil {
+		t.Fatal("expected to find session")
+	}
+	if found.ID != sess.ID {
+		t.Errorf("found wrong session: %s, want %s", found.ID, sess.ID)
+	}
+
+	// Non-existent watcher should return nil.
+	notFound, err := s.FindByCreatedWatcher(ctx, "w-nonexistent")
+	if err != nil {
+		t.Fatalf("FindByCreatedWatcher: %v", err)
+	}
+	if notFound != nil {
+		t.Error("expected nil for non-existent watcher")
+	}
+}
+
+func TestInvestigationSessionStore_FindByResolvedError(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewInvestigationSessionStore(db)
+	ctx := context.Background()
+
+	sess, _ := s.Create(ctx, CreateInvestigationSessionParams{
+		UserID:    "user-1",
+		Transport: "stdio",
+	})
+
+	err := s.Update(ctx, sess.ID, UpdateInvestigationSessionParams{
+		ResolvedErrorGroupIDs: []string{"fp-resolved"},
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	found, err := s.FindByResolvedError(ctx, "fp-resolved")
+	if err != nil {
+		t.Fatalf("FindByResolvedError: %v", err)
+	}
+	if found == nil {
+		t.Fatal("expected to find session")
+	}
+	if found.ID != sess.ID {
+		t.Errorf("found wrong session: %s, want %s", found.ID, sess.ID)
+	}
+
+	notFound, err := s.FindByResolvedError(ctx, "fp-nonexistent")
+	if err != nil {
+		t.Fatalf("FindByResolvedError: %v", err)
+	}
+	if notFound != nil {
+		t.Error("expected nil for non-existent fingerprint")
+	}
+}
+
+func TestInvestigationSessionStore_FindByCreatedHealthcheck(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewInvestigationSessionStore(db)
+	ctx := context.Background()
+
+	sess, _ := s.Create(ctx, CreateInvestigationSessionParams{
+		UserID:    "user-1",
+		Transport: "stdio",
+	})
+
+	err := s.Update(ctx, sess.ID, UpdateInvestigationSessionParams{
+		CreatedHealthcheckIDs: []string{"hc-abc"},
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	found, err := s.FindByCreatedHealthcheck(ctx, "hc-abc")
+	if err != nil {
+		t.Fatalf("FindByCreatedHealthcheck: %v", err)
+	}
+	if found == nil {
+		t.Fatal("expected to find session")
+	}
+	if found.ID != sess.ID {
+		t.Errorf("found wrong session: %s, want %s", found.ID, sess.ID)
+	}
+
+	notFound, err := s.FindByCreatedHealthcheck(ctx, "hc-nonexistent")
+	if err != nil {
+		t.Fatalf("FindByCreatedHealthcheck: %v", err)
+	}
+	if notFound != nil {
+		t.Error("expected nil for non-existent healthcheck")
+	}
+}

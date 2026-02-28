@@ -114,6 +114,13 @@ func createHealthcheckHandler(hcs store.HealthCheckStore) server.ToolHandlerFunc
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create health check: %v", err)), nil
 		}
 
+		// Link created health check to investigation session.
+		if recurrenceDetector != nil && sessionTracker != nil {
+			if sid := sessionTracker.CurrentSessionID(); sid != "" {
+				recurrenceDetector.LinkCreatedHealthcheck(ctx, sid, hc.ID)
+			}
+		}
+
 		resp := map[string]any{
 			"id":              hc.ID,
 			"name":            hc.Name,
@@ -207,11 +214,35 @@ func uptimeStatusHandler(hcs store.HealthCheckStore) server.ToolHandlerFunc {
 			}
 		}
 
+		// Link first down health check to investigation session.
+		if recurrenceDetector != nil && sessionTracker != nil {
+			if sid := sessionTracker.CurrentSessionID(); sid != "" {
+				for _, ep := range extended {
+					if ep.CurrentStatus == "down" {
+						recurrenceDetector.LinkTriggeredHealthcheck(ctx, sid, ep.HealthCheckID)
+						break
+					}
+				}
+			}
+		}
+
 		resp := map[string]any{
 			"window_hours": hours,
 			"since":        since.Format(time.RFC3339),
 			"count":        len(extended),
 			"endpoints":    extended,
+		}
+
+		// Inject recurrence context for down endpoints.
+		if recurrenceDetector != nil && sessionTracker != nil {
+			if sid := sessionTracker.CurrentSessionID(); sid != "" {
+				for _, ep := range extended {
+					if ep.CurrentStatus == "down" {
+						recurrenceDetector.InjectRecurrenceContext(ctx, sid, resp)
+						break
+					}
+				}
+			}
 		}
 
 		// Suggest next steps for down/degraded endpoints.
