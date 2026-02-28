@@ -294,7 +294,8 @@ type LogMCPActivityParams struct {
 	StepIndex              int    // step number within the investigation session
 	WasSuggested           bool   // whether this tool was in the previous suggested_tools
 	SuggestionRank         int    // rank in the suggestion list (0 if not suggested)
-	FollowedBy             string // tool name that followed this one
+	FollowedBy             string // tool name that followed this one (unused in INSERT, kept for compat)
+	PreviousStepIndex      int    // step index of the previous tool (for updating followed_by)
 }
 
 // MCPActivityStats holds aggregated MCP activity statistics.
@@ -1270,4 +1271,107 @@ type UpdateRunbookEffectivenessParams struct {
 	Outcome     string // "resolved" or "abandoned"
 	StepsAfter  int
 	DurationSec int
+}
+
+// ---------------------------------------------------------------------------
+// Code Entity Registry (Stage 5)
+// ---------------------------------------------------------------------------
+
+// CodeEntityType identifies the kind of source code entity.
+type CodeEntityType string
+
+const (
+	CodeEntityFile       CodeEntityType = "file"
+	CodeEntityController CodeEntityType = "controller"
+	CodeEntityEndpoint   CodeEntityType = "endpoint"
+)
+
+// CodeEntity represents a tracked source code path with risk scoring.
+type CodeEntity struct {
+	ID                 int64          `json:"id"`
+	EntityType         CodeEntityType `json:"entity_type"`
+	EntityName         string         `json:"entity_name"`
+	Service            string         `json:"service"`
+	RiskScore          float64        `json:"risk_score"`
+	ErrorCount         int            `json:"error_count"`
+	InvestigationCount int            `json:"investigation_count"`
+	AvgDurationMs      *float64       `json:"avg_duration_ms,omitempty"`
+	LastErrorAt        *time.Time     `json:"last_error_at,omitempty"`
+	LastInvestigationAt *time.Time    `json:"last_investigation_at,omitempty"`
+	Metadata           map[string]any `json:"metadata,omitempty"`
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          time.Time      `json:"updated_at"`
+}
+
+// UpsertCodeEntityParams defines input for creating or updating a code entity.
+type UpsertCodeEntityParams struct {
+	EntityType CodeEntityType
+	EntityName string
+	Service    string
+}
+
+// ---------------------------------------------------------------------------
+// Deploy Intelligence (Stage 5)
+// ---------------------------------------------------------------------------
+
+// DeployStatus represents the lifecycle state of a deploy.
+type DeployStatus string
+
+const (
+	DeployStatusPending  DeployStatus = "pending"
+	DeployStatusMeasured DeployStatus = "measured"
+	DeployStatusIncident DeployStatus = "incident"
+)
+
+// DeploySource identifies how the deploy was recorded.
+type DeploySource string
+
+const (
+	DeploySourceWebhook      DeploySource = "webhook"
+	DeploySourceAutoDetected DeploySource = "auto-detected"
+	DeploySourceManual       DeploySource = "manual"
+)
+
+// Deploy represents a recorded deployment event.
+type Deploy struct {
+	ID                     int64        `json:"id"`
+	Service                string       `json:"service"`
+	Environment            string       `json:"environment"`
+	CommitHash             string       `json:"commit_hash"`
+	Branch                 string       `json:"branch"`
+	Author                 string       `json:"author"`
+	FilesChanged           []string     `json:"files_changed,omitempty"`
+	DeploySource           DeploySource `json:"deploy_source"`
+	PreErrorRate           *float64     `json:"pre_error_rate,omitempty"`
+	PostErrorRate          *float64     `json:"post_error_rate,omitempty"`
+	PreAvgDurationMs       *float64     `json:"pre_avg_duration_ms,omitempty"`
+	PostAvgDurationMs      *float64     `json:"post_avg_duration_ms,omitempty"`
+	ImpactMeasuredAt       *time.Time   `json:"impact_measured_at,omitempty"`
+	LinkedInvestigationIDs []string     `json:"linked_investigation_ids,omitempty"`
+	Status                 DeployStatus `json:"status"`
+	DeployedAt             time.Time    `json:"deployed_at"`
+	CreatedAt              time.Time    `json:"created_at"`
+}
+
+// CreateDeployParams defines input for recording a new deploy.
+type CreateDeployParams struct {
+	Service      string
+	Environment  string
+	CommitHash   string
+	Branch       string
+	Author       string
+	FilesChanged []string
+	DeploySource DeploySource
+	DeployedAt   *time.Time // nil = now
+}
+
+// DeployImpact holds measured before/after metrics for a deploy.
+type DeployImpact struct {
+	PreErrorRate       float64 `json:"pre_error_rate"`
+	PostErrorRate      float64 `json:"post_error_rate"`
+	PreAvgDurationMs   float64 `json:"pre_avg_duration_ms"`
+	PostAvgDurationMs  float64 `json:"post_avg_duration_ms"`
+	ErrorRateChangePct float64 `json:"error_rate_change_pct"`
+	DurationChangePct  float64 `json:"duration_change_pct"`
+	IsIncident         bool    `json:"is_incident"`
 }

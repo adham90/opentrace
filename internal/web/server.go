@@ -80,6 +80,8 @@ type Server struct {
 	errorImpactStore   store.ErrorImpactStore
 	traceStore         store.TraceStore
 	investigationSessionStore store.InvestigationSessionStore
+	codeEntityStore          store.CodeEntityStore
+	deployStore              store.DeployStore
 	reliabilityProvider      ReliabilityProvider
 	versionChecker           *versionChecker
 	sseServer      *mcpgoserver.SSEServer
@@ -138,6 +140,8 @@ type ServerDeps struct {
 	ErrorImpactStore     store.ErrorImpactStore
 	TraceStore                   store.TraceStore
 	InvestigationSessionStore    store.InvestigationSessionStore
+	CodeEntityStore              store.CodeEntityStore
+	DeployStore                  store.DeployStore
 	IngestQueue                  *IngestQueue
 	ReliabilityProvider          ReliabilityProvider
 }
@@ -180,6 +184,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		errorImpactStore:   deps.ErrorImpactStore,
 		traceStore:                deps.TraceStore,
 		investigationSessionStore: deps.InvestigationSessionStore,
+		codeEntityStore:           deps.CodeEntityStore,
+		deployStore:               deps.DeployStore,
 		ingestQueue:               deps.IngestQueue,
 		reliabilityProvider:       deps.ReliabilityProvider,
 		versionChecker:      newVersionChecker("adham90", "opentrace"),
@@ -328,6 +334,11 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		// Log ingestion with dynamic API key auth + rate limiting
 		r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/logs", srv.handleIngestLogs)
 
+		// Deploy webhook with dynamic API key auth + rate limiting
+		if srv.deployStore != nil {
+			r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/events/deploy", srv.handleDeployWebhook)
+		}
+
 		// Server registration and metric push with dynamic API key auth + rate limiting
 		if srv.serverStore != nil && srv.metricStore != nil {
 			r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/servers/register", srv.handleRegisterServer)
@@ -404,6 +415,11 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			if srv.traceStore != nil {
 				r.Get("/traces/recent", srv.handleListRecentTraces)
 				r.Get("/traces/{traceID}/status", srv.handleGetTraceStatus)
+			}
+
+			// Deploys
+			if srv.deployStore != nil {
+				r.Get("/deploys", srv.handleListDeploys)
 			}
 
 			// MCP activity

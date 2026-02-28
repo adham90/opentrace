@@ -38,11 +38,21 @@ func (s *mcpActivityStore) Log(ctx context.Context, params LogMCPActivityParams)
 		params.Arguments, params.ResultPreview,
 		isError, params.DurationMs, eventType,
 		params.InvestigationSessionID, params.StepIndex,
-		wasSuggested, params.SuggestionRank, params.FollowedBy,
+		wasSuggested, params.SuggestionRank, "",
 	)
 	if err != nil {
 		return fmt.Errorf("logging mcp activity: %w", err)
 	}
+
+	// Update the previous step's followed_by in the same (sequential) write.
+	// This avoids the race between async INSERT and sync UPDATE.
+	if params.PreviousStepIndex > 0 && params.InvestigationSessionID != "" {
+		_, _ = s.db.ExecContext(ctx,
+			`UPDATE mcp_activity SET followed_by = ? WHERE investigation_session_id = ? AND step_index = ?`,
+			params.ToolName, params.InvestigationSessionID, params.PreviousStepIndex,
+		)
+	}
+
 	return nil
 }
 

@@ -37,6 +37,11 @@ type SessionTracker struct {
 	trendStore       store.TrendStore
 	auditStore       store.AuditStore
 
+	// Stage 5: code entity + deploy stores
+	codeEntityStore store.CodeEntityStore
+	errorGroupStore store.ErrorGroupStore
+	deployStore     store.DeployStore
+
 	mu              sync.RWMutex
 	session         *store.InvestigationSession
 	connectionID    string // from OnRegisterSession
@@ -89,6 +94,21 @@ func (st *SessionTracker) SetAuditStore(as store.AuditStore) {
 	st.auditStore = as
 }
 
+// SetCodeEntityStore configures the code entity store for linking investigations.
+func (st *SessionTracker) SetCodeEntityStore(ces store.CodeEntityStore) {
+	st.codeEntityStore = ces
+}
+
+// SetErrorGroupStore configures the error group store for entity resolution.
+func (st *SessionTracker) SetErrorGroupStore(egs store.ErrorGroupStore) {
+	st.errorGroupStore = egs
+}
+
+// SetDeployStore configures the deploy store for linking investigations.
+func (st *SessionTracker) SetDeployStore(ds store.DeployStore) {
+	st.deployStore = ds
+}
+
 // SetLastSuggestions records the suggestions returned to the client,
 // used for detecting whether the next tool call was a suggestion acceptance.
 func (st *SessionTracker) SetLastSuggestions(suggestions []ToolSuggestion) {
@@ -96,6 +116,17 @@ func (st *SessionTracker) SetLastSuggestions(suggestions []ToolSuggestion) {
 	defer st.mu.Unlock()
 	st.lastSuggestions = make([]ToolSuggestion, len(suggestions))
 	copy(st.lastSuggestions, suggestions)
+}
+
+// SnapshotLastSuggestions returns a copy of the current lastSuggestions.
+// Call this BEFORE the tool handler runs to capture what was suggested
+// prior to the handler overwriting lastSuggestions with its own suggestions.
+func (st *SessionTracker) SnapshotLastSuggestions() []ToolSuggestion {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	out := make([]ToolSuggestion, len(st.lastSuggestions))
+	copy(out, st.lastSuggestions)
+	return out
 }
 
 // RegisterHooks wires the session tracker into the mcp-go hooks system.
@@ -132,9 +163,11 @@ func (st *SessionTracker) UserID() string {
 
 // RecordStep increments step count and records the tool call in the session.
 // On the first step, also classifies the session intent.
-// Also records tool transitions and suggestion acceptance.
+// Also records tool transitions.
+// priorSuggestions is accepted for API compatibility but suggestion tracking
+// is now handled at the INSERT level in wrapWithActivityLog.
 // Returns the current step index.
-func (st *SessionTracker) RecordStep(toolName string, isError bool) int {
+func (st *SessionTracker) RecordStep(toolName string, isError bool, priorSuggestions []ToolSuggestion) int {
 	idx := int(st.step.Add(1))
 
 	sessID := st.CurrentSessionID()
@@ -161,42 +194,15 @@ func (st *SessionTracker) RecordStep(toolName string, isError bool) int {
 		st.correlateDeploy(ctx)
 	}
 
-	// Track suggestion acceptance
-	st.trackSuggestionAcceptance(ctx, sessID, idx, toolName)
-
 	// Record tool transition
 	st.recordTransition(ctx, toolName, sessID, idx)
 
 	return idx
 }
 
-// trackSuggestionAcceptance checks if the tool was in the last suggestions
-// and records the result.
-func (st *SessionTracker) trackSuggestionAcceptance(ctx context.Context, sessID string, stepIndex int, toolName string) {
-	if st.activityStore == nil {
-		return
-	}
-
-	st.mu.RLock()
-	suggestions := st.lastSuggestions
-	st.mu.RUnlock()
-
-	wasSuggested := false
-	rank := 0
-	for i, s := range suggestions {
-		if s.Tool == toolName {
-			wasSuggested = true
-			rank = i + 1
-			break
-		}
-	}
-
-	if err := st.activityStore.SetSuggestionTracking(ctx, sessID, stepIndex, wasSuggested, rank); err != nil {
-		slog.Debug("failed to track suggestion acceptance", "error", err)
-	}
-}
-
-// recordTransition records a tool-to-tool transition and updates the previous step's followed_by.
+// recordTransition records a tool-to-tool transition in the tool_transitions table.
+// Note: followed_by on mcp_activity is now updated by the async activity logger
+// (in the store's Log method) to avoid races with the async INSERT.
 func (st *SessionTracker) recordTransition(ctx context.Context, toolName string, sessID string, stepIndex int) {
 	st.mu.RLock()
 	sess := st.session
@@ -214,12 +220,6 @@ func (st *SessionTracker) recordTransition(ctx context.Context, toolName string,
 		if st.transitionStore != nil {
 			if err := st.transitionStore.Increment(ctx, prevTool, toolName, sess.Intent); err != nil {
 				slog.Debug("failed to record tool transition", "error", err)
-			}
-		}
-		// Update the previous step's followed_by
-		if st.activityStore != nil {
-			if err := st.activityStore.UpdateFollowedBy(ctx, sessID, stepIndex-1, toolName); err != nil {
-				slog.Debug("failed to update followed_by", "error", err)
 			}
 		}
 	}
@@ -306,6 +306,9 @@ func (st *SessionTracker) CloseSession() {
 	st.updateRunbookEffectiveness(ctx, sess)
 	st.updateQueryMemory(ctx, sess)
 	st.recordAuditEntry(ctx, sess)
+
+	// Stage 5: link code entities from investigated errors
+	LinkInvestigationToEntities(ctx, st.codeEntityStore, st.errorGroupStore, sess)
 
 	// Clear session reference.
 	st.mu.Lock()
@@ -569,4 +572,14 @@ func (st *SessionTracker) correlateDeploy(ctx context.Context) {
 	st.UpdateSession(store.UpdateInvestigationSessionParams{
 		CorrelatedDeploy: &deploy,
 	})
+
+	// Stage 5: link investigation to deploy record
+	if st.deployStore != nil && sess != nil {
+		d, err := st.deployStore.GetByCommit(ctx, deploy)
+		if err == nil && d != nil {
+			if linkErr := st.deployStore.LinkInvestigation(ctx, d.ID, sess.ID); linkErr != nil {
+				slog.Debug("failed to link investigation to deploy", "error", linkErr)
+			}
+		}
+	}
 }

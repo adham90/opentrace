@@ -20,6 +20,8 @@ type ContextInjector struct {
 	analyticsStore   store.AnalyticsStore
 	auditStore       store.AuditStore
 	trendStore       store.TrendStore
+	codeEntityStore  store.CodeEntityStore
+	deployStore      store.DeployStore
 }
 
 // ContextInjectorDeps holds optional stores for the context injector.
@@ -30,6 +32,8 @@ type ContextInjectorDeps struct {
 	AnalyticsStore   store.AnalyticsStore
 	AuditStore       store.AuditStore
 	TrendStore       store.TrendStore
+	CodeEntityStore  store.CodeEntityStore
+	DeployStore      store.DeployStore
 }
 
 // NewContextInjector creates a new ContextInjector.
@@ -42,6 +46,8 @@ func NewContextInjector(ss store.InvestigationSessionStore, ts store.ToolTransit
 		ci.analyticsStore = extra[0].AnalyticsStore
 		ci.auditStore = extra[0].AuditStore
 		ci.trendStore = extra[0].TrendStore
+		ci.codeEntityStore = extra[0].CodeEntityStore
+		ci.deployStore = extra[0].DeployStore
 	}
 	return ci
 }
@@ -57,6 +63,26 @@ type InvestigationContext struct {
 	DeployCorrelation      *DeployCorrelationContext  `json:"deploy_correlation,omitempty"`
 	TrafficContext         *TrafficContext             `json:"traffic_context,omitempty"`
 	RecentAdminActions     []AdminActionContext        `json:"recent_admin_actions,omitempty"`
+	CodeRiskContext        []CodeRiskEntry             `json:"code_risk_context,omitempty"`
+	DeployImpactContext    []DeployImpactEntry         `json:"deploy_impact_context,omitempty"`
+}
+
+// CodeRiskEntry is a risky code entity included in investigation context.
+type CodeRiskEntry struct {
+	EntityName         string  `json:"entity_name"`
+	EntityType         string  `json:"entity_type"`
+	RiskScore          float64 `json:"risk_score"`
+	ErrorCount         int     `json:"error_count"`
+	InvestigationCount int     `json:"investigation_count"`
+}
+
+// DeployImpactEntry is a recent deploy included in investigation context.
+type DeployImpactEntry struct {
+	CommitHash         string  `json:"commit_hash"`
+	Service            string  `json:"service"`
+	Status             string  `json:"status"`
+	DeployedAt         string  `json:"deployed_at"`
+	ErrorRateChangePct float64 `json:"error_rate_change_pct,omitempty"`
 }
 
 // SessionSummary is a compact representation of a past session.
@@ -225,6 +251,12 @@ func (ci *ContextInjector) BuildContext(ctx context.Context, sess *store.Investi
 	// 9. Recent admin actions
 	ci.getRecentAdminActions(ctx, sess, ic)
 
+	// 10. Code risk context (Stage 5)
+	ci.getCodeRiskContext(ctx, sess, ic)
+
+	// 11. Deploy impact context (Stage 5)
+	ci.getDeployImpactContext(ctx, sess, ic)
+
 	// Return nil if nothing useful was found
 	if ci.isContextEmpty(ic) {
 		return nil
@@ -245,7 +277,9 @@ func (ci *ContextInjector) isContextEmpty(ic *InvestigationContext) bool {
 		len(ic.QueryMemory) == 0 &&
 		ic.DeployCorrelation == nil &&
 		ic.TrafficContext == nil &&
-		len(ic.RecentAdminActions) == 0
+		len(ic.RecentAdminActions) == 0 &&
+		len(ic.CodeRiskContext) == 0 &&
+		len(ic.DeployImpactContext) == 0
 }
 
 // enforceSize truncates context to fit within maxBytes.
@@ -256,19 +290,31 @@ func (ci *ContextInjector) enforceSize(ic *InvestigationContext, maxBytes int) {
 		return
 	}
 
-	// Priority 1: remove RelevantNotes
+	// Priority 1 (lowest value, removed first): CodeRiskContext
+	for len(ic.CodeRiskContext) > 0 && len(data) > maxBytes {
+		ic.CodeRiskContext = ic.CodeRiskContext[:len(ic.CodeRiskContext)-1]
+		data, _ = json.Marshal(ic)
+	}
+
+	// Priority 2: DeployImpactContext
+	for len(ic.DeployImpactContext) > 0 && len(data) > maxBytes {
+		ic.DeployImpactContext = ic.DeployImpactContext[:len(ic.DeployImpactContext)-1]
+		data, _ = json.Marshal(ic)
+	}
+
+	// Priority 3: remove RelevantNotes
 	for len(ic.RelevantNotes) > 0 && len(data) > maxBytes {
 		ic.RelevantNotes = ic.RelevantNotes[:len(ic.RelevantNotes)-1]
 		data, _ = json.Marshal(ic)
 	}
 
-	// Priority 2: remove RecentAdminActions
+	// Priority 4: remove RecentAdminActions
 	for len(ic.RecentAdminActions) > 0 && len(data) > maxBytes {
 		ic.RecentAdminActions = ic.RecentAdminActions[:len(ic.RecentAdminActions)-1]
 		data, _ = json.Marshal(ic)
 	}
 
-	// Priority 3: remove SimilarPastSessions
+	// Priority 5: remove SimilarPastSessions
 	for len(ic.SimilarPastSessions) > 0 && len(data) > maxBytes {
 		ic.SimilarPastSessions = ic.SimilarPastSessions[:len(ic.SimilarPastSessions)-1]
 		data, _ = json.Marshal(ic)
@@ -448,6 +494,58 @@ func (ci *ContextInjector) getRecentAdminActions(ctx context.Context, sess *stor
 		if len(ic.RecentAdminActions) >= 5 {
 			break
 		}
+	}
+}
+
+func (ci *ContextInjector) getCodeRiskContext(ctx context.Context, sess *store.InvestigationSession, ic *InvestigationContext) {
+	if ci.codeEntityStore == nil {
+		return
+	}
+
+	service := sess.PrimaryService
+	entities, err := ci.codeEntityStore.TopByRisk(ctx, service, 3)
+	if err != nil {
+		slog.Debug("context_injector: code risk query failed", "error", err)
+		return
+	}
+
+	for _, e := range entities {
+		if e.RiskScore < 0.1 {
+			continue
+		}
+		ic.CodeRiskContext = append(ic.CodeRiskContext, CodeRiskEntry{
+			EntityName:         e.EntityName,
+			EntityType:         string(e.EntityType),
+			RiskScore:          e.RiskScore,
+			ErrorCount:         e.ErrorCount,
+			InvestigationCount: e.InvestigationCount,
+		})
+	}
+}
+
+func (ci *ContextInjector) getDeployImpactContext(ctx context.Context, sess *store.InvestigationSession, ic *InvestigationContext) {
+	if ci.deployStore == nil {
+		return
+	}
+
+	service := sess.PrimaryService
+	deploys, err := ci.deployStore.GetRecent(ctx, service, 3)
+	if err != nil {
+		slog.Debug("context_injector: deploy query failed", "error", err)
+		return
+	}
+
+	for _, d := range deploys {
+		entry := DeployImpactEntry{
+			CommitHash: d.CommitHash,
+			Service:    d.Service,
+			Status:     string(d.Status),
+			DeployedAt: d.DeployedAt.Format(time.RFC3339),
+		}
+		if d.PreErrorRate != nil && d.PostErrorRate != nil && *d.PreErrorRate > 0 {
+			entry.ErrorRateChangePct = ((*d.PostErrorRate - *d.PreErrorRate) / *d.PreErrorRate) * 100
+		}
+		ic.DeployImpactContext = append(ic.DeployImpactContext, entry)
 	}
 }
 
