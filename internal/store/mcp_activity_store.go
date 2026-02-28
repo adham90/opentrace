@@ -28,11 +28,12 @@ func (s *mcpActivityStore) Log(ctx context.Context, params LogMCPActivityParams)
 	}
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO mcp_activity (session_id, user_id, tool_name, arguments, result_preview, is_error, duration_ms, event_type)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO mcp_activity (session_id, user_id, tool_name, arguments, result_preview, is_error, duration_ms, event_type, investigation_session_id, step_index)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		params.SessionID, params.UserID, params.ToolName,
 		params.Arguments, params.ResultPreview,
 		isError, params.DurationMs, eventType,
+		params.InvestigationSessionID, params.StepIndex,
 	)
 	if err != nil {
 		return fmt.Errorf("logging mcp activity: %w", err)
@@ -106,6 +107,47 @@ func (s *mcpActivityStore) Recent(ctx context.Context, limit int) ([]MCPActivity
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing mcp activity: %w", err)
+	}
+	defer rows.Close()
+
+	var result []MCPActivityEvent
+	for rows.Next() {
+		var e MCPActivityEvent
+		var isError int
+		var durationMs sql.NullInt64
+		var createdAt string
+
+		if err := rows.Scan(
+			&e.ID, &e.SessionID, &e.UserID, &e.ToolName,
+			&e.Arguments, &e.ResultPreview,
+			&isError, &durationMs, &e.EventType, &createdAt,
+		); err != nil {
+			return nil, fmt.Errorf("scanning mcp activity: %w", err)
+		}
+
+		e.IsError = isError != 0
+		if durationMs.Valid {
+			e.DurationMs = &durationMs.Int64
+		}
+		e.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+
+		result = append(result, e)
+	}
+
+	return result, rows.Err()
+}
+
+func (s *mcpActivityStore) ListByInvestigationSession(ctx context.Context, sessionID string) ([]MCPActivityEvent, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, session_id, COALESCE(user_id, ''), tool_name, COALESCE(arguments, ''),
+		        COALESCE(result_preview, ''), is_error, duration_ms, event_type, created_at
+		 FROM mcp_activity
+		 WHERE investigation_session_id = ?
+		 ORDER BY step_index ASC, created_at ASC`,
+		sessionID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing mcp activity by investigation session: %w", err)
 	}
 	defer rows.Close()
 

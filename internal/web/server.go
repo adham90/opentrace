@@ -79,8 +79,9 @@ type Server struct {
 	journeyStore       store.JourneyStore
 	errorImpactStore   store.ErrorImpactStore
 	traceStore         store.TraceStore
-	reliabilityProvider ReliabilityProvider
-	versionChecker     *versionChecker
+	investigationSessionStore store.InvestigationSessionStore
+	reliabilityProvider      ReliabilityProvider
+	versionChecker           *versionChecker
 	sseServer      *mcpgoserver.SSEServer
 	loginLimiter   *RateLimiter
 	apiLimiter     *RateLimiter
@@ -135,9 +136,10 @@ type ServerDeps struct {
 	AnalyticsStore       store.AnalyticsStore
 	JourneyStore         store.JourneyStore
 	ErrorImpactStore     store.ErrorImpactStore
-	TraceStore           store.TraceStore
-	IngestQueue          *IngestQueue
-	ReliabilityProvider  ReliabilityProvider
+	TraceStore                   store.TraceStore
+	InvestigationSessionStore    store.InvestigationSessionStore
+	IngestQueue                  *IngestQueue
+	ReliabilityProvider          ReliabilityProvider
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
@@ -176,9 +178,10 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		analyticsStore:     deps.AnalyticsStore,
 		journeyStore:       deps.JourneyStore,
 		errorImpactStore:   deps.ErrorImpactStore,
-		traceStore:          deps.TraceStore,
-		ingestQueue:         deps.IngestQueue,
-		reliabilityProvider: deps.ReliabilityProvider,
+		traceStore:                deps.TraceStore,
+		investigationSessionStore: deps.InvestigationSessionStore,
+		ingestQueue:               deps.IngestQueue,
+		reliabilityProvider:       deps.ReliabilityProvider,
 		versionChecker:      newVersionChecker("adham90", "opentrace"),
 		auditCh:            make(chan auditEntry, 256),
 	}
@@ -274,6 +277,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Get("/profile", srv.handleProfilePage)
 		r.Get("/connectors", srv.handleConnectorsPage)
 		r.Get("/tools", srv.handleToolsPage)
+		r.Get("/sessions", srv.handleSessionsPage)
+		r.Get("/sessions/{id}", srv.handleSessionDetailPage)
 	})
 
 	// Settings (admin)

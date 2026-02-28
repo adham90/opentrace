@@ -91,6 +91,9 @@ type Deps struct {
 
 	// Error Impact (Phase 3 features)
 	ErrorImpactStore store.ErrorImpactStore
+
+	// Investigation Memory (Plan 012)
+	InvestigationSessionStore store.InvestigationSessionStore
 }
 
 // NewConfiguredServer creates an MCPServer and registers tools based on the
@@ -98,7 +101,7 @@ type Deps struct {
 // registered; otherwise only read-only tools are registered.
 // This is used by both the stdio transport (Serve) and the SSE transport
 // (web server).
-func NewConfiguredServer(deps Deps, isAdmin bool) *server.MCPServer {
+func NewConfiguredServer(deps Deps, isAdmin bool, hooks *server.Hooks) *server.MCPServer {
 	name := deps.ServerName
 	if name == "" {
 		name = "opentrace"
@@ -114,11 +117,18 @@ func NewConfiguredServer(deps Deps, isAdmin bool) *server.MCPServer {
 		activityLogger = NewActivityLogger(alCtx, deps.MCPActivityStore, 256, 2)
 	}
 
+	opts := []server.ServerOption{
+		server.WithToolCapabilities(false),
+		server.WithInstructions(mcpInstructions),
+	}
+	if hooks != nil {
+		opts = append(opts, server.WithHooks(hooks))
+	}
+
 	s := server.NewMCPServer(
 		name,
 		"0.1.0",
-		server.WithToolCapabilities(false),
-		server.WithInstructions(mcpInstructions),
+		opts...,
 	)
 
 	b := &CatalogBuilder{}
@@ -147,6 +157,7 @@ func Serve(deps Deps) error {
 	// Determine access level.
 	isAdmin := true // default: full access (backward compat)
 	hasAccess := true
+	var authUser *store.User
 
 	if deps.UserStore != nil && deps.MCPToken != "" {
 		parentCtx := deps.Ctx
@@ -161,6 +172,7 @@ func Serve(deps Deps) error {
 			hasAccess = false
 		} else {
 			isAdmin = user.Role == store.RoleAdmin
+			authUser = user
 		}
 	}
 
@@ -174,8 +186,31 @@ func Serve(deps Deps) error {
 		return server.ServeStdio(s)
 	}
 
-	s := NewConfiguredServer(deps, isAdmin)
-	return server.ServeStdio(s)
+	// Set up investigation session tracking hooks.
+	hooks := &server.Hooks{}
+	appCtx := deps.Ctx
+	if appCtx == nil {
+		appCtx = context.Background()
+	}
+
+	if deps.InvestigationSessionStore != nil {
+		sessionTracker = NewSessionTracker(appCtx, deps.InvestigationSessionStore, authUser, "stdio")
+		sessionTracker.RegisterHooks(hooks)
+	}
+
+	s := NewConfiguredServer(deps, isAdmin, hooks)
+
+	err := server.ServeStdio(s)
+
+	// Clean up on exit.
+	if sessionTracker != nil {
+		sessionTracker.CloseSession()
+	}
+	if activityLogger != nil {
+		activityLogger.Close()
+	}
+
+	return err
 }
 
 // activityStore is set by NewConfiguredServer when an MCPActivityStore is
@@ -183,6 +218,11 @@ func Serve(deps Deps) error {
 // This is package-level to avoid threading it through every addXxxTools call.
 var activityStoreForLogging store.MCPActivityStore
 var activityLogger *ActivityLogger
+
+// sessionTracker is set by Serve/NewConfiguredServer when an
+// InvestigationSessionStore is available. Used by wrapWithActivityLog to
+// tag activity with real session/user identity.
+var sessionTracker *SessionTracker
 
 // maybeAddTool registers a tool on the MCP server if s is non-nil.
 // When s is nil (catalog-only mode), this is a no-op.
@@ -236,21 +276,35 @@ func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler ser
 			isError = isError || result.IsError
 		}
 
-		// Determine session ID — use a hash of the context pointer as a rough identifier.
+		// Get real identity from session tracker.
 		sessionID := "mcp"
 		userID := ""
+		invSessionID := ""
+		stepIndex := 0
+		if sessionTracker != nil {
+			if uid := sessionTracker.UserID(); uid != "" {
+				userID = uid
+			}
+			if sid := sessionTracker.CurrentSessionID(); sid != "" {
+				invSessionID = sid
+				sessionID = sid
+			}
+			stepIndex = sessionTracker.RecordStep(toolName, isError)
+		}
 
 		// Log via bounded activity logger to avoid unbounded goroutine growth
 		if activityLogger != nil {
 			activityLogger.Log(store.LogMCPActivityParams{
-				SessionID:     sessionID,
-				UserID:        userID,
-				ToolName:      toolName,
-				Arguments:     argsPreview,
-				ResultPreview: resultPreview,
-				IsError:       isError,
-				DurationMs:    &elapsed,
-				EventType:     "tool_call",
+				SessionID:              sessionID,
+				UserID:                 userID,
+				ToolName:               toolName,
+				Arguments:              argsPreview,
+				ResultPreview:          resultPreview,
+				IsError:                isError,
+				DurationMs:             &elapsed,
+				EventType:              "tool_call",
+				InvestigationSessionID: invSessionID,
+				StepIndex:              stepIndex,
 			})
 		}
 
@@ -1095,6 +1149,31 @@ func addWriteTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			deleteNoteHandler(deps.AgentNoteStore),
 		)
 		b.Add("delete_note", "Remove a saved agent note", "Agent Memory", "admin", "")
+	}
+
+	// Investigation session summary (write).
+	if deps.InvestigationSessionStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("set_session_summary",
+				mcp.WithDescription(
+					"Provide a summary of the current investigation session. "+
+						"Call this when you've completed an investigation or identified a root cause. "+
+						"This helps future investigations of similar issues.",
+				),
+				mcp.WithString("summary", mcp.Required(),
+					mcp.Description("One sentence describing what was investigated and found")),
+				mcp.WithString("root_cause",
+					mcp.Description("The root cause if identified")),
+				mcp.WithString("fix_applied",
+					mcp.Description("What fix was applied, if any")),
+				mcp.WithString("outcome",
+					mcp.Description("Session outcome: resolved, unresolved, or partial")),
+				mcp.WithString("primary_service",
+					mcp.Description("The primary service investigated (e.g., 'payments', 'auth')")),
+			),
+			setSessionSummaryHandler(),
+		)
+		b.Add("set_session_summary", "Save a summary of the current investigation for future reference", "Investigation Memory", "admin", "")
 	}
 
 	// Agent-first watch tools (write).

@@ -92,7 +92,7 @@ func (s *Server) setupMCPSSE() *server.SSEServer {
 	// Create MCP server with all tools (admin level).
 	// Auth is at the connection level — if you have a valid MCP token, you
 	// get full access. This matches the stdio behavior for admin users.
-	mcpSrv := mcpserver.NewConfiguredServer(deps, true)
+	mcpSrv := mcpserver.NewConfiguredServer(deps, true, nil)
 
 	sseServer := server.NewSSEServer(mcpSrv,
 		server.WithStaticBasePath("/mcp"),
