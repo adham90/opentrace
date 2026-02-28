@@ -1120,7 +1120,7 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			mcp.NewTool("code_risk",
 				mcp.WithDescription("Get bulk risk scores for a list of files — useful as a pre-deploy safety check. Returns risk for each file and an overall assessment."),
 				mcp.WithString("service", mcp.Description("Service name for the files")),
-				mcp.WithObject("files", mcp.Description("Array of file paths to check")),
+				mcp.WithArray("files", mcp.Description("Array of file paths to check")),
 			),
 			codeRiskHandler(deps.CodeEntityStore),
 		)
@@ -1373,7 +1373,7 @@ func addWriteTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 				mcp.WithString("author", mcp.Description("Deploy author (email or name)")),
 				mcp.WithString("branch", mcp.Description("Git branch name")),
 				mcp.WithString("environment", mcp.Description("Target environment (production, staging, etc.)")),
-				mcp.WithObject("files", mcp.Description("Array of changed file paths")),
+				mcp.WithArray("files", mcp.Description("Array of changed file paths")),
 			),
 			recordDeployHandler(deps.DeployStore),
 		)
