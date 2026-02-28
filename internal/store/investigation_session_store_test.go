@@ -477,3 +477,117 @@ func TestInvestigationSessionStore_FindByCreatedHealthcheck(t *testing.T) {
 		t.Error("expected nil for non-existent healthcheck")
 	}
 }
+
+func TestInvestigationSessionStore_FindSimilar(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewInvestigationSessionStore(db)
+	ctx := context.Background()
+
+	// Create a resolved session with tools and service
+	sess1, _ := s.Create(ctx, CreateInvestigationSessionParams{
+		UserID:    "user-1",
+		Transport: "stdio",
+	})
+	intent := "investigation"
+	service := "api"
+	status := InvestigationStatusResolved
+	_ = s.Update(ctx, sess1.ID, UpdateInvestigationSessionParams{
+		Intent:         &intent,
+		PrimaryService: &service,
+		Status:         &status,
+	})
+	_ = s.RecordStep(ctx, sess1.ID, "diagnose", false)
+	_ = s.RecordStep(ctx, sess1.ID, "error_groups", false)
+	_ = s.RecordStep(ctx, sess1.ID, "log_search", false)
+
+	// Create current session
+	sess2, _ := s.Create(ctx, CreateInvestigationSessionParams{
+		UserID:    "user-1",
+		Transport: "stdio",
+	})
+
+	// FindSimilar should return sess1
+	similar, err := s.FindSimilar(ctx, FindSimilarParams{
+		Service:          "api",
+		Intent:           "investigation",
+		ExcludeSessionID: sess2.ID,
+		MaxResults:       3,
+		MinSteps:         2,
+		OnlyResolved:     true,
+	})
+	if err != nil {
+		t.Fatalf("FindSimilar: %v", err)
+	}
+	if len(similar) != 1 {
+		t.Fatalf("expected 1 similar session, got %d", len(similar))
+	}
+	if similar[0].ID != sess1.ID {
+		t.Errorf("expected session %s, got %s", sess1.ID, similar[0].ID)
+	}
+}
+
+func TestInvestigationSessionStore_FindSimilar_ExcludesCurrent(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewInvestigationSessionStore(db)
+	ctx := context.Background()
+
+	sess, _ := s.Create(ctx, CreateInvestigationSessionParams{
+		UserID:    "user-1",
+		Transport: "stdio",
+	})
+	intent := "investigation"
+	status := InvestigationStatusResolved
+	_ = s.Update(ctx, sess.ID, UpdateInvestigationSessionParams{
+		Intent: &intent,
+		Status: &status,
+	})
+	_ = s.RecordStep(ctx, sess.ID, "diagnose", false)
+	_ = s.RecordStep(ctx, sess.ID, "error_groups", false)
+
+	// FindSimilar excluding self should return nothing
+	similar, err := s.FindSimilar(ctx, FindSimilarParams{
+		Intent:           "investigation",
+		ExcludeSessionID: sess.ID,
+		MaxResults:       3,
+		MinSteps:         1,
+		OnlyResolved:     true,
+	})
+	if err != nil {
+		t.Fatalf("FindSimilar: %v", err)
+	}
+	if len(similar) != 0 {
+		t.Errorf("expected 0 similar sessions when excluding self, got %d", len(similar))
+	}
+}
+
+func TestInvestigationSessionStore_FindSimilar_RespectsMinSteps(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewInvestigationSessionStore(db)
+	ctx := context.Background()
+
+	sess, _ := s.Create(ctx, CreateInvestigationSessionParams{
+		UserID:    "user-1",
+		Transport: "stdio",
+	})
+	intent := "investigation"
+	status := InvestigationStatusResolved
+	_ = s.Update(ctx, sess.ID, UpdateInvestigationSessionParams{
+		Intent: &intent,
+		Status: &status,
+	})
+	_ = s.RecordStep(ctx, sess.ID, "diagnose", false) // only 1 step
+
+	similar, err := s.FindSimilar(ctx, FindSimilarParams{
+		Intent:           "investigation",
+		ExcludeSessionID: "other",
+		MaxResults:       3,
+		MinSteps:         3, // requires 3 steps
+		OnlyResolved:     true,
+	})
+	if err != nil {
+		t.Fatalf("FindSimilar: %v", err)
+	}
+	if len(similar) != 0 {
+		t.Errorf("expected 0 sessions with minSteps=3, got %d", len(similar))
+	}
+}

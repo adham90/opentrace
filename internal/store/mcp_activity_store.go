@@ -26,14 +26,19 @@ func (s *mcpActivityStore) Log(ctx context.Context, params LogMCPActivityParams)
 	if params.IsError {
 		isError = 1
 	}
+	var wasSuggested int
+	if params.WasSuggested {
+		wasSuggested = 1
+	}
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO mcp_activity (session_id, user_id, tool_name, arguments, result_preview, is_error, duration_ms, event_type, investigation_session_id, step_index)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO mcp_activity (session_id, user_id, tool_name, arguments, result_preview, is_error, duration_ms, event_type, investigation_session_id, step_index, was_suggested, suggestion_rank, followed_by)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		params.SessionID, params.UserID, params.ToolName,
 		params.Arguments, params.ResultPreview,
 		isError, params.DurationMs, eventType,
 		params.InvestigationSessionID, params.StepIndex,
+		wasSuggested, params.SuggestionRank, params.FollowedBy,
 	)
 	if err != nil {
 		return fmt.Errorf("logging mcp activity: %w", err)
@@ -195,4 +200,30 @@ func (s *mcpActivityStore) Prune(ctx context.Context, olderThan time.Duration) (
 		}
 	}
 	return totalDeleted, nil
+}
+
+func (s *mcpActivityStore) SetSuggestionTracking(ctx context.Context, invSessionID string, stepIndex int, wasSuggested bool, rank int) error {
+	var suggested int
+	if wasSuggested {
+		suggested = 1
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE mcp_activity SET was_suggested = ?, suggestion_rank = ? WHERE investigation_session_id = ? AND step_index = ?`,
+		suggested, rank, invSessionID, stepIndex,
+	)
+	if err != nil {
+		return fmt.Errorf("setting suggestion tracking: %w", err)
+	}
+	return nil
+}
+
+func (s *mcpActivityStore) UpdateFollowedBy(ctx context.Context, invSessionID string, stepIndex int, followedBy string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE mcp_activity SET followed_by = ? WHERE investigation_session_id = ? AND step_index = ?`,
+		followedBy, invSessionID, stepIndex,
+	)
+	if err != nil {
+		return fmt.Errorf("updating followed_by: %w", err)
+	}
+	return nil
 }

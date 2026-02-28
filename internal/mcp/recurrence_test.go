@@ -157,6 +157,10 @@ func (m *mockInvestigationSessionStore) FindByCreatedHealthcheck(_ context.Conte
 	return nil, nil
 }
 
+func (m *mockInvestigationSessionStore) FindSimilar(_ context.Context, _ store.FindSimilarParams) ([]store.InvestigationSession, error) {
+	return nil, nil
+}
+
 // putSession inserts a session directly into the mock store.
 func (m *mockInvestigationSessionStore) putSession(s *store.InvestigationSession) {
 	m.sessions[s.ID] = s

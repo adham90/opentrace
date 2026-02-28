@@ -579,6 +579,82 @@ func scanSession(row *sql.Row) (*InvestigationSession, error) {
 	return &sess, nil
 }
 
+// nthPipe returns the index of the nth '|' in s, or -1 if not found.
+func nthPipe(s string, n int) int {
+	count := 0
+	for i, c := range s {
+		if c == '|' {
+			count++
+			if count == n {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func (s *investigationSessionStore) FindSimilar(ctx context.Context, params FindSimilarParams) ([]InvestigationSession, error) {
+	maxResults := params.MaxResults
+	if maxResults <= 0 {
+		maxResults = 3
+	}
+	minSteps := params.MinSteps
+	if minSteps <= 0 {
+		minSteps = 1
+	}
+
+	// Build dynamic WHERE clause
+	where := "WHERE id != ?"
+	args := []any{params.ExcludeSessionID}
+
+	if params.Service != "" {
+		where += " AND primary_service = ?"
+		args = append(args, params.Service)
+	}
+	if params.Intent != "" {
+		where += " AND intent = ?"
+		args = append(args, params.Intent)
+	}
+	if params.OnlyResolved {
+		where += " AND status = 'resolved'"
+	}
+	where += " AND total_steps >= ?"
+	args = append(args, minSteps)
+
+	// If a tool fingerprint is provided, prefer sessions with a common prefix
+	if params.ToolFingerprint != "" {
+		prefix := params.ToolFingerprint
+		if idx := nthPipe(prefix, 3); idx > 0 {
+			prefix = prefix[:idx]
+		}
+		where += " AND tool_fingerprint LIKE ?"
+		args = append(args, prefix+"%")
+	}
+
+	args = append(args, maxResults)
+
+	query := fmt.Sprintf(
+		`SELECT %s FROM investigation_sessions %s ORDER BY started_at DESC LIMIT ?`,
+		investigationSessionColumns, where,
+	)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("finding similar sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var result []InvestigationSession
+	for rows.Next() {
+		sess, err := scanSessionRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *sess)
+	}
+	return result, rows.Err()
+}
+
 // scanSessionRow scans a *sql.Rows row (used in List).
 func scanSessionRow(rows *sql.Rows) (*InvestigationSession, error) {
 	var sess InvestigationSession

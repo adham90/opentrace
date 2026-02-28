@@ -94,6 +94,10 @@ type Deps struct {
 
 	// Investigation Memory (Plan 012)
 	InvestigationSessionStore store.InvestigationSessionStore
+
+	// Investigation Memory Stage 3 — Ranking + Context
+	ToolTransitionStore   store.ToolTransitionStore
+	WorkflowTemplateStore store.WorkflowTemplateStore
 }
 
 // NewConfiguredServer creates an MCPServer and registers tools based on the
@@ -197,6 +201,27 @@ func Serve(deps Deps) error {
 		sessionTracker = NewSessionTracker(appCtx, deps.InvestigationSessionStore, authUser, "stdio")
 		sessionTracker.RegisterHooks(hooks)
 		recurrenceDetector = NewRecurrenceDetector(deps.InvestigationSessionStore)
+
+		// Stage 3: Wire transition and activity stores into session tracker
+		if deps.ToolTransitionStore != nil {
+			sessionTracker.SetTransitionStore(deps.ToolTransitionStore)
+		}
+		if deps.MCPActivityStore != nil {
+			sessionTracker.SetActivityStore(deps.MCPActivityStore)
+		}
+	}
+
+	// Stage 3: Initialize ranking service and context injector
+	if deps.ToolTransitionStore != nil {
+		rankingService = NewRankingService(deps.ToolTransitionStore, deps.WorkflowTemplateStore)
+	}
+	if deps.InvestigationSessionStore != nil && deps.ToolTransitionStore != nil {
+		contextInjector = NewContextInjector(deps.InvestigationSessionStore, deps.ToolTransitionStore)
+	}
+
+	// Seed workflow templates for cold start
+	if deps.WorkflowTemplateStore != nil {
+		SeedDefaultTemplates(appCtx, deps.WorkflowTemplateStore)
 	}
 
 	s := NewConfiguredServer(deps, isAdmin, hooks)
@@ -229,6 +254,12 @@ var sessionTracker *SessionTracker
 // InvestigationSessionStore is available. Used by tool handlers
 // to link subsystem entities and detect recurring investigations.
 var recurrenceDetector *RecurrenceDetector
+
+// rankingService replaces static tool suggestions with data-driven rankings.
+var rankingService *RankingService
+
+// contextInjector enriches tool responses with investigation memory.
+var contextInjector *ContextInjector
 
 // maybeAddTool registers a tool on the MCP server if s is non-nil.
 // When s is nil (catalog-only mode), this is a no-op.
@@ -312,6 +343,17 @@ func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler ser
 				InvestigationSessionID: invSessionID,
 				StepIndex:              stepIndex,
 			})
+		}
+
+		// Inject investigation context for investigation-intent sessions.
+		if contextInjector != nil && sessionTracker != nil && result != nil && !result.IsError && len(result.Content) > 0 {
+			if sess := sessionTracker.CurrentSession(); sess != nil && sess.Intent == IntentInvestigation {
+				if txt, ok := result.Content[0].(mcp.TextContent); ok {
+					if enriched := InjectContextIntoResult(contextInjector, sess, toolName, txt.Text); enriched != txt.Text {
+						result.Content[0] = mcp.NewTextContent(enriched)
+					}
+				}
+			}
 		}
 
 		return result, err

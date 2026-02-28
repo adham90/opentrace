@@ -720,6 +720,14 @@ func (m *mockMCPActivityStore) Prune(_ context.Context, _ time.Duration) (int64,
 	return 0, nil
 }
 
+func (m *mockMCPActivityStore) SetSuggestionTracking(_ context.Context, _ string, _ int, _ bool, _ int) error {
+	return nil
+}
+
+func (m *mockMCPActivityStore) UpdateFollowedBy(_ context.Context, _ string, _ int, _ string) error {
+	return nil
+}
+
 // mockTraceStore implements store.TraceStore for testing.
 type mockTraceStore struct {
 	mu     sync.Mutex

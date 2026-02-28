@@ -47,6 +47,8 @@ type appDeps struct {
 	errorImpactStore            store.ErrorImpactStore
 	traceStore                  store.TraceStore
 	investigationSessionStore   store.InvestigationSessionStore
+	toolTransitionStore         store.ToolTransitionStore
+	workflowTemplateStore       store.WorkflowTemplateStore
 	registry           *connector.Registry
 	cfg              *config.Config
 }
@@ -156,6 +158,8 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	errorImpactStore := store.NewErrorImpactStore(db)
 	traceStore := store.NewTraceStore(db)
 	investigationSessionStore := store.NewInvestigationSessionStore(db)
+	toolTransitionStore := store.NewToolTransitionStore(db)
+	workflowTemplateStore := store.NewWorkflowTemplateStore(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
@@ -182,6 +186,8 @@ func initApp(ctx context.Context) (*appDeps, error) {
 		errorImpactStore:   errorImpactStore,
 		traceStore:                  traceStore,
 		investigationSessionStore:   investigationSessionStore,
+		toolTransitionStore:         toolTransitionStore,
+		workflowTemplateStore:       workflowTemplateStore,
 		registry:                    registry,
 		cfg:                         cfg,
 	}, nil
@@ -234,6 +240,8 @@ func runMCP() error {
 		JourneyStore:       deps.journeyStore,
 		ErrorImpactStore:             deps.errorImpactStore,
 		InvestigationSessionStore:    deps.investigationSessionStore,
+		ToolTransitionStore:          deps.toolTransitionStore,
+		WorkflowTemplateStore:        deps.workflowTemplateStore,
 	})
 }
 
