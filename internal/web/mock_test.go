@@ -822,3 +822,57 @@ func (m *mockRunbookEffectivenessStore) List(_ context.Context) ([]store.Runbook
 	return nil, nil
 }
 
+// mockCodeEntityStore implements store.CodeEntityStore for testing.
+type mockCodeEntityStore struct{}
+
+func (m *mockCodeEntityStore) Upsert(_ context.Context, _ store.UpsertCodeEntityParams) (*store.CodeEntity, error) {
+	return &store.CodeEntity{}, nil
+}
+func (m *mockCodeEntityStore) GetByName(_ context.Context, _ store.CodeEntityType, _, _ string) (*store.CodeEntity, error) {
+	return nil, store.ErrNotFound
+}
+func (m *mockCodeEntityStore) TopByRisk(_ context.Context, _ string, _ int) ([]store.CodeEntity, error) {
+	return nil, nil
+}
+func (m *mockCodeEntityStore) BatchGetRisk(_ context.Context, _ store.CodeEntityType, _ []string, _ string) ([]store.CodeEntity, error) {
+	return nil, nil
+}
+func (m *mockCodeEntityStore) IncrementError(_ context.Context, _ store.CodeEntityType, _, _ string) error {
+	return nil
+}
+func (m *mockCodeEntityStore) IncrementInvestigation(_ context.Context, _ store.CodeEntityType, _, _ string) error {
+	return nil
+}
+func (m *mockCodeEntityStore) BatchRecomputeRisk(_ context.Context) error { return nil }
+func (m *mockCodeEntityStore) Prune(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+
+// mockDeployStore implements store.DeployStore for testing.
+type mockDeployStore struct{}
+
+func (m *mockDeployStore) Create(_ context.Context, _ store.CreateDeployParams) (*store.Deploy, error) {
+	return &store.Deploy{ID: 1, Status: store.DeployStatusPending}, nil
+}
+func (m *mockDeployStore) GetByID(_ context.Context, _ int64) (*store.Deploy, error) {
+	return nil, store.ErrNotFound
+}
+func (m *mockDeployStore) GetByCommit(_ context.Context, _ string) (*store.Deploy, error) {
+	return nil, store.ErrNotFound
+}
+func (m *mockDeployStore) GetRecent(_ context.Context, _ string, _ int) ([]store.Deploy, error) {
+	return nil, nil
+}
+func (m *mockDeployStore) MeasureImpact(_ context.Context, _ int64, _ store.DeployImpact) error {
+	return nil
+}
+func (m *mockDeployStore) LinkInvestigation(_ context.Context, _ int64, _ string) error {
+	return nil
+}
+func (m *mockDeployStore) GetPendingMeasurement(_ context.Context, _ time.Duration) ([]store.Deploy, error) {
+	return nil, nil
+}
+func (m *mockDeployStore) Prune(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+

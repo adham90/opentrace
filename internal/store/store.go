@@ -333,3 +333,27 @@ type TraceStore interface {
 	MarkStaleTraces(ctx context.Context, olderThan time.Duration) (int, error)
 }
 
+// CodeEntityStore manages code entity risk tracking (Stage 5).
+type CodeEntityStore interface {
+	Upsert(ctx context.Context, params UpsertCodeEntityParams) (*CodeEntity, error)
+	GetByName(ctx context.Context, entityType CodeEntityType, entityName, service string) (*CodeEntity, error)
+	TopByRisk(ctx context.Context, service string, limit int) ([]CodeEntity, error)
+	BatchGetRisk(ctx context.Context, entityType CodeEntityType, names []string, service string) ([]CodeEntity, error)
+	IncrementError(ctx context.Context, entityType CodeEntityType, entityName, service string) error
+	IncrementInvestigation(ctx context.Context, entityType CodeEntityType, entityName, service string) error
+	BatchRecomputeRisk(ctx context.Context) error
+	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
+}
+
+// DeployStore manages deploy lifecycle and impact measurement (Stage 5).
+type DeployStore interface {
+	Create(ctx context.Context, params CreateDeployParams) (*Deploy, error)
+	GetByID(ctx context.Context, id int64) (*Deploy, error)
+	GetByCommit(ctx context.Context, commitHash string) (*Deploy, error)
+	GetRecent(ctx context.Context, service string, limit int) ([]Deploy, error)
+	MeasureImpact(ctx context.Context, id int64, impact DeployImpact) error
+	LinkInvestigation(ctx context.Context, id int64, sessionID string) error
+	GetPendingMeasurement(ctx context.Context, olderThan time.Duration) ([]Deploy, error)
+	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
+}
+
