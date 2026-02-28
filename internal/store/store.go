@@ -124,6 +124,8 @@ type MCPActivityStore interface {
 	Recent(ctx context.Context, limit int) ([]MCPActivityEvent, error)
 	ListByInvestigationSession(ctx context.Context, sessionID string) ([]MCPActivityEvent, error)
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
+	SetSuggestionTracking(ctx context.Context, invSessionID string, stepIndex int, wasSuggested bool, rank int) error
+	UpdateFollowedBy(ctx context.Context, invSessionID string, stepIndex int, followedBy string) error
 }
 
 // AuditStore tracks admin actions for security audit trail.
@@ -286,6 +288,26 @@ type InvestigationSessionStore interface {
 	FindByCreatedWatcher(ctx context.Context, watcherID string) (*InvestigationSession, error)
 	FindByResolvedError(ctx context.Context, fingerprint string) (*InvestigationSession, error)
 	FindByCreatedHealthcheck(ctx context.Context, healthcheckID string) (*InvestigationSession, error)
+
+	// Similarity search for investigation context
+	FindSimilar(ctx context.Context, params FindSimilarParams) ([]InvestigationSession, error)
+}
+
+// ToolTransitionStore tracks tool-to-tool transitions for ranking suggestions.
+type ToolTransitionStore interface {
+	Increment(ctx context.Context, fromTool, toTool, intent string) error
+	IncrementWithOutcome(ctx context.Context, fromTool, toTool, intent, outcome string) error
+	GetTransitions(ctx context.Context, params GetTransitionsParams) ([]ToolTransition, error)
+	GetDeadEnds(ctx context.Context, intent string) ([]ToolTransition, error)
+	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
+}
+
+// WorkflowTemplateStore manages curated and learned workflow templates.
+type WorkflowTemplateStore interface {
+	Seed(ctx context.Context, templates []WorkflowTemplate) error
+	GetNextStep(ctx context.Context, intent string, stepOrder int) ([]WorkflowTemplate, error)
+	GetByName(ctx context.Context, name string) ([]WorkflowTemplate, error)
+	List(ctx context.Context, intent string) ([]WorkflowTemplate, error)
 }
 
 // TraceStore manages distributed trace reassembly status.
