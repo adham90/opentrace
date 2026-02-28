@@ -16,9 +16,12 @@ const investigationSessionColumns = `id, user_id, user_email, user_role,
 		client_name, client_version, workspace, transport, connection_id,
 		intent, intent_detail, primary_service, primary_datasource_id,
 		status, summary, root_cause, fix_description,
-		created_watcher_ids, triggered_by_watcher_id,
+		created_watcher_ids, triggered_by_alert_id, triggered_by_watcher_id,
 		resolved_error_group_ids, investigated_error_fingerprints,
 		created_healthcheck_ids, triggered_by_healthcheck_id,
+		created_note_ids, auto_note_ids,
+		runbooks_executed, explained_queries, killed_queries, trace_ids,
+		correlated_deploy, pre_investigation_snapshot, post_investigation_snapshot,
 		total_steps, total_errors, tool_sequence, tool_fingerprint, arg_signature,
 		started_at, last_activity_at, ended_at, duration_seconds,
 		recurrence_group, recurrence_count, previous_session_id, fix_durability_seconds`
@@ -191,6 +194,50 @@ func (s *investigationSessionStore) Update(ctx context.Context, id string, param
 	if params.TriggeredByHealthcheckID != nil {
 		sets = append(sets, "triggered_by_healthcheck_id = ?")
 		args = append(args, *params.TriggeredByHealthcheckID)
+	}
+
+	// Stage 4: Additional subsystem links
+	if params.RunbooksExecuted != nil {
+		j, _ := json.Marshal(params.RunbooksExecuted)
+		sets = append(sets, "runbooks_executed = ?")
+		args = append(args, string(j))
+	}
+	if params.ExplainedQueries != nil {
+		j, _ := json.Marshal(params.ExplainedQueries)
+		sets = append(sets, "explained_queries = ?")
+		args = append(args, string(j))
+	}
+	if params.KilledQueries != nil {
+		j, _ := json.Marshal(params.KilledQueries)
+		sets = append(sets, "killed_queries = ?")
+		args = append(args, string(j))
+	}
+	if params.TraceIDs != nil {
+		j, _ := json.Marshal(params.TraceIDs)
+		sets = append(sets, "trace_ids = ?")
+		args = append(args, string(j))
+	}
+	if params.CorrelatedDeploy != nil {
+		sets = append(sets, "correlated_deploy = ?")
+		args = append(args, *params.CorrelatedDeploy)
+	}
+	if params.PreInvestigationSnapshot != nil {
+		sets = append(sets, "pre_investigation_snapshot = ?")
+		args = append(args, *params.PreInvestigationSnapshot)
+	}
+	if params.PostInvestigationSnapshot != nil {
+		sets = append(sets, "post_investigation_snapshot = ?")
+		args = append(args, *params.PostInvestigationSnapshot)
+	}
+	if params.AutoNoteIDs != nil {
+		j, _ := json.Marshal(params.AutoNoteIDs)
+		sets = append(sets, "auto_note_ids = ?")
+		args = append(args, string(j))
+	}
+	if params.CreatedNoteIDs != nil {
+		j, _ := json.Marshal(params.CreatedNoteIDs)
+		sets = append(sets, "created_note_ids = ?")
+		args = append(args, string(j))
 	}
 
 	// Recurrence
@@ -502,7 +549,10 @@ func scanSession(row *sql.Row) (*InvestigationSession, error) {
 	var seqJSON, startedAt, lastActivityAt string
 	var endedAt sql.NullString
 	var createdWatcherJSON, resolvedErrorJSON, investigatedErrorJSON, createdHCJSON string
-	var triggeredByWatcher, triggeredByHC sql.NullString
+	var triggeredByAlert, triggeredByWatcher, triggeredByHC sql.NullString
+	var createdNoteJSON, autoNoteJSON string
+	var runbooksJSON, explainedJSON, killedJSON, traceIDsJSON string
+	var preSnapshotJSON, postSnapshotJSON string
 	var recurrenceGroup, previousSessionID sql.NullString
 	var fixDurability sql.NullInt64
 
@@ -511,9 +561,12 @@ func scanSession(row *sql.Row) (*InvestigationSession, error) {
 		&sess.ClientName, &sess.ClientVersion, &sess.Workspace, &sess.Transport, &sess.ConnectionID,
 		&sess.Intent, &sess.IntentDetail, &sess.PrimaryService, &dsID,
 		&sess.Status, &sess.Summary, &sess.RootCause, &sess.FixDescription,
-		&createdWatcherJSON, &triggeredByWatcher,
+		&createdWatcherJSON, &triggeredByAlert, &triggeredByWatcher,
 		&resolvedErrorJSON, &investigatedErrorJSON,
 		&createdHCJSON, &triggeredByHC,
+		&createdNoteJSON, &autoNoteJSON,
+		&runbooksJSON, &explainedJSON, &killedJSON, &traceIDsJSON,
+		&sess.CorrelatedDeploy, &preSnapshotJSON, &postSnapshotJSON,
 		&sess.TotalSteps, &sess.TotalErrors, &seqJSON, &sess.ToolFingerprint, &sess.ArgSignature,
 		&startedAt, &lastActivityAt, &endedAt, &sess.DurationSeconds,
 		&recurrenceGroup, &sess.RecurrenceCount, &previousSessionID, &fixDurability,
@@ -528,28 +581,35 @@ func scanSession(row *sql.Row) (*InvestigationSession, error) {
 	}
 
 	// JSON array columns
-	json.Unmarshal([]byte(seqJSON), &sess.ToolSequence)
-	if sess.ToolSequence == nil {
-		sess.ToolSequence = []string{}
-	}
-	json.Unmarshal([]byte(createdWatcherJSON), &sess.CreatedWatcherIDs)
-	if sess.CreatedWatcherIDs == nil {
-		sess.CreatedWatcherIDs = []string{}
-	}
-	json.Unmarshal([]byte(resolvedErrorJSON), &sess.ResolvedErrorGroupIDs)
-	if sess.ResolvedErrorGroupIDs == nil {
-		sess.ResolvedErrorGroupIDs = []string{}
-	}
-	json.Unmarshal([]byte(investigatedErrorJSON), &sess.InvestigatedErrorFingerprints)
-	if sess.InvestigatedErrorFingerprints == nil {
-		sess.InvestigatedErrorFingerprints = []string{}
-	}
-	json.Unmarshal([]byte(createdHCJSON), &sess.CreatedHealthcheckIDs)
-	if sess.CreatedHealthcheckIDs == nil {
-		sess.CreatedHealthcheckIDs = []string{}
+	unmarshalStringSlice := func(raw string) []string {
+		var s []string
+		json.Unmarshal([]byte(raw), &s)
+		if s == nil {
+			return []string{}
+		}
+		return s
 	}
 
+	sess.ToolSequence = unmarshalStringSlice(seqJSON)
+	sess.CreatedWatcherIDs = unmarshalStringSlice(createdWatcherJSON)
+	sess.ResolvedErrorGroupIDs = unmarshalStringSlice(resolvedErrorJSON)
+	sess.InvestigatedErrorFingerprints = unmarshalStringSlice(investigatedErrorJSON)
+	sess.CreatedHealthcheckIDs = unmarshalStringSlice(createdHCJSON)
+	sess.CreatedNoteIDs = unmarshalStringSlice(createdNoteJSON)
+	sess.AutoNoteIDs = unmarshalStringSlice(autoNoteJSON)
+	sess.RunbooksExecuted = unmarshalStringSlice(runbooksJSON)
+	sess.ExplainedQueries = unmarshalStringSlice(explainedJSON)
+	sess.KilledQueries = unmarshalStringSlice(killedJSON)
+	sess.TraceIDs = unmarshalStringSlice(traceIDsJSON)
+
+	// JSON map columns
+	json.Unmarshal([]byte(preSnapshotJSON), &sess.PreInvestigationSnapshot)
+	json.Unmarshal([]byte(postSnapshotJSON), &sess.PostInvestigationSnapshot)
+
 	// Nullable TEXT columns
+	if triggeredByAlert.Valid {
+		sess.TriggeredByAlertID = &triggeredByAlert.String
+	}
 	if triggeredByWatcher.Valid {
 		sess.TriggeredByWatcherID = &triggeredByWatcher.String
 	}
@@ -662,7 +722,10 @@ func scanSessionRow(rows *sql.Rows) (*InvestigationSession, error) {
 	var seqJSON, startedAt, lastActivityAt string
 	var endedAt sql.NullString
 	var createdWatcherJSON, resolvedErrorJSON, investigatedErrorJSON, createdHCJSON string
-	var triggeredByWatcher, triggeredByHC sql.NullString
+	var triggeredByAlert, triggeredByWatcher, triggeredByHC sql.NullString
+	var createdNoteJSON, autoNoteJSON string
+	var runbooksJSON, explainedJSON, killedJSON, traceIDsJSON string
+	var preSnapshotJSON, postSnapshotJSON string
 	var recurrenceGroup, previousSessionID sql.NullString
 	var fixDurability sql.NullInt64
 
@@ -671,9 +734,12 @@ func scanSessionRow(rows *sql.Rows) (*InvestigationSession, error) {
 		&sess.ClientName, &sess.ClientVersion, &sess.Workspace, &sess.Transport, &sess.ConnectionID,
 		&sess.Intent, &sess.IntentDetail, &sess.PrimaryService, &dsID,
 		&sess.Status, &sess.Summary, &sess.RootCause, &sess.FixDescription,
-		&createdWatcherJSON, &triggeredByWatcher,
+		&createdWatcherJSON, &triggeredByAlert, &triggeredByWatcher,
 		&resolvedErrorJSON, &investigatedErrorJSON,
 		&createdHCJSON, &triggeredByHC,
+		&createdNoteJSON, &autoNoteJSON,
+		&runbooksJSON, &explainedJSON, &killedJSON, &traceIDsJSON,
+		&sess.CorrelatedDeploy, &preSnapshotJSON, &postSnapshotJSON,
 		&sess.TotalSteps, &sess.TotalErrors, &seqJSON, &sess.ToolFingerprint, &sess.ArgSignature,
 		&startedAt, &lastActivityAt, &endedAt, &sess.DurationSeconds,
 		&recurrenceGroup, &sess.RecurrenceCount, &previousSessionID, &fixDurability,
@@ -688,28 +754,35 @@ func scanSessionRow(rows *sql.Rows) (*InvestigationSession, error) {
 	}
 
 	// JSON array columns
-	json.Unmarshal([]byte(seqJSON), &sess.ToolSequence)
-	if sess.ToolSequence == nil {
-		sess.ToolSequence = []string{}
-	}
-	json.Unmarshal([]byte(createdWatcherJSON), &sess.CreatedWatcherIDs)
-	if sess.CreatedWatcherIDs == nil {
-		sess.CreatedWatcherIDs = []string{}
-	}
-	json.Unmarshal([]byte(resolvedErrorJSON), &sess.ResolvedErrorGroupIDs)
-	if sess.ResolvedErrorGroupIDs == nil {
-		sess.ResolvedErrorGroupIDs = []string{}
-	}
-	json.Unmarshal([]byte(investigatedErrorJSON), &sess.InvestigatedErrorFingerprints)
-	if sess.InvestigatedErrorFingerprints == nil {
-		sess.InvestigatedErrorFingerprints = []string{}
-	}
-	json.Unmarshal([]byte(createdHCJSON), &sess.CreatedHealthcheckIDs)
-	if sess.CreatedHealthcheckIDs == nil {
-		sess.CreatedHealthcheckIDs = []string{}
+	unmarshalStringSlice := func(raw string) []string {
+		var s []string
+		json.Unmarshal([]byte(raw), &s)
+		if s == nil {
+			return []string{}
+		}
+		return s
 	}
 
+	sess.ToolSequence = unmarshalStringSlice(seqJSON)
+	sess.CreatedWatcherIDs = unmarshalStringSlice(createdWatcherJSON)
+	sess.ResolvedErrorGroupIDs = unmarshalStringSlice(resolvedErrorJSON)
+	sess.InvestigatedErrorFingerprints = unmarshalStringSlice(investigatedErrorJSON)
+	sess.CreatedHealthcheckIDs = unmarshalStringSlice(createdHCJSON)
+	sess.CreatedNoteIDs = unmarshalStringSlice(createdNoteJSON)
+	sess.AutoNoteIDs = unmarshalStringSlice(autoNoteJSON)
+	sess.RunbooksExecuted = unmarshalStringSlice(runbooksJSON)
+	sess.ExplainedQueries = unmarshalStringSlice(explainedJSON)
+	sess.KilledQueries = unmarshalStringSlice(killedJSON)
+	sess.TraceIDs = unmarshalStringSlice(traceIDsJSON)
+
+	// JSON map columns
+	json.Unmarshal([]byte(preSnapshotJSON), &sess.PreInvestigationSnapshot)
+	json.Unmarshal([]byte(postSnapshotJSON), &sess.PostInvestigationSnapshot)
+
 	// Nullable TEXT columns
+	if triggeredByAlert.Valid {
+		sess.TriggeredByAlertID = &triggeredByAlert.String
+	}
 	if triggeredByWatcher.Valid {
 		sess.TriggeredByWatcherID = &triggeredByWatcher.String
 	}

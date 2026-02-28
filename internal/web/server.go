@@ -412,6 +412,14 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 				r.Get("/mcp/activity", srv.handleMCPActivity)
 			}
 
+			// Investigation sessions
+			if srv.investigationSessionStore != nil {
+				r.Get("/investigations", srv.handleListInvestigations)
+				r.Get("/investigations/stats", srv.handleInvestigationStats)
+				r.Get("/investigations/{id}", srv.handleGetInvestigation)
+				r.Get("/investigations/{id}/steps", srv.handleInvestigationSteps)
+			}
+
 			if srv.serverStore != nil && srv.metricStore != nil {
 				r.Get("/servers", srv.handleListServers)
 				r.Get("/servers/{id}", srv.handleGetServer)

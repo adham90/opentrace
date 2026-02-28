@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -28,6 +30,13 @@ type SessionTracker struct {
 	workspace       string         // project path if available
 	ctx             context.Context
 
+	// Stage 4: additional stores for lifecycle hooks
+	noteStore        store.AgentNoteStore
+	runbookStore     store.RunbookEffectivenessStore
+	queryMemoryStore store.QueryMemoryStore
+	trendStore       store.TrendStore
+	auditStore       store.AuditStore
+
 	mu              sync.RWMutex
 	session         *store.InvestigationSession
 	connectionID    string // from OnRegisterSession
@@ -53,6 +62,31 @@ func (st *SessionTracker) SetTransitionStore(ts store.ToolTransitionStore) {
 // SetActivityStore configures the activity store for suggestion tracking.
 func (st *SessionTracker) SetActivityStore(as store.MCPActivityStore) {
 	st.activityStore = as
+}
+
+// SetNoteStore configures the note store for auto-note creation.
+func (st *SessionTracker) SetNoteStore(ns store.AgentNoteStore) {
+	st.noteStore = ns
+}
+
+// SetRunbookStore configures the runbook effectiveness store.
+func (st *SessionTracker) SetRunbookStore(rs store.RunbookEffectivenessStore) {
+	st.runbookStore = rs
+}
+
+// SetQueryMemoryStore configures the query memory store.
+func (st *SessionTracker) SetQueryMemoryStore(qs store.QueryMemoryStore) {
+	st.queryMemoryStore = qs
+}
+
+// SetTrendStore configures the trend store for deploy correlation.
+func (st *SessionTracker) SetTrendStore(ts store.TrendStore) {
+	st.trendStore = ts
+}
+
+// SetAuditStore configures the audit store for recording investigation completions.
+func (st *SessionTracker) SetAuditStore(as store.AuditStore) {
+	st.auditStore = as
 }
 
 // SetLastSuggestions records the suggestions returned to the client,
@@ -123,6 +157,8 @@ func (st *SessionTracker) RecordStep(toolName string, isError bool) int {
 	// This may be overridden later if the tool includes a context parameter.
 	if idx == 1 {
 		st.classifyIntentFromTool(toolName)
+		// Correlate deploy on first step where service is known
+		st.correlateDeploy(ctx)
 	}
 
 	// Track suggestion acceptance
@@ -249,6 +285,7 @@ func (st *SessionTracker) CloseSession() {
 		st.mu.Lock()
 		st.session = latest
 		st.mu.Unlock()
+		sess = latest
 
 		// Infer outcome if no manual summary was provided.
 		finalizeSessionOutcome(st)
@@ -263,6 +300,12 @@ func (st *SessionTracker) CloseSession() {
 			}
 		}
 	}
+
+	// Stage 4: lifecycle hooks on close
+	st.createAutoNotes(ctx, sess)
+	st.updateRunbookEffectiveness(ctx, sess)
+	st.updateQueryMemory(ctx, sess)
+	st.recordAuditEntry(ctx, sess)
 
 	// Clear session reference.
 	st.mu.Lock()
@@ -369,4 +412,161 @@ func (st *SessionTracker) onInitialize(_ context.Context, _ any, req *mcplib.Ini
 // onDisconnect is called when an MCP session is unregistered (connection closes).
 func (st *SessionTracker) onDisconnect(_ context.Context, _ server.ClientSession) {
 	st.CloseSession()
+}
+
+// --- Stage 4: Lifecycle hooks ---
+
+// createAutoNotes creates agent notes when a session is resolved with a summary.
+func (st *SessionTracker) createAutoNotes(ctx context.Context, sess *store.InvestigationSession) {
+	if st.noteStore == nil || sess == nil || sess.Status != store.InvestigationStatusResolved || sess.Summary == "" {
+		return
+	}
+
+	var autoNoteIDs []string
+
+	// Create note for the service
+	if sess.PrimaryService != "" {
+		noteText := fmt.Sprintf("Investigation resolved: %s", sess.Summary)
+		if sess.RootCause != "" {
+			noteText += fmt.Sprintf("\nRoot cause: %s", sess.RootCause)
+		}
+		if sess.FixDescription != "" {
+			noteText += fmt.Sprintf("\nFix: %s", sess.FixDescription)
+		}
+
+		note, err := st.noteStore.Upsert(ctx, "service", sess.PrimaryService, noteText)
+		if err != nil {
+			slog.Debug("failed to create auto-note for service", "error", err)
+		} else if note != nil {
+			autoNoteIDs = append(autoNoteIDs, fmt.Sprintf("%d", note.ID))
+		}
+	}
+
+	// Create notes for resolved error fingerprints
+	for _, fp := range sess.ResolvedErrorGroupIDs {
+		noteText := fmt.Sprintf("Error resolved in session %s: %s", sess.ID[:8], sess.Summary)
+		if sess.RootCause != "" {
+			noteText += fmt.Sprintf("\nRoot cause: %s", sess.RootCause)
+		}
+		note, err := st.noteStore.Upsert(ctx, "error", fp, noteText)
+		if err != nil {
+			slog.Debug("failed to create auto-note for error", "error", err, "fingerprint", fp)
+		} else if note != nil {
+			autoNoteIDs = append(autoNoteIDs, fmt.Sprintf("%d", note.ID))
+		}
+	}
+
+	if len(autoNoteIDs) > 0 {
+		st.store.Update(ctx, sess.ID, store.UpdateInvestigationSessionParams{
+			AutoNoteIDs: autoNoteIDs,
+		})
+	}
+}
+
+// updateRunbookEffectiveness updates runbook stats based on session outcome.
+func (st *SessionTracker) updateRunbookEffectiveness(ctx context.Context, sess *store.InvestigationSession) {
+	if st.runbookStore == nil || sess == nil || len(sess.RunbooksExecuted) == 0 {
+		return
+	}
+
+	outcome := string(sess.Status)
+	if outcome != "resolved" && outcome != "abandoned" && outcome != "unresolved" {
+		return
+	}
+	if outcome == "unresolved" {
+		outcome = "abandoned"
+	}
+
+	for _, rb := range sess.RunbooksExecuted {
+		if err := st.runbookStore.UpdateOutcome(ctx, store.UpdateRunbookEffectivenessParams{
+			RunbookName: rb,
+			Outcome:     outcome,
+			StepsAfter:  sess.TotalSteps,
+			DurationSec: sess.DurationSeconds,
+		}); err != nil {
+			slog.Debug("failed to update runbook effectiveness", "error", err, "runbook", rb)
+		}
+	}
+}
+
+// updateQueryMemory updates query memory for explained queries in the session.
+func (st *SessionTracker) updateQueryMemory(ctx context.Context, sess *store.InvestigationSession) {
+	if st.queryMemoryStore == nil || sess == nil || len(sess.ExplainedQueries) == 0 {
+		return
+	}
+
+	rootCause := ""
+	fix := ""
+	if sess.Status == store.InvestigationStatusResolved {
+		rootCause = sess.RootCause
+		fix = sess.FixDescription
+	}
+
+	for _, fp := range sess.ExplainedQueries {
+		if err := st.queryMemoryStore.Upsert(ctx, store.UpsertQueryMemoryParams{
+			Fingerprint: fp,
+			SessionID:   sess.ID,
+			RootCause:   rootCause,
+			Fix:         fix,
+		}); err != nil {
+			slog.Debug("failed to update query memory", "error", err, "fingerprint", fp)
+		}
+	}
+}
+
+// recordAuditEntry logs an audit event for significant investigations.
+func (st *SessionTracker) recordAuditEntry(ctx context.Context, sess *store.InvestigationSession) {
+	if st.auditStore == nil || sess == nil || sess.Intent != IntentInvestigation || sess.TotalSteps < 3 {
+		return
+	}
+
+	details, _ := json.Marshal(map[string]any{
+		"status":   sess.Status,
+		"steps":    sess.TotalSteps,
+		"service":  sess.PrimaryService,
+		"duration": sess.DurationSeconds,
+	})
+
+	if err := st.auditStore.Log(ctx, store.LogAuditParams{
+		UserID:     sess.UserID,
+		UserEmail:  sess.UserEmail,
+		Action:     "investigation_completed",
+		TargetType: "investigation_session",
+		TargetID:   sess.ID,
+		Details:    string(details),
+	}); err != nil {
+		slog.Debug("failed to record audit entry for investigation", "error", err)
+	}
+}
+
+// correlateDeploy checks for recent deploys when the session's primary service is set.
+func (st *SessionTracker) correlateDeploy(ctx context.Context) {
+	if st.trendStore == nil {
+		return
+	}
+
+	st.mu.RLock()
+	sess := st.session
+	st.mu.RUnlock()
+	if sess == nil || sess.PrimaryService == "" || sess.CorrelatedDeploy != "" {
+		return
+	}
+
+	markers, err := st.trendStore.ListDeployMarkers(ctx, sess.PrimaryService, sess.StartedAt.Add(-30*time.Minute))
+	if err != nil || len(markers) == 0 {
+		return
+	}
+
+	// Take the most recent deploy
+	latest := markers[0]
+	for _, m := range markers[1:] {
+		if m.FirstSeenAt.After(latest.FirstSeenAt) {
+			latest = m
+		}
+	}
+
+	deploy := latest.CommitHash
+	st.UpdateSession(store.UpdateInvestigationSessionParams{
+		CorrelatedDeploy: &deploy,
+	})
 }
