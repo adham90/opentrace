@@ -10,6 +10,8 @@ Investigation Memory connects to **every major subsystem** in OpenTrace — erro
 
 **Effort**: Large | **Impact**: Very High
 
+**Vision**: OpenTrace evolves from a monitoring tool into a **production intelligence layer for AI coding agents** — bridging the gap between development and production so that every AI agent writes safer, better-informed code.
+
 ---
 
 ## Goals
@@ -2477,6 +2479,1143 @@ func (ci *ContextInjector) filterByAccess(ctx context.Context, sessions []Invest
 
 ---
 
+## Part 2: AI Coding Agent Assistant
+
+Investigation Memory (Part 1) makes OpenTrace smart about debugging. This section extends OpenTrace into a **production intelligence layer for AI coding agents** — bridging the gap between development and production.
+
+### The Problem
+
+AI coding agents and production monitoring live in separate worlds:
+
+```
+WHAT THE AI AGENT KNOWS           WHAT OPENTRACE KNOWS
+─────────────────────────         ────────────────────────
+The code in the repo              Logs and errors
+The current file being edited     Database performance
+Git history                       Health checks
+What the user asked               Traffic patterns
+Test results                      Watchers and alerts
+                                  Investigation history
+
+              ← NO CONNECTION →
+```
+
+When Claude Code edits `orders_controller.rb`, it has no idea this file caused 3 production incidents last month. When OpenTrace shows a stack trace pointing to `payment_service.rb:47`, it has no idea what that code does or what recently changed.
+
+**Bridging this gap turns OpenTrace from a monitoring tool into an AI coding agent's production memory.**
+
+---
+
+### New Capability 1: Code Entity Registry
+
+Connect source code files, functions, classes, and endpoints to their production history. Populated automatically by parsing stack traces from error groups, endpoint paths from request summaries, and SQL from query stats.
+
+#### Data Model
+
+```sql
+CREATE TABLE IF NOT EXISTS code_entities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL
+        CHECK(entity_type IN ('file', 'function', 'class', 'endpoint', 'query')),
+    entity_path TEXT NOT NULL,             -- "app/controllers/orders_controller.rb"
+    entity_name TEXT NOT NULL DEFAULT '',   -- "OrdersController#index"
+    service TEXT NOT NULL DEFAULT '',
+
+    -- Production stats (rolled up from investigations, errors, request summaries)
+    error_count_30d INTEGER NOT NULL DEFAULT 0,
+    investigation_count INTEGER NOT NULL DEFAULT 0,
+    last_incident_at TEXT DEFAULT NULL,
+    last_incident_summary TEXT NOT NULL DEFAULT '',
+    last_investigation_session_id TEXT DEFAULT NULL,
+    avg_response_ms REAL DEFAULT NULL,
+    p95_response_ms REAL DEFAULT NULL,
+    has_n_plus_one INTEGER NOT NULL DEFAULT 0,
+
+    -- Risk score
+    risk_score REAL NOT NULL DEFAULT 0.0,      -- 0.0–1.0
+    risk_factors TEXT NOT NULL DEFAULT '[]',    -- JSON: ["3 incidents in 30 days", "N+1 query"]
+
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE UNIQUE INDEX idx_code_entities_lookup ON code_entities(entity_type, entity_path, entity_name);
+CREATE INDEX idx_code_entities_service ON code_entities(service);
+CREATE INDEX idx_code_entities_risk ON code_entities(risk_score DESC);
+```
+
+#### How It Gets Populated
+
+No manual input needed. OpenTrace builds the registry automatically from data it already has:
+
+```go
+// 1. Parse stack traces from error groups → extract file paths, function names
+func (r *CodeEntityPopulator) FromErrorGroup(eg *ErrorGroup) {
+    for _, frame := range parseStackTrace(eg.Backtrace) {
+        r.UpsertEntity(ctx, CodeEntity{
+            EntityType: "file",
+            EntityPath: frame.FilePath,     // "app/controllers/orders_controller.rb"
+            EntityName: frame.FunctionName, // "OrdersController#index"
+            Service:    eg.Service,
+        })
+        r.IncrementErrorCount(ctx, frame.FilePath, frame.FunctionName)
+    }
+}
+
+// 2. Parse endpoint paths from request summaries → map to controllers
+func (r *CodeEntityPopulator) FromRequestSummary(rs *RequestSummary) {
+    r.UpsertEntity(ctx, CodeEntity{
+        EntityType:    "endpoint",
+        EntityPath:    rs.Path,           // "/api/orders"
+        EntityName:    rs.Controller,     // "OrdersController#index"
+        Service:       rs.Service,
+        AvgResponseMs: &rs.DurationMs,
+        HasNPlusOne:   rs.DuplicateQueries > 0,
+    })
+}
+
+// 3. Link investigation sessions to code entities via errors investigated
+func (r *CodeEntityPopulator) FromSession(session *InvestigationSession) {
+    for _, fp := range session.InvestigatedErrorFingerprints {
+        eg, _ := r.errorGroupStore.GetByFingerprint(ctx, fp)
+        if eg != nil {
+            for _, frame := range parseStackTrace(eg.Backtrace) {
+                r.LinkInvestigation(ctx, frame.FilePath, session.ID)
+            }
+        }
+    }
+}
+```
+
+#### Risk Score Computation
+
+```go
+func computeRiskScore(entity *CodeEntity) float64 {
+    score := 0.0
+    factors := []string{}
+
+    // Error frequency (0–0.4)
+    if entity.ErrorCount30d > 10 {
+        score += 0.4
+        factors = append(factors, fmt.Sprintf("%d errors in 30 days", entity.ErrorCount30d))
+    } else if entity.ErrorCount30d > 3 {
+        score += 0.2
+        factors = append(factors, fmt.Sprintf("%d errors in 30 days", entity.ErrorCount30d))
+    }
+
+    // Investigation frequency (0–0.3)
+    if entity.InvestigationCount >= 3 {
+        score += 0.3
+        factors = append(factors, fmt.Sprintf("Investigated %d times", entity.InvestigationCount))
+    } else if entity.InvestigationCount >= 1 {
+        score += 0.15
+    }
+
+    // Performance issues (0–0.2)
+    if entity.HasNPlusOne {
+        score += 0.1
+        factors = append(factors, "Has N+1 query pattern")
+    }
+    if entity.P95ResponseMs != nil && *entity.P95ResponseMs > 1000 {
+        score += 0.1
+        factors = append(factors, fmt.Sprintf("P95 response: %dms", int(*entity.P95ResponseMs)))
+    }
+
+    // Recency (0–0.1)
+    if entity.LastIncidentAt != nil && time.Since(*entity.LastIncidentAt) < 7*24*time.Hour {
+        score += 0.1
+        factors = append(factors, "Incident in the last 7 days")
+    }
+
+    entity.RiskScore = min(score, 1.0)
+    entity.RiskFactors = factors
+    return entity.RiskScore
+}
+```
+
+#### MCP Tools
+
+```go
+// code_context — Get production history for a file or function
+mcp.NewTool("code_context",
+    mcp.WithDescription(
+        "Get production context for a source code file or function. "+
+        "Returns error history, performance data, investigation history, "+
+        "risk score, and relevant notes. Use this when editing or reviewing code "+
+        "to understand its production behavior.",
+    ),
+    mcp.WithString("file", mcp.Required(),
+        mcp.Description("File path (e.g., 'app/controllers/orders_controller.rb')")),
+    mcp.WithString("function",
+        mcp.Description("Function or method name (e.g., 'OrdersController#index')")),
+)
+
+// code_risk — Risk assessment for one or more files
+mcp.NewTool("code_risk",
+    mcp.WithDescription(
+        "Get risk scores for source code files based on production history. "+
+        "Use this before making changes to understand which files are fragile.",
+    ),
+    mcp.WithString("files", mcp.Required(),
+        mcp.Description("Comma-separated file paths to assess")),
+)
+
+// whats_fragile — Top riskiest code paths in a service
+mcp.NewTool("whats_fragile",
+    mcp.WithDescription(
+        "Find the riskiest code paths in a service based on production data. "+
+        "Returns files/functions ranked by error frequency, investigation count, "+
+        "and performance issues.",
+    ),
+    mcp.WithString("service",
+        mcp.Description("Service name to analyze")),
+    mcp.WithNumber("limit",
+        mcp.Description("Max results (default 10)")),
+)
+```
+
+#### What Claude Code Sees
+
+When editing `orders_controller.rb`:
+
+```json
+{
+  "code_context": {
+    "file": "app/controllers/orders_controller.rb",
+    "risk_score": 0.72,
+    "risk_factors": [
+      "3 production incidents in the last 30 days",
+      "N+1 query on OrdersController#index (orders.includes missing)",
+      "Investigated twice for timeout errors"
+    ],
+    "recent_incidents": [
+      {
+        "date": "2026-02-25",
+        "session_id": "sess_001",
+        "summary": "Connection pool exhaustion triggered by batch import hitting OrdersController#index",
+        "root_cause": "Missing includes(:line_items) causes 47 queries per request under load",
+        "fix_applied": "Added includes(:line_items)",
+        "fix_held": true
+      }
+    ],
+    "performance": {
+      "avg_response_ms": 340,
+      "p95_response_ms": 1200,
+      "sql_count_avg": 23
+    },
+    "relevant_notes": [
+      { "content": "N+1 query pattern — add .includes(:line_items) when loading orders with items" }
+    ],
+    "suggested_actions": [
+      "Check that includes(:line_items) is present in any new queries loading orders",
+      "Consider adding a watcher for this endpoint's SQL count"
+    ]
+  }
+}
+```
+
+---
+
+### New Capability 2: Git & Deploy Intelligence
+
+Track deployments with full context — which files changed, who authored them, and what production impact resulted.
+
+#### Data Model
+
+```sql
+CREATE TABLE IF NOT EXISTS deploys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    commit_hash TEXT NOT NULL,
+    branch TEXT NOT NULL DEFAULT '',
+    author TEXT NOT NULL DEFAULT '',
+    message TEXT NOT NULL DEFAULT '',
+    files_changed TEXT NOT NULL DEFAULT '[]',     -- JSON array of file paths
+    service TEXT NOT NULL DEFAULT '',
+    environment TEXT NOT NULL DEFAULT 'production',
+
+    -- Impact tracking (filled in asynchronously after deploy)
+    error_rate_before REAL DEFAULT NULL,
+    error_rate_after REAL DEFAULT NULL,
+    error_rate_delta REAL DEFAULT NULL,
+    response_time_before_ms REAL DEFAULT NULL,
+    response_time_after_ms REAL DEFAULT NULL,
+    response_time_delta_ms REAL DEFAULT NULL,
+    caused_incident INTEGER NOT NULL DEFAULT 0,
+    incident_session_id TEXT DEFAULT NULL,
+
+    deployed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_deploys_service ON deploys(service, deployed_at DESC);
+CREATE INDEX idx_deploys_commit ON deploys(commit_hash);
+CREATE INDEX idx_deploys_impact ON deploys(caused_incident, deployed_at DESC);
+```
+
+#### Webhook Endpoint
+
+```go
+// POST /api/events/deploy — called by CI/CD pipeline
+type DeployEvent struct {
+    CommitHash   string   `json:"commit_hash"`
+    Branch       string   `json:"branch"`
+    Author       string   `json:"author"`
+    Message      string   `json:"message"`
+    FilesChanged []string `json:"files_changed"`
+    Service      string   `json:"service"`
+    Environment  string   `json:"environment"`
+}
+```
+
+#### Impact Tracking (Background Job)
+
+```go
+// Run 15 minutes after each deploy to measure impact
+func (d *DeployTracker) MeasureImpact(ctx context.Context, deploy *Deploy) {
+    // Compare metrics from 15 min before deploy to 15 min after
+    before := d.getMetrics(ctx, deploy.Service, deploy.DeployedAt.Add(-15*time.Minute), deploy.DeployedAt)
+    after := d.getMetrics(ctx, deploy.Service, deploy.DeployedAt, deploy.DeployedAt.Add(15*time.Minute))
+
+    deploy.ErrorRateBefore = before.ErrorRate
+    deploy.ErrorRateAfter = after.ErrorRate
+    deploy.ErrorRateDelta = after.ErrorRate - before.ErrorRate
+    deploy.ResponseTimeBeforeMs = before.AvgResponseMs
+    deploy.ResponseTimeAfterMs = after.AvgResponseMs
+    deploy.ResponseTimeDeltaMs = after.AvgResponseMs - before.AvgResponseMs
+
+    // Check if an investigation session started within 30 min of deploy
+    session, _ := d.sessionStore.FindByTimeRange(ctx, FindByTimeRangeParams{
+        Service: deploy.Service,
+        After:   deploy.DeployedAt,
+        Before:  deploy.DeployedAt.Add(30 * time.Minute),
+        Intent:  "investigation",
+    })
+    if session != nil {
+        deploy.CausedIncident = true
+        deploy.IncidentSessionID = &session.ID
+    }
+
+    // Update risk scores for all changed files
+    for _, file := range deploy.FilesChanged {
+        if deploy.CausedIncident {
+            d.codeEntityStore.IncrementIncidentCount(ctx, file)
+        }
+    }
+}
+```
+
+#### MCP Tools
+
+```go
+// deploy_history — Recent deploys with impact
+mcp.NewTool("deploy_history",
+    mcp.WithDescription(
+        "View recent deployments with their production impact scores. "+
+        "Shows error rate and response time changes caused by each deploy.",
+    ),
+    mcp.WithString("service", mcp.Description("Filter by service")),
+    mcp.WithNumber("limit", mcp.Description("Max results (default 10)")),
+)
+
+// deploy_risk — Pre-deployment risk assessment
+mcp.NewTool("deploy_risk",
+    mcp.WithDescription(
+        "Assess the risk of deploying changes to specific files. "+
+        "Returns historical impact data for each file and an overall risk score. "+
+        "Use this before deploying to understand potential production impact.",
+    ),
+    mcp.WithString("files", mcp.Required(),
+        mcp.Description("Comma-separated file paths that will be deployed")),
+    mcp.WithString("service",
+        mcp.Description("Target service")),
+)
+
+// record_deploy — Record a deployment event
+mcp.NewTool("record_deploy",
+    mcp.WithDescription("Record a deployment for impact tracking."),
+    mcp.WithString("commit", mcp.Required(), mcp.Description("Commit hash")),
+    mcp.WithString("files", mcp.Description("Comma-separated changed files")),
+    mcp.WithString("service", mcp.Description("Service name")),
+    mcp.WithString("message", mcp.Description("Commit message")),
+)
+```
+
+#### What Claude Code Sees (Pre-Deploy Check)
+
+```json
+{
+  "deploy_risk_assessment": {
+    "overall_risk": "high",
+    "reason": "2 of 3 changed files have recent production incidents",
+    "files": [
+      {
+        "file": "app/controllers/orders_controller.rb",
+        "risk": "high",
+        "history": {
+          "deploys_last_30d": 5,
+          "incidents_caused": 2,
+          "last_incident": "2026-02-25: Connection pool exhaustion"
+        }
+      },
+      {
+        "file": "app/services/payment_service.rb",
+        "risk": "medium",
+        "history": {
+          "deploys_last_30d": 3,
+          "incidents_caused": 1,
+          "last_incident": "2026-02-10: Payment timeout"
+        }
+      },
+      {
+        "file": "app/models/user.rb",
+        "risk": "low",
+        "history": {
+          "deploys_last_30d": 8,
+          "incidents_caused": 0
+        }
+      }
+    ],
+    "recommendations": [
+      "Deploy during low-traffic hours (after 10 PM based on your traffic heatmap)",
+      "Create a watcher for error_rate on payments service before deploying",
+      "Monitor OrdersController#index response time for 15 minutes after deploy"
+    ]
+  }
+}
+```
+
+---
+
+### New Capability 3: Development Session Tracking
+
+Extend session tracking beyond investigations. When an AI agent is writing code, refactoring, or reviewing, track that too and link it to production impact.
+
+#### Extended Session Types
+
+```
+Session intents (updated):
+  investigation  → debugging a production issue (existing)
+  development    → writing/modifying code (NEW)
+  review         → reviewing a PR or code change (NEW)
+  deployment     → deploying and monitoring a release (NEW)
+  query          → simple data retrieval (existing)
+  configuration  → setting up monitoring (existing)
+  exploration    → browsing/exploring (existing)
+```
+
+#### Development Session Detection
+
+```go
+func classifyDevelopmentIntent(context string, toolName string, args map[string]any) (string, string) {
+    lower := strings.ToLower(context)
+
+    // Development keywords
+    devKeywords := []string{
+        "adding", "implementing", "building", "creating feature",
+        "refactoring", "modifying", "updating code", "writing",
+        "fixing", "changing", "optimizing",
+    }
+    for _, kw := range devKeywords {
+        if strings.Contains(lower, kw) {
+            return "development", context
+        }
+    }
+
+    // Review keywords
+    reviewKeywords := []string{
+        "reviewing", "review pr", "checking pr", "code review",
+        "looking at changes", "pr #",
+    }
+    for _, kw := range reviewKeywords {
+        if strings.Contains(lower, kw) {
+            return "review", context
+        }
+    }
+
+    // Deploy keywords
+    deployKeywords := []string{
+        "deploying", "deploy", "releasing", "shipping",
+        "going to production", "pushing to prod",
+    }
+    for _, kw := range deployKeywords {
+        if strings.Contains(lower, kw) {
+            return "deployment", context
+        }
+    }
+
+    return "", "" // not a development session
+}
+```
+
+#### Linking Development to Production
+
+```
+Development session (10:00 AM):
+  Claude Code modifies orders_controller.rb
+  → OpenTrace records: files_modified: ["orders_controller.rb"]
+
+Deploy (11:00 AM):
+  CI/CD sends deploy event → files: ["orders_controller.rb"]
+  → OpenTrace links: deploy includes changes from dev session sess_100
+
+Investigation (1:00 PM):
+  Error rate spikes → new investigation starts
+  → OpenTrace connects ALL the dots:
+    deploy.files_changed includes "orders_controller.rb"
+    dev session sess_100 modified this file 3 hours ago
+    → investigation_context includes:
+      "orders_controller.rb was modified 3 hours ago (session sess_100)
+       and deployed at 11:00 AM. Error spike started at 12:45 PM."
+```
+
+#### What Development Sessions Track
+
+```sql
+-- Additional columns on investigation_sessions for development sessions
+ALTER TABLE investigation_sessions ADD COLUMN files_modified TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE investigation_sessions ADD COLUMN files_read TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE investigation_sessions ADD COLUMN linked_deploy_id INTEGER DEFAULT NULL;
+```
+
+---
+
+### New Capability 4: Proactive Context Delivery
+
+Don't wait for the agent to call a tool. Push relevant production context automatically via MCP notifications and resources.
+
+#### MCP Notifications (Server → Client)
+
+```go
+// When something production-relevant happens while an agent is connected
+func (s *MCPServer) checkForProactiveAlerts(ctx context.Context) {
+    if s.session == nil || s.session.Intent == "" {
+        return
+    }
+
+    // 1. Did any watcher fire for the service the agent is working on?
+    if s.session.PrimaryService != "" {
+        alerts, _ := s.watchStore.ListAlerts(ctx, store.ListAlertParams{
+            Service:  s.session.PrimaryService,
+            Status:   "active",
+            After:    s.session.StartedAt,
+        })
+        for _, alert := range alerts {
+            s.sendNotification(ctx, "production_alert", map[string]any{
+                "message": fmt.Sprintf("Alert: %s for service %s", alert.Summary, s.session.PrimaryService),
+                "alert_id": alert.ID,
+                "suggested_tool": "triage_alerts",
+            })
+        }
+    }
+
+    // 2. Did error rate change for files the agent recently modified?
+    for _, file := range s.session.FilesModified {
+        entity, _ := s.codeEntityStore.GetByPath(ctx, file)
+        if entity != nil && entity.ErrorCount30d > entity.PreviousErrorCount30d {
+            s.sendNotification(ctx, "code_risk_change", map[string]any{
+                "file": file,
+                "message": fmt.Sprintf("Error count for %s increased since your last edit", file),
+                "new_errors": entity.ErrorCount30d - entity.PreviousErrorCount30d,
+            })
+        }
+    }
+
+    // 3. Did a teammate's investigation find something relevant?
+    if s.session.PrimaryService != "" {
+        parallel := s.findParallelInvestigations(ctx, s.session)
+        for _, p := range parallel {
+            if p.HasNewFindings {
+                s.sendNotification(ctx, "team_finding", map[string]any{
+                    "message": fmt.Sprintf("A teammate found something relevant: %s", p.LatestFinding),
+                    "session_id": p.SessionID,
+                })
+            }
+        }
+    }
+}
+
+func (s *MCPServer) sendNotification(ctx context.Context, notificationType string, data map[string]any) {
+    s.mcpServer.SendNotification(ctx, mcp.Notification{
+        Method: "notifications/message",
+        Params: map[string]any{
+            "level":   "info",
+            "logger":  "opentrace",
+            "type":    notificationType,
+            "data":    data,
+        },
+    })
+}
+```
+
+#### MCP Resources (Subscribable Production State)
+
+```go
+// Register resources that agents can subscribe to for real-time updates
+func (s *MCPServer) registerResources() {
+    // Per-service production status
+    s.mcpServer.AddResource(mcp.Resource{
+        URI:         "opentrace://services/{service}/status",
+        Name:        "Service Production Status",
+        Description: "Real-time production metrics for a service. Updates on significant changes.",
+        MimeType:    "application/json",
+    })
+
+    // Code risk dashboard
+    s.mcpServer.AddResource(mcp.Resource{
+        URI:         "opentrace://code/risk-summary",
+        Name:        "Code Risk Summary",
+        Description: "Top risky code paths across all services. Updates when risk scores change.",
+        MimeType:    "application/json",
+    })
+
+    // Active investigations feed
+    s.mcpServer.AddResource(mcp.Resource{
+        URI:         "opentrace://investigations/active",
+        Name:        "Active Investigations",
+        Description: "Currently active investigation sessions and their findings.",
+        MimeType:    "application/json",
+    })
+}
+```
+
+---
+
+### New Capability 5: Test-Production Correlation
+
+Connect test coverage to production error paths. Help AI agents write the most impactful tests.
+
+#### Data Model
+
+```sql
+CREATE TABLE IF NOT EXISTS test_production_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    test_file TEXT NOT NULL,                    -- "spec/controllers/orders_controller_spec.rb"
+    production_file TEXT NOT NULL,              -- "app/controllers/orders_controller.rb"
+    production_endpoint TEXT DEFAULT NULL,      -- "/api/orders"
+    production_function TEXT DEFAULT NULL,      -- "OrdersController#index"
+
+    -- Production impact of the code path this test covers
+    error_fingerprints TEXT NOT NULL DEFAULT '[]',  -- errors in this code path
+    error_count_30d INTEGER NOT NULL DEFAULT 0,
+    investigation_count INTEGER NOT NULL DEFAULT 0,
+
+    -- Coverage assessment
+    has_error_case_coverage INTEGER NOT NULL DEFAULT 0, -- does the test cover error scenarios?
+    has_performance_coverage INTEGER NOT NULL DEFAULT 0, -- does the test assert on performance?
+
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_test_prod_links_prod ON test_production_links(production_file);
+
+-- Track production error paths that have NO test coverage
+CREATE TABLE IF NOT EXISTS uncovered_error_paths (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_path TEXT NOT NULL,
+    function_name TEXT NOT NULL DEFAULT '',
+    error_fingerprint TEXT NOT NULL,
+    error_count_30d INTEGER NOT NULL DEFAULT 0,
+    investigation_count INTEGER NOT NULL DEFAULT 0,
+    impact_score REAL NOT NULL DEFAULT 0.0,     -- from ErrorImpact (users affected)
+    suggested_test_description TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_uncovered_impact ON uncovered_error_paths(impact_score DESC);
+```
+
+#### MCP Tools
+
+```go
+// test_gaps — Find production error paths with no test coverage
+mcp.NewTool("test_gaps",
+    mcp.WithDescription(
+        "Find production error paths that have no test coverage. "+
+        "Returns code paths ranked by production impact (error frequency, "+
+        "user impact, investigation count). Use this to prioritize which tests to write.",
+    ),
+    mcp.WithString("service", mcp.Description("Filter by service")),
+    mcp.WithString("file", mcp.Description("Filter by source file")),
+    mcp.WithNumber("limit", mcp.Description("Max results (default 10)")),
+)
+
+// test_priority — Highest-value tests to write based on production data
+mcp.NewTool("test_priority",
+    mcp.WithDescription(
+        "Get a prioritized list of tests to write based on production impact. "+
+        "Combines error frequency, user impact, and investigation history "+
+        "to identify the most valuable test coverage gaps.",
+    ),
+    mcp.WithString("service", mcp.Description("Filter by service")),
+    mcp.WithNumber("limit", mcp.Description("Max results (default 10)")),
+)
+```
+
+#### What Claude Code Sees
+
+```json
+{
+  "test_gaps": {
+    "uncovered_error_paths": [
+      {
+        "file": "app/services/payment_service.rb",
+        "function": "PaymentService#charge",
+        "error": "Net::ReadTimeout when payment gateway is slow",
+        "production_impact": {
+          "error_count_30d": 47,
+          "users_affected": 2400,
+          "investigations": 3
+        },
+        "suggested_test": "Test PaymentService#charge with a slow/timing out gateway connection. Verify it raises a user-friendly error and doesn't leave the payment in a pending state."
+      },
+      {
+        "file": "app/controllers/orders_controller.rb",
+        "function": "OrdersController#create",
+        "error": "ActiveRecord::RecordNotUnique on duplicate order submission",
+        "production_impact": {
+          "error_count_30d": 12,
+          "users_affected": 89,
+          "investigations": 1
+        },
+        "suggested_test": "Test OrdersController#create with a duplicate idempotency key. Verify it returns the existing order instead of raising."
+      }
+    ]
+  }
+}
+```
+
+---
+
+### New Capability 6: Webhook/Event Intake
+
+Accept events from the entire development ecosystem so OpenTrace has the full picture.
+
+#### Endpoints
+
+```go
+// All webhook endpoints validate via API key or bearer token
+
+POST /api/events/deploy    // CI/CD pipeline sends deploy info
+POST /api/events/pr        // GitHub webhook for PR events
+POST /api/events/test      // Test runner sends results
+POST /api/events/alert     // External alerting (PagerDuty, OpsGenie)
+POST /api/events/commit    // Git hook sends commit info
+POST /api/events/custom    // Generic event for custom integrations
+```
+
+#### Event Models
+
+```go
+type PREvent struct {
+    Action       string   `json:"action"`       // "opened", "merged", "closed"
+    PRNumber     int      `json:"pr_number"`
+    Title        string   `json:"title"`
+    Author       string   `json:"author"`
+    Branch       string   `json:"branch"`
+    BaseBranch   string   `json:"base_branch"`
+    FilesChanged []string `json:"files_changed"`
+    URL          string   `json:"url"`
+}
+
+type TestEvent struct {
+    TestFile     string `json:"test_file"`
+    TestName     string `json:"test_name"`
+    Status       string `json:"status"`       // "passed", "failed", "error"
+    DurationMs   int    `json:"duration_ms"`
+    ErrorMessage string `json:"error_message,omitempty"`
+    CommitHash   string `json:"commit_hash"`
+    Branch       string `json:"branch"`
+}
+
+type ExternalAlertEvent struct {
+    Source       string `json:"source"`        // "pagerduty", "opsgenie", "custom"
+    AlertID      string `json:"alert_id"`
+    Summary      string `json:"summary"`
+    Severity     string `json:"severity"`
+    Service      string `json:"service"`
+    URL          string `json:"url,omitempty"`
+}
+```
+
+#### How Events Connect
+
+```
+commit → PR opened → CI tests run → PR merged → deploy → metrics change → alert → investigation
+   │         │            │             │           │            │           │          │
+   └─────────┴────────────┴─────────────┴───────────┴────────────┴───────────┴──────────┘
+                              All linked in OpenTrace
+```
+
+When an investigation starts, OpenTrace can trace the full chain: "This error started after deploy `abc123`, which was PR #456, authored by developer A, which changed `orders_controller.rb`. CI tests passed but there was no test covering the error case."
+
+---
+
+### New Capability 7: The `context` Meta-Tool
+
+Instead of requiring agents to know which of 80+ tools to call, provide one tool that returns everything relevant to the current task.
+
+```go
+mcp.NewTool("context",
+    mcp.WithDescription(
+        "Get all relevant OpenTrace context for your current work. "+
+        "Describe what you're doing and OpenTrace returns production data, "+
+        "investigation history, risk scores, and suggestions tailored to your task. "+
+        "This is the recommended starting tool for any interaction with OpenTrace.",
+    ),
+    mcp.WithString("task", mcp.Required(),
+        mcp.Description(
+            "What you're currently doing. Examples: "+
+            "'editing app/controllers/orders_controller.rb to add pagination', "+
+            "'debugging payment timeout errors', "+
+            "'reviewing PR #123 that changes payment_service.rb', "+
+            "'preparing to deploy payments service', "+
+            "'writing tests for OrdersController'")),
+    mcp.WithString("files",
+        mcp.Description("Comma-separated file paths you're working with")),
+    mcp.WithString("service",
+        mcp.Description("Service name if known")),
+)
+```
+
+#### Context Bundle by Task Type
+
+```go
+func (h *contextHandler) Handle(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+    args := req.GetArguments()
+    task := args["task"].(string)
+    files := parseFilesList(args["files"])
+    service := args["service"]
+
+    taskType := classifyTask(task) // "editing", "debugging", "reviewing", "deploying", "testing"
+
+    bundle := ContextBundle{}
+
+    switch taskType {
+    case "editing":
+        // Code risk, error history, performance, notes, investigation history
+        for _, file := range files {
+            bundle.CodeContext = append(bundle.CodeContext, h.getCodeContext(ctx, file))
+        }
+        bundle.RelevantNotes = h.getNotesForFiles(ctx, files)
+        bundle.RecentInvestigations = h.getInvestigationsForFiles(ctx, files)
+
+    case "debugging":
+        // Full investigation context (same as investigation memory)
+        bundle.InvestigationContext = h.getInvestigationContext(ctx, service, task)
+        bundle.RelevantNotes = h.getNotesForService(ctx, service)
+        bundle.RunbookSuggestion = h.suggestRunbook(ctx, task)
+
+    case "reviewing":
+        // Risk assessment for changed files, production history
+        bundle.DeployRisk = h.assessDeployRisk(ctx, files)
+        for _, file := range files {
+            bundle.CodeContext = append(bundle.CodeContext, h.getCodeContext(ctx, file))
+        }
+        bundle.TestGaps = h.getTestGaps(ctx, files)
+
+    case "deploying":
+        // Pre-deploy risk check, recommended watchers, safe deploy windows
+        bundle.DeployRisk = h.assessDeployRisk(ctx, files)
+        bundle.RecommendedWatchers = h.suggestWatchers(ctx, files, service)
+        bundle.SafeDeployWindow = h.getSafeDeployWindow(ctx, service)
+
+    case "testing":
+        // Production error paths, test gaps, priority tests to write
+        bundle.TestGaps = h.getTestGaps(ctx, files)
+        bundle.TestPriority = h.getTestPriority(ctx, service)
+    }
+
+    data, _ := json.Marshal(bundle)
+    return mcp.NewToolResultText(string(data)), nil
+}
+```
+
+#### What Claude Code Sees (editing a file)
+
+```json
+{
+  "task_type": "editing",
+  "context": {
+    "code_risk": [
+      {
+        "file": "app/controllers/orders_controller.rb",
+        "risk_score": 0.72,
+        "risk_factors": ["3 incidents in 30 days", "N+1 query pattern"],
+        "last_incident": "Connection pool exhaustion, 3 days ago",
+        "watch_out_for": "Ensure .includes(:line_items) is present in any new queries"
+      }
+    ],
+    "relevant_notes": [
+      "N+1 query pattern on OrdersController#index — always use includes(:line_items)",
+      "Batch import job can exhaust connection pool — avoid long-running transactions"
+    ],
+    "recent_investigations": [
+      {
+        "date": "2026-02-25",
+        "summary": "Connection pool exhaustion from batch import",
+        "related_to_this_file": true
+      }
+    ],
+    "performance_baseline": {
+      "avg_response_ms": 340,
+      "sql_count": 23,
+      "note": "This endpoint is the #3 most trafficked. Changes here affect 15% of total traffic."
+    }
+  },
+  "suggested_tools": [
+    { "tool": "code_context", "why": "Get detailed production history for specific functions" },
+    { "tool": "deploy_risk", "why": "Assess risk before deploying your changes" }
+  ]
+}
+```
+
+---
+
+### New Capability 8: Cross-Agent Knowledge Sharing
+
+Any MCP client (Claude Code, Cursor, Copilot, Continue) benefits from any other client's findings. OpenTrace is the shared brain.
+
+#### How It Works
+
+Already built into Investigation Memory — the auth token identifies the user, the session tracks what they did, and context injection shares findings across users (access-scoped). This section makes it explicit for **different AI agent types**:
+
+```
+Claude Code (Developer A):
+  → Investigates payment timeout
+  → Finds root cause: batch import job
+  → OpenTrace stores investigation + summary + root cause
+
+Cursor (Developer B, same codebase):
+  → Opens payments_controller.rb
+  → Calls: context(task: "editing payments_controller.rb")
+  → OpenTrace serves Developer A's findings:
+    "This file was investigated 2 days ago.
+     Root cause: batch import job exhausts connection pool.
+     Suggestion: ensure transaction timeouts are set."
+
+Developer B's AI agent writes safer code without ever investigating.
+```
+
+The only requirement: both agents authenticate with MCP tokens from the same OpenTrace instance and the users have overlapping data source access.
+
+---
+
+### Agent Assistant Example Workflows
+
+#### Workflow 8: Code-Aware Investigation
+
+```
+Developer: "Orders page is slow"
+Claude Code connects to OpenTrace MCP
+
+── Step 1: context ─────────────────────────────────────────
+  Claude Code calls: context(task: "debugging slow orders page",
+                             service: "web")
+
+  OpenTrace returns:
+  {
+    "task_type": "debugging",
+    "context": {
+      "code_risk": [{
+        "file": "app/controllers/orders_controller.rb",
+        "risk_score": 0.72,
+        "risk_factors": ["N+1 query", "P95 1200ms"]
+      }],
+      "investigation_history": [{
+        "date": "2026-02-20",
+        "summary": "N+1 query in OrdersController#index",
+        "fix": "Added includes(:line_items)",
+        "fix_held": false
+      }],
+      "query_memory": {
+        "fingerprint": "SELECT * FROM orders...",
+        "last_root_cause": "Missing includes causes 47 queries per request"
+      },
+      "runbook_suggestion": {
+        "name": "slow_database",
+        "resolution_rate": 0.82
+      }
+    }
+  }
+
+  Claude Code immediately knows:
+    • This is a known N+1 query issue
+    • It was "fixed" before but the fix didn't hold
+    • The specific query and root cause are already documented
+    • Goes directly to checking if includes(:line_items) is present
+    • Skips: diagnose, log_search, db_query_stats, explain_query
+    • 1 step instead of 6
+```
+
+#### Workflow 9: Pre-Deploy Safety Check
+
+```
+Developer: "Ship it"
+Claude Code is about to deploy changes to payments service
+
+── Step 1: deploy_risk ─────────────────────────────────────
+  Claude Code calls: deploy_risk(files: "app/controllers/orders_controller.rb,app/services/payment_service.rb",
+                                  service: "payments")
+
+  OpenTrace returns:
+  {
+    "deploy_risk_assessment": {
+      "overall_risk": "high",
+      "files": [
+        { "file": "orders_controller.rb", "risk": "high", "incidents_caused": 2 },
+        { "file": "payment_service.rb", "risk": "medium", "incidents_caused": 1 }
+      ],
+      "recommendations": [
+        "Deploy during low-traffic hours (after 10 PM)",
+        "Create error_rate watcher for payments before deploying"
+      ],
+      "test_gaps": [
+        "PaymentService#charge timeout handling has no test (3 incidents)"
+      ]
+    }
+  }
+
+  Claude Code:
+    → Warns the developer about the risk
+    → Suggests writing a test for the timeout handling first
+    → Creates a watcher before deploying
+    → Recommends a deploy window
+```
+
+#### Workflow 10: Test Writing Guided by Production
+
+```
+Developer: "Write tests for the payments service"
+Claude Code calls: test_priority(service: "payments")
+
+OpenTrace returns:
+{
+  "test_priority": [
+    {
+      "rank": 1,
+      "file": "app/services/payment_service.rb",
+      "function": "PaymentService#charge",
+      "error": "Net::ReadTimeout",
+      "impact": { "errors_30d": 47, "users_affected": 2400, "investigations": 3 },
+      "suggested_test": "Test charge with slow gateway. Verify timeout handling and payment state consistency."
+    },
+    {
+      "rank": 2,
+      "file": "app/controllers/orders_controller.rb",
+      "function": "OrdersController#create",
+      "error": "RecordNotUnique on duplicate submission",
+      "impact": { "errors_30d": 12, "users_affected": 89, "investigations": 1 },
+      "suggested_test": "Test create with duplicate idempotency key. Verify existing order returned."
+    }
+  ]
+}
+
+Claude Code writes the highest-impact tests first,
+guided by real production error data.
+```
+
+#### Workflow 11: Proactive Alert During Development
+
+```
+Developer is editing payment_service.rb
+Claude Code is connected to OpenTrace MCP
+
+── Background: watcher fires ──────────────────────────────
+  Watcher "payment-error-rate" triggers: error_rate > 5
+
+  OpenTrace detects:
+    • Agent is connected and working on payments service
+    • Alert is relevant to current work
+
+  OpenTrace sends MCP notification:
+  {
+    "method": "notifications/message",
+    "params": {
+      "level": "warning",
+      "logger": "opentrace",
+      "data": {
+        "type": "production_alert",
+        "message": "Payment error rate just spiked to 8%. You're currently editing payment_service.rb — this may be related to a recent deploy.",
+        "alert_id": "alert_789",
+        "suggested_tool": "triage_alerts"
+      }
+    }
+  }
+
+  Claude Code receives notification and alerts the developer:
+    "OpenTrace detected a production alert for the payments service
+     you're working on. Want me to investigate?"
+```
+
+---
+
+### Agent Assistant Store Interfaces
+
+```go
+type CodeEntityStore interface {
+    Upsert(ctx context.Context, entity CodeEntity) error
+    GetByPath(ctx context.Context, filePath string) (*CodeEntity, error)
+    GetByFunction(ctx context.Context, filePath string, functionName string) (*CodeEntity, error)
+    GetByService(ctx context.Context, service string, limit int) ([]CodeEntity, error)
+    GetTopRisk(ctx context.Context, service string, limit int) ([]CodeEntity, error)
+    IncrementErrorCount(ctx context.Context, filePath string) error
+    IncrementIncidentCount(ctx context.Context, filePath string) error
+    LinkInvestigation(ctx context.Context, filePath string, sessionID string) error
+    UpdateRiskScores(ctx context.Context) error  // batch recompute
+}
+
+type DeployStore interface {
+    Create(ctx context.Context, deploy Deploy) (*Deploy, error)
+    GetByCommit(ctx context.Context, commitHash string) (*Deploy, error)
+    List(ctx context.Context, params ListDeployParams) ([]Deploy, error)
+    UpdateImpact(ctx context.Context, deployID int, impact DeployImpact) error
+    GetRiskForFiles(ctx context.Context, files []string) ([]FileDeployRisk, error)
+}
+
+type TestProductionLinkStore interface {
+    Upsert(ctx context.Context, link TestProductionLink) error
+    GetGaps(ctx context.Context, params TestGapParams) ([]UncoveredErrorPath, error)
+    GetPriority(ctx context.Context, service string, limit int) ([]UncoveredErrorPath, error)
+}
+
+type EventStore interface {
+    LogPREvent(ctx context.Context, event PREvent) error
+    LogTestEvent(ctx context.Context, event TestEvent) error
+    LogExternalAlert(ctx context.Context, event ExternalAlertEvent) error
+    LogCustomEvent(ctx context.Context, eventType string, data map[string]any) error
+}
+```
+
+---
+
+### Agent Assistant Web API Endpoints
+
+```
+-- Code Intelligence
+GET  /api/code/entities                    — list code entities with risk scores
+GET  /api/code/entities/{path}            — single entity detail
+GET  /api/code/risk                        — risk assessment for files
+GET  /api/code/fragile                     — top risky code paths
+
+-- Deploy Intelligence
+GET  /api/deploys                          — deploy history with impact
+POST /api/deploys                          — record a deploy
+GET  /api/deploys/{id}/impact             — deploy impact detail
+
+-- Test Intelligence
+GET  /api/tests/gaps                       — uncovered production error paths
+GET  /api/tests/priority                   — highest-value tests to write
+
+-- Events
+POST /api/events/deploy                    — CI/CD deploy webhook
+POST /api/events/pr                        — GitHub PR webhook
+POST /api/events/test                      — test result webhook
+POST /api/events/alert                     — external alert webhook
+POST /api/events/commit                    — git commit webhook
+POST /api/events/custom                    — generic event webhook
+```
+
+---
+
 ## Implementation Order
 
 ### Phase 1: Foundation
@@ -2540,10 +3679,55 @@ func (ci *ContextInjector) filterByAccess(ctx context.Context, sessions []Invest
 44. Access-scoped filtering
 45. Response size capping
 
-### Phase 9: Web + Analytics
-46. Web API endpoints
+### Phase 9: Web + Analytics (Part 1)
+46. Web API endpoints for investigation sessions
 47. Admin UI: investigation dashboard
-48. Retention/pruning jobs
+48. Retention/pruning jobs for Part 1 tables
+
+### Phase 10: Code Entity Registry
+49. Migration: `code_entities` table
+50. `CodeEntityStore` implementation
+51. `CodeEntityPopulator` — auto-populate from error groups, request summaries, investigation sessions
+52. Risk score computation + batch recompute job
+53. `code_context`, `code_risk`, `whats_fragile` MCP tools
+54. Update all mock stores
+
+### Phase 11: Deploy Intelligence + Webhook Intake
+55. Migration: `deploys` table
+56. `DeployStore` implementation
+57. `EventStore` implementation (PR, test, alert, commit, custom events)
+58. Webhook HTTP endpoints (`POST /api/events/{type}`) with API key validation
+59. `DeployTracker` background job — measures impact 15 min after deploy
+60. `deploy_history`, `deploy_risk`, `record_deploy` MCP tools
+61. Link deploys to code entities — increment incident counts on impacted files
+
+### Phase 12: Development Session Tracking
+62. Extended session intents: `development`, `review`, `deployment`
+63. `classifyDevelopmentIntent` — keyword-based classification
+64. `files_modified`, `files_read`, `linked_deploy_id` columns on `investigation_sessions`
+65. Development → deploy → investigation chain linking
+
+### Phase 13: Proactive Context Delivery
+66. MCP notifications infrastructure (`sendNotification` on MCPServer)
+67. Background alert checker — polls for alerts relevant to connected sessions
+68. Code risk change notifications — detects error count increases for modified files
+69. Team finding notifications — detects parallel investigation discoveries
+70. MCP resources: `opentrace://services/{service}/status`, `opentrace://code/risk-summary`, `opentrace://investigations/active`
+
+### Phase 14: Test-Production Correlation
+71. Migration: `test_production_links` and `uncovered_error_paths` tables
+72. `TestProductionLinkStore` implementation
+73. Auto-populate from test events + error groups
+74. `test_gaps`, `test_priority` MCP tools
+75. Suggested test description generation
+
+### Phase 15: Context Meta-Tool + Cross-Agent + Web API
+76. `context` meta-tool implementation
+77. Task type classifier: `editing`, `debugging`, `reviewing`, `deploying`, `testing`
+78. Context bundle assembly — per task type, pulls from relevant subsystems
+79. Cross-agent knowledge sharing verification (already built into auth + sessions)
+80. Web API endpoints for code entities, deploys, tests, events
+81. Admin UI: code risk dashboard, deploy impact view, test coverage gaps
 
 ---
 
@@ -2586,12 +3770,44 @@ func (ci *ContextInjector) filterByAccess(ctx context.Context, sessions []Invest
 - Reconnection and session resume
 - Cross-team knowledge sharing (access-scoped)
 
+### Part 2: Code Entity + Deploy Tests
+
+#### Unit Tests
+- Code entity populator: from error groups (stack trace parsing), request summaries, sessions
+- Risk score computation: all factor weights, edge cases (0 errors, maxed out, recent incident)
+- Deploy impact measurement: error rate delta, response time delta, incident detection
+- Task type classification: editing, debugging, reviewing, deploying, testing keywords
+- Context bundle assembly: correct subsystems queried for each task type
+- Test-production link matching: file path mapping, coverage detection
+- Uncovered error path ranking: impact score calculation
+
+#### Store Tests (SQLite)
+- `code_entities` CRUD, unique index on (type, path, name), risk score ordering
+- `deploys` CRUD, commit lookup, impact update, risk-for-files query
+- `test_production_links` upsert, gap query, priority ordering
+- `uncovered_error_paths` impact score ordering
+- Event store: all event types persisted correctly
+
+#### Integration Tests
+- Full code entity lifecycle: error group created → entity populated → risk computed → served via `code_context`
+- Deploy lifecycle: webhook received → deploy recorded → impact measured → linked to investigation
+- Development session → deploy → investigation chain correctly linked
+- `context` meta-tool returns different bundles for editing vs debugging vs deploying
+- MCP notifications delivered when alert fires during active session
+- MCP resources return correct real-time data
+- Test gaps populated from error groups with no matching test files
+- Cross-agent: session from Claude Code enriches Cursor's `context` call (access-scoped)
+- Webhook authentication: invalid API key rejected, valid key accepted
+
 ### Backward Compatibility Tests
 - All existing tool calls work unchanged when no history exists
 - Suggestion format remains compatible (new fields are additive)
 - Missing `context` parameter doesn't break tools
 - MCP Sampling failure doesn't affect tool execution
 - All subsystem integrations fail gracefully (tool still works if integration errors)
+- New webhook endpoints don't affect existing API routes
+- `context` meta-tool works with empty code entity registry (returns empty sections gracefully)
+- Deploy risk returns "no data" assessment for unknown files (not an error)
 
 ---
 
@@ -2609,6 +3825,16 @@ func (ci *ContextInjector) filterByAccess(ctx context.Context, sessions []Invest
 | Auto-note creation | Track | Notes created per resolved session |
 | Cross-team knowledge transfer | Track | Sessions enriched by other users' findings |
 | Zero latency impact | <5ms overhead | P99 tool response time before/after |
+| **Part 2** | | |
+| Code entity coverage | >80% of error groups mapped | Entities with linked error fingerprints / total error groups |
+| Risk score accuracy | Manual review of top 20 | Risk factors match known fragile code |
+| Deploy impact detection | >90% of incident-causing deploys flagged | Deploys with `caused_incident=true` / deploys followed by investigation within 30 min |
+| `context` tool adoption | >60% of sessions start with `context` | Sessions where first tool is `context` / total sessions |
+| Context bundle relevance | Track | User follows suggestion from context bundle (next tool matches suggested_tools) |
+| Test gap identification | Track | Uncovered error paths that get tests written within 7 days |
+| Proactive notification hit rate | >70% actionable | Notifications that led to a tool call within 5 min / total notifications |
+| Webhook event ingestion | Track | Events per type per day, processing latency |
+| Cross-agent knowledge hits | Track | `context` calls enriched by a different agent's findings |
 
 ---
 
@@ -2626,6 +3852,16 @@ func (ci *ContextInjector) filterByAccess(ctx context.Context, sessions []Invest
 | Session detection wrong on reconnect | Ask Claude Code via tool response, don't guess |
 | Too many subsystem queries per tool call | Lazy loading: only query subsystems relevant to current tool + cached per-session |
 | Subsystem integration failure | Each integration wrapped in error recovery — tool always works even if enrichment fails |
+| **Part 2** | |
+| Stack trace parsing fails for unfamiliar frameworks | Pluggable parsers per language (Ruby, Go, Python, JS). Unknown formats stored raw and skipped for entity mapping |
+| Code entity registry grows unbounded | Prune entities with zero errors and zero investigations older than 90 days. Cap at 50K entities per instance |
+| Deploy impact measurement window misses slow-onset issues | 15-minute window is the default. Add a second check at 1 hour. Incident linking also catches sessions starting up to 30 min after deploy |
+| Webhook endpoint abuse / spam | Rate limiting per API key (100 events/min). Payload size limit (64KB). Event deduplication by idempotency key |
+| MCP notifications not supported by all clients | Graceful degradation — notifications are fire-and-forget. If client doesn't support them, they're silently dropped. Agent still gets context via tool calls |
+| `context` tool returns too much data | Cap response to 4KB. Prioritize by task type relevance. Include `more_available: true` flag when truncated |
+| Risk scores are noisy with little data | Require minimum thresholds: 3 errors before risk > 0.2, 1 investigation before risk > 0.3. Show "insufficient data" for new entities |
+| Test-production linking accuracy (wrong file mapping) | Use exact file path matching first. Convention-based mapping (`app/foo.rb` → `spec/foo_spec.rb`) as fallback. Manual override via MCP tool |
+| Cross-agent data leakage between organizations | Auth token scopes data to the token's user + their accessible data sources. No cross-org queries possible |
 
 ---
 
@@ -2651,3 +3887,17 @@ func (ci *ContextInjector) filterByAccess(ctx context.Context, sessions []Invest
 | MCP Sampling not available | Automatic inference + set_session_summary tool. |
 | Brand new OpenTrace install | Templates + runbook suggestions until real data accumulates. |
 | Subsystem integration fails | Tool works normally. Missing context section logged as warning. |
+| **Part 2 Scenarios** | |
+| Agent edits a high-risk file | `context` returns risk score, recent incidents, notes, performance baseline. Agent warns developer. |
+| Agent edits a file with no production data | `context` returns empty code_risk section. No warnings. No errors. |
+| CI/CD sends deploy webhook | Deploy recorded. Impact measured after 15 min. If incident follows, linked to deploy + changed files. |
+| Agent about to deploy risky files | `deploy_risk` returns file-by-file risk, incident history, recommended deploy window, suggested pre-deploy watchers. |
+| Agent writing tests | `test_priority` returns production error paths ranked by impact. Agent writes highest-value tests first. |
+| Watcher fires while agent is connected | MCP notification pushed. Agent alerts developer with context about the alert. |
+| Error count increases for a file agent modified | MCP notification: "Error count for X increased since your last edit." |
+| Teammate finds root cause in parallel session | MCP notification: "A teammate found something relevant." Context shared access-scoped. |
+| Agent calls `context` for the first time | Returns tailored bundle for task type. Becomes the recommended starting point for all interactions. |
+| Different AI agents (Claude Code + Cursor) on same codebase | Both authenticate via MCP tokens. Both contribute to and benefit from shared investigation memory + code entity registry. |
+| Webhook for unknown event type | `POST /api/events/custom` accepts any structured event. Stored for future correlation. |
+| Deploy has no measurable impact | Impact fields remain at zero/null. `caused_incident = false`. No risk score inflation. |
+| Test file maps to wrong production file | Exact path matching prevents false links. Convention fallback only for standard layouts. Manual override available. |
