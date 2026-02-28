@@ -200,6 +200,17 @@ func traceLookupHandler(ls store.LogStore) server.ToolHandlerFunc {
 			resp["warnings"] = warnings
 		}
 
+		// Track trace ID on session
+		if sessionTracker != nil {
+			if sess := sessionTracker.CurrentSession(); sess != nil {
+				traceIDs := append([]string{}, sess.TraceIDs...)
+				traceIDs = append(traceIDs, traceID)
+				sessionTracker.UpdateSession(store.UpdateInvestigationSessionParams{
+					TraceIDs: traceIDs,
+				})
+			}
+		}
+
 		data, _ := json.Marshal(resp)
 		return mcp.NewToolResultText(string(data)), nil
 	}

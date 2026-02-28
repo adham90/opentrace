@@ -98,6 +98,10 @@ type Deps struct {
 	// Investigation Memory Stage 3 — Ranking + Context
 	ToolTransitionStore   store.ToolTransitionStore
 	WorkflowTemplateStore store.WorkflowTemplateStore
+
+	// Investigation Memory Stage 4 — All Integrations
+	QueryMemoryStore          store.QueryMemoryStore
+	RunbookEffectivenessStore store.RunbookEffectivenessStore
 }
 
 // NewConfiguredServer creates an MCPServer and registers tools based on the
@@ -209,6 +213,23 @@ func Serve(deps Deps) error {
 		if deps.MCPActivityStore != nil {
 			sessionTracker.SetActivityStore(deps.MCPActivityStore)
 		}
+
+		// Stage 4: Wire additional stores into session tracker
+		if deps.AgentNoteStore != nil {
+			sessionTracker.SetNoteStore(deps.AgentNoteStore)
+		}
+		if deps.RunbookEffectivenessStore != nil {
+			sessionTracker.SetRunbookStore(deps.RunbookEffectivenessStore)
+		}
+		if deps.QueryMemoryStore != nil {
+			sessionTracker.SetQueryMemoryStore(deps.QueryMemoryStore)
+		}
+		if deps.TrendStore != nil {
+			sessionTracker.SetTrendStore(deps.TrendStore)
+		}
+		if deps.AuditStore != nil {
+			sessionTracker.SetAuditStore(deps.AuditStore)
+		}
 	}
 
 	// Stage 3: Initialize ranking service and context injector
@@ -216,7 +237,14 @@ func Serve(deps Deps) error {
 		rankingService = NewRankingService(deps.ToolTransitionStore, deps.WorkflowTemplateStore)
 	}
 	if deps.InvestigationSessionStore != nil && deps.ToolTransitionStore != nil {
-		contextInjector = NewContextInjector(deps.InvestigationSessionStore, deps.ToolTransitionStore)
+		contextInjector = NewContextInjector(deps.InvestigationSessionStore, deps.ToolTransitionStore, ContextInjectorDeps{
+			NoteStore:        deps.AgentNoteStore,
+			RunbookStore:     deps.RunbookEffectivenessStore,
+			QueryMemoryStore: deps.QueryMemoryStore,
+			AnalyticsStore:   deps.AnalyticsStore,
+			AuditStore:       deps.AuditStore,
+			TrendStore:       deps.TrendStore,
+		})
 	}
 
 	// Seed workflow templates for cold start
@@ -819,7 +847,7 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 				mcp.WithDescription("Run a composite investigation playbook that executes multiple diagnostic queries at once. Available playbooks: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike. Use when you need a comprehensive investigation rather than individual tool calls."),
 				mcp.WithString("playbook", mcp.Required(), mcp.Description("Playbook to run: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike")),
 			),
-			runbookHandler(deps.Registry, deps.LogStore),
+			runbookHandler(deps.Registry, deps.LogStore, deps.RunbookEffectivenessStore),
 		)
 		b.Add("runbook", "Run a composite investigation playbook (slow_database, connection_exhaustion, etc.)", "Database Introspection", "read", "database connector")
 	}
@@ -1039,7 +1067,7 @@ func addWriteTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			mcp.WithBoolean("analyze", mcp.Description("Actually execute the query for real timing (default: true). Set to false for estimated-only plan.")),
 			mcp.WithBoolean("buffers", mcp.Description("Include buffer usage statistics (default: true). Requires analyze=true.")),
 		),
-		explainQueryHandler(deps.Registry),
+		explainQueryHandler(deps.Registry, deps.QueryMemoryStore),
 	)
 	b.Add("explain_query", "Run EXPLAIN ANALYZE on a query and return the execution plan with optimization tips", "Database Introspection", "admin", "database connector")
 

@@ -236,7 +236,7 @@ func TestContextInjector_SizeCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(data) > 2200 { // allow some margin over 2048
+	if len(data) > 4400 { // allow some margin over 4096
 		t.Errorf("context too large: %d bytes", len(data))
 	}
 }
@@ -273,6 +273,428 @@ func TestContextInjector_ParallelInvestigations(t *testing.T) {
 	}
 	if ic.ParallelInvestigations[0].UserEmail != "other@example.com" {
 		t.Errorf("expected other@example.com, got %q", ic.ParallelInvestigations[0].UserEmail)
+	}
+}
+
+// --- Mock stores for Stage 4 context sections ---
+
+type mockNoteStoreForContext struct {
+	notes []store.AgentNote
+}
+
+func (m *mockNoteStoreForContext) Upsert(_ context.Context, entityType, entityID, note string) (*store.AgentNote, error) {
+	n := store.AgentNote{EntityType: entityType, EntityID: entityID, Note: note}
+	m.notes = append(m.notes, n)
+	return &n, nil
+}
+func (m *mockNoteStoreForContext) Get(_ context.Context, entityType, entityID string) (*store.AgentNote, error) {
+	for _, n := range m.notes {
+		if n.EntityType == entityType && n.EntityID == entityID {
+			return &n, nil
+		}
+	}
+	return nil, nil
+}
+func (m *mockNoteStoreForContext) List(_ context.Context, entityType string) ([]store.AgentNote, error) {
+	var result []store.AgentNote
+	for _, n := range m.notes {
+		if n.EntityType == entityType {
+			result = append(result, n)
+		}
+	}
+	return result, nil
+}
+func (m *mockNoteStoreForContext) Delete(_ context.Context, _, _ string) error { return nil }
+func (m *mockNoteStoreForContext) Prune(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+
+type mockRunbookStoreForContext struct {
+	best *store.RunbookEffectiveness
+}
+
+func (m *mockRunbookStoreForContext) RecordExecution(_ context.Context, _ string) error { return nil }
+func (m *mockRunbookStoreForContext) UpdateOutcome(_ context.Context, _ store.UpdateRunbookEffectivenessParams) error {
+	return nil
+}
+func (m *mockRunbookStoreForContext) GetMostEffective(_ context.Context) (*store.RunbookEffectiveness, error) {
+	return m.best, nil
+}
+func (m *mockRunbookStoreForContext) List(_ context.Context) ([]store.RunbookEffectiveness, error) {
+	return nil, nil
+}
+
+type mockQueryMemoryStoreForContext struct {
+	entries map[string]*store.QueryMemory
+}
+
+func (m *mockQueryMemoryStoreForContext) Get(_ context.Context, fp string) (*store.QueryMemory, error) {
+	if qm, ok := m.entries[fp]; ok {
+		return qm, nil
+	}
+	return nil, store.ErrNotFound
+}
+func (m *mockQueryMemoryStoreForContext) Upsert(_ context.Context, _ store.UpsertQueryMemoryParams) error {
+	return nil
+}
+func (m *mockQueryMemoryStoreForContext) Prune(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+
+type mockAnalyticsStoreForContext struct {
+	summary *store.TrafficSummary
+	heatmap []store.HeatmapCell
+}
+
+func (m *mockAnalyticsStoreForContext) AggregateEndpointStats(_ context.Context, _ string, _ time.Time) error {
+	return nil
+}
+func (m *mockAnalyticsStoreForContext) UpdateTrafficHeatmap(_ context.Context, _ time.Time) error {
+	return nil
+}
+func (m *mockAnalyticsStoreForContext) TopEndpoints(_ context.Context, _ store.TopEndpointParams) ([]store.EndpointStat, error) {
+	return nil, nil
+}
+func (m *mockAnalyticsStoreForContext) TrafficSummary(_ context.Context, _ store.AnalyticsParams) (*store.TrafficSummary, error) {
+	return m.summary, nil
+}
+func (m *mockAnalyticsStoreForContext) TrafficHeatmap(_ context.Context, _ string) ([]store.HeatmapCell, error) {
+	return m.heatmap, nil
+}
+func (m *mockAnalyticsStoreForContext) Prune(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+
+type mockAuditStoreForContext struct {
+	entries []store.AuditEntry
+}
+
+func (m *mockAuditStoreForContext) Log(_ context.Context, _ store.LogAuditParams) error { return nil }
+func (m *mockAuditStoreForContext) Recent(_ context.Context, limit int) ([]store.AuditEntry, error) {
+	if limit > len(m.entries) {
+		limit = len(m.entries)
+	}
+	return m.entries[:limit], nil
+}
+func (m *mockAuditStoreForContext) Prune(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+
+type mockTrendStoreForContext struct {
+	markers []store.DeployMarker
+}
+
+func (m *mockTrendStoreForContext) AggregateBuckets(_ context.Context, _ string, _ time.Time) error {
+	return nil
+}
+func (m *mockTrendStoreForContext) QueryTrends(_ context.Context, _ store.TrendQueryParams) ([]store.MetricBucket, error) {
+	return nil, nil
+}
+func (m *mockTrendStoreForContext) ListDeployMarkers(_ context.Context, _ string, _ time.Time) ([]store.DeployMarker, error) {
+	return m.markers, nil
+}
+func (m *mockTrendStoreForContext) Prune(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+
+func TestContextInjector_RelevantNotes(t *testing.T) {
+	ms := newMockSessionStoreForContext()
+	ts := &mockToolTransitionStore{}
+	ns := &mockNoteStoreForContext{
+		notes: []store.AgentNote{
+			{EntityType: "service", EntityID: "api", Note: "Known issue with connection pool"},
+			{EntityType: "service", EntityID: "web", Note: "Unrelated service note"},
+		},
+	}
+
+	ci := NewContextInjector(ms, ts, ContextInjectorDeps{NoteStore: ns})
+
+	sess := &store.InvestigationSession{
+		ID:             "current",
+		Intent:         IntentInvestigation,
+		Status:         store.InvestigationStatusOpen,
+		PrimaryService: "api",
+	}
+
+	ic := ci.BuildContext(context.Background(), sess, "diagnose")
+	if ic == nil {
+		t.Fatal("expected context")
+	}
+	if len(ic.RelevantNotes) == 0 {
+		t.Fatal("expected relevant notes")
+	}
+	if ic.RelevantNotes[0].EntityID != "api" {
+		t.Errorf("note entity_id = %q, want api", ic.RelevantNotes[0].EntityID)
+	}
+	if ic.RelevantNotes[0].Note != "Known issue with connection pool" {
+		t.Errorf("note = %q", ic.RelevantNotes[0].Note)
+	}
+}
+
+func TestContextInjector_RunbookSuggestion(t *testing.T) {
+	ms := newMockSessionStoreForContext()
+	ts := &mockToolTransitionStore{}
+	rs := &mockRunbookStoreForContext{
+		best: &store.RunbookEffectiveness{
+			RunbookName:      "slow_query_playbook",
+			TotalExecutions:  10,
+			ResolvedSessions: 8,
+		},
+	}
+
+	ci := NewContextInjector(ms, ts, ContextInjectorDeps{RunbookStore: rs})
+
+	// Session at step 0 should get suggestion
+	sess := &store.InvestigationSession{
+		ID:         "current",
+		Intent:     IntentInvestigation,
+		Status:     store.InvestigationStatusOpen,
+		TotalSteps: 0,
+	}
+
+	ic := ci.BuildContext(context.Background(), sess, "diagnose")
+	if ic == nil {
+		t.Fatal("expected context")
+	}
+	if ic.RunbookSuggestion == nil {
+		t.Fatal("expected runbook suggestion")
+	}
+	if ic.RunbookSuggestion.RunbookName != "slow_query_playbook" {
+		t.Errorf("runbook = %q", ic.RunbookSuggestion.RunbookName)
+	}
+	if ic.RunbookSuggestion.ResolutionRate != 0.8 {
+		t.Errorf("rate = %f, want 0.8", ic.RunbookSuggestion.ResolutionRate)
+	}
+
+	// Session at step > 0 should NOT get suggestion
+	sess.TotalSteps = 3
+	ic2 := ci.BuildContext(context.Background(), sess, "diagnose")
+	if ic2 != nil && ic2.RunbookSuggestion != nil {
+		t.Error("should not suggest runbook after step 0")
+	}
+}
+
+func TestContextInjector_RunbookSuggestion_LowRate(t *testing.T) {
+	ms := newMockSessionStoreForContext()
+	ts := &mockToolTransitionStore{}
+	rs := &mockRunbookStoreForContext{
+		best: &store.RunbookEffectiveness{
+			RunbookName:      "bad_playbook",
+			TotalExecutions:  10,
+			ResolvedSessions: 3, // 30% — below 50% threshold
+		},
+	}
+
+	ci := NewContextInjector(ms, ts, ContextInjectorDeps{RunbookStore: rs})
+
+	sess := &store.InvestigationSession{
+		ID:         "current",
+		Intent:     IntentInvestigation,
+		Status:     store.InvestigationStatusOpen,
+		TotalSteps: 0,
+	}
+
+	ic := ci.BuildContext(context.Background(), sess, "diagnose")
+	if ic != nil && ic.RunbookSuggestion != nil {
+		t.Error("should not suggest runbook with <50% resolution rate")
+	}
+}
+
+func TestContextInjector_QueryMemory(t *testing.T) {
+	ms := newMockSessionStoreForContext()
+	ts := &mockToolTransitionStore{}
+	qms := &mockQueryMemoryStoreForContext{
+		entries: map[string]*store.QueryMemory{
+			"SELECT * FROM users WHERE id = ?": {
+				Fingerprint:        "SELECT * FROM users WHERE id = ?",
+				InvestigationCount: 3,
+				LastRootCause:      "Missing index on users.id",
+				LastFix:            "Added index",
+			},
+		},
+	}
+
+	ci := NewContextInjector(ms, ts, ContextInjectorDeps{QueryMemoryStore: qms})
+
+	sess := &store.InvestigationSession{
+		ID:               "current",
+		Intent:           IntentInvestigation,
+		Status:           store.InvestigationStatusOpen,
+		ExplainedQueries: []string{"SELECT * FROM users WHERE id = ?"},
+	}
+
+	ic := ci.BuildContext(context.Background(), sess, "explain_query")
+	if ic == nil {
+		t.Fatal("expected context")
+	}
+	if len(ic.QueryMemory) == 0 {
+		t.Fatal("expected query memory")
+	}
+	if ic.QueryMemory[0].InvestigationCount != 3 {
+		t.Errorf("count = %d, want 3", ic.QueryMemory[0].InvestigationCount)
+	}
+	if ic.QueryMemory[0].LastRootCause != "Missing index on users.id" {
+		t.Errorf("root_cause = %q", ic.QueryMemory[0].LastRootCause)
+	}
+}
+
+func TestContextInjector_DeployCorrelation(t *testing.T) {
+	ms := newMockSessionStoreForContext()
+	ts := &mockToolTransitionStore{}
+	trs := &mockTrendStoreForContext{
+		markers: []store.DeployMarker{
+			{
+				Service:     "api",
+				CommitHash:  "abc123",
+				Environment: "production",
+				FirstSeenAt: time.Now().Add(-20 * time.Minute),
+			},
+		},
+	}
+
+	ci := NewContextInjector(ms, ts, ContextInjectorDeps{TrendStore: trs})
+
+	sess := &store.InvestigationSession{
+		ID:               "current",
+		Intent:           IntentInvestigation,
+		Status:           store.InvestigationStatusOpen,
+		PrimaryService:   "api",
+		CorrelatedDeploy: "abc123",
+		StartedAt:        time.Now(),
+	}
+
+	ic := ci.BuildContext(context.Background(), sess, "diagnose")
+	if ic == nil {
+		t.Fatal("expected context")
+	}
+	if ic.DeployCorrelation == nil {
+		t.Fatal("expected deploy correlation")
+	}
+	if ic.DeployCorrelation.CommitHash != "abc123" {
+		t.Errorf("commit = %q", ic.DeployCorrelation.CommitHash)
+	}
+	if ic.DeployCorrelation.Service != "api" {
+		t.Errorf("service = %q", ic.DeployCorrelation.Service)
+	}
+}
+
+func TestContextInjector_TrafficContext(t *testing.T) {
+	ms := newMockSessionStoreForContext()
+	ts := &mockToolTransitionStore{}
+	as := &mockAnalyticsStoreForContext{
+		summary: &store.TrafficSummary{
+			TotalRequests: 5000,
+			ErrorRate:     0.05,
+		},
+		heatmap: []store.HeatmapCell{
+			{
+				DayOfWeek:    int(time.Now().UTC().Weekday()),
+				HourOfDay:    time.Now().UTC().Hour(),
+				RequestCount: 2000, // 5000/2000 = 2.5x — anomaly
+			},
+		},
+	}
+
+	ci := NewContextInjector(ms, ts, ContextInjectorDeps{AnalyticsStore: as})
+
+	sess := &store.InvestigationSession{
+		ID:             "current",
+		Intent:         IntentInvestigation,
+		Status:         store.InvestigationStatusOpen,
+		PrimaryService: "api",
+	}
+
+	ic := ci.BuildContext(context.Background(), sess, "diagnose")
+	if ic == nil {
+		t.Fatal("expected context")
+	}
+	if ic.TrafficContext == nil {
+		t.Fatal("expected traffic context")
+	}
+	if ic.TrafficContext.TotalRequests != 5000 {
+		t.Errorf("requests = %d, want 5000", ic.TrafficContext.TotalRequests)
+	}
+	if ic.TrafficContext.Anomaly == "" {
+		t.Error("expected anomaly warning (2.5x higher)")
+	}
+}
+
+func TestContextInjector_TrafficContext_NoAnomaly(t *testing.T) {
+	ms := newMockSessionStoreForContext()
+	ts := &mockToolTransitionStore{}
+	as := &mockAnalyticsStoreForContext{
+		summary: &store.TrafficSummary{
+			TotalRequests: 1000,
+			ErrorRate:     0.01,
+		},
+		heatmap: []store.HeatmapCell{
+			{
+				DayOfWeek:    int(time.Now().UTC().Weekday()),
+				HourOfDay:    time.Now().UTC().Hour(),
+				RequestCount: 900, // ~1.1x — no anomaly
+			},
+		},
+	}
+
+	ci := NewContextInjector(ms, ts, ContextInjectorDeps{AnalyticsStore: as})
+
+	sess := &store.InvestigationSession{
+		ID:             "current",
+		Intent:         IntentInvestigation,
+		Status:         store.InvestigationStatusOpen,
+		PrimaryService: "api",
+	}
+
+	ic := ci.BuildContext(context.Background(), sess, "diagnose")
+	if ic == nil {
+		t.Fatal("expected context")
+	}
+	if ic.TrafficContext.Anomaly != "" {
+		t.Errorf("unexpected anomaly: %q", ic.TrafficContext.Anomaly)
+	}
+}
+
+func TestContextInjector_RecentAdminActions(t *testing.T) {
+	ms := newMockSessionStoreForContext()
+	ts := &mockToolTransitionStore{}
+
+	now := time.Now().UTC()
+	as := &mockAuditStoreForContext{
+		entries: []store.AuditEntry{
+			{
+				Action:     "connector.update",
+				TargetType: "connector",
+				UserEmail:  "admin@example.com",
+				CreatedAt:  now.Add(-30 * time.Minute), // within 1h window
+			},
+			{
+				Action:     "settings.update",
+				TargetType: "settings",
+				UserEmail:  "admin@example.com",
+				CreatedAt:  now.Add(-2 * time.Hour), // outside 1h window
+			},
+		},
+	}
+
+	ci := NewContextInjector(ms, ts, ContextInjectorDeps{AuditStore: as})
+
+	sess := &store.InvestigationSession{
+		ID:             "current",
+		Intent:         IntentInvestigation,
+		Status:         store.InvestigationStatusOpen,
+		PrimaryService: "api",
+		StartedAt:      now,
+	}
+
+	ic := ci.BuildContext(context.Background(), sess, "diagnose")
+	if ic == nil {
+		t.Fatal("expected context")
+	}
+	if len(ic.RecentAdminActions) != 1 {
+		t.Fatalf("admin actions = %d, want 1", len(ic.RecentAdminActions))
+	}
+	if ic.RecentAdminActions[0].Action != "connector.update" {
+		t.Errorf("action = %q", ic.RecentAdminActions[0].Action)
 	}
 }
 

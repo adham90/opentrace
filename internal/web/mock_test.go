@@ -793,3 +793,32 @@ func (m *mockTraceStore) MarkStaleTraces(_ context.Context, _ time.Duration) (in
 	return 0, nil
 }
 
+// mockQueryMemoryStore implements store.QueryMemoryStore for testing.
+type mockQueryMemoryStore struct{}
+
+func (m *mockQueryMemoryStore) Get(_ context.Context, _ string) (*store.QueryMemory, error) {
+	return nil, store.ErrNotFound
+}
+func (m *mockQueryMemoryStore) Upsert(_ context.Context, _ store.UpsertQueryMemoryParams) error {
+	return nil
+}
+func (m *mockQueryMemoryStore) Prune(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+
+// mockRunbookEffectivenessStore implements store.RunbookEffectivenessStore for testing.
+type mockRunbookEffectivenessStore struct{}
+
+func (m *mockRunbookEffectivenessStore) RecordExecution(_ context.Context, _ string) error {
+	return nil
+}
+func (m *mockRunbookEffectivenessStore) UpdateOutcome(_ context.Context, _ store.UpdateRunbookEffectivenessParams) error {
+	return nil
+}
+func (m *mockRunbookEffectivenessStore) GetMostEffective(_ context.Context) (*store.RunbookEffectiveness, error) {
+	return nil, nil
+}
+func (m *mockRunbookEffectivenessStore) List(_ context.Context) ([]store.RunbookEffectiveness, error) {
+	return nil, nil
+}
+

@@ -13,7 +13,7 @@ import (
 )
 
 // runbookHandler returns a handler that runs a composite investigation workflow.
-func runbookHandler(registry *connector.Registry, logStore store.LogStore) server.ToolHandlerFunc {
+func runbookHandler(registry *connector.Registry, logStore store.LogStore, rbStore store.RunbookEffectivenessStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 
@@ -22,20 +22,42 @@ func runbookHandler(registry *connector.Registry, logStore store.LogStore) serve
 			return mcp.NewToolResultError("playbook is required. Available: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike"), nil
 		}
 
+		var result *mcp.CallToolResult
+		var err error
+
 		switch playbook {
 		case "slow_database":
-			return runbookSlowDB(ctx, registry)
+			result, err = runbookSlowDB(ctx, registry)
 		case "connection_exhaustion":
-			return runbookConnExhaustion(ctx, registry)
+			result, err = runbookConnExhaustion(ctx, registry)
 		case "disk_pressure":
-			return runbookDiskPressure(ctx, registry)
+			result, err = runbookDiskPressure(ctx, registry)
 		case "replication_lag":
-			return runbookReplicationLag(ctx, registry)
+			result, err = runbookReplicationLag(ctx, registry)
 		case "error_spike":
-			return runbookErrorSpike(ctx, logStore)
+			result, err = runbookErrorSpike(ctx, logStore)
 		default:
 			return mcp.NewToolResultError(fmt.Sprintf("unknown playbook %q. Available: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike", playbook)), nil
 		}
+
+		// Track runbook execution on session
+		if err == nil && sessionTracker != nil {
+			if sess := sessionTracker.CurrentSession(); sess != nil {
+				runbooks := append([]string{}, sess.RunbooksExecuted...)
+				runbooks = append(runbooks, playbook)
+				sessionTracker.UpdateSession(store.UpdateInvestigationSessionParams{
+					RunbooksExecuted: runbooks,
+				})
+			}
+			if rbStore != nil {
+				if rbErr := rbStore.RecordExecution(ctx, playbook); rbErr != nil {
+					// Fire and forget — don't fail the tool call
+					_ = rbErr
+				}
+			}
+		}
+
+		return result, err
 	}
 }
 

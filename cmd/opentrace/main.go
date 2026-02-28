@@ -46,9 +46,11 @@ type appDeps struct {
 	journeyStore       store.JourneyStore
 	errorImpactStore            store.ErrorImpactStore
 	traceStore                  store.TraceStore
-	investigationSessionStore   store.InvestigationSessionStore
-	toolTransitionStore         store.ToolTransitionStore
-	workflowTemplateStore       store.WorkflowTemplateStore
+	investigationSessionStore    store.InvestigationSessionStore
+	toolTransitionStore          store.ToolTransitionStore
+	workflowTemplateStore        store.WorkflowTemplateStore
+	queryMemoryStore             store.QueryMemoryStore
+	runbookEffectivenessStore    store.RunbookEffectivenessStore
 	registry           *connector.Registry
 	cfg              *config.Config
 }
@@ -160,6 +162,8 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	investigationSessionStore := store.NewInvestigationSessionStore(db)
 	toolTransitionStore := store.NewToolTransitionStore(db)
 	workflowTemplateStore := store.NewWorkflowTemplateStore(db)
+	queryMemoryStore := store.NewQueryMemoryStore(db)
+	runbookEffectivenessStore := store.NewRunbookEffectivenessStore(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
@@ -185,10 +189,12 @@ func initApp(ctx context.Context) (*appDeps, error) {
 		journeyStore:       journeyStore,
 		errorImpactStore:   errorImpactStore,
 		traceStore:                  traceStore,
-		investigationSessionStore:   investigationSessionStore,
-		toolTransitionStore:         toolTransitionStore,
-		workflowTemplateStore:       workflowTemplateStore,
-		registry:                    registry,
+		investigationSessionStore:    investigationSessionStore,
+		toolTransitionStore:          toolTransitionStore,
+		workflowTemplateStore:        workflowTemplateStore,
+		queryMemoryStore:             queryMemoryStore,
+		runbookEffectivenessStore:    runbookEffectivenessStore,
+		registry:                     registry,
 		cfg:                         cfg,
 	}, nil
 }
@@ -242,6 +248,8 @@ func runMCP() error {
 		InvestigationSessionStore:    deps.investigationSessionStore,
 		ToolTransitionStore:          deps.toolTransitionStore,
 		WorkflowTemplateStore:        deps.workflowTemplateStore,
+		QueryMemoryStore:             deps.queryMemoryStore,
+		RunbookEffectivenessStore:    deps.runbookEffectivenessStore,
 	})
 }
 
