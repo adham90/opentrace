@@ -1,0 +1,231 @@
+{{define "content"}}
+<div class="settings-page">
+  <div class="page-header">
+    <h1><span class="prompt">$</span> sessions</h1>
+    <div class="actions">
+      <select id="status-filter" class="sess-filter-select">
+        <option value="">all statuses</option>
+        <option value="open">open</option>
+        <option value="resolved">resolved</option>
+        <option value="unresolved">unresolved</option>
+        <option value="abandoned">abandoned</option>
+      </select>
+    </div>
+    <a href="/" class="page-close" title="Back to dashboard" aria-label="Back to dashboard">&times;</a>
+  </div>
+
+  {{if .SessionStats}}
+  <div class="sess-stats">
+    <div class="sess-stat">
+      <span class="sess-stat-value">{{.SessionStats.TotalSessions}}</span>
+      <span class="sess-stat-label">total</span>
+    </div>
+    <div class="sess-stat">
+      <span class="sess-stat-value sess-stat-open">{{.SessionStats.OpenSessions}}</span>
+      <span class="sess-stat-label">open</span>
+    </div>
+    <div class="sess-stat">
+      <span class="sess-stat-value sess-stat-resolved">{{.SessionStats.ResolvedSessions}}</span>
+      <span class="sess-stat-label">resolved</span>
+    </div>
+    <div class="sess-stat">
+      <span class="sess-stat-value">{{fmtFloat .SessionStats.AvgSteps}}</span>
+      <span class="sess-stat-label">avg steps</span>
+    </div>
+    <div class="sess-stat">
+      <span class="sess-stat-value">{{fmtFloat .SessionStats.AvgDurationSecs}}s</span>
+      <span class="sess-stat-label">avg duration</span>
+    </div>
+  </div>
+  {{end}}
+
+  {{if .Sessions}}
+  <div class="sess-table-wrap">
+    <table class="sess-table">
+      <thead>
+        <tr>
+          <th class="sess-th-id">ID</th>
+          <th>User</th>
+          <th>Client</th>
+          <th>Intent</th>
+          <th class="sess-th-num">Steps</th>
+          <th>Status</th>
+          <th class="sess-th-num">Duration</th>
+          <th>Started</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Sessions}}
+        <tr class="sess-row" data-href="/sessions/{{.ID}}">
+          <td class="sess-cell-id" title="{{.ID}}"><code>{{truncate .ID 8}}</code></td>
+          <td>{{if .UserEmail}}{{.UserEmail}}{{else}}<span class="text-dim">-</span>{{end}}</td>
+          <td>{{if .ClientName}}<code>{{.ClientName}}</code>{{else}}<span class="text-dim">-</span>{{end}}</td>
+          <td>{{if .Intent}}<span class="sess-intent">{{.Intent}}</span>{{else}}<span class="text-dim">unknown</span>{{end}}</td>
+          <td class="sess-th-num">{{.TotalSteps}}</td>
+          <td><span class="sess-badge sess-badge-{{.Status}}">{{.Status}}</span></td>
+          <td class="sess-th-num">{{if .DurationSeconds}}{{fmtDuration .DurationSeconds}}{{else}}<span class="text-dim">-</span>{{end}}</td>
+          <td title="{{.StartedAt.Format "2006-01-02 15:04:05 UTC"}}">{{timeAgo .StartedAt}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty-state">
+    <div class="empty-icon">--</div>
+    <p>no investigation sessions yet</p>
+    <p class="text-dim" style="font-size:0.8rem">Sessions are created when an MCP client connects and starts investigating.</p>
+  </div>
+  {{end}}
+</div>
+
+<style nonce="{{.CSPNonce}}">
+.sess-stats {
+  display: flex;
+  gap: 1.5rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  flex-wrap: wrap;
+}
+.sess-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 60px;
+}
+.sess-stat-value {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text-bright);
+  font-family: var(--font-mono);
+}
+.sess-stat-open { color: var(--yellow, #facc15); }
+.sess-stat-resolved { color: var(--green, #4ade80); }
+.sess-stat-label {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.sess-filter-select {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  background: var(--bg-secondary);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.sess-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.sess-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.sess-table thead {
+  background: var(--bg-tertiary);
+}
+.sess-table th {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.sess-th-id { width: 90px; }
+.sess-th-num { text-align: right; }
+.sess-table td {
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  color: var(--text);
+}
+.sess-row {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.sess-row:hover {
+  background: var(--bg-tertiary);
+}
+.sess-cell-id code {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--accent, #60a5fa);
+  background: none;
+  padding: 0;
+}
+.sess-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  padding: 1px 7px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  border: 1px solid;
+}
+.sess-badge-open {
+  color: var(--yellow, #facc15);
+  border-color: rgba(250, 204, 21, 0.3);
+  background: rgba(250, 204, 21, 0.08);
+}
+.sess-badge-resolved {
+  color: var(--green, #4ade80);
+  border-color: rgba(74, 222, 128, 0.3);
+  background: rgba(74, 222, 128, 0.08);
+}
+.sess-badge-unresolved {
+  color: var(--red, #f87171);
+  border-color: rgba(248, 113, 113, 0.3);
+  background: rgba(248, 113, 113, 0.08);
+}
+.sess-badge-abandoned {
+  color: var(--text-dim);
+  border-color: var(--border);
+  background: var(--bg-tertiary);
+}
+.sess-intent {
+  color: var(--accent, #60a5fa);
+  font-family: var(--font-mono);
+}
+@media (max-width: 799px) {
+  .sess-table td, .sess-table th {
+    padding: 0.35rem 0.5rem;
+  }
+}
+</style>
+
+<script nonce="{{.CSPNonce}}">
+(function() {
+  // Status filter
+  var sel = document.getElementById('status-filter');
+  if (sel) {
+    var params = new URLSearchParams(window.location.search);
+    var current = params.get('status');
+    if (current) sel.value = current;
+    sel.addEventListener('change', function() {
+      var url = '/sessions';
+      if (sel.value) url += '?status=' + encodeURIComponent(sel.value);
+      window.location.href = url;
+    });
+  }
+  // Clickable rows
+  document.querySelectorAll('.sess-row[data-href]').forEach(function(row) {
+    row.addEventListener('click', function() {
+      window.location.href = row.getAttribute('data-href');
+    });
+  });
+})();
+</script>
+{{end}}

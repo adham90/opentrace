@@ -11,7 +11,7 @@ vendor/
 
 # Environment
 .env
-
+.mcp.json
 # IDE
 .idea/
 .vscode/

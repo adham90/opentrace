@@ -44,8 +44,9 @@ type appDeps struct {
 	trendStore         store.TrendStore
 	analyticsStore     store.AnalyticsStore
 	journeyStore       store.JourneyStore
-	errorImpactStore   store.ErrorImpactStore
-	traceStore         store.TraceStore
+	errorImpactStore            store.ErrorImpactStore
+	traceStore                  store.TraceStore
+	investigationSessionStore   store.InvestigationSessionStore
 	registry           *connector.Registry
 	cfg              *config.Config
 }
@@ -154,6 +155,7 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	journeyStore := store.NewJourneyStore(db)
 	errorImpactStore := store.NewErrorImpactStore(db)
 	traceStore := store.NewTraceStore(db)
+	investigationSessionStore := store.NewInvestigationSessionStore(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
@@ -178,9 +180,10 @@ func initApp(ctx context.Context) (*appDeps, error) {
 		analyticsStore:     analyticsStore,
 		journeyStore:       journeyStore,
 		errorImpactStore:   errorImpactStore,
-		traceStore:         traceStore,
-		registry:           registry,
-		cfg:                cfg,
+		traceStore:                  traceStore,
+		investigationSessionStore:   investigationSessionStore,
+		registry:                    registry,
+		cfg:                         cfg,
 	}, nil
 }
 
@@ -229,7 +232,8 @@ func runMCP() error {
 		TrendStore:         deps.trendStore,
 		AnalyticsStore:     deps.analyticsStore,
 		JourneyStore:       deps.journeyStore,
-		ErrorImpactStore:   deps.errorImpactStore,
+		ErrorImpactStore:             deps.errorImpactStore,
+		InvestigationSessionStore:    deps.investigationSessionStore,
 	})
 }
 
@@ -330,8 +334,9 @@ func run() error {
 		AnalyticsStore:       deps.analyticsStore,
 		JourneyStore:         deps.journeyStore,
 		ErrorImpactStore:     deps.errorImpactStore,
-		TraceStore:           deps.traceStore,
-		ReliabilityProvider:  hcSched,
+		TraceStore:                deps.traceStore,
+		InvestigationSessionStore: deps.investigationSessionStore,
+		ReliabilityProvider:       hcSched,
 	})
 
 	httpServer := &http.Server{

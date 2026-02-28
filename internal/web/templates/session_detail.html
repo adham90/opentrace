@@ -1,0 +1,512 @@
+{{define "content"}}
+<div class="settings-page">
+  <div class="page-header">
+    <h1><span class="prompt">$</span> session <span class="dim">{{truncate .SessionDetail.ID 8}}</span></h1>
+    <div class="actions">
+      <span class="sess-badge sess-badge-{{.SessionDetail.Status}}">{{.SessionDetail.Status}}</span>
+    </div>
+    <a href="/sessions" class="page-close" title="Back to sessions" aria-label="Back to sessions">&times;</a>
+  </div>
+
+  {{with .SessionDetail}}
+  <!-- Summary bar -->
+  <div class="sd-summary">
+    <div class="sd-summary-item">
+      <span class="text-dim">user:</span>
+      {{.UserEmail}}
+      {{if .UserRole}}<span class="sd-badge-sm">{{.UserRole}}</span>{{end}}
+    </div>
+    <div class="sd-summary-item">
+      <span class="text-dim">client:</span>
+      <code>{{.ClientName}}{{if .ClientVersion}} v{{.ClientVersion}}{{end}}</code>
+    </div>
+    {{if .PrimaryService}}
+    <div class="sd-summary-item">
+      <span class="text-dim">service:</span>
+      <code>{{.PrimaryService}}</code>
+    </div>
+    {{end}}
+    <div class="sd-summary-item">
+      <span class="text-dim">steps:</span>
+      {{.TotalSteps}}{{if .TotalErrors}} <span class="sd-errors">({{.TotalErrors}} errors)</span>{{end}}
+    </div>
+    {{if .DurationSeconds}}
+    <div class="sd-summary-item">
+      <span class="text-dim">duration:</span>
+      {{fmtDuration .DurationSeconds}}
+    </div>
+    {{end}}
+    <div class="sd-summary-item">
+      <span class="text-dim">started:</span>
+      {{.StartedAt.Format "2006-01-02 15:04:05 UTC"}}
+    </div>
+    {{if .EndedAt}}
+    <div class="sd-summary-item">
+      <span class="text-dim">ended:</span>
+      {{.EndedAt.Format "2006-01-02 15:04:05 UTC"}}
+    </div>
+    {{end}}
+  </div>
+
+  <!-- Detail sections -->
+  <div class="sd-grid">
+    <!-- Identity -->
+    <div class="sd-card">
+      <h3 class="sd-card-title"><span class="dim">#</span> identity</h3>
+      <dl class="sd-dl">
+        <dt>user</dt><dd>{{.UserEmail}}</dd>
+        <dt>role</dt><dd>{{if .UserRole}}{{.UserRole}}{{else}}<span class="text-dim">-</span>{{end}}</dd>
+        <dt>client</dt><dd><code>{{.ClientName}}{{if .ClientVersion}} v{{.ClientVersion}}{{end}}</code></dd>
+        {{if .Workspace}}<dt>workspace</dt><dd><code>{{.Workspace}}</code></dd>{{end}}
+        <dt>transport</dt><dd>{{.Transport}}</dd>
+        <dt>connection</dt><dd><code class="sd-mono-dim">{{truncate .ConnectionID 12}}</code></dd>
+        <dt>session id</dt><dd><code class="sd-mono-dim">{{.ID}}</code></dd>
+      </dl>
+    </div>
+
+    <!-- Intent -->
+    <div class="sd-card">
+      <h3 class="sd-card-title"><span class="dim">#</span> intent</h3>
+      <dl class="sd-dl">
+        <dt>intent</dt><dd>{{if .Intent}}<span class="sd-intent-value">{{.Intent}}</span>{{else}}<span class="text-dim">unclassified</span>{{end}}</dd>
+        {{if .IntentDetail}}<dt>detail</dt><dd>{{.IntentDetail}}</dd>{{end}}
+        {{if .PrimaryService}}<dt>service</dt><dd><code>{{.PrimaryService}}</code></dd>{{end}}
+      </dl>
+    </div>
+
+    <!-- Outcome -->
+    <div class="sd-card">
+      <h3 class="sd-card-title"><span class="dim">#</span> outcome</h3>
+      <dl class="sd-dl">
+        <dt>status</dt><dd><span class="sess-badge sess-badge-{{.Status}}">{{.Status}}</span></dd>
+        {{if .Summary}}<dt>summary</dt><dd>{{.Summary}}</dd>{{end}}
+        {{if .RootCause}}<dt>root cause</dt><dd>{{.RootCause}}</dd>{{end}}
+        {{if .FixDescription}}<dt>fix</dt><dd>{{.FixDescription}}</dd>{{end}}
+        {{if .RecurrenceGroup}}<dt>recurrence</dt><dd><code>{{.RecurrenceGroup}}</code> ({{.RecurrenceCount}}x)</dd>{{end}}
+        {{if .PreviousSessionID}}<dt>previous</dt><dd><a href="/sessions/{{.PreviousSessionID}}" class="sd-link">{{truncate (derefStr .PreviousSessionID) 8}}</a></dd>{{end}}
+        {{if .FixDurabilitySeconds}}<dt>fix durability</dt><dd>{{fmtDuration (derefInt .FixDurabilitySeconds)}}</dd>{{end}}
+      </dl>
+    </div>
+
+    <!-- Metrics -->
+    <div class="sd-card">
+      <h3 class="sd-card-title"><span class="dim">#</span> metrics</h3>
+      <dl class="sd-dl">
+        <dt>total steps</dt><dd>{{.TotalSteps}}</dd>
+        <dt>total errors</dt><dd>{{if .TotalErrors}}<span class="sd-errors">{{.TotalErrors}}</span>{{else}}0{{end}}</dd>
+        <dt>duration</dt><dd>{{if .DurationSeconds}}{{fmtDuration .DurationSeconds}}{{else}}<span class="text-dim">ongoing</span>{{end}}</dd>
+        {{if .ToolFingerprint}}<dt>fingerprint</dt><dd><code class="sd-mono-dim">{{truncate .ToolFingerprint 40}}</code></dd>{{end}}
+        {{if .ArgSignature}}<dt>arg signature</dt><dd><code class="sd-mono-dim">{{truncate .ArgSignature 40}}</code></dd>{{end}}
+      </dl>
+    </div>
+  </div>
+
+  <!-- Tool Sequence -->
+  {{if .ToolSequence}}
+  <div class="sd-section">
+    <h3 class="sd-card-title"><span class="dim">#</span> tool sequence <span class="sd-count">({{len .ToolSequence}} calls)</span></h3>
+    <div class="sd-tool-sequence">
+      {{range $i, $tool := .ToolSequence}}
+      <div class="sd-tool-step">
+        <span class="sd-tool-step-num">{{add $i 1}}</span>
+        <code class="sd-tool-step-name">{{$tool}}</code>
+      </div>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+  {{end}}
+
+  <!-- Activity Log (MCP tool calls) -->
+  {{if .ActivityEvents}}
+  <div class="sd-section">
+    <h3 class="sd-card-title"><span class="dim">#</span> activity log <span class="sd-count">({{len .ActivityEvents}} events)</span></h3>
+    <div class="sd-activity-table-wrap">
+      <table class="sd-activity-table">
+        <thead>
+          <tr>
+            <th class="sd-at-time">Time</th>
+            <th>Tool</th>
+            <th>Type</th>
+            <th class="sd-at-dur">Duration</th>
+            <th>Arguments</th>
+            <th>Result</th>
+            <th class="sd-at-expand"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range $i, $ev := .ActivityEvents}}
+          <tr class="sd-al-row{{if .IsError}} sd-activity-error{{end}}" data-al-idx="{{$i}}">
+            <td class="sd-at-time"><code>{{.CreatedAt.Format "15:04:05"}}</code></td>
+            <td><code class="sd-activity-tool-name">{{.ToolName}}</code></td>
+            <td>
+              {{if .IsError}}<span class="sess-badge sess-badge-unresolved">error</span>
+              {{else}}<span class="sd-event-type">{{.EventType}}</span>{{end}}
+            </td>
+            <td class="sd-at-dur">{{if .DurationMs}}{{deref .DurationMs}}ms{{else}}<span class="text-dim">-</span>{{end}}</td>
+            <td class="sd-at-args">{{if .Arguments}}<code class="sd-truncated">{{truncate .Arguments 60}}</code>{{else}}<span class="text-dim">-</span>{{end}}</td>
+            <td class="sd-at-result">{{if .ResultPreview}}<code class="sd-truncated">{{truncate .ResultPreview 60}}</code>{{else}}<span class="text-dim">-</span>{{end}}</td>
+            <td class="sd-at-expand"><span class="sd-expand-icon" data-al-idx="{{$i}}">&#x25B6;</span></td>
+          </tr>
+          <tr class="sd-al-detail" id="al-detail-{{$i}}" style="display:none">
+            <td colspan="7">
+              <div class="sd-al-detail-inner">
+                {{if .Arguments}}
+                <div class="sd-al-detail-block">
+                  <div class="sd-al-detail-label">arguments</div>
+                  <pre class="sd-al-pre">{{.Arguments}}</pre>
+                </div>
+                {{end}}
+                {{if .ResultPreview}}
+                <div class="sd-al-detail-block">
+                  <div class="sd-al-detail-label">result</div>
+                  <pre class="sd-al-pre">{{.ResultPreview}}</pre>
+                </div>
+                {{end}}
+                {{if not .Arguments}}{{if not .ResultPreview}}
+                <span class="text-dim">no details available</span>
+                {{end}}{{end}}
+              </div>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{end}}
+</div>
+
+<style nonce="{{.CSPNonce}}">
+/* Summary bar */
+.sd-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  padding: 0.6rem 1rem;
+  margin-bottom: 1.25rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.82rem;
+}
+.sd-summary-item {
+  white-space: nowrap;
+}
+.sd-errors {
+  color: var(--red, #f87171);
+}
+.sd-badge-sm {
+  font-size: 0.65rem;
+  padding: 0 5px;
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  margin-left: 4px;
+}
+
+/* Card grid */
+.sd-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+.sd-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+}
+.sd-card-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 0.5rem 0;
+  font-family: var(--font-mono);
+}
+.sd-count {
+  font-weight: 400;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+/* Definition list in cards */
+.sd-dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 0.75rem;
+  font-size: 0.8rem;
+  margin: 0;
+}
+.sd-dl dt {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.sd-dl dd {
+  margin: 0;
+  word-break: break-word;
+  color: var(--text);
+}
+.sd-mono-dim {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  background: none;
+  padding: 0;
+}
+.sd-intent-value {
+  color: var(--accent, #60a5fa);
+  font-family: var(--font-mono);
+}
+.sd-link {
+  color: var(--accent, #60a5fa);
+  text-decoration: none;
+}
+.sd-link:hover {
+  text-decoration: underline;
+}
+
+/* Section (tool sequence, activity log) */
+.sd-section {
+  margin-bottom: 1.25rem;
+}
+
+/* Tool sequence */
+.sd-tool-sequence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-top: 0.5rem;
+}
+.sd-tool-step {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+}
+.sd-tool-step-num {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  min-width: 14px;
+  text-align: right;
+}
+.sd-tool-step-name {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text);
+  background: none;
+  padding: 0;
+}
+
+/* Activity table */
+.sd-activity-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-top: 0.5rem;
+}
+.sd-activity-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+.sd-activity-table thead {
+  background: var(--bg-tertiary);
+}
+.sd-activity-table th {
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.sd-activity-table td {
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  vertical-align: top;
+}
+.sd-activity-error {
+  background: rgba(248, 113, 113, 0.05);
+}
+.sd-activity-error td {
+  color: var(--text);
+}
+.sd-at-time {
+  width: 70px;
+  white-space: nowrap;
+}
+.sd-at-time code {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-dim);
+  background: none;
+  padding: 0;
+}
+.sd-at-dur {
+  width: 70px;
+  text-align: right;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-dim);
+}
+.sd-at-args, .sd-at-result {
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sd-at-expand {
+  width: 24px;
+  text-align: center;
+  padding: 0 4px !important;
+}
+.sd-activity-tool-name {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--accent, #60a5fa);
+  background: none;
+  padding: 0;
+}
+.sd-event-type {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+.sd-truncated {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  background: none;
+  padding: 0;
+}
+.sd-al-row {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.sd-al-row:hover {
+  background: var(--bg-tertiary);
+}
+.sd-al-row.sd-al-expanded {
+  background: var(--bg-secondary);
+}
+.sd-expand-icon {
+  display: inline-block;
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  transition: transform 0.15s;
+  user-select: none;
+}
+.sd-al-expanded .sd-expand-icon {
+  transform: rotate(90deg);
+}
+.sd-al-detail td {
+  padding: 0 !important;
+  border-bottom: 1px solid var(--border);
+}
+.sd-al-detail-inner {
+  padding: 0.6rem 1rem;
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.sd-al-detail-block {
+  min-width: 0;
+}
+.sd-al-detail-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.2rem;
+  font-family: var(--font-mono);
+}
+.sd-al-pre {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 300px;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
+/* Reuse badge styles from list page */
+.sess-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  padding: 1px 7px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  border: 1px solid;
+}
+.sess-badge-open {
+  color: var(--yellow, #facc15);
+  border-color: rgba(250, 204, 21, 0.3);
+  background: rgba(250, 204, 21, 0.08);
+}
+.sess-badge-resolved {
+  color: var(--green, #4ade80);
+  border-color: rgba(74, 222, 128, 0.3);
+  background: rgba(74, 222, 128, 0.08);
+}
+.sess-badge-unresolved {
+  color: var(--red, #f87171);
+  border-color: rgba(248, 113, 113, 0.3);
+  background: rgba(248, 113, 113, 0.08);
+}
+.sess-badge-abandoned {
+  color: var(--text-dim);
+  border-color: var(--border);
+  background: var(--bg-tertiary);
+}
+
+@media (max-width: 799px) {
+  .sd-grid {
+    grid-template-columns: 1fr;
+  }
+  .sd-activity-table td, .sd-activity-table th {
+    padding: 0.3rem 0.4rem;
+  }
+}
+</style>
+
+<script nonce="{{.CSPNonce}}">
+(function() {
+  document.querySelectorAll('.sd-al-row').forEach(function(row) {
+    row.addEventListener('click', function() {
+      var idx = row.getAttribute('data-al-idx');
+      var detail = document.getElementById('al-detail-' + idx);
+      if (!detail) return;
+      var open = detail.style.display !== 'none';
+      // Close all
+      document.querySelectorAll('.sd-al-detail').forEach(function(d) { d.style.display = 'none'; });
+      document.querySelectorAll('.sd-al-row').forEach(function(r) { r.classList.remove('sd-al-expanded'); });
+      if (!open) {
+        detail.style.display = '';
+        row.classList.add('sd-al-expanded');
+      }
+    });
+  });
+})();
+</script>
+{{end}}

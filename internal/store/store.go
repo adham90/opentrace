@@ -122,6 +122,7 @@ type MCPActivityStore interface {
 	Log(ctx context.Context, params LogMCPActivityParams) error
 	Stats(ctx context.Context) (*MCPActivityStats, error)
 	Recent(ctx context.Context, limit int) ([]MCPActivityEvent, error)
+	ListByInvestigationSession(ctx context.Context, sessionID string) ([]MCPActivityEvent, error)
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
 }
 
@@ -259,6 +260,27 @@ type WatchStore interface {
 	DismissAlert(ctx context.Context, id string, reason string) error
 	AcknowledgeAlert(ctx context.Context, id string) error
 	CountPendingAlerts(ctx context.Context) (int, error)
+}
+
+// InvestigationSessionStore manages MCP investigation session lifecycle.
+type InvestigationSessionStore interface {
+	Create(ctx context.Context, params CreateInvestigationSessionParams) (*InvestigationSession, error)
+	GetByID(ctx context.Context, id string) (*InvestigationSession, error)
+	Close(ctx context.Context, id string) error
+	Update(ctx context.Context, id string, params UpdateInvestigationSessionParams) error
+
+	// Session lookup
+	FindRecent(ctx context.Context, params FindRecentSessionParams) (*InvestigationSession, error)
+
+	// Listing / analytics
+	List(ctx context.Context, params ListInvestigationSessionParams) ([]InvestigationSession, error)
+	Stats(ctx context.Context) (*InvestigationSessionStats, error)
+
+	// Retention
+	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
+
+	// Step tracking
+	RecordStep(ctx context.Context, sessionID string, toolName string, isError bool) error
 }
 
 // TraceStore manages distributed trace reassembly status.

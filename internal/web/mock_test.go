@@ -712,6 +712,10 @@ func (m *mockMCPActivityStore) Recent(_ context.Context, limit int) ([]store.MCP
 	return m.events[:limit], nil
 }
 
+func (m *mockMCPActivityStore) ListByInvestigationSession(_ context.Context, _ string) ([]store.MCPActivityEvent, error) {
+	return nil, nil
+}
+
 func (m *mockMCPActivityStore) Prune(_ context.Context, _ time.Duration) (int64, error) {
 	return 0, nil
 }

@@ -3,6 +3,7 @@ package web
 import (
 	"embed"
 	"errors"
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -24,6 +25,55 @@ var staticFS embed.FS
 
 var tmplFuncs = template.FuncMap{
 	"add": func(a, b int) int { return a + b },
+	"truncate": func(s string, n int) string {
+		if len(s) <= n {
+			return s
+		}
+		return s[:n] + "..."
+	},
+	"fmtDuration": func(secs int) string {
+		if secs < 60 {
+			return fmt.Sprintf("%ds", secs)
+		}
+		if secs < 3600 {
+			return fmt.Sprintf("%dm %ds", secs/60, secs%60)
+		}
+		return fmt.Sprintf("%dh %dm", secs/3600, (secs%3600)/60)
+	},
+	"fmtFloat": func(f float64) string {
+		return fmt.Sprintf("%.1f", f)
+	},
+	"deref": func(p *int64) int64 {
+		if p == nil {
+			return 0
+		}
+		return *p
+	},
+	"derefStr": func(p *string) string {
+		if p == nil {
+			return ""
+		}
+		return *p
+	},
+	"derefInt": func(p *int) int {
+		if p == nil {
+			return 0
+		}
+		return *p
+	},
+	"timeAgo": func(t time.Time) string {
+		d := time.Since(t)
+		switch {
+		case d < time.Minute:
+			return "just now"
+		case d < time.Hour:
+			return fmt.Sprintf("%dm ago", int(d.Minutes()))
+		case d < 24*time.Hour:
+			return fmt.Sprintf("%dh ago", int(d.Hours()))
+		default:
+			return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+		}
+	},
 }
 
 var (
@@ -36,7 +86,9 @@ var (
 	usersTmpl       *template.Template
 	connectorsTmpl  *template.Template
 	toolsTmpl       *template.Template
-	onboardingTmpl  *template.Template
+	sessionsTmpl       *template.Template
+	sessionDetailTmpl  *template.Template
+	onboardingTmpl     *template.Template
 )
 
 func init() {
@@ -59,6 +111,10 @@ func init() {
 		"templates/layout.html", "templates/connectors.html"))
 	toolsTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout.html", "templates/tools.html"))
+	sessionsTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
+		"templates/layout.html", "templates/sessions.html"))
+	sessionDetailTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
+		"templates/layout.html", "templates/session_detail.html"))
 	onboardingTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout_minimal.html", "templates/onboarding.html"))
 }
@@ -150,6 +206,11 @@ type pageData struct {
 	QueryEnvOverride    bool
 	MCPName             string
 	MCPNameEnvOverride  bool
+	// Sessions page
+	Sessions       []store.InvestigationSession
+	SessionStats   *store.InvestigationSessionStats
+	SessionDetail  *store.InvestigationSession
+	ActivityEvents []store.MCPActivityEvent
 }
 
 func (s *Server) isDevMode() bool {
@@ -781,6 +842,69 @@ func (s *Server) handleToolsPage(w http.ResponseWriter, r *http.Request) {
 	tmpl := s.getTemplate(toolsTmpl,
 		"internal/web/templates/layout.html",
 		"internal/web/templates/tools.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleSessionsPage(w http.ResponseWriter, r *http.Request) {
+	data := s.newPageData(r, "Sessions", "sessions")
+
+	if s.investigationSessionStore != nil {
+		statusFilter := store.InvestigationSessionStatus(r.URL.Query().Get("status"))
+
+		sessions, err := s.investigationSessionStore.List(r.Context(), store.ListInvestigationSessionParams{
+			Status: statusFilter,
+			Limit:  100,
+		})
+		if err == nil {
+			data.Sessions = sessions
+		}
+
+		stats, err := s.investigationSessionStore.Stats(r.Context())
+		if err == nil {
+			data.SessionStats = stats
+		}
+	}
+
+	tmpl := s.getTemplate(sessionsTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/sessions.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleSessionDetailPage(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing session id")
+		return
+	}
+
+	if s.investigationSessionStore == nil {
+		writeError(w, http.StatusNotFound, "sessions not available")
+		return
+	}
+
+	sess, err := s.investigationSessionStore.GetByID(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get session")
+		return
+	}
+
+	var activities []store.MCPActivityEvent
+	if s.mcpActivityStore != nil {
+		activities, _ = s.mcpActivityStore.ListByInvestigationSession(r.Context(), id)
+	}
+
+	data := s.newPageData(r, "Session Detail", "sessions")
+	data.SessionDetail = sess
+	data.ActivityEvents = activities
+
+	tmpl := s.getTemplate(sessionDetailTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/session_detail.html")
 	tmpl.ExecuteTemplate(w, "layout", data)
 }
 
