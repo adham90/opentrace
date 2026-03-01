@@ -1,18 +1,7 @@
 {{define "content"}}
-<div id="toast-container" aria-live="polite" role="status"></div>
 <div class="term-container" id="term-container" role="region" aria-label="Log viewer">
-  <div class="term-output" id="term-output" aria-live="polite" aria-relevant="additions">
-    <div id="logs-list" data-max-id="{{.MaxLogID}}">
-    {{template "logs-list" .}}
-    </div>
-  </div>
-
-  <button class="term-new-indicator" id="new-indicator" style="display:none" aria-live="polite" aria-label="Scroll to new logs">
-    <span id="new-indicator-count">0</span> new logs
-  </button>
-
   <form id="filter-form" class="term-cmdline" autocomplete="off" role="search" aria-label="Log filter"
-        hx-get="/logs" hx-target="#logs-list" hx-swap="innerHTML" hx-trigger="submit" hx-push-url="false">
+        hx-get="/logs/fragment" hx-target="#logs-list" hx-swap="innerHTML" hx-trigger="submit" hx-push-url="false">
     <input type="hidden" name="service" id="f-service" value="{{.LogFilters.Service}}">
     <input type="hidden" name="level" id="f-level" value="{{.LogFilters.Level}}">
     <input type="hidden" name="event_type" id="f-event-type" value="{{.LogFilters.EventType}}">
@@ -36,6 +25,21 @@
       <div class="ac-dropdown" id="ac-dropdown" style="display:none" role="listbox" aria-label="Filter suggestions"></div>
     </div>
   </form>
+
+  <div class="histogram-container" id="histogram-container">
+    <svg id="histogram-svg" width="100%" height="100%" preserveAspectRatio="none"></svg>
+    <div class="histogram-tooltip" id="histogram-tooltip" style="display:none"></div>
+  </div>
+
+  <div class="term-output" id="term-output" aria-live="polite" aria-relevant="additions">
+    <div id="logs-list" data-max-id="{{.MaxLogID}}">
+    {{template "logs-list" .}}
+    </div>
+  </div>
+
+  <button class="term-new-indicator" id="new-indicator" style="display:none" aria-live="polite" aria-label="Scroll to new logs">
+    <span id="new-indicator-count">0</span> new logs
+  </button>
 </div>
 
 <style nonce="{{.CSPNonce}}">
@@ -129,56 +133,211 @@
   flex-shrink: 0;
 }
 
+/* ── Error badge ───────────────────────────────────────────── */
+.term-error-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  margin-left: 6px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--red);
+  border-radius: 3px;
+  color: var(--red);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  text-decoration: none;
+  flex-shrink: 0;
+  line-height: 1.5;
+}
+.term-error-badge:hover {
+  background: rgba(239, 68, 68, 0.2);
+  text-decoration: none;
+}
+.badge-count:empty::after {
+  content: '\2026';
+  color: var(--text-dim);
+}
+
 /* ── Expanded detail ───────────────────────────────────────── */
 .term-detail {
   display: none;
-  padding: 6px 12px 8px 116px;
-  font-size: 11px;
-  line-height: 1.5;
+  padding: 12px 16px 14px 16px;
+  font-size: 12px;
+  line-height: 1.6;
   background: var(--bg-secondary);
-  border-left: 2px solid var(--border);
+  border-left: 3px solid var(--cyan);
   margin: 0;
 }
 .term-line.expanded + .term-detail { display: block; }
-.term-line.expanded { background: var(--bg-secondary); }
+.term-line.expanded { background: var(--bg-secondary); border-left-color: var(--cyan) !important; }
+
+/* Detail header with actions */
+.term-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.term-detail-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-bright);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.term-detail-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Cards for grouping related fields */
+.term-detail-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.term-detail-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.term-detail-card-full {
+  grid-column: 1 / -1;
+}
+.term-detail-card-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.term-detail-card-title .card-icon {
+  font-size: 12px;
+  opacity: .6;
+}
 
 .term-detail-row {
   display: flex;
-  gap: 12px;
-  padding: 1px 0;
+  gap: 10px;
+  padding: 2px 0;
+  align-items: baseline;
 }
 .term-detail-key {
   color: var(--text-dim);
-  min-width: 90px;
+  min-width: 100px;
   flex-shrink: 0;
   user-select: none;
+  font-size: 11px;
 }
 .term-detail-key::after { content: ':'; }
 .term-detail-val {
   color: var(--text);
-  word-break: break-all;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
-.term-detail-section {
-  padding: 4px 0;
+.term-detail-val-highlight {
+  color: var(--text-bright);
+  font-weight: 500;
 }
-.term-detail-section + .term-detail-section {
-  border-top: 1px solid var(--border);
-  margin-top: 4px;
-  padding-top: 6px;
+.term-detail-val-link {
+  color: var(--cyan);
+  text-decoration: none;
+  cursor: pointer;
 }
-.term-detail-section-title {
-  color: var(--text-dim);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 2px;
+.term-detail-val-link:hover { text-decoration: underline; }
+.term-detail-val-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  background: var(--bg-tertiary);
+  padding: 1px 5px;
+  border-radius: 3px;
 }
+
+/* Stat pills for request performance */
+.term-detail-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.term-detail-stat {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+}
+.term-detail-stat-label { color: var(--text-dim); }
+.term-detail-stat-val { font-weight: 600; color: var(--text-bright); }
+.term-detail-stat-val.stat-ok { color: var(--green); }
+.term-detail-stat-val.stat-warn { color: var(--yellow); }
+.term-detail-stat-val.stat-err { color: var(--red); }
+
+/* Status badge in request card */
 .term-detail-status { font-weight: 600; }
 .term-detail-status.status-2xx { color: var(--green); }
 .term-detail-status.status-3xx { color: var(--cyan); }
 .term-detail-status.status-4xx { color: var(--yellow); }
 .term-detail-status.status-5xx { color: var(--red); }
-.term-detail-flag { color: var(--red); font-weight: 600; }
+.term-detail-flag {
+  color: var(--red);
+  font-weight: 600;
+  background: var(--red-dim);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+/* Full-width message display */
+.term-detail-message {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 10px;
+}
+
+/* Stack trace / pre blocks */
+.term-detail-row-block {
+  flex-direction: column;
+  gap: 4px;
+}
+.term-detail-card-full .term-detail-row-block {
+  grid-column: 1 / -1;
+}
+.term-detail-pre {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--text);
+  margin: 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
 
 .term-copy-btn {
   background: var(--bg-tertiary);
@@ -204,7 +363,7 @@
 /* ── New logs indicator ────────────────────────────────────── */
 .term-new-indicator {
   position: absolute;
-  bottom: 80px;
+  top: 140px;
   left: 50%;
   transform: translateX(-50%);
   background: var(--bg-tertiary);
@@ -221,10 +380,10 @@
 }
 .term-new-indicator:hover { background: var(--bg-secondary); }
 
-/* ── Command line ──────────────────────────────────────────── */
+/* ── Command line (at top) ─────────────────────────────────── */
 .term-cmdline {
   flex-shrink: 0;
-  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
   padding: 0;
 }
@@ -235,6 +394,7 @@
   padding: 6px 12px;
   gap: 8px;
   flex: 1;
+  position: relative;
 }
 
 .term-prompt-symbol {
@@ -337,6 +497,57 @@
   font-size: 13px;
 }
 
+/* ── Histogram ─────────────────────────────────────────────── */
+.histogram-container {
+  flex-shrink: 0;
+  height: 60px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  position: relative;
+  cursor: crosshair;
+}
+.histogram-container svg {
+  display: block;
+}
+.histogram-bar {
+  fill: var(--green);
+  opacity: 0.6;
+  transition: opacity 0.1s;
+}
+.histogram-bar:hover {
+  opacity: 1;
+}
+.histogram-bar-error {
+  fill: var(--red);
+  opacity: 0.8;
+  transition: opacity 0.1s;
+}
+.histogram-bar-error:hover {
+  opacity: 1;
+}
+.histogram-tooltip {
+  position: absolute;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text);
+  pointer-events: none;
+  z-index: 20;
+  white-space: nowrap;
+}
+.histogram-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
 /* ── Loading sentinel ──────────────────────────────────────── */
 .logs-sentinel {
   padding: 8px 12px;
@@ -384,21 +595,24 @@
   .term-ts { min-width: auto; font-size: 10px; }
   .term-source { width: auto; min-width: 60px; max-width: 80px; }
   .term-msg { flex-basis: 100%; padding-left: 0; margin-top: 1px; }
-  .term-detail { padding-left: 12px; }
+  .term-detail { padding: 10px 12px; }
+  .term-detail-cards { grid-template-columns: 1fr; }
+  .term-detail-header { flex-direction: column; align-items: flex-start; gap: 6px; }
+  .term-detail-stats { flex-direction: column; }
+  .histogram-container { height: 40px; }
 }
 
-/* ── Autocomplete dropdown ─────────────────────────────────── */
-.term-cmdline-inner { position: relative; }
+/* ── Autocomplete dropdown (opens downward) ────────────────── */
 .ac-dropdown {
   position: absolute;
-  bottom: 100%;
+  top: 100%;
   left: 0;
   right: 0;
   max-height: 200px;
   overflow-y: auto;
   background: var(--bg-secondary);
-  border-top: 1px solid var(--border);
-  border-bottom: none;
+  border-bottom: 1px solid var(--border);
+  border-top: none;
   font-size: 12px;
   font-family: var(--font-mono);
   z-index: 200;
@@ -483,45 +697,36 @@
     source_file: '{{.LogFilters.SourceFile}}',
     start: '',
     end: '',
-    metadata: {}  // key-value pairs for metadata filters
+    metadata: {}
   };
 
-  // ── Auto-scroll state ─────────────────────────────────────
-  var autoScroll = true;
+  // ── Scroll state (newest at top) ───────────────────────────
   var pendingNew = 0;
-  var userScrolling = false;
 
-  function isNearBottom() {
-    var threshold = 60;
-    return (termOutput.scrollHeight - termOutput.scrollTop - termOutput.clientHeight) < threshold;
+  function isNearTop() {
+    return termOutput.scrollTop < 60;
   }
 
-  function scrollToBottom() {
-    termOutput.scrollTop = termOutput.scrollHeight;
-    autoScroll = true;
+  function scrollToTop() {
+    termOutput.scrollTop = 0;
     pendingNew = 0;
     newIndicator.style.display = 'none';
   }
-  window.scrollToBottom = scrollToBottom;
+  window.scrollToTop = scrollToTop;
 
   termOutput.addEventListener('scroll', function() {
-    if (isNearBottom()) {
-      autoScroll = true;
+    if (isNearTop()) {
       pendingNew = 0;
       newIndicator.style.display = 'none';
-    } else {
-      autoScroll = false;
     }
   });
 
-  // Initial scroll to bottom
-  setTimeout(scrollToBottom, 50);
-
   // ── Inline detail expand/collapse ──────────────────────────
   document.addEventListener('click', function(e) {
-    // Only toggle when clicking the summary row, not the detail panel
     var line = e.target.closest('.term-line');
     if (!line) return;
+    // Don't toggle if clicking the error badge link
+    if (e.target.closest('.term-error-badge')) return;
     var entry = line.closest('.term-entry');
     if (!entry) return;
     if (window.getSelection().toString()) return;
@@ -567,113 +772,207 @@
   function renderInlineDetail(el, log) {
     var html = '';
 
-    // Copy button
-    html += '<button class="term-copy-btn" title="Copy log details" aria-label="Copy log details">Copy</button>';
-
-    // Identity row
-    html += '<div class="term-detail-section">';
-    html += dRow('id', log.id);
-    if (log.trace_id) html += dRow('trace_id', log.trace_id);
-    if (log.span_id) html += dRow('span_id', log.span_id);
-    if (log.parent_span_id) html += dRow('parent_span_id', log.parent_span_id);
-    if (log.service) html += dRow('service', log.service);
-    if (log.event_type) html += dRow('event_type', log.event_type);
-    if (log.request_id) html += dRow('request_id', log.request_id);
-    if (log.environment) html += dRow('environment', log.environment);
-    if (log.commit_hash) html += dRow('commit_hash', log.commit_hash);
-    if (log.exception_class) html += dRow('exception_class', log.exception_class);
-    if (log.error_fingerprint) html += dRow('error_fingerprint', log.error_fingerprint);
-    if (log.source_file) {
-      var src = log.source_file;
-      if (log.source_line > 0) src += ':' + log.source_line;
-      html += dRow('source', src);
+    // ── Header bar with level badge, timestamp, and actions ──
+    var levelColors = { ERROR: 'var(--red)', FATAL: 'var(--red)', WARN: 'var(--yellow)', INFO: 'var(--green)', DEBUG: 'var(--text-dim)' };
+    var lvlColor = levelColors[log.level] || 'var(--text-dim)';
+    html += '<div class="term-detail-header">';
+    html += '<div class="term-detail-title">';
+    html += '<span style="color:' + lvlColor + '">' + escH(log.level) + '</span>';
+    html += '<span style="color:var(--text-dim);font-weight:400;font-size:11px">#' + log.id + '</span>';
+    if (log.timestamp) {
+      var ts = new Date(log.timestamp);
+      html += '<span style="color:var(--text-dim);font-weight:400;font-size:11px">' + ts.toLocaleString() + '</span>';
     }
     html += '</div>';
+    html += '<div class="term-detail-actions">';
+    if (log.error_fingerprint) {
+      html += '<a class="term-copy-btn" href="/errors/' + encodeURIComponent(log.error_fingerprint) + '" style="text-decoration:none" title="View error group">Error Group</a>';
+    }
+    if (log.request_id) {
+      html += '<button class="term-copy-btn" onclick="event.stopPropagation();setFilter(\'request_id\',\'' + escH(log.request_id) + '\')" title="Filter by this request">Request</button>';
+    }
+    if (log.trace_id) {
+      html += '<button class="term-copy-btn" onclick="event.stopPropagation();setFilter(\'query\',\'' + escH(log.trace_id) + '\')" title="Search this trace">Trace</button>';
+    }
+    html += '<button class="term-copy-btn" title="Copy log as JSON" aria-label="Copy log details">Copy</button>';
+    html += '</div></div>';
 
-    // Request Summary
+    // ── Full message ──
+    html += '<div class="term-detail-message">' + escH(log.message) + '</div>';
+
+    // ── Identity + Context cards ──
+    html += '<div class="term-detail-cards">';
+
+    // Identity card
+    html += '<div class="term-detail-card">';
+    html += '<div class="term-detail-card-title">Identity</div>';
+    if (log.service) html += dRow('service', log.service);
+    if (log.environment) html += dRow('environment', log.environment);
+    if (log.event_type) html += dRow('event_type', log.event_type);
+    if (log.commit_hash) html += dRow('commit_hash', log.commit_hash);
+    if (log.user_id) html += dRow('user_id', log.user_id);
+    if (log.session_id) html += dRow('session_id', log.session_id);
+    html += '</div>';
+
+    // Tracing card
+    var hasTracing = log.trace_id || log.span_id || log.request_id;
+    if (hasTracing) {
+      html += '<div class="term-detail-card">';
+      html += '<div class="term-detail-card-title">Tracing</div>';
+      if (log.trace_id) html += '<div class="term-detail-row"><span class="term-detail-key">trace_id</span><span class="term-detail-val term-detail-val-mono">' + escH(log.trace_id) + '</span></div>';
+      if (log.span_id) html += '<div class="term-detail-row"><span class="term-detail-key">span_id</span><span class="term-detail-val term-detail-val-mono">' + escH(log.span_id) + '</span></div>';
+      if (log.parent_span_id) html += '<div class="term-detail-row"><span class="term-detail-key">parent_span</span><span class="term-detail-val term-detail-val-mono">' + escH(log.parent_span_id) + '</span></div>';
+      if (log.request_id) html += '<div class="term-detail-row"><span class="term-detail-key">request_id</span><span class="term-detail-val term-detail-val-mono">' + escH(log.request_id) + '</span></div>';
+      html += '</div>';
+    }
+
+    // Error card (if exception)
+    if (log.exception_class || log.error_fingerprint) {
+      html += '<div class="term-detail-card' + (hasTracing ? '' : '') + '" style="border-color:var(--red-dim)">';
+      html += '<div class="term-detail-card-title" style="color:var(--red)">Error</div>';
+      if (log.exception_class) html += '<div class="term-detail-row"><span class="term-detail-key">class</span><span class="term-detail-val term-detail-val-highlight" style="color:var(--red)">' + escH(log.exception_class) + '</span></div>';
+      if (log.error_fingerprint) html += '<div class="term-detail-row"><span class="term-detail-key">fingerprint</span><span class="term-detail-val term-detail-val-mono">' + escH(log.error_fingerprint) + '</span></div>';
+      if (log.source_file) {
+        var src = log.source_file;
+        if (log.source_line > 0) src += ':' + log.source_line;
+        html += '<div class="term-detail-row"><span class="term-detail-key">source</span><span class="term-detail-val term-detail-val-mono">' + escH(src) + '</span></div>';
+      }
+      html += '</div>';
+    } else if (log.source_file) {
+      html += '<div class="term-detail-card">';
+      html += '<div class="term-detail-card-title">Source</div>';
+      var src = log.source_file;
+      if (log.source_line > 0) src += ':' + log.source_line;
+      html += '<div class="term-detail-row"><span class="term-detail-key">file</span><span class="term-detail-val term-detail-val-mono">' + escH(src) + '</span></div>';
+      html += '</div>';
+    }
+
+    html += '</div>'; // end cards
+
+    // ── Request Summary ──
     var rs = log.request_summary;
     if (rs) {
-      html += '<div class="term-detail-section">';
-      html += '<div class="term-detail-section-title">Request</div>';
-      if (rs.method || rs.path) html += dRow('endpoint', (rs.method || '') + ' ' + (rs.path || ''));
-      if (rs.controller || rs.action) html += dRow('action', (rs.controller || '') + '#' + (rs.action || ''));
-      if (rs.status) {
-        var sc = statusClass(rs.status);
-        html += '<div class="term-detail-row"><span class="term-detail-key">status</span>' +
-          '<span class="term-detail-val term-detail-status ' + sc + '">' + rs.status + '</span></div>';
+      // Performance stat pills
+      html += '<div class="term-detail-stats">';
+      if (rs.method || rs.path) {
+        var sc = rs.status ? statusClass(rs.status) : '';
+        html += '<div class="term-detail-stat">';
+        html += '<span class="term-detail-stat-label">' + escH((rs.method || 'GET') + ' ' + (rs.path || '/')) + '</span>';
+        if (rs.status) html += '<span class="term-detail-stat-val ' + (sc ? 'term-detail-status ' + sc : '') + '">' + rs.status + '</span>';
+        html += '</div>';
       }
-      if (rs.duration_ms) html += dRow('duration', rs.duration_ms.toFixed(1) + ' ms');
-      if (rs.db_time_ms) html += dRow('db_time', rs.db_time_ms.toFixed(1) + ' ms');
-      if (rs.view_time_ms) html += dRow('view_time', rs.view_time_ms.toFixed(1) + ' ms');
-      if (rs.time_breakdown) {
-        var tb = typeof rs.time_breakdown === 'string' ? JSON.parse(rs.time_breakdown) : rs.time_breakdown;
-        html += dRow('breakdown', 'sql:' + tb.sql_pct + '% view:' + tb.view_pct + '% http:' + tb.http_pct + '% other:' + tb.other_pct + '%');
+      if (rs.duration_ms) {
+        var dc = rs.duration_ms > 1000 ? 'stat-err' : rs.duration_ms > 300 ? 'stat-warn' : 'stat-ok';
+        html += '<div class="term-detail-stat"><span class="term-detail-stat-label">duration</span><span class="term-detail-stat-val ' + dc + '">' + rs.duration_ms.toFixed(1) + ' ms</span></div>';
+      }
+      if (rs.sql_count > 0) {
+        var sqc = rs.sql_count > 20 ? 'stat-err' : rs.sql_count > 10 ? 'stat-warn' : '';
+        html += '<div class="term-detail-stat"><span class="term-detail-stat-label">SQL</span><span class="term-detail-stat-val ' + sqc + '">' + rs.sql_count + ' queries</span></div>';
+      }
+      if (rs.n_plus_one) {
+        html += '<div class="term-detail-stat" style="border-color:var(--red-dim)"><span class="term-detail-flag">N+1 DETECTED</span></div>';
+      }
+      if (rs.view_count > 0) {
+        html += '<div class="term-detail-stat"><span class="term-detail-stat-label">views</span><span class="term-detail-stat-val">' + rs.view_count + '</span></div>';
+      }
+      if (rs.cache_reads > 0) {
+        var ratio = rs.cache_hit_ratio ? (rs.cache_hit_ratio * 100).toFixed(0) + '%' : '-';
+        html += '<div class="term-detail-stat"><span class="term-detail-stat-label">cache hit</span><span class="term-detail-stat-val">' + ratio + '</span></div>';
+      }
+      if (rs.memory_delta_mb) {
+        var mc = rs.memory_delta_mb > 50 ? 'stat-err' : rs.memory_delta_mb > 10 ? 'stat-warn' : '';
+        html += '<div class="term-detail-stat"><span class="term-detail-stat-label">mem &Delta;</span><span class="term-detail-stat-val ' + mc + '">' + rs.memory_delta_mb.toFixed(1) + ' MB</span></div>';
       }
       html += '</div>';
 
-      if (rs.sql_count > 0) {
-        html += '<div class="term-detail-section">';
-        html += '<div class="term-detail-section-title">SQL (' + rs.sql_count + ' queries' + (rs.sql_total_ms ? ', ' + rs.sql_total_ms.toFixed(1) + ' ms' : '') + ')</div>';
-        if (rs.sql_slowest_ms) html += dRow('slowest', rs.sql_slowest_ms.toFixed(1) + ' ms' + (rs.sql_slowest_name ? '  ' + escH(rs.sql_slowest_name) : ''));
-        if (rs.n_plus_one) html += '<div class="term-detail-row"><span class="term-detail-key">N+1</span><span class="term-detail-val term-detail-flag">DETECTED</span></div>';
-        if (rs.duplicate_queries > 0) {
-          html += dRow('duplicates', rs.duplicate_queries + ' queries, worst: ' + rs.worst_duplicate_count + 'x');
-        }
-        if (rs.top_duplicates) {
-          var dups = typeof rs.top_duplicates === 'string' ? JSON.parse(rs.top_duplicates) : rs.top_duplicates;
-          dups.forEach(function(d) {
-            html += dRow('dup ' + d.count + 'x', d.fingerprint);
-          });
+      // Detailed cards for sub-sections
+      html += '<div class="term-detail-cards">';
+
+      // Request details card
+      if (rs.controller || rs.action || rs.db_time_ms || rs.view_time_ms || rs.time_breakdown) {
+        html += '<div class="term-detail-card">';
+        html += '<div class="term-detail-card-title">Request Details</div>';
+        if (rs.controller || rs.action) html += dRow('action', (rs.controller || '') + '#' + (rs.action || ''));
+        if (rs.db_time_ms) html += dRow('db_time', rs.db_time_ms.toFixed(1) + ' ms');
+        if (rs.view_time_ms) html += dRow('view_time', rs.view_time_ms.toFixed(1) + ' ms');
+        if (rs.time_breakdown) {
+          var tb = typeof rs.time_breakdown === 'string' ? JSON.parse(rs.time_breakdown) : rs.time_breakdown;
+          html += dRow('breakdown', 'sql:' + tb.sql_pct + '% view:' + tb.view_pct + '% http:' + tb.http_pct + '% other:' + tb.other_pct + '%');
         }
         html += '</div>';
       }
 
+      // SQL details card
+      if (rs.sql_count > 0) {
+        html += '<div class="term-detail-card">';
+        html += '<div class="term-detail-card-title">SQL</div>';
+        html += dRow('queries', rs.sql_count);
+        if (rs.sql_total_ms) html += dRow('total', rs.sql_total_ms.toFixed(1) + ' ms');
+        if (rs.sql_slowest_ms) html += dRow('slowest', rs.sql_slowest_ms.toFixed(1) + ' ms' + (rs.sql_slowest_name ? ' (' + escH(rs.sql_slowest_name) + ')' : ''));
+        if (rs.duplicate_queries > 0) html += dRow('duplicates', rs.duplicate_queries + ' (worst: ' + rs.worst_duplicate_count + 'x)');
+        if (rs.top_duplicates) {
+          var dups = typeof rs.top_duplicates === 'string' ? JSON.parse(rs.top_duplicates) : rs.top_duplicates;
+          dups.forEach(function(d) { html += dRow('dup ' + d.count + 'x', d.fingerprint); });
+        }
+        html += '</div>';
+      }
+
+      // Views card
       if (rs.view_count > 0) {
-        html += '<div class="term-detail-section">';
-        html += '<div class="term-detail-section-title">Views (' + rs.view_count + (rs.view_total_ms ? ', ' + rs.view_total_ms.toFixed(1) + ' ms' : '') + ')</div>';
+        html += '<div class="term-detail-card">';
+        html += '<div class="term-detail-card-title">Views</div>';
+        html += dRow('count', rs.view_count);
+        if (rs.view_total_ms) html += dRow('total', rs.view_total_ms.toFixed(1) + ' ms');
         if (rs.view_slowest_ms) html += dRow('slowest', rs.view_slowest_ms.toFixed(1) + ' ms');
         if (rs.view_slowest_template) html += dRow('template', rs.view_slowest_template);
         html += '</div>';
       }
 
+      // Cache card
       if (rs.cache_reads > 0 || rs.cache_writes > 0) {
-        html += '<div class="term-detail-section">';
-        html += '<div class="term-detail-section-title">Cache</div>';
+        html += '<div class="term-detail-card">';
+        html += '<div class="term-detail-card-title">Cache</div>';
         html += dRow('reads', rs.cache_reads);
         html += dRow('hits', rs.cache_hits);
         html += dRow('writes', rs.cache_writes);
-        if (rs.cache_hit_ratio) html += dRow('hit_ratio', (rs.cache_hit_ratio * 100).toFixed(0) + '%');
+        if (rs.cache_hit_ratio) html += dRow('hit ratio', (rs.cache_hit_ratio * 100).toFixed(0) + '%');
         html += '</div>';
       }
 
+      // HTTP External card
       if (rs.http_external_count > 0) {
-        html += '<div class="term-detail-section">';
-        html += '<div class="term-detail-section-title">HTTP External (' + rs.http_external_count + ')</div>';
+        html += '<div class="term-detail-card">';
+        html += '<div class="term-detail-card-title">HTTP External</div>';
+        html += dRow('requests', rs.http_external_count);
         if (rs.http_external_total_ms) html += dRow('total', rs.http_external_total_ms.toFixed(1) + ' ms');
         if (rs.http_slowest_ms) html += dRow('slowest', rs.http_slowest_ms.toFixed(1) + ' ms');
         if (rs.http_slowest_host) html += dRow('host', rs.http_slowest_host);
         html += '</div>';
       }
 
+      // Memory card
       if (rs.memory_delta_mb) {
-        html += '<div class="term-detail-section">';
-        html += '<div class="term-detail-section-title">Memory</div>';
+        html += '<div class="term-detail-card">';
+        html += '<div class="term-detail-card-title">Memory</div>';
         if (rs.memory_before_mb) html += dRow('before', rs.memory_before_mb.toFixed(1) + ' MB');
         if (rs.memory_after_mb) html += dRow('after', rs.memory_after_mb.toFixed(1) + ' MB');
         html += dRow('delta', rs.memory_delta_mb.toFixed(1) + ' MB');
         html += '</div>';
       }
+
+      html += '</div>'; // end request cards
     }
 
-    // Metadata
+    // ── Metadata ──
     if (log.metadata && Object.keys(log.metadata).length > 0) {
-      html += '<div class="term-detail-section">';
-      html += '<div class="term-detail-section-title">Metadata</div>';
+      html += '<div class="term-detail-cards">';
+      html += '<div class="term-detail-card term-detail-card-full">';
+      html += '<div class="term-detail-card-title">Metadata</div>';
       Object.keys(log.metadata).sort().forEach(function(k) {
         var v = log.metadata[k];
         html += renderMetadataField(k, v);
       });
-      html += '</div>';
+      html += '</div></div>';
     }
 
     el.innerHTML = html;
@@ -686,6 +985,18 @@
 
   function renderMetadataField(key, val) {
     if (val == null) return dRow(key, '');
+
+    if (key === 'stack_trace' || key === 'backtrace') {
+      var parsed = val;
+      if (typeof val === 'string') {
+        try { parsed = JSON.parse(val); } catch(e) { /* keep as string */ }
+      }
+      var text = Array.isArray(parsed) ? parsed.join('\n') : String(parsed);
+      return '<div class="term-detail-row term-detail-row-block">' +
+        '<span class="term-detail-key">' + escH(key) + '</span>' +
+        '<pre class="term-detail-pre">' + escH(text) + '</pre></div>';
+    }
+
     var parsed = val;
     if (typeof val === 'string') {
       try { parsed = JSON.parse(val); } catch(e) { return dRow(key, val); }
@@ -741,14 +1052,6 @@
         });
         return h;
 
-      case 'backtrace':
-        if (!Array.isArray(parsed)) return dRow(key, String(parsed));
-        var h = '';
-        parsed.forEach(function(frame) {
-          h += dRow('', frame);
-        });
-        return h;
-
       default:
         if (typeof parsed === 'object') return dRow(key, JSON.stringify(parsed));
         return dRow(key, String(parsed));
@@ -790,14 +1093,11 @@
     document.getElementById('f-error-fingerprint').value = filters.error_fingerprint;
     document.getElementById('f-source-file').value = filters.source_file;
 
-    // Remove old dynamic fields
     form.querySelectorAll('.dynamic-field').forEach(function(el) { el.remove(); });
 
-    // Add start/end if present
     if (filters.start) addHiddenField('start', filters.start);
     if (filters.end) addHiddenField('end', filters.end);
 
-    // Add metadata fields
     Object.keys(filters.metadata).forEach(function(k) {
       if (filters.metadata[k]) addHiddenField('meta.' + k, filters.metadata[k]);
     });
@@ -822,18 +1122,10 @@
 
   function renderFilterChips() {
     var html = '';
-    if (filters.level) {
-      html += chip('level', filters.level);
-    }
-    if (filters.service) {
-      html += chip('service', filters.service);
-    }
-    if (filters.event_type) {
-      html += chip('type', filters.event_type);
-    }
-    if (filters.time_range) {
-      html += chip('time', filters.time_range);
-    }
+    if (filters.level) html += chip('level', filters.level);
+    if (filters.service) html += chip('service', filters.service);
+    if (filters.event_type) html += chip('type', filters.event_type);
+    if (filters.time_range) html += chip('time', filters.time_range);
     if (filters.start || filters.end) {
       var timeLabel = '';
       if (filters.start && filters.end) {
@@ -845,28 +1137,13 @@
       }
       html += chip('range', timeLabel);
     }
-    if (filters.environment) {
-      html += chip('env', filters.environment);
-    }
-    if (filters.commit_hash) {
-      html += chip('commit', filters.commit_hash);
-    }
-    if (filters.request_id) {
-      html += chip('rid', filters.request_id);
-    }
-    if (filters.exception_class) {
-      html += chip('error', filters.exception_class);
-    }
-    if (filters.error_fingerprint) {
-      html += chip('fingerprint', filters.error_fingerprint);
-    }
-    if (filters.source_file) {
-      html += chip('file', filters.source_file);
-    }
-    if (filters.query) {
-      html += chip('search', filters.query);
-    }
-    // Metadata chips
+    if (filters.environment) html += chip('env', filters.environment);
+    if (filters.commit_hash) html += chip('commit', filters.commit_hash);
+    if (filters.request_id) html += chip('rid', filters.request_id);
+    if (filters.exception_class) html += chip('error', filters.exception_class);
+    if (filters.error_fingerprint) html += chip('fingerprint', filters.error_fingerprint);
+    if (filters.source_file) html += chip('file', filters.source_file);
+    if (filters.query) html += chip('search', filters.query);
     Object.keys(filters.metadata).forEach(function(k) {
       html += chip('meta.' + k, filters.metadata[k]);
     });
@@ -877,7 +1154,6 @@
       activeFiltersEl.classList.remove('has-filters');
     }
 
-    // Bind remove handlers
     activeFiltersEl.querySelectorAll('.term-filter-chip').forEach(function(el) {
       el.addEventListener('click', function() {
         var k = el.getAttribute('data-filter-key');
@@ -960,6 +1236,7 @@
   function applyFilters() {
     pushFilterURL();
     htmx.trigger(form, 'submit');
+    fetchHistogram();
   }
 
   // ── Command line parsing ──────────────────────────────────
@@ -967,7 +1244,6 @@
     input = input.trim();
     if (!input) return;
 
-    // "clear" command resets everything
     if (input === 'clear') {
       clearAllFilters();
       cmdInput.value = '';
@@ -975,7 +1251,6 @@
       return;
     }
 
-    // Parse key:value pairs and bare text
     var parts = input.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
     var searchParts = [];
     var changed = false;
@@ -1042,7 +1317,6 @@
   var filterOrder = ['query', 'time_range', 'event_type', 'service', 'level', 'environment', 'commit_hash', 'request_id', 'exception_class', 'error_fingerprint', 'source_file'];
 
   function removeLastFilter() {
-    // Check metadata first
     var metaKeys = Object.keys(filters.metadata);
     if (metaKeys.length > 0) {
       delete filters.metadata[metaKeys[metaKeys.length - 1]];
@@ -1051,7 +1325,6 @@
       applyFilters();
       return true;
     }
-    // Check custom time range
     if (filters.start || filters.end) {
       filters.start = '';
       filters.end = '';
@@ -1113,7 +1386,7 @@
     }
   });
 
-  // ── Live polling ──────────────────────────────────────────
+  // ── Live polling (prepend new at top) ──────────────────────
   var live = true;
   var timer = null;
   var POLL_INTERVAL = 2000;
@@ -1158,35 +1431,36 @@
         if (listEl) {
           listEl.innerHTML = '<div class="log-list">' + container.innerHTML + '</div>';
         }
-        if (autoScroll) scrollToBottom();
+        scheduleBadgeFetch();
         return;
       }
 
-      // Append new entries at the bottom
+      // Prepend new entries at the top (newest first)
       var newEntries = container.querySelectorAll('.term-entry');
       var count = 0;
-      for (var i = 0; i < newEntries.length; i++) {
+      for (var i = newEntries.length - 1; i >= 0; i--) {
         newEntries[i].classList.add('term-entry-new');
-        logList.appendChild(newEntries[i]);
+        logList.insertBefore(newEntries[i], logList.firstChild);
         count++;
       }
 
-      // Also handle legacy .log-entry format from logs-new template
+      // Also handle legacy .log-entry format
       var legacyEntries = container.querySelectorAll('.log-entry');
-      for (var j = 0; j < legacyEntries.length; j++) {
+      for (var j = legacyEntries.length - 1; j >= 0; j--) {
         legacyEntries[j].classList.add('log-entry-new');
-        logList.appendChild(legacyEntries[j]);
+        logList.insertBefore(legacyEntries[j], logList.firstChild);
         count++;
       }
 
       if (count > 0) {
-        if (autoScroll) {
-          scrollToBottom();
+        if (isNearTop()) {
+          scrollToTop();
         } else {
           pendingNew += count;
           newIndicatorCount.textContent = pendingNew;
           newIndicator.style.display = '';
         }
+        scheduleBadgeFetch();
       }
     }).catch(function(){});
   }
@@ -1209,7 +1483,6 @@
       liveBadge.setAttribute('aria-pressed', 'true');
       liveLabel.textContent = 'LIVE';
       startPolling();
-      scrollToBottom();
     } else {
       liveBadge.classList.remove('live-on');
       liveBadge.classList.add('live-off');
@@ -1223,14 +1496,14 @@
   liveBadge.classList.add('live-on');
   startPolling();
 
-  // ── Infinite scroll upward (load older) ───────────────────
+  // ── Infinite scroll downward (load older) ──────────────────
   var loadingOlder = false;
   var currentOffset = {{.LogOffset}} + {{.LogLimit}};
   var hasMoreOlder = {{if .HasMore}}true{{else}}false{{end}};
 
   termOutput.addEventListener('scroll', function() {
     if (loadingOlder || !hasMoreOlder) return;
-    if (termOutput.scrollTop < 80) {
+    if ((termOutput.scrollHeight - termOutput.scrollTop - termOutput.clientHeight) < 80) {
       loadOlderLogs();
     }
   });
@@ -1243,10 +1516,7 @@
     params.set('offset', currentOffset);
     params.set('limit', '50');
 
-    var url = '/logs?' + params.toString();
-
-    // Save scroll position so we can restore after prepend
-    var prevHeight = termOutput.scrollHeight;
+    var url = '/logs/fragment?' + params.toString();
 
     fetch(url, { headers: { 'HX-Request': 'true' } })
       .then(function(r) { return r.text(); })
@@ -1264,7 +1534,6 @@
           return;
         }
 
-        // Check if response contains a sentinel (hasMore indicator)
         var temp = document.createElement('div');
         temp.innerHTML = html;
 
@@ -1276,7 +1545,6 @@
           hasMoreOlder = false;
         }
 
-        // Count the entries we got
         var entries = temp.querySelectorAll('.term-entry, .log-entry');
         if (entries.length === 0) {
           hasMoreOlder = false;
@@ -1284,24 +1552,226 @@
           return;
         }
 
-        // Prepend entries at top of the list
+        // Append older entries at bottom
         var frag = document.createDocumentFragment();
         for (var i = 0; i < entries.length; i++) {
           frag.appendChild(entries[i]);
         }
-        logList.insertBefore(frag, logList.firstChild);
+        logList.appendChild(frag);
 
         currentOffset += entries.length;
-
-        // Restore scroll position
-        var newHeight = termOutput.scrollHeight;
-        termOutput.scrollTop += (newHeight - prevHeight);
-
         loadingOlder = false;
+        scheduleBadgeFetch();
       })
       .catch(function() {
         loadingOlder = false;
       });
+  }
+
+  // ── Histogram (pure SVG) ───────────────────────────────────
+  var histogramSvg = document.getElementById('histogram-svg');
+  var histogramTooltip = document.getElementById('histogram-tooltip');
+  var histogramContainer = document.getElementById('histogram-container');
+  var histogramTimer = null;
+  var lastBuckets = [];
+
+  function fetchHistogram() {
+    var params = new URLSearchParams();
+    var tr = filters.time_range || '1h';
+    params.set('time_range', tr);
+    if (filters.service) params.set('service', filters.service);
+    if (filters.level) params.set('level', filters.level);
+
+    fetch('/api/logs/histogram?' + params.toString())
+      .then(function(r) { return r.json(); })
+      .then(function(buckets) {
+        if (!Array.isArray(buckets)) {
+          lastBuckets = [];
+          renderHistogram([]);
+          return;
+        }
+        lastBuckets = buckets;
+        renderHistogram(buckets);
+      })
+      .catch(function() {
+        lastBuckets = [];
+        histogramSvg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="var(--text-dim)" font-size="11" font-family="var(--font-mono)">histogram unavailable</text>';
+      });
+  }
+
+  function renderHistogram(buckets) {
+    if (!buckets || buckets.length === 0) {
+      histogramSvg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="var(--text-dim)" font-size="11" font-family="var(--font-mono)">no data</text>';
+      return;
+    }
+
+    var rect = histogramContainer.getBoundingClientRect();
+    var width = rect.width;
+    var height = rect.height;
+    var barGap = 1;
+    var barWidth = Math.max(2, (width - barGap * buckets.length) / buckets.length);
+    var maxTotal = 0;
+    for (var i = 0; i < buckets.length; i++) {
+      if (buckets[i].total > maxTotal) maxTotal = buckets[i].total;
+    }
+    if (maxTotal === 0) maxTotal = 1;
+
+    var svgNS = 'http://www.w3.org/2000/svg';
+    // Clear existing
+    while (histogramSvg.firstChild) histogramSvg.removeChild(histogramSvg.firstChild);
+
+    histogramSvg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+
+    for (var i = 0; i < buckets.length; i++) {
+      var b = buckets[i];
+      var x = i * (barWidth + barGap);
+      var totalH = (b.total / maxTotal) * (height - 4);
+      var errorH = (b.error_count / maxTotal) * (height - 4);
+
+      // Total bar (green)
+      var totalBar = document.createElementNS(svgNS, 'rect');
+      totalBar.setAttribute('x', x);
+      totalBar.setAttribute('y', height - totalH);
+      totalBar.setAttribute('width', barWidth);
+      totalBar.setAttribute('height', totalH);
+      totalBar.setAttribute('class', 'histogram-bar');
+      totalBar.setAttribute('data-idx', i);
+      histogramSvg.appendChild(totalBar);
+
+      // Error bar (red, stacked on bottom)
+      if (b.error_count > 0) {
+        var errorBar = document.createElementNS(svgNS, 'rect');
+        errorBar.setAttribute('x', x);
+        errorBar.setAttribute('y', height - errorH);
+        errorBar.setAttribute('width', barWidth);
+        errorBar.setAttribute('height', errorH);
+        errorBar.setAttribute('class', 'histogram-bar-error');
+        errorBar.setAttribute('data-idx', i);
+        histogramSvg.appendChild(errorBar);
+      }
+    }
+  }
+
+  // Histogram hover tooltip
+  histogramContainer.addEventListener('mousemove', function(e) {
+    if (!lastBuckets || lastBuckets.length === 0) return;
+    var rect = histogramContainer.getBoundingClientRect();
+    var x = e.clientX - rect.left;
+    var barGap = 1;
+    var barWidth = Math.max(2, (rect.width - barGap * lastBuckets.length) / lastBuckets.length);
+    var idx = Math.floor(x / (barWidth + barGap));
+    if (idx < 0 || idx >= lastBuckets.length) {
+      histogramTooltip.style.display = 'none';
+      return;
+    }
+    var b = lastBuckets[idx];
+    var ts = new Date(b.timestamp);
+    var timeStr = ts.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    histogramTooltip.textContent = timeStr + ' — ' + b.total + ' logs, ' + b.error_count + ' errors';
+
+    var tipX = Math.min(x + 10, rect.width - 200);
+    histogramTooltip.style.left = tipX + 'px';
+    histogramTooltip.style.top = '4px';
+    histogramTooltip.style.display = '';
+  });
+
+  histogramContainer.addEventListener('mouseleave', function() {
+    histogramTooltip.style.display = 'none';
+  });
+
+  // Histogram click → filter by time bucket
+  histogramContainer.addEventListener('click', function(e) {
+    if (!lastBuckets || lastBuckets.length === 0) return;
+    var rect = histogramContainer.getBoundingClientRect();
+    var x = e.clientX - rect.left;
+    var barGap = 1;
+    var barWidth = Math.max(2, (rect.width - barGap * lastBuckets.length) / lastBuckets.length);
+    var idx = Math.floor(x / (barWidth + barGap));
+    if (idx < 0 || idx >= lastBuckets.length) return;
+
+    var b = lastBuckets[idx];
+    var startTime = new Date(b.timestamp);
+    // Calculate bucket end from next bucket or interval
+    var endTime;
+    if (idx + 1 < lastBuckets.length) {
+      endTime = new Date(lastBuckets[idx + 1].timestamp);
+    } else {
+      endTime = new Date();
+    }
+
+    filters.start = startTime.toISOString();
+    filters.end = endTime.toISOString();
+    filters.time_range = '';
+    syncHiddenFields();
+    renderFilterChips();
+    pushFilterURL();
+    htmx.trigger(form, 'submit');
+  });
+
+  // Refresh histogram on resize
+  var resizeTimer;
+  window.addEventListener('resize', function() {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function() {
+      renderHistogram(lastBuckets);
+    }, 200);
+  });
+
+  // Auto-refresh histogram every 30s when live
+  function scheduleHistogramRefresh() {
+    if (histogramTimer) clearInterval(histogramTimer);
+    if (live) {
+      histogramTimer = setInterval(fetchHistogram, 30000);
+    }
+  }
+
+  // ── Error badges ───────────────────────────────────────────
+  var badgeCache = {};
+  var badgeFetchTimer = null;
+
+  function scheduleBadgeFetch() {
+    if (badgeFetchTimer) clearTimeout(badgeFetchTimer);
+    badgeFetchTimer = setTimeout(fetchBadges, 300);
+  }
+
+  function fetchBadges() {
+    var entries = document.querySelectorAll('[data-error-fp]');
+    var fps = [];
+    var seen = {};
+    for (var i = 0; i < entries.length; i++) {
+      var fp = entries[i].getAttribute('data-error-fp');
+      if (fp && !seen[fp] && !badgeCache[fp]) {
+        fps.push(fp);
+        seen[fp] = true;
+      }
+    }
+    if (fps.length === 0) {
+      populateBadges();
+      return;
+    }
+
+    // Cap at 50
+    if (fps.length > 50) fps = fps.slice(0, 50);
+
+    fetch('/api/errors/batch?fingerprints=' + encodeURIComponent(fps.join(',')))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        for (var fp in data) {
+          badgeCache[fp] = data[fp];
+        }
+        populateBadges();
+      })
+      .catch(function() {});
+  }
+
+  function populateBadges() {
+    var badges = document.querySelectorAll('.badge-count');
+    for (var i = 0; i < badges.length; i++) {
+      var fp = badges[i].getAttribute('data-fp');
+      if (fp && badgeCache[fp]) {
+        badges[i].textContent = badgeCache[fp].occurrence_count + 'x';
+      }
+    }
   }
 
   // ── Browser back/forward ──────────────────────────────────
@@ -1327,13 +1797,12 @@
     syncHiddenFields();
     renderFilterChips();
     htmx.trigger(form, 'submit');
+    fetchHistogram();
   });
 
   // ── Expose for global use ─────────────────────────────────
   window.clearFilters = clearAllFilters;
-  window.pauseLiveOnFilter = function() {
-    // When filters change, keep polling but reset
-  };
+  window.pauseLiveOnFilter = function() {};
   window.loadPageData = function() {
     syncHiddenFields();
     renderFilterChips();
@@ -1343,6 +1812,7 @@
   // ── Update empty state when filters are active ─────────────
   document.body.addEventListener('htmx:afterSwap', function(evt) {
     if (evt.detail.target.id !== 'logs-list') return;
+    scheduleBadgeFetch();
     if (!hasActiveFilters()) return;
     var emptyMsg = evt.detail.target.querySelector('.term-empty-msg');
     if (emptyMsg) {
@@ -1357,9 +1827,12 @@
   // ── Initial render ────────────────────────────────────────
   syncHiddenFields();
   renderFilterChips();
+  fetchHistogram();
+  scheduleHistogramRefresh();
+  setTimeout(scheduleBadgeFetch, 100);
 
-  // ── Event bindings (replacing inline handlers) ────────────
-  newIndicator.addEventListener('click', function() { scrollToBottom(); });
+  // ── Event bindings ────────────────────────────────────────
+  newIndicator.addEventListener('click', function() { scrollToTop(); });
   form.addEventListener('submit', function(e) { e.preventDefault(); });
   liveBadge.addEventListener('click', function() { window.toggleLive(); });
 })();
@@ -1500,8 +1973,6 @@ document.addEventListener('click', function(e) {
 
     var token = getCurrentToken();
     var val = cmdInput.value;
-    // If selecting a prefix suggestion, just insert it
-    // If selecting a value, insert prefix:value
     var newVal = val.substring(0, token.start) + replacement + val.substring(token.end);
     cmdInput.value = newVal;
     var newPos = token.start + replacement.length;
@@ -1532,14 +2003,12 @@ document.addEventListener('click', function(e) {
 
     var colonIdx = text.indexOf(':');
     if (colonIdx === -1) {
-      // Filter prefix suggestions
       var lf = text.toLowerCase();
       var matched = prefixes.filter(function(p){ return p.label.toLowerCase().indexOf(lf) !== -1; });
       renderDropdown(matched.map(function(p){ return { label: p.label, hint: p.hint, value: p.label }; }));
       return;
     }
 
-    // After colon — suggest values
     var prefix = text.substring(0, colonIdx);
     var fragment = text.substring(colonIdx + 1);
 
@@ -1557,7 +2026,6 @@ document.addEventListener('click', function(e) {
     setTimeout(hide, 150);
   });
 
-  // Intercept keydown on cmd-input for autocomplete navigation
   cmdInput.addEventListener('keydown', function(e) {
     if (dropdown.style.display === 'none') return;
 
@@ -1585,15 +2053,13 @@ document.addEventListener('click', function(e) {
         selectItem(activeIdx);
         return;
       }
-      // If dropdown is open but nothing highlighted, let Enter submit normally
       hide();
       return;
     }
     if (e.key === 'Escape') {
       hide();
-      // Don't stop propagation — let existing handler clear input
     }
-  }, true); // capture phase so we run before the existing handler
+  }, true);
 
   document.addEventListener('click', function(e) {
     if (!dropdown.contains(e.target) && e.target !== cmdInput) {
@@ -1605,13 +2071,14 @@ document.addEventListener('click', function(e) {
 {{end}}
 
 {{define "log-entry"}}
-<div class="term-entry" data-log-id="{{.ID}}">
+<div class="term-entry" data-log-id="{{.ID}}"{{if .ErrorFingerprint}} data-error-fp="{{.ErrorFingerprint}}"{{end}}>
   <div class="term-line level-{{.Level}}">
     <span class="term-ts" title="{{.Timestamp.Format "2006-01-02T15:04:05.000Z07:00"}}">{{.Timestamp.Format "15:04:05.000"}}</span>
     <span class="term-level level-{{.Level}}">{{.Level}}</span>
     <span class="term-source" title="{{.Service}}">{{if .Service}}{{.Service}}{{end}}</span>
     <span class="term-msg">{{.Message}}</span>
     {{if .ExceptionClass}}<span class="term-exc">{{.ExceptionClass}}</span>{{end}}
+    {{if .ErrorFingerprint}}<a class="term-error-badge" href="/errors/{{.ErrorFingerprint}}" title="View error group" onclick="event.stopPropagation()"><span class="badge-count" data-fp="{{.ErrorFingerprint}}"></span></a>{{end}}
   </div>
   <div class="term-detail"></div>
 </div>

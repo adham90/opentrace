@@ -36,7 +36,7 @@
     };
   })();
   </script>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v={{.CSPNonce}}">
   <script src="/static/htmx.min.js"></script>
 </head>
 <body>
@@ -44,13 +44,73 @@
   <div hx-get="/api/version/banner" hx-trigger="load" hx-swap="innerHTML" id="version-banner-container"></div>
   <div class="toast-container" id="toast-container" aria-live="polite" role="status"></div>
 
+  {{if .User}}
+  <!-- ── Global Status Bar ─────────────────────────────────── -->
+  <div class="status-bar-wrap">
+    <div class="status-bar" role="banner">
+      <div class="status-bar-left">
+        <a href="/" class="status-brand status-ok" id="status-brand">opentrace</a>
+        <nav class="status-nav" aria-label="Main navigation">
+          <a href="/logs"{{if eq .Nav "logs"}} class="active"{{end}}>logs</a>
+          <a href="/errors"{{if eq .Nav "errors"}} class="active"{{end}}>errors</a>
+          <a href="/watchers"{{if eq .Nav "watchers"}} class="active"{{end}}>watchers</a>
+          <a href="/health"{{if eq .Nav "health"}} class="active"{{end}}>health</a>
+          <a href="/sessions"{{if eq .Nav "sessions"}} class="active"{{end}}>investigations</a>
+          <a href="/connectors"{{if eq .Nav "connectors"}} class="active"{{end}}>connectors</a>
+        </nav>
+      </div>
+      <div class="status-bar-right">
+        <nav class="user-menu" id="user-menu" aria-label="User menu">
+          <button class="user-menu-trigger" id="user-menu-trigger-btn" aria-expanded="false" aria-haspopup="true" aria-label="User menu for {{.User.DisplayName}}">
+            {{.User.DisplayName}}
+            <svg width="8" height="5" viewBox="0 0 8 5" fill="currentColor" aria-hidden="true"><path d="M0 0l4 5 4-5z"/></svg>
+          </button>
+          <div class="user-menu-dropdown" id="user-menu-dropdown" role="menu">
+            <button class="user-menu-item" id="theme-toggle-btn" role="menuitem" aria-label="Toggle theme">theme: <span id="dropdown-theme-label">system</span></button>
+            <div class="user-menu-divider" role="separator"></div>
+            <a href="/profile" class="user-menu-item" role="menuitem">profile</a>
+            <a href="/settings" class="user-menu-item" role="menuitem">settings</a>
+            <a href="/setup" class="user-menu-item" role="menuitem">setup</a>
+            <div class="user-menu-divider" role="separator"></div>
+            <form method="POST" action="/logout" style="margin:0">
+              <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+              <button type="submit" class="user-menu-item user-menu-item-danger" role="menuitem">logout</button>
+            </form>
+          </div>
+        </nav>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Command Bar (⌘K) ──────────────────────────────────── -->
+  <div class="cmd-overlay" id="cmd-overlay" role="dialog" aria-modal="true" aria-label="Command bar">
+    <div class="cmd-box">
+      <div class="cmd-input-wrap">
+        <span class="cmd-icon">&#x2318;</span>
+        <input type="text" class="cmd-input" id="cmd-bar-input" placeholder="Search logs, errors, services, investigations..." autocomplete="off">
+        <span class="cmd-hint">esc to close</span>
+      </div>
+      <div class="cmd-results" id="cmd-results"></div>
+      <div class="cmd-footer">
+        <span><kbd>↑</kbd> <kbd>↓</kbd> navigate</span>
+        <span><kbd>↵</kbd> open</span>
+        <span><kbd>esc</kbd> close</span>
+      </div>
+    </div>
+  </div>
+  {{end}}
+
   <!-- Keyboard shortcut overlay -->
   <div id="shortcut-overlay" class="shortcut-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="shortcut-dialog-title">
     <div class="shortcut-dialog">
       <div class="shortcut-title" id="shortcut-dialog-title">Keyboard Shortcuts</div>
       <div class="shortcut-section">
+        <div class="shortcut-section-label">Navigation</div>
+        <div class="shortcut-row"><kbd>⌘K</kbd><span>Command bar</span></div>
+        <div class="shortcut-row"><kbd>/</kbd><span>Focus search / command line</span></div>
+      </div>
+      <div class="shortcut-section">
         <div class="shortcut-section-label">Log Filters</div>
-        <div class="shortcut-row"><kbd>/</kbd><span>Focus command line</span></div>
         <div class="shortcut-row"><kbd>c</kbd><span>Clear all filters</span></div>
         <div class="shortcut-row"><kbd>p</kbd><span>Toggle live/paused</span></div>
       </div>
@@ -64,7 +124,7 @@
   </div>
 
   <div class="layout-container">
-    <main id="main-content" class="main-content{{if eq .Nav "dashboard"}} dashboard-page{{end}}{{if eq .Nav "logs"}} logs-page{{end}}" tabindex="-1">
+    <main id="main-content" class="main-content{{if eq .Nav "logs"}} logs-page{{end}}" tabindex="-1">
       {{template "content" .}}
     </main>
   </div>
@@ -189,7 +249,7 @@
     };
   })();
 
-  // Keyboard shortcut overlay
+  // Keyboard shortcut overlay + command bar + user menu
   (function(){
     window.toggleShortcuts = function() {
       var overlay = document.getElementById('shortcut-overlay');
@@ -200,7 +260,128 @@
       if (e.target === this) toggleShortcuts();
     });
 
+    // User menu toggle
+    var menuTrigger = document.getElementById('user-menu-trigger-btn');
+    if (menuTrigger) {
+      menuTrigger.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var dd = document.getElementById('user-menu-dropdown');
+        var isOpen = dd.classList.toggle('user-menu-open');
+        menuTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      });
+      document.addEventListener('click', function(e) {
+        var dd = document.getElementById('user-menu-dropdown');
+        if (dd && dd.classList.contains('user-menu-open') && !e.target.closest('.user-menu')) {
+          dd.classList.remove('user-menu-open');
+          menuTrigger.setAttribute('aria-expanded', 'false');
+        }
+      });
+    }
+
+    // Theme toggle
+    var themeBtn = document.getElementById('theme-toggle-btn');
+    if (themeBtn) {
+      var themes = ['system', 'dark', 'light'];
+      function updateLabel() {
+        var el = document.getElementById('dropdown-theme-label');
+        if (el) el.textContent = localStorage.getItem('opentrace-theme') || 'system';
+      }
+      updateLabel();
+      themeBtn.addEventListener('click', function() {
+        window.cycleTheme();
+        updateLabel();
+      });
+    }
+
+    // Command bar
+    var cmdOverlay = document.getElementById('cmd-overlay');
+    var cmdInput = document.getElementById('cmd-bar-input');
+    var cmdResults = document.getElementById('cmd-results');
+
+    var cmdPages = [
+      {label: 'Dashboard', hint: '/', icon: '~', href: '/'},
+      {label: 'Logs', hint: '/logs', icon: '>', href: '/logs'},
+      {label: 'Errors', hint: '/errors', icon: '!', href: '/errors'},
+      {label: 'Watchers', hint: '/watchers', icon: '#', href: '/watchers'},
+      {label: 'Health', hint: '/health', icon: '+', href: '/health'},
+      {label: 'Investigations', hint: '/sessions', icon: '?', href: '/sessions'},
+      {label: 'Connectors', hint: '/connectors', icon: '@', href: '/connectors'},
+      {label: 'Settings', hint: '/settings', icon: '*', href: '/settings'},
+      {label: 'Setup', hint: '/setup', icon: '$', href: '/setup'},
+      {label: 'Tools', hint: '/tools', icon: '%', href: '/tools'},
+      {label: 'Profile', hint: '/profile', icon: '&', href: '/profile'},
+    ];
+
+    function openCmd() {
+      if (!cmdOverlay) return;
+      cmdOverlay.classList.add('open');
+      cmdInput.value = '';
+      renderCmdResults('');
+      setTimeout(function() { cmdInput.focus(); }, 50);
+    }
+    function closeCmd() {
+      if (!cmdOverlay) return;
+      cmdOverlay.classList.remove('open');
+    }
+    window.openCommandBar = openCmd;
+
+    function renderCmdResults(q) {
+      if (!cmdResults) return;
+      var filtered = cmdPages;
+      if (q) {
+        var lower = q.toLowerCase();
+        filtered = cmdPages.filter(function(p) {
+          return p.label.toLowerCase().indexOf(lower) >= 0 || p.hint.toLowerCase().indexOf(lower) >= 0;
+        });
+      }
+      cmdResults.innerHTML = filtered.map(function(p, i) {
+        return '<a href="' + p.href + '" class="cmd-item' + (i === 0 ? ' cmd-active' : '') + '">' +
+          '<span class="cmd-item-icon">' + p.icon + '</span>' +
+          '<span class="cmd-item-label">' + p.label + '</span>' +
+          '<span class="cmd-item-hint">' + p.hint + '</span>' +
+          '</a>';
+      }).join('');
+    }
+
+    if (cmdInput) {
+      cmdInput.addEventListener('input', function() { renderCmdResults(this.value); });
+      cmdInput.addEventListener('keydown', function(e) {
+        var items = cmdResults.querySelectorAll('.cmd-item');
+        var active = cmdResults.querySelector('.cmd-active');
+        var idx = Array.prototype.indexOf.call(items, active);
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (active) active.classList.remove('cmd-active');
+          idx = (idx + 1) % items.length;
+          if (items[idx]) items[idx].classList.add('cmd-active');
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          if (active) active.classList.remove('cmd-active');
+          idx = idx <= 0 ? items.length - 1 : idx - 1;
+          if (items[idx]) items[idx].classList.add('cmd-active');
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          if (active && active.href) window.location.href = active.href;
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          closeCmd();
+        }
+      });
+    }
+    if (cmdOverlay) {
+      cmdOverlay.addEventListener('click', function(e) {
+        if (e.target === cmdOverlay) closeCmd();
+      });
+    }
+
     document.addEventListener('keydown', function(e) {
+      // ⌘K / Ctrl+K — open command bar
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        if (cmdOverlay && cmdOverlay.classList.contains('open')) { closeCmd(); } else { openCmd(); }
+        return;
+      }
+
       var tag = e.target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -211,17 +392,21 @@
         return;
       }
       if (e.key === 'Escape') {
+        // Close command bar first
+        if (cmdOverlay && cmdOverlay.classList.contains('open')) {
+          closeCmd();
+          return;
+        }
         var overlay = document.getElementById('shortcut-overlay');
         if (overlay && overlay.style.display !== 'none') {
           overlay.style.display = 'none';
           return;
         }
-        // Close user menu if open
         var userMenu = document.getElementById('user-menu-dropdown');
         if (userMenu && userMenu.classList.contains('user-menu-open')) {
           userMenu.classList.remove('user-menu-open');
-          var menuTrigger = document.getElementById('user-menu-trigger-btn');
-          if (menuTrigger) menuTrigger.setAttribute('aria-expanded', 'false');
+          var mt = document.getElementById('user-menu-trigger-btn');
+          if (mt) mt.setAttribute('aria-expanded', 'false');
           return;
         }
         var modals = document.querySelectorAll('.modal[style*="flex"]');

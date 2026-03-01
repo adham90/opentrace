@@ -430,6 +430,44 @@ func (s *logStore) CountByLevel(ctx context.Context, params LogCountParams) (map
 	return result, rows.Err()
 }
 
+func (s *logStore) Histogram(ctx context.Context, params LogHistogramParams) ([]LogHistogramBucket, error) {
+	var buckets []LogHistogramBucket
+
+	for t := params.Since; t.Before(params.Until); t = t.Add(params.Interval) {
+		bucketEnd := t.Add(params.Interval)
+		if bucketEnd.After(params.Until) {
+			bucketEnd = params.Until
+		}
+
+		query := `SELECT COUNT(*) AS total,
+		          COALESCE(SUM(CASE WHEN level IN ('ERROR', 'error', 'FATAL', 'fatal') THEN 1 ELSE 0 END), 0) AS error_count
+		          FROM logs WHERE timestamp >= ? AND timestamp < ?`
+		args := []any{t.UTC().Format(time.RFC3339Nano), bucketEnd.UTC().Format(time.RFC3339Nano)}
+
+		if params.Service != "" {
+			query += ` AND service = ? COLLATE NOCASE`
+			args = append(args, params.Service)
+		}
+		if params.Level != "" {
+			query += ` AND level = ? COLLATE NOCASE`
+			args = append(args, params.Level)
+		}
+
+		var total, errorCount int
+		if err := s.db.QueryRowContext(ctx, query, args...).Scan(&total, &errorCount); err != nil {
+			return nil, fmt.Errorf("histogram bucket query: %w", err)
+		}
+
+		buckets = append(buckets, LogHistogramBucket{
+			Timestamp:  t,
+			Total:      total,
+			ErrorCount: errorCount,
+		})
+	}
+
+	return buckets, nil
+}
+
 func (s *logStore) CountByService(ctx context.Context, params LogCountParams) ([]ServiceLogCount, error) {
 	query := `SELECT service,
 	                 COUNT(*) AS total,

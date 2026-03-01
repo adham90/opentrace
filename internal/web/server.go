@@ -285,7 +285,12 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Group(func(r chi.Router) {
 		r.Use(srv.RedirectToOnboardingIfNeeded)
 		r.Get("/", srv.handleDashboardPage)
-		r.Get("/logs", srv.handleLogsFragment)
+		r.Get("/logs", srv.handleLogsPage)
+		r.Get("/logs/fragment", srv.handleLogsFragment)
+		r.Get("/errors", srv.handleErrorsPage)
+		r.Get("/errors/{fingerprint}", srv.handleErrorDetailPage)
+		r.Get("/watchers", srv.handleWatchersPage)
+		r.Get("/health", srv.handleHealthPage)
 		r.Get("/profile", srv.handleProfilePage)
 		r.Get("/connectors", srv.handleConnectorsPage)
 		r.Get("/tools", srv.handleToolsPage)
@@ -364,8 +369,10 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Get("/connectors", srv.handleListConnectors)
 			r.Get("/connectors/{id}", srv.handleGetConnectorAPI)
 			r.Get("/overview", srv.handleOverviewAPI)
+			r.Get("/dashboard", srv.handleDashboardAPI)
 			r.Get("/tools", srv.handleToolsAPI)
 			r.Get("/logs/poll", srv.handleLogsPoll)
+			r.Get("/logs/histogram", srv.handleLogsHistogram)
 			r.Get("/logs/{id}", srv.handleGetLogDetail)
 			// Watches (agent-first)
 			if srv.watchStore != nil {
@@ -380,6 +387,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			// Error groups
 			if srv.errorGroupStore != nil {
 				r.Get("/errors", srv.handleListErrorGroups)
+				r.Get("/errors/batch", srv.handleBatchErrorGroups)
 				r.Get("/errors/{fingerprint}", srv.handleGetErrorGroup)
 			}
 

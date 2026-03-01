@@ -27,6 +27,7 @@ type LogStore interface {
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
 	CountByLevel(ctx context.Context, params LogCountParams) (map[string]int, error)
 	CountByService(ctx context.Context, params LogCountParams) ([]ServiceLogCount, error)
+	Histogram(ctx context.Context, params LogHistogramParams) ([]LogHistogramBucket, error)
 	DistinctValues(ctx context.Context, field string, params LogCountParams) ([]string, error)
 	MetadataKeys(ctx context.Context, params LogCountParams) ([]string, error)
 	GetByID(ctx context.Context, id int64) (*LogEntry, error)

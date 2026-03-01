@@ -1,0 +1,104 @@
+{{define "content"}}
+<div class="settings-page">
+  <div class="page-header">
+    <h1><span class="prompt">$</span> watchers <span class="dim">{{if .PendingCount}}&middot; {{.PendingCount}} pending alerts{{end}}</span></h1>
+  </div>
+
+  {{if .Watches}}
+  <div class="section-header">
+    <span class="section-title">Watches</span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:12px"></th>
+        <th>Metric</th>
+        <th>Service</th>
+        <th>Threshold</th>
+        <th>Current</th>
+        <th>Interval</th>
+        <th style="text-align:right">Breaches</th>
+        <th>Last Checked</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Watches}}
+      <tr>
+        <td>
+          <span class="status-dot {{if eq (printf "%s" .Status) "active"}}status-dot-ok{{else if eq (printf "%s" .Status) "triggered"}}status-dot-err{{else}}status-dot-off{{end}}"></span>
+        </td>
+        <td style="font-weight:500;color:var(--text-bright)">{{.Metric}}</td>
+        <td>{{if .Service}}<span class="badge badge-INFO">{{.Service}}</span>{{end}}</td>
+        <td>{{.Operator}} {{fmtFloat .Threshold}}</td>
+        <td>{{if .CurrentValue}}{{fmtFloat (derefFloat .CurrentValue)}}{{else}}-{{end}}</td>
+        <td style="color:var(--text-dim)">{{.CheckInterval}}</td>
+        <td style="text-align:right;font-weight:600">{{.ConsecutiveBreaches}}</td>
+        <td style="color:var(--text-dim);font-size:11px">{{if .LastCheckedAt}}{{timeAgo (derefTime .LastCheckedAt)}}{{else}}-{{end}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <div class="empty-state">
+    <div class="empty-state-title">No watches configured</div>
+    <div class="empty-state-desc">Watches are created by the AI agent during investigations to monitor metrics.</div>
+  </div>
+  {{end}}
+
+  {{if .WatchAlerts}}
+  <div class="section-header" style="margin-top:24px">
+    <span class="section-title">Alerts</span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:12px"></th>
+        <th>Summary</th>
+        <th>Metric</th>
+        <th>Value</th>
+        <th>Threshold</th>
+        <th>Status</th>
+        <th>Time</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .WatchAlerts}}
+      <tr>
+        <td>
+          <span class="status-dot {{if eq .Status "pending"}}status-dot-warn{{else if eq .Status "dismissed"}}status-dot-off{{else}}status-dot-ok{{end}}"></span>
+        </td>
+        <td style="font-weight:500;color:var(--text-bright);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{.Summary}}</td>
+        <td style="color:var(--text-dim)">{{.TriggerMetric}}</td>
+        <td style="font-weight:600">{{fmtFloat .TriggerValue}}</td>
+        <td style="color:var(--text-dim)">{{fmtFloat .ThresholdValue}}</td>
+        <td><span class="badge {{if eq .Status "pending"}}badge-WARN{{else if eq .Status "dismissed"}}badge-disconnected{{else}}badge-connected{{end}}">{{.Status}}</span></td>
+        <td style="color:var(--text-dim);font-size:11px">{{timeAgo .CreatedAt}}</td>
+        <td>
+          {{if eq .Status "pending"}}
+          <button class="btn btn-sm" data-dismiss-id="{{.ID}}">dismiss</button>
+          {{end}}
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{end}}
+</div>
+
+<script nonce="{{.CSPNonce}}">
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('[data-dismiss-id]');
+  if (!btn) return;
+  var id = btn.getAttribute('data-dismiss-id');
+  fetch('/api/watches/alerts/' + id + '/dismiss', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({reason: 'dismissed from UI'})
+  }).then(function(r) {
+    if (r.ok) window.location.reload();
+    else showToast('Failed to dismiss alert', 'error');
+  }).catch(function() { showToast('Network error', 'error'); });
+});
+</script>
+{{end}}

@@ -32,6 +32,10 @@ func (m *mockLogStore) CountByLevel(_ context.Context, _ store.LogCountParams) (
 	return nil, nil
 }
 
+func (m *mockLogStore) Histogram(_ context.Context, _ store.LogHistogramParams) ([]store.LogHistogramBucket, error) {
+	return nil, nil
+}
+
 func (m *mockLogStore) CountByService(_ context.Context, _ store.LogCountParams) ([]store.ServiceLogCount, error) {
 	return nil, nil
 }

@@ -102,9 +102,24 @@ func runSeed() error {
 		},
 	}
 
+	// Error fingerprints and exception classes for realistic error grouping
+	errorDetails := []struct {
+		exceptionClass   string
+		errorFingerprint string
+		message          string
+	}{
+		{"CardDeclinedException", "fp-card-declined-001", "Failed to process payment: card declined (4111****1234)"},
+		{"ConnectionTimeoutError", "fp-db-timeout-002", "Database connection timeout after 30s"},
+		{"NullPointerException", "fp-npe-orders-003", "Unhandled exception in /api/v1/orders: NullPointerException"},
+		{"ServiceUnavailableError", "fp-upstream-503-004", "External API returned 503: service unavailable"},
+		{"SMTPConnectionError", "fp-smtp-refused-005", "Failed to send notification email: SMTP connection refused"},
+		{"RateLimitExceeded", "fp-rate-limit-006", "Rate limit exceeded for client app-web-dashboard"},
+		{"TLSHandshakeError", "fp-tls-expired-007", "TLS handshake failed with upstream: certificate expired"},
+	}
+
 	var logEntries []store.LogEntry
 	now := time.Now()
-	for i := 0; i < 500; i++ {
+	for i := 0; i < 2000; i++ {
 		level := levels[rand.Intn(len(levels))]
 		svc := services[rand.Intn(len(services))]
 		msgs := messages[level]
@@ -119,6 +134,13 @@ func runSeed() error {
 		}
 		if rand.Float32() < 0.3 {
 			entry.TraceID = fmt.Sprintf("trace-%s", uuid.New().String()[:8])
+		}
+		// Add error details to ERROR entries
+		if level == "ERROR" {
+			ed := errorDetails[rand.Intn(len(errorDetails))]
+			entry.ExceptionClass = ed.exceptionClass
+			entry.ErrorFingerprint = ed.errorFingerprint
+			entry.Message = ed.message
 		}
 		logEntries = append(logEntries, entry)
 	}
@@ -166,6 +188,20 @@ func runSeed() error {
 		return fmt.Errorf("inserting logs: %w", err)
 	}
 	slog.Info("seeded logs", "count", n)
+
+	// --- Error Groups (from error log entries) ---
+	errorGroupStore := store.NewErrorGroupStore(deps.db)
+	errorGroupCount := 0
+	for _, entry := range logEntries {
+		if entry.ErrorFingerprint != "" {
+			if err := errorGroupStore.Upsert(ctx, entry); err != nil {
+				slog.Warn("failed to upsert error group", "fingerprint", entry.ErrorFingerprint, "error", err)
+			} else {
+				errorGroupCount++
+			}
+		}
+	}
+	slog.Info("seeded error groups", "upserted", errorGroupCount)
 
 	// --- Watches (new agent-first system) ---
 	watchStore := store.NewWatchStore(deps.db)

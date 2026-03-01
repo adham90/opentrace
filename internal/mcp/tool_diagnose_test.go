@@ -52,6 +52,10 @@ func (m *mockLogStoreForDiagnose) GetByID(context.Context, int64) (*store.LogEnt
 	return nil, nil
 }
 
+func (m *mockLogStoreForDiagnose) Histogram(context.Context, store.LogHistogramParams) ([]store.LogHistogramBucket, error) {
+	return nil, nil
+}
+
 // mockWatchStoreForDiagnose implements enough of WatchStore for diagnose.
 type mockWatchStoreForDiagnose struct {
 	watches       []store.Watch

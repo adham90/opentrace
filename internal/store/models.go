@@ -159,6 +159,22 @@ type ServiceLogCount struct {
 	ErrorCount int    `json:"error_count"`
 }
 
+// LogHistogramParams defines parameters for log volume histogram queries.
+type LogHistogramParams struct {
+	Since    time.Time
+	Until    time.Time
+	Interval time.Duration
+	Service  string
+	Level    string
+}
+
+// LogHistogramBucket holds aggregated log counts for a single time bucket.
+type LogHistogramBucket struct {
+	Timestamp  time.Time `json:"timestamp"`
+	Total      int       `json:"total"`
+	ErrorCount int       `json:"error_count"`
+}
+
 // ServerStatus represents the health status of a monitored server.
 type ServerStatus string
 

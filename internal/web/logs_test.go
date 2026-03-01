@@ -217,30 +217,31 @@ func TestAPIKeyAuth_Disabled(t *testing.T) {
 	}
 }
 
-func TestLogsPage_RedirectsToDashboard(t *testing.T) {
+func TestLogsPage_StandalonePage(t *testing.T) {
 	srv, _ := setupTestServerWithLogStore()
 
 	req := httptest.NewRequest(http.MethodGet, "/logs", nil)
 	w := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusMovedPermanently {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusMovedPermanently)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
-	if loc := w.Header().Get("Location"); loc != "/" {
-		t.Errorf("redirect location = %q, want %q", loc, "/")
+	body := w.Body.String()
+	if !strings.Contains(body, "<html") {
+		t.Error("expected full HTML page for browser request")
 	}
 }
 
-func TestLogsPage_WithFilters_RedirectsToDashboard(t *testing.T) {
+func TestLogsPage_WithFilters(t *testing.T) {
 	srv, _ := setupTestServerWithLogStore()
 
 	req := httptest.NewRequest(http.MethodGet, "/logs?level=ERROR&service=api&query=timeout", nil)
 	w := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusMovedPermanently {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusMovedPermanently)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 }
 
@@ -576,7 +577,7 @@ func TestLogsPage_HTMXFragment(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/logs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/logs/fragment", nil)
 	req.Header.Set("HX-Request", "true")
 	w := httptest.NewRecorder()
 	srv.Router.ServeHTTP(w, req)

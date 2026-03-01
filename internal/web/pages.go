@@ -61,6 +61,18 @@ var tmplFuncs = template.FuncMap{
 		}
 		return *p
 	},
+	"derefFloat": func(p *float64) float64 {
+		if p == nil {
+			return 0
+		}
+		return *p
+	},
+	"derefTime": func(p *time.Time) time.Time {
+		if p == nil {
+			return time.Time{}
+		}
+		return *p
+	},
 	"timeAgo": func(t time.Time) string {
 		d := time.Since(t)
 		switch {
@@ -89,6 +101,11 @@ var (
 	sessionsTmpl       *template.Template
 	sessionDetailTmpl  *template.Template
 	onboardingTmpl     *template.Template
+	logsPageTmpl       *template.Template
+	errorsPageTmpl       *template.Template
+	errorDetailPageTmpl  *template.Template
+	watchersPageTmpl   *template.Template
+	healthPageTmpl     *template.Template
 )
 
 func init() {
@@ -117,6 +134,16 @@ func init() {
 		"templates/layout.html", "templates/session_detail.html"))
 	onboardingTmpl = template.Must(template.ParseFS(templateFS,
 		"templates/layout_minimal.html", "templates/onboarding.html"))
+	logsPageTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
+		"templates/layout.html", "templates/logs.html"))
+	errorsPageTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
+		"templates/layout.html", "templates/errors.html"))
+	errorDetailPageTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
+		"templates/layout.html", "templates/error_detail.html"))
+	watchersPageTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
+		"templates/layout.html", "templates/watchers.html"))
+	healthPageTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
+		"templates/layout.html", "templates/health.html"))
 }
 
 // logsFragmentTmpl is used for rendering HTMX fragment responses for logs-list
@@ -176,6 +203,61 @@ func parseMetadataParams(q url.Values) map[string]string {
 	return m
 }
 
+// ── Dashboard data types ─────────────────────────────────────────
+
+type dashboardSystemStatus struct {
+	ServicesUp    int    `json:"services_up"`
+	ServicesTotal int    `json:"services_total"`
+	ErrorsPerHour int   `json:"errors_per_hour"`
+	LogsPerHour   int   `json:"logs_per_hour"`
+	WatchersActive int  `json:"watchers_active"`
+	InvestOpen     int  `json:"invest_open"`
+	OverallStatus  string `json:"overall_status"` // "ok", "warn", "critical"
+}
+
+type dashboardLastSession struct {
+	ID      string `json:"id"`
+	Intent  string `json:"intent"`
+	Service string `json:"service"`
+	Status  string `json:"status"`
+	TimeAgo string `json:"time_ago"`
+}
+
+type dashboardAttentionItem struct {
+	Severity string `json:"severity"` // "error", "warn", "info"
+	Type     string `json:"type"`     // "error", "health", "watch"
+	Title    string `json:"title"`
+	Detail   string `json:"detail"`
+	Velocity string `json:"velocity"` // "accelerating", "slowing", "stable"
+	Time     string `json:"time"`
+	Link     string `json:"link"`
+}
+
+type dashboardGlance struct {
+	TotalLogs       int     `json:"total_logs"`
+	ErrorGroups     int     `json:"error_groups"`
+	WatcherTriggers int     `json:"watcher_triggers"`
+	Investigations  int     `json:"investigations"`
+	Uptime          float64 `json:"uptime"`
+}
+
+type dashboardActivityItem struct {
+	Status string `json:"status"` // "ok", "error", "warn", "info"
+	Type   string `json:"type"`
+	Desc   string `json:"desc"`
+	Time   string `json:"time"`
+}
+
+type dashboardData struct {
+	SystemStatus dashboardSystemStatus    `json:"system_status"`
+	LastSession  *dashboardLastSession    `json:"last_session"`
+	Attention    []dashboardAttentionItem `json:"attention"`
+	Glance       dashboardGlance          `json:"glance"`
+	QuietMinutes int                      `json:"quiet_minutes"`
+	LastIncident string                   `json:"last_incident"`
+	Activity     []dashboardActivityItem  `json:"activity"`
+}
+
 type pageData struct {
 	Title          string
 	Nav            string
@@ -211,6 +293,29 @@ type pageData struct {
 	SessionStats   *store.InvestigationSessionStats
 	SessionDetail  *store.InvestigationSession
 	ActivityEvents []store.MCPActivityEvent
+
+	// Dashboard
+	DashSystemStatus *dashboardSystemStatus
+	DashLastSession  *dashboardLastSession
+	DashAttention    []dashboardAttentionItem
+	DashGlance       *dashboardGlance
+	DashQuietMinutes int
+	DashLastIncident string
+	DashActivity     []dashboardActivityItem
+
+	// Errors page
+	ErrorGroups []store.ErrorGroup
+	ErrorGroup  *store.ErrorGroup
+	ErrorLogs   []store.LogEntry
+
+	// Watchers page
+	Watches      []store.Watch
+	WatchAlerts  []store.WatchAlert
+	PendingCount int
+
+	// Health page
+	HealthChecks    []store.HealthCheck
+	UptimeSummaries []store.UptimeSummary
 }
 
 func (s *Server) isDevMode() bool {
@@ -250,7 +355,301 @@ func (s *Server) getTemplate(fallback *template.Template, files ...string) *temp
 	return t
 }
 
+// gatherDashboardData collects all data for the dashboard from stores.
+// Each store query is independent — nil stores or errors result in zero/empty values.
+func (s *Server) gatherDashboardData(r *http.Request) dashboardData {
+	ctx := r.Context()
+	now := time.Now()
+	oneHourAgo := now.Add(-1 * time.Hour)
+	oneDayAgo := now.Add(-24 * time.Hour)
+
+	dd := dashboardData{}
+
+	// ── System Status ──────────────────────────────────────────
+	ss := &dd.SystemStatus
+	ss.OverallStatus = "ok"
+
+	if s.logStore != nil {
+		counts, err := s.logStore.CountByLevel(ctx, store.LogCountParams{
+			Since: oneHourAgo, Until: now,
+		})
+		if err == nil {
+			for level, count := range counts {
+				ss.LogsPerHour += count
+				if level == "ERROR" {
+					ss.ErrorsPerHour = count
+				}
+			}
+		}
+	}
+
+	if s.healthCheckStore != nil {
+		checks, err := s.healthCheckStore.List(ctx, store.ListHealthCheckParams{})
+		if err == nil {
+			ss.ServicesTotal = len(checks)
+		}
+		results, err := s.healthCheckStore.LatestResults(ctx, "", 100)
+		if err == nil {
+			seen := make(map[string]bool)
+			for _, r := range results {
+				if seen[r.HealthCheckID] {
+					continue
+				}
+				seen[r.HealthCheckID] = true
+				if r.Status == store.HealthCheckUp {
+					ss.ServicesUp++
+				}
+			}
+		}
+	}
+
+	if s.watchStore != nil {
+		watches, err := s.watchStore.List(ctx, store.ListWatchParams{Status: store.WatchStatusActive})
+		if err == nil {
+			ss.WatchersActive = len(watches)
+		}
+	}
+
+	if s.investigationSessionStore != nil {
+		stats, err := s.investigationSessionStore.Stats(ctx)
+		if err == nil && stats != nil {
+			ss.InvestOpen = stats.OpenSessions
+		}
+	}
+
+	// Derive overall status
+	if ss.ErrorsPerHour > 10 || (ss.ServicesTotal > 0 && ss.ServicesUp < ss.ServicesTotal) {
+		ss.OverallStatus = "critical"
+	} else if ss.ErrorsPerHour > 3 {
+		ss.OverallStatus = "warn"
+	}
+
+	// ── Last Session ───────────────────────────────────────────
+	if s.investigationSessionStore != nil {
+		user := UserFromContext(ctx)
+		if user != nil {
+			sess, err := s.investigationSessionStore.FindRecent(ctx, store.FindRecentSessionParams{
+				UserID: user.ID,
+				MaxAge: 24 * time.Hour,
+			})
+			if err == nil && sess != nil {
+				dd.LastSession = &dashboardLastSession{
+					ID:      sess.ID,
+					Intent:  sess.Intent,
+					Service: sess.PrimaryService,
+					Status:  string(sess.Status),
+					TimeAgo: formatTimeAgo(sess.LastActivityAt),
+				}
+			}
+		}
+	}
+
+	// ── Attention Items ────────────────────────────────────────
+	if s.errorGroupStore != nil {
+		groups, err := s.errorGroupStore.List(ctx, store.ListErrorGroupParams{
+			Status: store.ErrorGroupUnresolved,
+			Limit:  3,
+			SortBy: "last_seen_at",
+		})
+		if err == nil {
+			for _, eg := range groups {
+				dd.Attention = append(dd.Attention, dashboardAttentionItem{
+					Severity: "error",
+					Type:     "error",
+					Title:    eg.ExceptionClass,
+					Detail:   truncateStr(eg.Message, 80),
+					Velocity: "stable",
+					Time:     formatTimeAgo(eg.LastSeenAt),
+					Link:     "/errors",
+				})
+			}
+		}
+	}
+
+	if s.healthCheckStore != nil {
+		results, err := s.healthCheckStore.LatestResults(ctx, "", 100)
+		if err == nil {
+			seen := make(map[string]bool)
+			for _, r := range results {
+				if seen[r.HealthCheckID] {
+					continue
+				}
+				seen[r.HealthCheckID] = true
+				if r.Status == store.HealthCheckDown {
+					dd.Attention = append(dd.Attention, dashboardAttentionItem{
+						Severity: "error",
+						Type:     "health",
+						Title:    "Health check failing",
+						Detail:   r.HealthCheckID,
+						Velocity: "stable",
+						Time:     formatTimeAgo(r.CheckedAt),
+						Link:     "/health",
+					})
+				}
+			}
+		}
+	}
+
+	if s.watchStore != nil {
+		alerts, err := s.watchStore.ListAlerts(ctx, "", "pending", 3)
+		if err == nil {
+			for _, a := range alerts {
+				dd.Attention = append(dd.Attention, dashboardAttentionItem{
+					Severity: "warn",
+					Type:     "watch",
+					Title:    a.Summary,
+					Detail:   fmt.Sprintf("%s = %.1f (threshold: %.1f)", a.TriggerMetric, a.TriggerValue, a.ThresholdValue),
+					Velocity: "stable",
+					Time:     formatTimeAgo(a.CreatedAt),
+					Link:     "/watchers",
+				})
+			}
+		}
+	}
+
+	// Cap attention at 5
+	if len(dd.Attention) > 5 {
+		dd.Attention = dd.Attention[:5]
+	}
+
+	// ── Glance (24h) ──────────────────────────────────────────
+	if s.logStore != nil {
+		counts, err := s.logStore.CountByLevel(ctx, store.LogCountParams{
+			Since: oneDayAgo, Until: now,
+		})
+		if err == nil {
+			for _, count := range counts {
+				dd.Glance.TotalLogs += count
+			}
+		}
+	}
+	if s.errorGroupStore != nil {
+		groups, err := s.errorGroupStore.List(ctx, store.ListErrorGroupParams{
+			Status: store.ErrorGroupUnresolved,
+		})
+		if err == nil {
+			dd.Glance.ErrorGroups = len(groups)
+		}
+	}
+	if s.watchStore != nil {
+		triggered, err := s.watchStore.List(ctx, store.ListWatchParams{Status: store.WatchStatusTriggered})
+		if err == nil {
+			dd.Glance.WatcherTriggers = len(triggered)
+		}
+	}
+	if s.investigationSessionStore != nil {
+		stats, err := s.investigationSessionStore.Stats(ctx)
+		if err == nil && stats != nil {
+			dd.Glance.Investigations = stats.TotalSessions
+		}
+	}
+	if s.healthCheckStore != nil {
+		summaries, err := s.healthCheckStore.UptimeSummaries(ctx, oneDayAgo)
+		if err == nil && len(summaries) > 0 {
+			var total float64
+			for _, s := range summaries {
+				total += s.UptimePct
+			}
+			dd.Glance.Uptime = total / float64(len(summaries))
+		}
+	}
+
+	// ── Quiet Minutes ──────────────────────────────────────────
+	dd.QuietMinutes = int(time.Since(now).Minutes()) // 0 by default
+	if len(dd.Attention) == 0 {
+		dd.QuietMinutes = 60 // show as quiet if no attention items
+	}
+
+	// ── Activity ───────────────────────────────────────────────
+	if s.investigationSessionStore != nil {
+		sessions, err := s.investigationSessionStore.List(ctx, store.ListInvestigationSessionParams{
+			Limit: 3,
+		})
+		if err == nil {
+			for _, sess := range sessions {
+				status := "info"
+				if sess.Status == store.InvestigationStatusResolved {
+					status = "ok"
+				}
+				dd.Activity = append(dd.Activity, dashboardActivityItem{
+					Status: status,
+					Type:   "investigation",
+					Desc:   sess.Intent,
+					Time:   formatTimeAgo(sess.LastActivityAt),
+				})
+			}
+		}
+	}
+	if s.watchStore != nil {
+		alerts, err := s.watchStore.ListAlerts(ctx, "", "", 3)
+		if err == nil {
+			for _, a := range alerts {
+				status := "warn"
+				if a.Status == "dismissed" {
+					status = "ok"
+				}
+				dd.Activity = append(dd.Activity, dashboardActivityItem{
+					Status: status,
+					Type:   "alert",
+					Desc:   a.Summary,
+					Time:   formatTimeAgo(a.CreatedAt),
+				})
+			}
+		}
+	}
+	// Cap activity at 6
+	if len(dd.Activity) > 6 {
+		dd.Activity = dd.Activity[:6]
+	}
+
+	return dd
+}
+
+func formatTimeAgo(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
+}
+
+func truncateStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
+
 func (s *Server) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
+	dd := s.gatherDashboardData(r)
+
+	data := s.newPageData(r, "Dashboard", "dashboard")
+	data.DashSystemStatus = &dd.SystemStatus
+	data.DashLastSession = dd.LastSession
+	data.DashAttention = dd.Attention
+	data.DashGlance = &dd.Glance
+	data.DashQuietMinutes = dd.QuietMinutes
+	data.DashLastIncident = dd.LastIncident
+	data.DashActivity = dd.Activity
+
+	tmpl := s.getTemplate(dashboardTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/dashboard.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleDashboardAPI(w http.ResponseWriter, r *http.Request) {
+	dd := s.gatherDashboardData(r)
+	writeJSON(w, http.StatusOK, dd)
+}
+
+func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 	filters := LogFilters{
 		Query:            r.URL.Query().Get("query"),
 		Service:          r.URL.Query().Get("service"),
@@ -298,56 +697,160 @@ func (s *Server) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
 		ErrorFingerprint: filters.ErrorFingerprint,
 		SourceFile:       filters.SourceFile,
 	}
-	if s := r.URL.Query().Get("start"); s != "" {
-		if t, err := time.Parse(time.RFC3339, s); err == nil {
+	if startStr := r.URL.Query().Get("start"); startStr != "" {
+		if t, err := time.Parse(time.RFC3339, startStr); err == nil {
 			searchParams.Start = &t
 		}
 	}
-	if e := r.URL.Query().Get("end"); e != "" {
-		if t, err := time.Parse(time.RFC3339, e); err == nil {
+	if endStr := r.URL.Query().Get("end"); endStr != "" {
+		if t, err := time.Parse(time.RFC3339, endStr); err == nil {
 			searchParams.End = &t
 		}
 	}
 
-	var logs []store.LogEntry
+	var logEntries []store.LogEntry
 	var hasMore bool
 	var maxID int64
 	if s.logStore != nil {
 		var err error
-		logs, err = s.logStore.Search(r.Context(), searchParams)
+		logEntries, err = s.logStore.Search(r.Context(), searchParams)
 		if err != nil {
-			logs = nil
+			logEntries = nil
 		}
-		hasMore = len(logs) > limit
+		hasMore = len(logEntries) > limit
 		if hasMore {
-			logs = logs[:limit]
+			logEntries = logEntries[:limit]
 		}
-		for _, l := range logs {
+		for _, l := range logEntries {
 			if l.ID > maxID {
 				maxID = l.ID
 			}
 		}
 	}
 
-	data := s.newPageData(r, "Dashboard", "dashboard")
-	data.Logs = logs
+	data := s.newPageData(r, "Logs", "logs")
+	data.Logs = logEntries
 	data.LogFilters = filters
 	data.LogOffset = offset
 	data.LogLimit = limit
 	data.HasMore = hasMore
 	data.MaxLogID = maxID
 
-	tmpl := s.getTemplate(dashboardTmpl,
+	tmpl := s.getTemplate(logsPageTmpl,
 		"internal/web/templates/layout.html",
-		"internal/web/templates/dashboard.html")
+		"internal/web/templates/logs.html")
 	tmpl.ExecuteTemplate(w, "layout", data)
 }
 
-// handleLogsFragment serves HTMX log fragments for the dashboard.
-// Browser visits to /logs redirect to the dashboard.
+func (s *Server) handleErrorsPage(w http.ResponseWriter, r *http.Request) {
+	data := s.newPageData(r, "Errors", "errors")
+	if s.errorGroupStore != nil {
+		status := store.ErrorGroupStatus(r.URL.Query().Get("status"))
+		groups, err := s.errorGroupStore.List(r.Context(), store.ListErrorGroupParams{
+			Status:  status,
+			Service: r.URL.Query().Get("service"),
+			SortBy:  "last_seen_at",
+			Limit:   100,
+		})
+		if err == nil {
+			data.ErrorGroups = groups
+		}
+	}
+	tmpl := s.getTemplate(errorsPageTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/errors.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleErrorDetailPage(w http.ResponseWriter, r *http.Request) {
+	fp := chi.URLParam(r, "fingerprint")
+	if fp == "" {
+		http.Redirect(w, r, "/errors", http.StatusFound)
+		return
+	}
+	if s.errorGroupStore == nil {
+		writeError(w, http.StatusNotFound, "error tracking not available")
+		return
+	}
+
+	eg, err := s.errorGroupStore.Get(r.Context(), fp)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "error group not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get error group")
+		return
+	}
+
+	events, _ := s.errorGroupStore.ListEvents(r.Context(), fp, 20)
+	eg.Events = events
+
+	data := s.newPageData(r, eg.ExceptionClass, "errors")
+	data.ErrorGroup = eg
+
+	// Fetch recent log entries for this error fingerprint
+	if s.logStore != nil {
+		logs, err := s.logStore.Search(r.Context(), store.LogSearchParams{
+			ErrorFingerprint: fp,
+			Limit:            25,
+		})
+		if err == nil {
+			data.ErrorLogs = logs
+		}
+	}
+
+	tmpl := s.getTemplate(errorDetailPageTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/error_detail.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleWatchersPage(w http.ResponseWriter, r *http.Request) {
+	data := s.newPageData(r, "Watchers", "watchers")
+	if s.watchStore != nil {
+		watches, err := s.watchStore.List(r.Context(), store.ListWatchParams{Limit: 100})
+		if err == nil {
+			data.Watches = watches
+		}
+		alerts, err := s.watchStore.ListAlerts(r.Context(), "", "", 20)
+		if err == nil {
+			data.WatchAlerts = alerts
+		}
+		pending, err := s.watchStore.CountPendingAlerts(r.Context())
+		if err == nil {
+			data.PendingCount = pending
+		}
+	}
+	tmpl := s.getTemplate(watchersPageTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/watchers.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleHealthPage(w http.ResponseWriter, r *http.Request) {
+	data := s.newPageData(r, "Health", "health")
+	if s.healthCheckStore != nil {
+		checks, err := s.healthCheckStore.List(r.Context(), store.ListHealthCheckParams{})
+		if err == nil {
+			data.HealthChecks = checks
+		}
+		oneDayAgo := time.Now().Add(-24 * time.Hour)
+		summaries, err := s.healthCheckStore.UptimeSummaries(r.Context(), oneDayAgo)
+		if err == nil {
+			data.UptimeSummaries = summaries
+		}
+	}
+	tmpl := s.getTemplate(healthPageTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/health.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+// handleLogsFragment serves HTMX log fragments for the logs page.
 func (s *Server) handleLogsFragment(w http.ResponseWriter, r *http.Request) {
 	if !isHTMX(r) {
-		http.Redirect(w, r, "/", http.StatusMovedPermanently)
+		http.Redirect(w, r, "/logs", http.StatusMovedPermanently)
 		return
 	}
 
@@ -520,6 +1023,70 @@ func (s *Server) handleLogsPoll(w http.ResponseWriter, r *http.Request) {
 
 	ft := s.getTemplate(logsFragmentTmpl, "internal/web/templates/logs.html")
 	ft.ExecuteTemplate(w, "logs-new", pageData{Logs: logs, MaxLogID: maxID})
+}
+
+func (s *Server) handleLogsHistogram(w http.ResponseWriter, r *http.Request) {
+	if s.logStore == nil {
+		writeJSON(w, http.StatusOK, []store.LogHistogramBucket{})
+		return
+	}
+
+	timeRange := r.URL.Query().Get("time_range")
+	if timeRange == "" {
+		timeRange = "1h"
+	}
+
+	var duration time.Duration
+	switch timeRange {
+	case "15m":
+		duration = 15 * time.Minute
+	case "1h":
+		duration = time.Hour
+	case "6h":
+		duration = 6 * time.Hour
+	case "24h":
+		duration = 24 * time.Hour
+	case "7d":
+		duration = 7 * 24 * time.Hour
+	default:
+		duration = time.Hour
+	}
+
+	// Auto interval based on time range
+	var interval time.Duration
+	switch timeRange {
+	case "15m":
+		interval = time.Minute
+	case "1h":
+		interval = 5 * time.Minute
+	case "6h":
+		interval = 15 * time.Minute
+	case "24h":
+		interval = time.Hour
+	case "7d":
+		interval = 6 * time.Hour
+	default:
+		interval = 5 * time.Minute
+	}
+
+	now := time.Now()
+	params := store.LogHistogramParams{
+		Since:    now.Add(-duration),
+		Until:    now,
+		Interval: interval,
+		Service:  r.URL.Query().Get("service"),
+		Level:    r.URL.Query().Get("level"),
+	}
+
+	buckets, err := s.logStore.Histogram(r.Context(), params)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to compute histogram")
+		return
+	}
+	if buckets == nil {
+		buckets = []store.LogHistogramBucket{}
+	}
+	writeJSON(w, http.StatusOK, buckets)
 }
 
 func (s *Server) handleGetLogDetail(w http.ResponseWriter, r *http.Request) {

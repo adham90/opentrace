@@ -1,0 +1,261 @@
+{{define "content"}}
+<style>
+  .ed-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 24px;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 20px;
+    font-size: 13px;
+  }
+  .ed-summary-item { display: flex; gap: 6px; align-items: center; }
+  .ed-status {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+  }
+  .ed-status-unresolved { background: rgba(255,85,85,.15); color: var(--red); }
+  .ed-status-resolved { background: rgba(80,200,120,.15); color: var(--green); }
+  .ed-status-ignored { background: rgba(150,150,150,.15); color: var(--text-dim); }
+  .ed-message {
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 20px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: var(--bg-secondary);
+  }
+  .ed-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+  }
+  .ed-actions button {
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 12px;
+    font-family: var(--font-mono);
+  }
+  .ed-actions button:hover { border-color: var(--text-dim); }
+  .ed-actions .btn-resolve { border-color: var(--green); color: var(--green); }
+  .ed-actions .btn-resolve:hover { background: rgba(80,200,120,.1); }
+  .ed-actions .btn-ignore { border-color: var(--text-dim); }
+  .ed-section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin: 24px 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ed-section-title .dim { color: var(--text-dim); font-weight: 400; }
+  .ed-logs-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    font-family: var(--font-mono);
+  }
+  .ed-logs-table th {
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .ed-logs-table td {
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: top;
+  }
+  .ed-logs-table tr:hover td { background: var(--bg-secondary); }
+  .ed-logs-table .lvl-ERROR,
+  .ed-logs-table .lvl-FATAL { color: var(--red); }
+  .ed-logs-table .lvl-WARN { color: var(--yellow); }
+  .ed-logs-table .msg-cell {
+    max-width: 500px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ed-events {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .ed-events li {
+    padding: 8px 12px;
+    border-left: 2px solid var(--border);
+    margin-bottom: 4px;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .ed-events li .ev-type {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+    margin-right: 8px;
+  }
+  .ed-events li .ev-time {
+    color: var(--text-dim);
+    font-size: 11px;
+    margin-left: 8px;
+  }
+  .ed-empty {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  @media (max-width: 768px) {
+    .ed-summary { flex-direction: column; gap: 6px; }
+    .ed-actions { flex-wrap: wrap; }
+    .msg-cell { max-width: 200px; }
+  }
+</style>
+
+<div class="settings-page">
+  <div class="page-header">
+    <h1><span class="prompt">$</span> error <span class="dim">{{.ErrorGroup.ExceptionClass}}</span></h1>
+    <div class="actions">
+      <a href="/errors" style="color:var(--text-dim);text-decoration:none;font-size:13px">&larr; all errors</a>
+    </div>
+  </div>
+
+  {{with .ErrorGroup}}
+  <div class="ed-summary">
+    <div class="ed-summary-item">
+      <span class="text-dim">status:</span>
+      <span class="ed-status ed-status-{{.Status}}">{{.Status}}</span>
+    </div>
+    <div class="ed-summary-item">
+      <span class="text-dim">occurrences:</span>
+      <strong>{{.OccurrenceCount}}</strong>
+    </div>
+    {{if .Service}}
+    <div class="ed-summary-item">
+      <span class="text-dim">service:</span>
+      <span class="badge badge-INFO">{{.Service}}</span>
+    </div>
+    {{end}}
+    {{if .Environment}}
+    <div class="ed-summary-item">
+      <span class="text-dim">env:</span>
+      <span class="badge badge-dim">{{.Environment}}</span>
+    </div>
+    {{end}}
+    <div class="ed-summary-item">
+      <span class="text-dim">first seen:</span>
+      {{timeAgo .FirstSeenAt}}
+    </div>
+    <div class="ed-summary-item">
+      <span class="text-dim">last seen:</span>
+      {{timeAgo .LastSeenAt}}
+    </div>
+    {{if .SourceFile}}
+    <div class="ed-summary-item">
+      <span class="text-dim">source:</span>
+      <code>{{.SourceFile}}{{if .SourceLine}}:{{.SourceLine}}{{end}}</code>
+    </div>
+    {{end}}
+    <div class="ed-summary-item">
+      <span class="text-dim">fingerprint:</span>
+      <code style="font-size:11px;color:var(--text-dim)">{{.Fingerprint}}</code>
+    </div>
+  </div>
+
+  <div class="ed-message">{{.Message}}</div>
+
+  {{if eq (printf "%s" .Status) "unresolved"}}
+  <div class="ed-actions" id="error-actions">
+    <button class="btn-resolve" onclick="resolveError()">resolve</button>
+    <button class="btn-ignore" onclick="ignoreError()">ignore</button>
+  </div>
+  {{end}}
+  {{end}}
+
+  {{if .ErrorLogs}}
+  <div class="ed-section-title"><span class="dim">#</span> recent occurrences <span class="dim">({{len .ErrorLogs}})</span></div>
+  <table class="ed-logs-table">
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Level</th>
+        <th>Service</th>
+        <th>Message</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .ErrorLogs}}
+      <tr>
+        <td style="white-space:nowrap;color:var(--text-dim)">{{.Timestamp.Format "15:04:05"}}</td>
+        <td><span class="lvl-{{.Level}}">{{.Level}}</span></td>
+        <td>{{if .Service}}<span class="badge badge-INFO">{{.Service}}</span>{{end}}</td>
+        <td class="msg-cell" title="{{.Message}}">{{truncate .Message 120}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <div class="ed-section-title"><span class="dim">#</span> recent occurrences</div>
+  <div class="ed-empty">No log entries found for this error fingerprint.</div>
+  {{end}}
+
+  {{if .ErrorGroup.Events}}
+  <div class="ed-section-title"><span class="dim">#</span> timeline</div>
+  <ul class="ed-events">
+    {{range .ErrorGroup.Events}}
+    <li>
+      <span class="ev-type">{{.Type}}</span>
+      {{if .Reason}}{{.Reason}}{{end}}
+      <span class="ev-time">{{timeAgo .CreatedAt}}</span>
+    </li>
+    {{end}}
+  </ul>
+  {{end}}
+</div>
+
+<script nonce="{{.CSPNonce}}">
+(function() {
+  var fp = '{{.ErrorGroup.Fingerprint}}';
+
+  window.resolveError = function() {
+    if (!confirm('Resolve this error group?')) return;
+    fetch('/api/errors/' + encodeURIComponent(fp) + '/resolve', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({reason: 'Resolved from UI'})
+    }).then(function(r) {
+      if (r.ok) location.reload();
+      else r.json().then(function(d) { alert(d.error || 'Failed'); });
+    });
+  };
+
+  window.ignoreError = function() {
+    if (!confirm('Ignore this error group?')) return;
+    fetch('/api/errors/' + encodeURIComponent(fp) + '/ignore', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({reason: 'Ignored from UI'})
+    }).then(function(r) {
+      if (r.ok) location.reload();
+      else r.json().then(function(d) { alert(d.error || 'Failed'); });
+    });
+  };
+})();
+</script>
+{{end}}
