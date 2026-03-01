@@ -588,6 +588,7 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*LogEntry, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, timestamp, level, service, environment, commit_hash,
 			trace_id, span_id, parent_span_id, request_id,
+			user_id, session_id,
 			message, event_type, exception_class, error_fingerprint,
 			source_file, source_line, metadata
 		FROM logs WHERE id = ?`, id)
@@ -596,10 +597,12 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*LogEntry, error) {
 	var tsStr string
 	var metaJSON sql.NullString
 	var environment, commitHash, spanID, parentSpanID, requestID sql.NullString
+	var userID, sessionID sql.NullString
 	var eventType, exceptionClass, errorFingerprint, sourceFile sql.NullString
 	var sourceLine sql.NullInt64
 	if err := row.Scan(&entry.ID, &tsStr, &entry.Level, &entry.Service, &environment, &commitHash,
 		&entry.TraceID, &spanID, &parentSpanID, &requestID,
+		&userID, &sessionID,
 		&entry.Message, &eventType, &exceptionClass, &errorFingerprint,
 		&sourceFile, &sourceLine, &metaJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -622,6 +625,12 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*LogEntry, error) {
 	}
 	if requestID.Valid {
 		entry.RequestID = requestID.String
+	}
+	if userID.Valid {
+		entry.UserID = userID.String
+	}
+	if sessionID.Valid {
+		entry.SessionID = sessionID.String
 	}
 	if eventType.Valid {
 		entry.EventType = eventType.String

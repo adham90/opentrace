@@ -69,7 +69,7 @@
   font-size: 12px;
   line-height: 1.6;
   cursor: pointer;
-  border-left: 2px solid transparent;
+  border-left: 3px solid transparent;
   transition: background 0.1s;
   gap: 8px;
 }
@@ -166,11 +166,21 @@
   font-size: 12px;
   line-height: 1.6;
   background: var(--bg-secondary);
-  border-left: 3px solid var(--cyan);
+  border-left: 3px solid var(--border);
   margin: 0;
 }
 .term-line.expanded + .term-detail { display: block; }
-.term-line.expanded { background: var(--bg-secondary); border-left-color: var(--cyan) !important; }
+.term-line.expanded { background: var(--bg-secondary); }
+
+/* Level-colored left border on expanded detail panel */
+.term-line.level-ERROR.expanded,
+.term-line.level-ERROR.expanded + .term-detail { border-left-color: var(--red); }
+.term-line.level-WARN.expanded,
+.term-line.level-WARN.expanded + .term-detail  { border-left-color: var(--yellow); }
+.term-line.level-INFO.expanded,
+.term-line.level-INFO.expanded + .term-detail  { border-left-color: var(--green); }
+.term-line.level-DEBUG.expanded,
+.term-line.level-DEBUG.expanded + .term-detail { border-left-color: var(--bg-tertiary); }
 
 /* Detail header with actions */
 .term-detail-header {
