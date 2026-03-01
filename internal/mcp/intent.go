@@ -4,10 +4,13 @@ import "strings"
 
 // Intent constants for investigation session classification.
 const (
-	IntentInvestigation  = "investigation"
-	IntentQuery          = "query"
-	IntentConfiguration  = "configuration"
-	IntentExploration    = "exploration"
+	IntentInvestigation = "investigation"
+	IntentQuery         = "query"
+	IntentConfiguration = "configuration"
+	IntentExploration   = "exploration"
+	IntentDevelopment   = "development"
+	IntentReview        = "review"
+	IntentDeployment    = "deployment"
 )
 
 // ClassifyIntent determines the session intent from an optional context string
@@ -49,6 +52,37 @@ func classifyFromContext(ctx string) (string, string) {
 	for _, kw := range configPhrases {
 		if strings.Contains(lower, kw) {
 			return IntentConfiguration, ctx
+		}
+	}
+
+	// Deployment keywords — signals a deploy/release workflow.
+	deployKeywords := []string{
+		"deploying", "deploy", "releasing", "shipping", "rollback", "rollout",
+	}
+	for _, kw := range deployKeywords {
+		if strings.Contains(lower, kw) {
+			return IntentDeployment, ctx
+		}
+	}
+
+	// Review keywords — code review / PR review workflow.
+	reviewKeywords := []string{
+		"reviewing", "code review", "pr review", "pull request",
+	}
+	for _, kw := range reviewKeywords {
+		if strings.Contains(lower, kw) {
+			return IntentReview, ctx
+		}
+	}
+
+	// Development keywords — building/coding workflow.
+	devKeywords := []string{
+		"implementing", "building", "refactoring", "coding", "developing",
+		"editing", "writing code",
+	}
+	for _, kw := range devKeywords {
+		if strings.Contains(lower, kw) {
+			return IntentDevelopment, ctx
 		}
 	}
 
@@ -105,6 +139,14 @@ func classifyFromTool(toolName string) (string, string) {
 		return IntentInvestigation, ""
 	case "trace_lookup":
 		return IntentInvestigation, ""
+
+	// Deployment tools
+	case "record_deploy", "deploy_history", "deploy_impact":
+		return IntentDeployment, ""
+
+	// Development/code tools
+	case "code_context", "whats_fragile", "code_risk", "test_gaps", "test_priority":
+		return IntentDevelopment, ""
 
 	// Configuration tools
 	case "watch", "create_healthcheck", "set_note", "configure_connector":

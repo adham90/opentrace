@@ -53,6 +53,8 @@ type appDeps struct {
 	runbookEffectivenessStore    store.RunbookEffectivenessStore
 	codeEntityStore              store.CodeEntityStore
 	deployStore                  store.DeployStore
+	eventStore                   store.EventStore
+	testCorrelationStore         store.TestCorrelationStore
 	registry           *connector.Registry
 	cfg              *config.Config
 }
@@ -168,6 +170,8 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	runbookEffectivenessStore := store.NewRunbookEffectivenessStore(db)
 	codeEntityStore := store.NewCodeEntityStore(db)
 	deployStore := store.NewDeployStore(db)
+	eventStore := store.NewEventStore(db)
+	testCorrelationStore := store.NewTestCorrelationStore(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
@@ -200,6 +204,8 @@ func initApp(ctx context.Context) (*appDeps, error) {
 		runbookEffectivenessStore:    runbookEffectivenessStore,
 		codeEntityStore:              codeEntityStore,
 		deployStore:                  deployStore,
+		eventStore:                   eventStore,
+		testCorrelationStore:         testCorrelationStore,
 		registry:                     registry,
 		cfg:                         cfg,
 	}, nil
@@ -258,6 +264,8 @@ func runMCP() error {
 		RunbookEffectivenessStore:    deps.runbookEffectivenessStore,
 		CodeEntityStore:              deps.codeEntityStore,
 		DeployStore:                  deps.deployStore,
+		EventStore:                   deps.eventStore,
+		TestCorrelationStore:         deps.testCorrelationStore,
 	})
 }
 
@@ -322,8 +330,10 @@ func run() error {
 		AnalyticsStore:  deps.analyticsStore,
 		JourneyStore:    deps.journeyStore,
 		ErrorImpactStore: deps.errorImpactStore,
-		CodeEntityStore:  deps.codeEntityStore,
-		DeployStore:      deps.deployStore,
+		CodeEntityStore:          deps.codeEntityStore,
+		DeployStore:              deps.deployStore,
+		EventStore:               deps.eventStore,
+		TestCorrelationStore:     deps.testCorrelationStore,
 	})
 
 	// Agent-first watch evaluator + stream (reactive on log ingestion)
@@ -364,6 +374,8 @@ func run() error {
 		InvestigationSessionStore: deps.investigationSessionStore,
 		CodeEntityStore:           deps.codeEntityStore,
 		DeployStore:               deps.deployStore,
+		EventStore:                deps.eventStore,
+		TestCorrelationStore:      deps.testCorrelationStore,
 		ReliabilityProvider:       hcSched,
 	})
 
@@ -539,6 +551,20 @@ func run() error {
 						slog.Info("pruned old deploys", "count", n)
 					}
 				}
+				if deps.eventStore != nil {
+					if n, err := deps.eventStore.Prune(ctx, retention); err != nil {
+						slog.Warn("event prune failed", "error", err)
+					} else if n > 0 {
+						slog.Info("pruned old events", "count", n)
+					}
+				}
+				if deps.testCorrelationStore != nil {
+					if n, err := deps.testCorrelationStore.Prune(ctx, retention); err != nil {
+						slog.Warn("uncovered paths prune failed", "error", err)
+					} else if n > 0 {
+						slog.Info("pruned stale uncovered paths", "count", n)
+					}
+				}
 			}
 
 			// Metric retention: env override > DB setting > global retention
@@ -633,6 +659,14 @@ func run() error {
 			if deps.deployStore != nil && deps.analyticsStore != nil {
 				g.Go(func() error {
 					measureDeployImpacts(gctx, deps.deployStore, deps.analyticsStore)
+					return nil
+				})
+			}
+			if deps.testCorrelationStore != nil {
+				g.Go(func() error {
+					if err := deps.testCorrelationStore.RefreshUncoveredPaths(gctx); err != nil {
+						slog.Warn("test correlation refresh failed", "error", err)
+					}
 					return nil
 				})
 			}

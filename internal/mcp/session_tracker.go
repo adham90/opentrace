@@ -42,6 +42,10 @@ type SessionTracker struct {
 	errorGroupStore store.ErrorGroupStore
 	deployStore     store.DeployStore
 
+	// Stage 6: event + test correlation stores
+	eventStore           store.EventStore
+	testCorrelationStore store.TestCorrelationStore
+
 	mu              sync.RWMutex
 	session         *store.InvestigationSession
 	connectionID    string // from OnRegisterSession
@@ -107,6 +111,72 @@ func (st *SessionTracker) SetErrorGroupStore(egs store.ErrorGroupStore) {
 // SetDeployStore configures the deploy store for linking investigations.
 func (st *SessionTracker) SetDeployStore(ds store.DeployStore) {
 	st.deployStore = ds
+}
+
+// SetEventStore configures the event store for session tracking.
+func (st *SessionTracker) SetEventStore(es store.EventStore) {
+	st.eventStore = es
+}
+
+// SetTestCorrelationStore configures the test correlation store.
+func (st *SessionTracker) SetTestCorrelationStore(tcs store.TestCorrelationStore) {
+	st.testCorrelationStore = tcs
+}
+
+// TrackFileRead adds a file path to the session's files_read list.
+func (st *SessionTracker) TrackFileRead(filePath string) {
+	st.mu.RLock()
+	sess := st.session
+	st.mu.RUnlock()
+	if sess == nil || st.store == nil {
+		return
+	}
+
+	// Append to existing list
+	files := append(sess.FilesRead, filePath)
+	// Deduplicate
+	files = deduplicateStrings(files)
+	st.UpdateSession(store.UpdateInvestigationSessionParams{
+		FilesRead: files,
+	})
+	st.mu.Lock()
+	if st.session != nil {
+		st.session.FilesRead = files
+	}
+	st.mu.Unlock()
+}
+
+// TrackFileModified adds a file path to the session's files_modified list.
+func (st *SessionTracker) TrackFileModified(filePath string) {
+	st.mu.RLock()
+	sess := st.session
+	st.mu.RUnlock()
+	if sess == nil || st.store == nil {
+		return
+	}
+
+	files := append(sess.FilesModified, filePath)
+	files = deduplicateStrings(files)
+	st.UpdateSession(store.UpdateInvestigationSessionParams{
+		FilesModified: files,
+	})
+	st.mu.Lock()
+	if st.session != nil {
+		st.session.FilesModified = files
+	}
+	st.mu.Unlock()
+}
+
+func deduplicateStrings(ss []string) []string {
+	seen := make(map[string]struct{}, len(ss))
+	out := make([]string, 0, len(ss))
+	for _, s := range ss {
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // SetLastSuggestions records the suggestions returned to the client,

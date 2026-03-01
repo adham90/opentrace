@@ -876,3 +876,38 @@ func (m *mockDeployStore) Prune(_ context.Context, _ time.Duration) (int64, erro
 	return 0, nil
 }
 
+// mockEventStore implements store.EventStore for testing.
+type mockEventStore struct{}
+
+func (m *mockEventStore) Create(_ context.Context, p store.CreateEventParams) (*store.Event, error) {
+	return &store.Event{ID: 1, EventType: p.EventType, Title: p.Title}, nil
+}
+func (m *mockEventStore) GetByID(_ context.Context, _ int64) (*store.Event, error) {
+	return nil, store.ErrNotFound
+}
+func (m *mockEventStore) List(_ context.Context, _ store.ListEventParams) ([]store.Event, error) {
+	return nil, nil
+}
+func (m *mockEventStore) GetByExternalID(_ context.Context, _ store.EventType, _ string) (*store.Event, error) {
+	return nil, store.ErrNotFound
+}
+func (m *mockEventStore) Prune(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+
+// mockTestCorrelationStore implements store.TestCorrelationStore for testing.
+type mockTestCorrelationStore struct{}
+
+func (m *mockTestCorrelationStore) RefreshUncoveredPaths(_ context.Context) error {
+	return nil
+}
+func (m *mockTestCorrelationStore) TopByPriority(_ context.Context, _ string, _ int) ([]store.UncoveredErrorPath, error) {
+	return nil, nil
+}
+func (m *mockTestCorrelationStore) GetByFingerprint(_ context.Context, _ string) (*store.UncoveredErrorPath, error) {
+	return nil, store.ErrNotFound
+}
+func (m *mockTestCorrelationStore) Prune(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+

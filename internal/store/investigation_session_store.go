@@ -24,7 +24,8 @@ const investigationSessionColumns = `id, user_id, user_email, user_role,
 		correlated_deploy, pre_investigation_snapshot, post_investigation_snapshot,
 		total_steps, total_errors, tool_sequence, tool_fingerprint, arg_signature,
 		started_at, last_activity_at, ended_at, duration_seconds,
-		recurrence_group, recurrence_count, previous_session_id, fix_durability_seconds`
+		recurrence_group, recurrence_count, previous_session_id, fix_durability_seconds,
+		files_modified, files_read, linked_deploy_id`
 
 type investigationSessionStore struct {
 	db *sql.DB
@@ -256,6 +257,22 @@ func (s *investigationSessionStore) Update(ctx context.Context, id string, param
 	if params.FixDurabilitySeconds != nil {
 		sets = append(sets, "fix_durability_seconds = ?")
 		args = append(args, *params.FixDurabilitySeconds)
+	}
+
+	// Stage 6: Development session tracking
+	if params.FilesModified != nil {
+		j, _ := json.Marshal(params.FilesModified)
+		sets = append(sets, "files_modified = ?")
+		args = append(args, string(j))
+	}
+	if params.FilesRead != nil {
+		j, _ := json.Marshal(params.FilesRead)
+		sets = append(sets, "files_read = ?")
+		args = append(args, string(j))
+	}
+	if params.LinkedDeployID != nil {
+		sets = append(sets, "linked_deploy_id = ?")
+		args = append(args, *params.LinkedDeployID)
 	}
 
 	if len(sets) == 0 {
@@ -555,6 +572,8 @@ func scanSession(row *sql.Row) (*InvestigationSession, error) {
 	var preSnapshotJSON, postSnapshotJSON string
 	var recurrenceGroup, previousSessionID sql.NullString
 	var fixDurability sql.NullInt64
+	var filesModifiedJSON, filesReadJSON string
+	var linkedDeployID sql.NullInt64
 
 	err := row.Scan(
 		&sess.ID, &sess.UserID, &sess.UserEmail, &sess.UserRole,
@@ -570,6 +589,7 @@ func scanSession(row *sql.Row) (*InvestigationSession, error) {
 		&sess.TotalSteps, &sess.TotalErrors, &seqJSON, &sess.ToolFingerprint, &sess.ArgSignature,
 		&startedAt, &lastActivityAt, &endedAt, &sess.DurationSeconds,
 		&recurrenceGroup, &sess.RecurrenceCount, &previousSessionID, &fixDurability,
+		&filesModifiedJSON, &filesReadJSON, &linkedDeployID,
 	)
 	if err != nil {
 		return nil, err
@@ -601,6 +621,8 @@ func scanSession(row *sql.Row) (*InvestigationSession, error) {
 	sess.ExplainedQueries = unmarshalStringSlice(explainedJSON)
 	sess.KilledQueries = unmarshalStringSlice(killedJSON)
 	sess.TraceIDs = unmarshalStringSlice(traceIDsJSON)
+	sess.FilesModified = unmarshalStringSlice(filesModifiedJSON)
+	sess.FilesRead = unmarshalStringSlice(filesReadJSON)
 
 	// JSON map columns
 	json.Unmarshal([]byte(preSnapshotJSON), &sess.PreInvestigationSnapshot)
@@ -615,6 +637,9 @@ func scanSession(row *sql.Row) (*InvestigationSession, error) {
 	}
 	if triggeredByHC.Valid {
 		sess.TriggeredByHealthcheckID = &triggeredByHC.String
+	}
+	if linkedDeployID.Valid {
+		sess.LinkedDeployID = &linkedDeployID.Int64
 	}
 
 	sess.StartedAt, _ = time.Parse(time.RFC3339, startedAt)
@@ -728,6 +753,8 @@ func scanSessionRow(rows *sql.Rows) (*InvestigationSession, error) {
 	var preSnapshotJSON, postSnapshotJSON string
 	var recurrenceGroup, previousSessionID sql.NullString
 	var fixDurability sql.NullInt64
+	var filesModifiedJSON, filesReadJSON string
+	var linkedDeployID sql.NullInt64
 
 	err := rows.Scan(
 		&sess.ID, &sess.UserID, &sess.UserEmail, &sess.UserRole,
@@ -743,6 +770,7 @@ func scanSessionRow(rows *sql.Rows) (*InvestigationSession, error) {
 		&sess.TotalSteps, &sess.TotalErrors, &seqJSON, &sess.ToolFingerprint, &sess.ArgSignature,
 		&startedAt, &lastActivityAt, &endedAt, &sess.DurationSeconds,
 		&recurrenceGroup, &sess.RecurrenceCount, &previousSessionID, &fixDurability,
+		&filesModifiedJSON, &filesReadJSON, &linkedDeployID,
 	)
 	if err != nil {
 		return nil, err
@@ -774,6 +802,8 @@ func scanSessionRow(rows *sql.Rows) (*InvestigationSession, error) {
 	sess.ExplainedQueries = unmarshalStringSlice(explainedJSON)
 	sess.KilledQueries = unmarshalStringSlice(killedJSON)
 	sess.TraceIDs = unmarshalStringSlice(traceIDsJSON)
+	sess.FilesModified = unmarshalStringSlice(filesModifiedJSON)
+	sess.FilesRead = unmarshalStringSlice(filesReadJSON)
 
 	// JSON map columns
 	json.Unmarshal([]byte(preSnapshotJSON), &sess.PreInvestigationSnapshot)
@@ -788,6 +818,9 @@ func scanSessionRow(rows *sql.Rows) (*InvestigationSession, error) {
 	}
 	if triggeredByHC.Valid {
 		sess.TriggeredByHealthcheckID = &triggeredByHC.String
+	}
+	if linkedDeployID.Valid {
+		sess.LinkedDeployID = &linkedDeployID.Int64
 	}
 
 	sess.StartedAt, _ = time.Parse(time.RFC3339, startedAt)

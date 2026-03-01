@@ -82,6 +82,8 @@ type Server struct {
 	investigationSessionStore store.InvestigationSessionStore
 	codeEntityStore          store.CodeEntityStore
 	deployStore              store.DeployStore
+	eventStore               store.EventStore
+	testCorrelationStore     store.TestCorrelationStore
 	reliabilityProvider      ReliabilityProvider
 	versionChecker           *versionChecker
 	sseServer      *mcpgoserver.SSEServer
@@ -142,6 +144,8 @@ type ServerDeps struct {
 	InvestigationSessionStore    store.InvestigationSessionStore
 	CodeEntityStore              store.CodeEntityStore
 	DeployStore                  store.DeployStore
+	EventStore                   store.EventStore
+	TestCorrelationStore         store.TestCorrelationStore
 	IngestQueue                  *IngestQueue
 	ReliabilityProvider          ReliabilityProvider
 }
@@ -186,6 +190,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		investigationSessionStore: deps.InvestigationSessionStore,
 		codeEntityStore:           deps.CodeEntityStore,
 		deployStore:               deps.DeployStore,
+		eventStore:                deps.EventStore,
+		testCorrelationStore:      deps.TestCorrelationStore,
 		ingestQueue:               deps.IngestQueue,
 		reliabilityProvider:       deps.ReliabilityProvider,
 		versionChecker:      newVersionChecker("adham90", "opentrace"),
@@ -339,6 +345,11 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/events/deploy", srv.handleDeployWebhook)
 		}
 
+		// Generic event webhooks with dynamic API key auth + rate limiting
+		if srv.eventStore != nil {
+			r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/events/{type}", srv.handleEventWebhook)
+		}
+
 		// Server registration and metric push with dynamic API key auth + rate limiting
 		if srv.serverStore != nil && srv.metricStore != nil {
 			r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/servers/register", srv.handleRegisterServer)
@@ -420,6 +431,21 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			// Deploys
 			if srv.deployStore != nil {
 				r.Get("/deploys", srv.handleListDeploys)
+			}
+
+			// Events
+			if srv.eventStore != nil {
+				r.Get("/events", srv.handleListEvents)
+			}
+
+			// Code entities
+			if srv.codeEntityStore != nil {
+				r.Get("/code-entities", srv.handleListCodeEntities)
+			}
+
+			// Test gaps
+			if srv.testCorrelationStore != nil {
+				r.Get("/test-gaps", srv.handleListTestGaps)
 			}
 
 			// MCP activity

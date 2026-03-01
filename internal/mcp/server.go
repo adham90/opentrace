@@ -53,6 +53,7 @@ Use add_note / get_notes to save and recall persistent context about services, q
 - Runbooks: runbook (composite playbooks that run multiple diagnostics at once)
 - Code Intelligence: code_context, whats_fragile, code_risk (source code risk tracking)
 - Deploys: deploy_history, deploy_impact, record_deploy (deploy lifecycle + impact measurement)
+- Agent Assistant: context (task-specific production context), check_alerts (unified alert view), test_gaps (uncovered error paths), test_priority (error detail for writing tests)
 `
 
 // Deps holds the dependencies for the MCP server.
@@ -108,6 +109,10 @@ type Deps struct {
 	// Investigation Memory Stage 5 — Code Intelligence + Deploys
 	CodeEntityStore store.CodeEntityStore
 	DeployStore     store.DeployStore
+
+	// Investigation Memory Stage 6 — Agent Assistant
+	EventStore           store.EventStore
+	TestCorrelationStore store.TestCorrelationStore
 }
 
 // NewConfiguredServer creates an MCPServer and registers tools based on the
@@ -133,6 +138,7 @@ func NewConfiguredServer(deps Deps, isAdmin bool, hooks *server.Hooks) *server.M
 
 	opts := []server.ServerOption{
 		server.WithToolCapabilities(false),
+		server.WithResourceCapabilities(false, true),
 		server.WithInstructions(mcpInstructions),
 	}
 	if hooks != nil {
@@ -151,6 +157,9 @@ func NewConfiguredServer(deps Deps, isAdmin bool, hooks *server.Hooks) *server.M
 	if isAdmin {
 		addWriteTools(s, deps, b)
 	}
+
+	// Register MCP resources
+	addResources(s, deps)
 
 	// Clear the package-level store after registration.
 	activityStoreForLogging = nil
@@ -246,6 +255,14 @@ func Serve(deps Deps) error {
 		}
 		if deps.DeployStore != nil {
 			sessionTracker.SetDeployStore(deps.DeployStore)
+		}
+
+		// Stage 6: Wire event + test correlation stores into session tracker
+		if deps.EventStore != nil {
+			sessionTracker.SetEventStore(deps.EventStore)
+		}
+		if deps.TestCorrelationStore != nil {
+			sessionTracker.SetTestCorrelationStore(deps.TestCorrelationStore)
 		}
 	}
 
@@ -1147,6 +1164,30 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			deployImpactHandler(deps.DeployStore),
 		)
 		b.Add("deploy_impact", "Get before/after impact metrics for a deploy", "Deploys", "read", "")
+	}
+
+	// Agent Assistant (Stage 6 — read-only).
+	// Context meta-tool
+	if deps.ErrorGroupStore != nil || deps.CodeEntityStore != nil || deps.DeployStore != nil {
+		maybeAddTool(s, contextToolDef(), contextMetaToolHandler(deps))
+		b.Add("context", "Get task-specific context (errors, risks, deploys)", "Agent Assistant", "read", "")
+	}
+
+	// Check alerts
+	if deps.ErrorGroupStore != nil || deps.WatchStore != nil || deps.DeployStore != nil {
+		maybeAddTool(s, checkAlertsToolDef(), checkAlertsHandler(deps))
+		b.Add("check_alerts", "Check pending alerts, error spikes, deploy incidents", "Agent Assistant", "read", "")
+	}
+
+	// Test correlation
+	if deps.TestCorrelationStore != nil {
+		maybeAddTool(s, testGapsToolDef(), testGapsHandler(deps.TestCorrelationStore))
+		b.Add("test_gaps", "List uncovered production error paths ranked by impact", "Agent Assistant", "read", "")
+
+		if deps.ErrorGroupStore != nil {
+			maybeAddTool(s, testPriorityToolDef(), testPriorityHandler(deps.TestCorrelationStore, deps.ErrorGroupStore))
+			b.Add("test_priority", "Get detailed error context for writing tests", "Agent Assistant", "read", "")
+		}
 	}
 }
 
