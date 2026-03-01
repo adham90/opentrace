@@ -32,6 +32,11 @@
   </div>
 
   <div class="term-output" id="term-output" aria-live="polite" aria-relevant="additions">
+    <div class="filter-summary-bar" id="filter-summary-bar">
+      <span style="color:var(--text-dim)">Filtered:</span>
+      <div class="filter-summary-chips" id="filter-summary-chips"></div>
+      <button class="filter-summary-clear" onclick="window.clearFilters()" title="Clear all filters (c)">&times; clear</button>
+    </div>
     <div id="logs-list" data-max-id="{{.MaxLogID}}">
     {{template "logs-list" .}}
     </div>
@@ -184,9 +189,10 @@
 
 /* Detail header with actions */
 .term-detail-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 10px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
@@ -198,6 +204,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  overflow: hidden;
 }
 .term-detail-actions {
   display: flex;
@@ -350,6 +358,7 @@
 }
 
 .term-copy-btn {
+  position: static;
   background: var(--bg-tertiary);
   color: var(--text-dim);
   border: 1px solid var(--border);
@@ -358,6 +367,9 @@
   font-size: 10px;
   font-family: inherit;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  z-index: auto;
 }
 .term-copy-btn:hover { color: var(--text); border-color: var(--text-dim); }
 
@@ -642,6 +654,86 @@
   font-size: 11px;
 }
 
+/* ── Keyboard focus ───────────────────────────────────────── */
+.term-entry.kb-focus > .term-line {
+  background: rgba(99, 179, 237, 0.15);
+  box-shadow: inset 4px 0 0 var(--cyan);
+}
+.term-entry.kb-focus > .term-line:hover {
+  background: rgba(99, 179, 237, 0.18);
+}
+
+/* ── Clickable filter values ──────────────────────────────── */
+.term-detail-val-filter {
+  color: var(--cyan);
+  cursor: pointer;
+  border-bottom: 1px dashed transparent;
+  transition: border-color 0.15s;
+}
+.term-detail-val-filter:hover {
+  border-bottom-color: var(--cyan);
+}
+
+/* ── Histogram brush selection ────────────────────────────── */
+.histogram-brush {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(99, 179, 237, 0.15);
+  border-left: 1px solid var(--cyan);
+  border-right: 1px solid var(--cyan);
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* ── Sticky filter summary bar ────────────────────────────── */
+.filter-summary-bar {
+  display: none;
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 4px 12px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  align-items: center;
+  gap: 6px;
+}
+.filter-summary-bar.visible { display: flex; }
+.filter-summary-chips {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  overflow-x: auto;
+}
+.filter-summary-clear {
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 10px;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  font-family: inherit;
+  padding: 2px 6px;
+}
+.filter-summary-clear:hover { color: var(--red); }
+
+/* ── JSON tree toggle ─────────────────────────────────────── */
+.json-tree-toggle {
+  cursor: pointer;
+  color: var(--text-dim);
+  user-select: none;
+  font-size: 10px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  font-family: var(--font-mono);
+  margin-left: auto;
+}
+.json-tree-toggle:hover { color: var(--text); border-color: var(--text-dim); }
+
 /* ── Toast notifications ──────────────────────────────────── */
 #toast-container {
   position: fixed;
@@ -804,6 +896,7 @@
     if (log.trace_id) {
       html += '<button class="term-copy-btn" onclick="event.stopPropagation();setFilter(\'query\',\'' + escH(log.trace_id) + '\')" title="Search this trace">Trace</button>';
     }
+    html += '<button class="term-copy-btn" data-context-ts="' + escH(log.timestamp) + '" data-context-id="' + log.id + '" title="Show surrounding logs (&plusmn;30s)">Context</button>';
     html += '<button class="term-copy-btn" title="Copy log as JSON" aria-label="Copy log details">Copy</button>';
     html += '</div></div>';
 
@@ -816,10 +909,10 @@
     // Identity card
     html += '<div class="term-detail-card">';
     html += '<div class="term-detail-card-title">Identity</div>';
-    if (log.service) html += dRow('service', log.service);
-    if (log.environment) html += dRow('environment', log.environment);
-    if (log.event_type) html += dRow('event_type', log.event_type);
-    if (log.commit_hash) html += dRow('commit_hash', log.commit_hash);
+    if (log.service) html += dRowFilter('service', log.service, 'service');
+    if (log.environment) html += dRowFilter('environment', log.environment, 'environment');
+    if (log.event_type) html += dRowFilter('event_type', log.event_type, 'event_type');
+    if (log.commit_hash) html += dRowFilter('commit_hash', log.commit_hash, 'commit_hash');
     if (log.user_id) html += dRow('user_id', log.user_id);
     if (log.session_id) html += dRow('session_id', log.session_id);
     html += '</div>';
@@ -840,12 +933,12 @@
     if (log.exception_class || log.error_fingerprint) {
       html += '<div class="term-detail-card' + (hasTracing ? '' : '') + '" style="border-color:var(--red-dim)">';
       html += '<div class="term-detail-card-title" style="color:var(--red)">Error</div>';
-      if (log.exception_class) html += '<div class="term-detail-row"><span class="term-detail-key">class</span><span class="term-detail-val term-detail-val-highlight" style="color:var(--red)">' + escH(log.exception_class) + '</span></div>';
-      if (log.error_fingerprint) html += '<div class="term-detail-row"><span class="term-detail-key">fingerprint</span><span class="term-detail-val term-detail-val-mono">' + escH(log.error_fingerprint) + '</span></div>';
+      if (log.exception_class) html += dRowFilter('class', log.exception_class, 'exception_class');
+      if (log.error_fingerprint) html += dRowFilter('fingerprint', log.error_fingerprint, 'error_fingerprint');
       if (log.source_file) {
         var src = log.source_file;
         if (log.source_line > 0) src += ':' + log.source_line;
-        html += '<div class="term-detail-row"><span class="term-detail-key">source</span><span class="term-detail-val term-detail-val-mono">' + escH(src) + '</span></div>';
+        html += dRowFilter('source', src, 'source_file');
       }
       html += '</div>';
     } else if (log.source_file) {
@@ -853,7 +946,7 @@
       html += '<div class="term-detail-card-title">Source</div>';
       var src = log.source_file;
       if (log.source_line > 0) src += ':' + log.source_line;
-      html += '<div class="term-detail-row"><span class="term-detail-key">file</span><span class="term-detail-val term-detail-val-mono">' + escH(src) + '</span></div>';
+      html += dRowFilter('file', src, 'source_file');
       html += '</div>';
     }
 
@@ -977,11 +1070,14 @@
     if (log.metadata && Object.keys(log.metadata).length > 0) {
       html += '<div class="term-detail-cards">';
       html += '<div class="term-detail-card term-detail-card-full">';
-      html += '<div class="term-detail-card-title">Metadata</div>';
+      html += '<div class="term-detail-card-title">Metadata <button class="json-tree-toggle" data-json-toggle title="Toggle JSON view">{ }</button></div>';
+      html += '<div class="metadata-flat-view">';
       Object.keys(log.metadata).sort().forEach(function(k) {
         var v = log.metadata[k];
         html += renderMetadataField(k, v);
       });
+      html += '</div>';
+      html += '<div class="metadata-tree-view" style="display:none"><pre class="term-detail-pre" style="max-height:400px">' + escH(JSON.stringify(log.metadata, null, 2)) + '</pre></div>';
       html += '</div></div>';
     }
 
@@ -991,6 +1087,13 @@
   function dRow(key, val) {
     return '<div class="term-detail-row"><span class="term-detail-key">' + escH(key) +
       '</span><span class="term-detail-val">' + escH(String(val)) + '</span></div>';
+  }
+
+  function dRowFilter(key, val, filterKey) {
+    return '<div class="term-detail-row"><span class="term-detail-key">' + escH(key) +
+      '</span><span class="term-detail-val term-detail-val-filter" data-filter-key="' +
+      escH(filterKey) + '" data-filter-val="' + escH(String(val)) +
+      '" title="Filter by ' + escH(filterKey) + '">' + escH(String(val)) + '</span></div>';
   }
 
   function renderMetadataField(key, val) {
@@ -1373,12 +1476,45 @@
     }
   });
 
-  // ── Keyboard shortcuts ────────────────────────────────────
+  // ── Keyboard navigation ──────────────────────────────────
+  var kbFocusIdx = -1;
+
+  function getLogEntries() {
+    return document.querySelectorAll('#logs-list .term-entry');
+  }
+
+  function setKbFocus(idx) {
+    var entries = getLogEntries();
+    if (kbFocusIdx >= 0 && kbFocusIdx < entries.length) {
+      entries[kbFocusIdx].classList.remove('kb-focus');
+    }
+    kbFocusIdx = idx;
+    if (idx >= 0 && idx < entries.length) {
+      entries[idx].classList.add('kb-focus');
+      entries[idx].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }
+
+  function clearKbFocus() {
+    var entries = getLogEntries();
+    for (var i = 0; i < entries.length; i++) {
+      entries[i].classList.remove('kb-focus');
+    }
+    kbFocusIdx = -1;
+  }
+
+  // Reset keyboard focus when log list is reloaded
+  document.body.addEventListener('htmx:afterSwap', function(evt) {
+    if (evt.detail.target.id === 'logs-list') clearKbFocus();
+  });
+
   document.addEventListener('keydown', function(e) {
     var tag = document.activeElement.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
     var overlay = document.getElementById('shortcut-overlay');
     if (overlay && overlay.style.display !== 'none') return;
+
+    var entries = getLogEntries();
 
     switch (e.key) {
       case '/':
@@ -1392,6 +1528,36 @@
       case 'p':
         e.preventDefault();
         window.toggleLive();
+        break;
+      case 'j':
+      case 'ArrowDown':
+        e.preventDefault();
+        if (entries.length === 0) break;
+        setKbFocus(Math.min(kbFocusIdx + 1, entries.length - 1));
+        break;
+      case 'k':
+      case 'ArrowUp':
+        e.preventDefault();
+        if (entries.length === 0) break;
+        setKbFocus(Math.max(kbFocusIdx - 1, 0));
+        break;
+      case 'Enter':
+        if (kbFocusIdx >= 0 && kbFocusIdx < entries.length) {
+          e.preventDefault();
+          var line = entries[kbFocusIdx].querySelector('.term-line');
+          if (line) line.click();
+        }
+        break;
+      case 'Escape':
+        e.preventDefault();
+        var expanded = document.querySelectorAll('.term-line.expanded');
+        if (expanded.length > 0) {
+          for (var i = 0; i < expanded.length; i++) {
+            expanded[i].classList.remove('expanded');
+          }
+        } else {
+          clearKbFocus();
+        }
         break;
     }
   });
@@ -1689,26 +1855,35 @@
     histogramTooltip.style.display = 'none';
   });
 
-  // Histogram click → filter by time bucket
-  histogramContainer.addEventListener('click', function(e) {
-    if (!lastBuckets || lastBuckets.length === 0) return;
+  // Histogram click + brush-select → filter by time range
+  var brushEl = document.createElement('div');
+  brushEl.className = 'histogram-brush';
+  brushEl.style.display = 'none';
+  histogramContainer.appendChild(brushEl);
+
+  var brushState = { active: false, startX: 0, startIdx: -1 };
+
+  function getBucketIdx(clientX) {
+    if (!lastBuckets || lastBuckets.length === 0) return -1;
     var rect = histogramContainer.getBoundingClientRect();
-    var x = e.clientX - rect.left;
+    var x = clientX - rect.left;
     var barGap = 1;
     var barWidth = Math.max(2, (rect.width - barGap * lastBuckets.length) / lastBuckets.length);
     var idx = Math.floor(x / (barWidth + barGap));
-    if (idx < 0 || idx >= lastBuckets.length) return;
+    return Math.max(0, Math.min(idx, lastBuckets.length - 1));
+  }
 
-    var b = lastBuckets[idx];
-    var startTime = new Date(b.timestamp);
-    // Calculate bucket end from next bucket or interval
+  function applyBucketRange(fromIdx, toIdx) {
+    if (fromIdx > toIdx) { var tmp = fromIdx; fromIdx = toIdx; toIdx = tmp; }
+    fromIdx = Math.max(0, fromIdx);
+    toIdx = Math.min(lastBuckets.length - 1, toIdx);
+    var startTime = new Date(lastBuckets[fromIdx].timestamp);
     var endTime;
-    if (idx + 1 < lastBuckets.length) {
-      endTime = new Date(lastBuckets[idx + 1].timestamp);
+    if (toIdx + 1 < lastBuckets.length) {
+      endTime = new Date(lastBuckets[toIdx + 1].timestamp);
     } else {
       endTime = new Date();
     }
-
     filters.start = startTime.toISOString();
     filters.end = endTime.toISOString();
     filters.time_range = '';
@@ -1716,6 +1891,47 @@
     renderFilterChips();
     pushFilterURL();
     htmx.trigger(form, 'submit');
+  }
+
+  histogramContainer.addEventListener('mousedown', function(e) {
+    if (!lastBuckets || lastBuckets.length === 0) return;
+    if (e.button !== 0) return;
+    var rect = histogramContainer.getBoundingClientRect();
+    brushState.active = true;
+    brushState.startX = e.clientX - rect.left;
+    brushState.startIdx = getBucketIdx(e.clientX);
+    brushEl.style.display = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (!brushState.active) return;
+    var rect = histogramContainer.getBoundingClientRect();
+    var currentX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    var dx = Math.abs(currentX - brushState.startX);
+    if (dx > 5) {
+      var left = Math.min(brushState.startX, currentX);
+      brushEl.style.left = left + 'px';
+      brushEl.style.width = dx + 'px';
+      brushEl.style.display = '';
+    }
+  });
+
+  document.addEventListener('mouseup', function(e) {
+    if (!brushState.active) return;
+    brushState.active = false;
+    var wasBrush = brushEl.style.display !== 'none';
+    brushEl.style.display = 'none';
+    if (!lastBuckets || lastBuckets.length === 0) return;
+
+    if (wasBrush) {
+      applyBucketRange(brushState.startIdx, getBucketIdx(e.clientX));
+    } else {
+      var idx = brushState.startIdx;
+      if (idx >= 0 && idx < lastBuckets.length) {
+        applyBucketRange(idx, idx);
+      }
+    }
   });
 
   // Refresh histogram on resize
@@ -1810,10 +2026,72 @@
     fetchHistogram();
   });
 
+  // ── Sticky filter summary bar ─────────────────────────────
+  var filterSummaryBar = document.getElementById('filter-summary-bar');
+  var filterSummaryChips = document.getElementById('filter-summary-chips');
+
+  function updateFilterSummary() {
+    if (!hasActiveFilters()) {
+      filterSummaryBar.classList.remove('visible');
+      return;
+    }
+    filterSummaryBar.classList.add('visible');
+    filterSummaryChips.innerHTML = activeFiltersEl.innerHTML;
+    filterSummaryChips.querySelectorAll('.term-filter-chip').forEach(function(el) {
+      el.addEventListener('click', function() {
+        var k = el.getAttribute('data-filter-key');
+        if (k === 'search') k = 'query';
+        else if (k === 'type') k = 'event_type';
+        else if (k === 'time') k = 'time_range';
+        else if (k === 'env') k = 'environment';
+        else if (k === 'commit') k = 'commit_hash';
+        else if (k === 'rid') k = 'request_id';
+        else if (k === 'error') k = 'exception_class';
+        else if (k === 'fingerprint') k = 'error_fingerprint';
+        else if (k === 'file') k = 'source_file';
+        else if (k === 'range') {
+          filters.start = '';
+          filters.end = '';
+          syncHiddenFields();
+          renderFilterChips();
+          applyFilters();
+          return;
+        } else if (k.indexOf('meta.') === 0) {
+          delete filters.metadata[k.substring(5)];
+          syncHiddenFields();
+          renderFilterChips();
+          applyFilters();
+          return;
+        }
+        removeFilter(k);
+      });
+    });
+  }
+
+  // Hook into renderFilterChips to sync summary bar
+  var _origRenderChips = renderFilterChips;
+  renderFilterChips = function() {
+    _origRenderChips();
+    updateFilterSummary();
+  };
+
   // ── Expose for global use ─────────────────────────────────
   window.clearFilters = clearAllFilters;
+  window.setFilter = setFilter;
+  window.removeFilter = removeFilter;
   window.pauseLiveOnFilter = function() {};
   window.loadPageData = function() {
+    syncHiddenFields();
+    renderFilterChips();
+    applyFilters();
+  };
+  window.showLogContext = function(timestamp, logId) {
+    var ts = new Date(timestamp);
+    var start = new Date(ts.getTime() - 30000);
+    var end = new Date(ts.getTime() + 30000);
+    filters.start = start.toISOString();
+    filters.end = end.toISOString();
+    filters.time_range = '';
     syncHiddenFields();
     renderFilterChips();
     applyFilters();
@@ -1861,9 +2139,49 @@ function copyLogDetail(btn) {
     setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
   });
 }
+
+// ── Delegated click handlers for detail panel ──────────────
 document.addEventListener('click', function(e) {
-  if (e.target.classList.contains('term-copy-btn')) {
+  // Copy button
+  if (e.target.classList.contains('term-copy-btn') && e.target.title === 'Copy log as JSON') {
+    e.stopPropagation();
     copyLogDetail(e.target);
+    return;
+  }
+
+  // Clickable filter values
+  var filterEl = e.target.closest('.term-detail-val-filter');
+  if (filterEl) {
+    e.stopPropagation();
+    setFilter(filterEl.dataset.filterKey, filterEl.dataset.filterVal);
+    return;
+  }
+
+  // JSON tree toggle
+  var jsonToggle = e.target.closest('[data-json-toggle]');
+  if (jsonToggle) {
+    e.stopPropagation();
+    var card = jsonToggle.closest('.term-detail-card');
+    var flat = card.querySelector('.metadata-flat-view');
+    var tree = card.querySelector('.metadata-tree-view');
+    if (flat.style.display === 'none') {
+      flat.style.display = '';
+      tree.style.display = 'none';
+      jsonToggle.textContent = '{ }';
+    } else {
+      flat.style.display = 'none';
+      tree.style.display = '';
+      jsonToggle.textContent = 'rows';
+    }
+    return;
+  }
+
+  // Context logs button
+  var ctxBtn = e.target.closest('[data-context-ts]');
+  if (ctxBtn) {
+    e.stopPropagation();
+    window.showLogContext(ctxBtn.dataset.contextTs, ctxBtn.dataset.contextId);
+    return;
   }
 });
 
