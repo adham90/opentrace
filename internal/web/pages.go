@@ -162,6 +162,7 @@ type LogFilters struct {
 	Environment      string
 	CommitHash       string
 	RequestID        string
+	TraceID          string
 	ExceptionClass   string
 	ErrorFingerprint string
 	SourceFile       string
@@ -195,6 +196,22 @@ func parseMetadataParams(q url.Values) map[string]string {
 	for key, vals := range q {
 		if strings.HasPrefix(key, "meta.") && len(vals) > 0 && vals[0] != "" {
 			m[strings.TrimPrefix(key, "meta.")] = vals[0]
+		}
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
+// parseExcludeParams extracts "exclude_field=value" query params into a map.
+func parseExcludeParams(q url.Values) map[string]string {
+	m := make(map[string]string)
+	allowed := []string{"service", "level", "environment", "event_type",
+		"exception_class", "error_fingerprint", "source_file", "commit_hash"}
+	for _, f := range allowed {
+		if v := q.Get("exclude_" + f); v != "" {
+			m[f] = v
 		}
 	}
 	if len(m) == 0 {
@@ -659,6 +676,7 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		Environment:      r.URL.Query().Get("environment"),
 		CommitHash:       r.URL.Query().Get("commit_hash"),
 		RequestID:        r.URL.Query().Get("request_id"),
+		TraceID:          r.URL.Query().Get("trace_id"),
 		ExceptionClass:   r.URL.Query().Get("exception_class"),
 		ErrorFingerprint: r.URL.Query().Get("error_fingerprint"),
 		SourceFile:       r.URL.Query().Get("source_file"),
@@ -690,9 +708,11 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		Limit:            limit + 1,
 		Offset:           offset,
 		MetadataFilter:   parseMetadataParams(r.URL.Query()),
+		Exclude:          parseExcludeParams(r.URL.Query()),
 		Environment:      filters.Environment,
 		CommitHash:       filters.CommitHash,
 		RequestID:        filters.RequestID,
+		TraceID:          filters.TraceID,
 		ExceptionClass:   filters.ExceptionClass,
 		ErrorFingerprint: filters.ErrorFingerprint,
 		SourceFile:       filters.SourceFile,
@@ -863,6 +883,7 @@ func (s *Server) handleLogsFragment(w http.ResponseWriter, r *http.Request) {
 		Environment:      r.URL.Query().Get("environment"),
 		CommitHash:       r.URL.Query().Get("commit_hash"),
 		RequestID:        r.URL.Query().Get("request_id"),
+		TraceID:          r.URL.Query().Get("trace_id"),
 		ExceptionClass:   r.URL.Query().Get("exception_class"),
 		ErrorFingerprint: r.URL.Query().Get("error_fingerprint"),
 		SourceFile:       r.URL.Query().Get("source_file"),
@@ -894,9 +915,11 @@ func (s *Server) handleLogsFragment(w http.ResponseWriter, r *http.Request) {
 		Limit:            limit + 1,
 		Offset:           offset,
 		MetadataFilter:   parseMetadataParams(r.URL.Query()),
+		Exclude:          parseExcludeParams(r.URL.Query()),
 		Environment:      filters.Environment,
 		CommitHash:       filters.CommitHash,
 		RequestID:        filters.RequestID,
+		TraceID:          filters.TraceID,
 		ExceptionClass:   filters.ExceptionClass,
 		ErrorFingerprint: filters.ErrorFingerprint,
 		SourceFile:       filters.SourceFile,
@@ -971,6 +994,7 @@ func (s *Server) handleLogsPoll(w http.ResponseWriter, r *http.Request) {
 		Environment:      r.URL.Query().Get("environment"),
 		CommitHash:       r.URL.Query().Get("commit_hash"),
 		RequestID:        r.URL.Query().Get("request_id"),
+		TraceID:          r.URL.Query().Get("trace_id"),
 		ExceptionClass:   r.URL.Query().Get("exception_class"),
 		ErrorFingerprint: r.URL.Query().Get("error_fingerprint"),
 		SourceFile:       r.URL.Query().Get("source_file"),
@@ -985,9 +1009,11 @@ func (s *Server) handleLogsPoll(w http.ResponseWriter, r *http.Request) {
 		SinceID:          sinceID,
 		Limit:            200,
 		MetadataFilter:   parseMetadataParams(r.URL.Query()),
+		Exclude:          parseExcludeParams(r.URL.Query()),
 		Environment:      filters.Environment,
 		CommitHash:       filters.CommitHash,
 		RequestID:        filters.RequestID,
+		TraceID:          filters.TraceID,
 		ExceptionClass:   filters.ExceptionClass,
 		ErrorFingerprint: filters.ErrorFingerprint,
 		SourceFile:       filters.SourceFile,
@@ -1263,6 +1289,44 @@ func (s *Server) handleListEventTypes(w http.ResponseWriter, r *http.Request) {
 		types = []string{}
 	}
 	writeJSON(w, http.StatusOK, types)
+}
+
+func (s *Server) handleLogValues(w http.ResponseWriter, r *http.Request) {
+	if s.logStore == nil {
+		writeJSON(w, http.StatusOK, []string{})
+		return
+	}
+	field := r.URL.Query().Get("field")
+	if field == "" {
+		writeError(w, http.StatusBadRequest, "field parameter required")
+		return
+	}
+	now := time.Now().UTC()
+	params := store.LogCountParams{
+		Since: now.Add(-7 * 24 * time.Hour),
+		Until: now,
+	}
+	if field == "metadata_key" {
+		keys, err := s.logStore.MetadataKeys(r.Context(), params)
+		if err != nil {
+			writeJSON(w, http.StatusOK, []string{})
+			return
+		}
+		if keys == nil {
+			keys = []string{}
+		}
+		writeJSON(w, http.StatusOK, keys)
+		return
+	}
+	values, err := s.logStore.DistinctValues(r.Context(), field, params)
+	if err != nil {
+		writeJSON(w, http.StatusOK, []string{})
+		return
+	}
+	if values == nil {
+		values = []string{}
+	}
+	writeJSON(w, http.StatusOK, values)
 }
 
 func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {

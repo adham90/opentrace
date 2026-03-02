@@ -141,6 +141,7 @@ type LogSearchParams struct {
 	Offset           int               `json:"offset,omitempty"`
 	SinceID          int64             `json:"since_id,omitempty"`
 	MetadataFilter   map[string]string `json:"metadata_filter,omitempty"` // key-value filters on metadata JSON
+	Exclude          map[string]string `json:"exclude,omitempty"`         // field -> comma-separated values to exclude (NOT IN)
 	SortAsc          bool              `json:"sort_asc,omitempty"`        // true for oldest-first (default: newest-first)
 }
 

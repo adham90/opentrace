@@ -366,6 +366,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Use(srv.requireAuthOrOnboardingAPI)
 			r.Get("/services", srv.handleListServices)
 			r.Get("/event_types", srv.handleListEventTypes)
+			r.Get("/log_values", srv.handleLogValues)
 			r.Get("/connectors", srv.handleListConnectors)
 			r.Get("/connectors/{id}", srv.handleGetConnectorAPI)
 			r.Get("/overview", srv.handleOverviewAPI)

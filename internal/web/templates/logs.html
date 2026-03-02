@@ -13,6 +13,7 @@
     <input type="hidden" name="exception_class" id="f-exception-class" value="{{.LogFilters.ExceptionClass}}">
     <input type="hidden" name="error_fingerprint" id="f-error-fingerprint" value="{{.LogFilters.ErrorFingerprint}}">
     <input type="hidden" name="source_file" id="f-source-file" value="{{.LogFilters.SourceFile}}">
+    <input type="hidden" name="trace_id" id="f-trace-id" value="{{.LogFilters.TraceID}}">
 
     <div class="term-cmdline-inner">
       <span class="term-prompt-symbol" aria-hidden="true">$</span>
@@ -518,6 +519,12 @@
   margin-left: 2px;
   font-size: 13px;
 }
+.term-filter-chip.chip-exclude {
+  border-color: var(--red);
+  background: rgba(239, 68, 68, 0.08);
+}
+.term-filter-chip.chip-exclude .chip-key { color: var(--red); }
+.term-filter-chip.chip-exclude .chip-val { color: var(--text-secondary); }
 
 /* ── Histogram ─────────────────────────────────────────────── */
 .histogram-container {
@@ -624,20 +631,22 @@
   .histogram-container { height: 40px; }
 }
 
-/* ── Autocomplete dropdown (opens downward) ────────────────── */
-.ac-dropdown {
+/* ── Autocomplete dropdown (opens downward, portaled to body) ── */
+body > .ac-dropdown {
   position: absolute;
-  top: 100%;
+  top: 0;
+  bottom: auto;
   left: 0;
-  right: 0;
+  right: auto;
   max-height: 200px;
   overflow-y: auto;
   background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
+  border: 1px solid var(--border);
   border-top: none;
   font-size: 12px;
   font-family: var(--font-mono);
-  z-index: 200;
+  z-index: 9999;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
 .ac-item {
   padding: 4px 12px;
@@ -794,6 +803,7 @@
     environment: '{{.LogFilters.Environment}}',
     commit_hash: '{{.LogFilters.CommitHash}}',
     request_id: '{{.LogFilters.RequestID}}',
+    trace_id: '{{.LogFilters.TraceID}}',
     exception_class: '{{.LogFilters.ExceptionClass}}',
     error_fingerprint: '{{.LogFilters.ErrorFingerprint}}',
     source_file: '{{.LogFilters.SourceFile}}',
@@ -801,6 +811,7 @@
     end: '',
     metadata: {}
   };
+  var excludes = {}; // { field: 'value,value2' } — negation filters
 
   // ── Scroll state (newest at top) ───────────────────────────
   var pendingNew = 0;
@@ -894,7 +905,7 @@
       html += '<button class="term-copy-btn" onclick="event.stopPropagation();setFilter(\'request_id\',\'' + escH(log.request_id) + '\')" title="Filter by this request">Request</button>';
     }
     if (log.trace_id) {
-      html += '<button class="term-copy-btn" onclick="event.stopPropagation();setFilter(\'query\',\'' + escH(log.trace_id) + '\')" title="Search this trace">Trace</button>';
+      html += '<button class="term-copy-btn" onclick="event.stopPropagation();setFilter(\'trace_id\',\'' + escH(log.trace_id) + '\')" title="Filter by trace ID">Trace</button>';
     }
     html += '<button class="term-copy-btn" data-context-ts="' + escH(log.timestamp) + '" data-context-id="' + log.id + '" title="Show surrounding logs (&plusmn;30s)">Context</button>';
     html += '<button class="term-copy-btn" title="Copy log as JSON" aria-label="Copy log details">Copy</button>';
@@ -1187,7 +1198,8 @@
   }
 
   function clearAllFilters() {
-    filters = { query: '', service: '', level: '', event_type: '', time_range: '', environment: '', commit_hash: '', request_id: '', exception_class: '', error_fingerprint: '', source_file: '', start: '', end: '', metadata: {} };
+    filters = { query: '', service: '', level: '', event_type: '', time_range: '', environment: '', commit_hash: '', request_id: '', trace_id: '', exception_class: '', error_fingerprint: '', source_file: '', start: '', end: '', metadata: {} };
+    excludes = {};
     syncHiddenFields();
     renderFilterChips();
     applyFilters();
@@ -1202,6 +1214,7 @@
     document.getElementById('f-environment').value = filters.environment;
     document.getElementById('f-commit-hash').value = filters.commit_hash;
     document.getElementById('f-request-id').value = filters.request_id;
+    document.getElementById('f-trace-id').value = filters.trace_id;
     document.getElementById('f-exception-class').value = filters.exception_class;
     document.getElementById('f-error-fingerprint').value = filters.error_fingerprint;
     document.getElementById('f-source-file').value = filters.source_file;
@@ -1213,6 +1226,10 @@
 
     Object.keys(filters.metadata).forEach(function(k) {
       if (filters.metadata[k]) addHiddenField('meta.' + k, filters.metadata[k]);
+    });
+
+    Object.keys(excludes).forEach(function(k) {
+      if (excludes[k]) addHiddenField('exclude_' + k, excludes[k]);
     });
   }
 
@@ -1229,8 +1246,10 @@
     return filters.query || filters.service || filters.level ||
            filters.event_type || filters.time_range ||
            filters.environment || filters.commit_hash || filters.request_id ||
+           filters.trace_id ||
            filters.exception_class || filters.error_fingerprint || filters.source_file ||
-           filters.start || filters.end || Object.keys(filters.metadata).length > 0;
+           filters.start || filters.end || Object.keys(filters.metadata).length > 0 ||
+           Object.keys(excludes).length > 0;
   }
 
   function renderFilterChips() {
@@ -1253,12 +1272,17 @@
     if (filters.environment) html += chip('env', filters.environment);
     if (filters.commit_hash) html += chip('commit', filters.commit_hash);
     if (filters.request_id) html += chip('rid', filters.request_id);
+    if (filters.trace_id) html += chip('trace', filters.trace_id);
     if (filters.exception_class) html += chip('error', filters.exception_class);
     if (filters.error_fingerprint) html += chip('fingerprint', filters.error_fingerprint);
     if (filters.source_file) html += chip('file', filters.source_file);
     if (filters.query) html += chip('search', filters.query);
     Object.keys(filters.metadata).forEach(function(k) {
       html += chip('meta.' + k, filters.metadata[k]);
+    });
+    // Exclusion chips (red-tinted)
+    Object.keys(excludes).forEach(function(k) {
+      html += excludeChip(k, excludes[k]);
     });
     activeFiltersEl.innerHTML = html;
     if (html) {
@@ -1270,12 +1294,21 @@
     activeFiltersEl.querySelectorAll('.term-filter-chip').forEach(function(el) {
       el.addEventListener('click', function() {
         var k = el.getAttribute('data-filter-key');
+        // Handle exclusion chip removal
+        if (k.indexOf('!') === 0) {
+          delete excludes[k.substring(1)];
+          syncHiddenFields();
+          renderFilterChips();
+          applyFilters();
+          return;
+        }
         if (k === 'search') k = 'query';
         else if (k === 'type') k = 'event_type';
         else if (k === 'time') k = 'time_range';
         else if (k === 'env') k = 'environment';
         else if (k === 'commit') k = 'commit_hash';
         else if (k === 'rid') k = 'request_id';
+        else if (k === 'trace') k = 'trace_id';
         else if (k === 'error') k = 'exception_class';
         else if (k === 'fingerprint') k = 'error_fingerprint';
         else if (k === 'file') k = 'source_file';
@@ -1312,6 +1345,13 @@
       '<span class="chip-x">\u00d7</span></span>';
   }
 
+  function excludeChip(field, val) {
+    return '<span class="term-filter-chip chip-exclude" data-filter-key="!' + escH(field) + '">' +
+      '<span class="chip-key">!' + escH(field) + ':</span>' +
+      '<span class="chip-val">' + escH(val) + '</span>' +
+      '<span class="chip-x">\u00d7</span></span>';
+  }
+
   function escH(s) {
     var d = document.createElement('div');
     d.textContent = s || '';
@@ -1335,6 +1375,7 @@
     if (filters.environment) params.set('environment', filters.environment);
     if (filters.commit_hash) params.set('commit_hash', filters.commit_hash);
     if (filters.request_id) params.set('request_id', filters.request_id);
+    if (filters.trace_id) params.set('trace_id', filters.trace_id);
     if (filters.exception_class) params.set('exception_class', filters.exception_class);
     if (filters.error_fingerprint) params.set('error_fingerprint', filters.error_fingerprint);
     if (filters.source_file) params.set('source_file', filters.source_file);
@@ -1342,6 +1383,9 @@
     if (filters.end) params.set('end', filters.end);
     Object.keys(filters.metadata).forEach(function(k) {
       if (filters.metadata[k]) params.set('meta.' + k, filters.metadata[k]);
+    });
+    Object.keys(excludes).forEach(function(k) {
+      if (excludes[k]) params.set('exclude_' + k, excludes[k]);
     });
     return params;
   }
@@ -1368,45 +1412,54 @@
     var searchParts = [];
     var changed = false;
 
+    // Map of key alias → { filter field name, isNegatable }
+    var keyToField = {
+      'level': 'level', 'l': 'level',
+      'service': 'service', 'svc': 'service', 's': 'service',
+      'time': 'time_range', 't': 'time_range',
+      'type': 'event_type', 'event_type': 'event_type', 'y': 'event_type',
+      'env': 'environment', 'environment': 'environment', 'e': 'environment',
+      'commit': 'commit_hash', 'commit_hash': 'commit_hash', 'c': 'commit_hash',
+      'request_id': 'request_id', 'rid': 'request_id', 'r': 'request_id',
+      'trace': 'trace_id', 'trace_id': 'trace_id', 'tid': 'trace_id',
+      'error': 'exception_class', 'exception_class': 'exception_class', 'x': 'exception_class',
+      'fingerprint': 'error_fingerprint', 'fp': 'error_fingerprint', 'error_fingerprint': 'error_fingerprint',
+      'file': 'source_file', 'source_file': 'source_file', 'f': 'source_file'
+    };
+    // Fields that support negation (! prefix on value)
+    var negatableFields = { 'level':1, 'service':1, 'environment':1, 'event_type':1, 'exception_class':1, 'error_fingerprint':1, 'source_file':1, 'commit_hash':1 };
+
     parts.forEach(function(part) {
-      var m = part.match(/^(level|l|service|svc|s|time|t|type|event_type|y|env|environment|e|commit|commit_hash|c|request_id|rid|r|error|exception_class|x|fingerprint|fp|error_fingerprint|file|source_file|f):(.+)$/i);
+      // Check for meta.KEY:VALUE pattern first
+      var metaMatch = part.match(/^meta\.([^:]+):(.+)$/i);
+      if (metaMatch) {
+        var metaKey = metaMatch[1];
+        var metaVal = metaMatch[2].replace(/^"(.*)"$/, '$1');
+        filters.metadata[metaKey] = metaVal;
+        changed = true;
+        return;
+      }
+
+      var m = part.match(/^(level|l|service|svc|s|time|t|type|event_type|y|env|environment|e|commit|commit_hash|c|request_id|rid|r|trace|trace_id|tid|error|exception_class|x|fingerprint|fp|error_fingerprint|file|source_file|f):(.+)$/i);
       if (m) {
         var key = m[1].toLowerCase();
         var val = m[2].replace(/^"(.*)"$/, '$1');
+        var field = keyToField[key];
+        if (!field) { searchParts.push(part); return; }
         changed = true;
 
-        switch (key) {
-          case 'level': case 'l':
-            filters.level = val.toUpperCase();
-            break;
-          case 'service': case 'svc': case 's':
-            filters.service = val;
-            break;
-          case 'time': case 't':
-            filters.time_range = val;
-            break;
-          case 'type': case 'event_type': case 'y':
-            filters.event_type = val;
-            break;
-          case 'env': case 'environment': case 'e':
-            filters.environment = val;
-            break;
-          case 'commit': case 'commit_hash': case 'c':
-            filters.commit_hash = val;
-            break;
-          case 'request_id': case 'rid': case 'r':
-            filters.request_id = val;
-            break;
-          case 'error': case 'exception_class': case 'x':
-            filters.exception_class = val;
-            break;
-          case 'fingerprint': case 'fp': case 'error_fingerprint':
-            filters.error_fingerprint = val;
-            break;
-          case 'file': case 'source_file': case 'f':
-            filters.source_file = val;
-            break;
+        // Detect negation: !value
+        if (val.charAt(0) === '!' && val.length > 1 && negatableFields[field]) {
+          var negVal = val.substring(1);
+          if (field === 'level') negVal = negVal.toUpperCase();
+          // Append to existing excludes with comma separation
+          excludes[field] = excludes[field] ? excludes[field] + ',' + negVal : negVal;
+          return;
         }
+
+        // Positive filter
+        if (field === 'level') val = val.toUpperCase();
+        filters[field] = val;
       } else {
         searchParts.push(part);
       }
@@ -1427,9 +1480,18 @@
   }
 
   // ── Active filter order (for backspace removal) ──────────
-  var filterOrder = ['query', 'time_range', 'event_type', 'service', 'level', 'environment', 'commit_hash', 'request_id', 'exception_class', 'error_fingerprint', 'source_file'];
+  var filterOrder = ['query', 'time_range', 'event_type', 'service', 'level', 'environment', 'commit_hash', 'request_id', 'trace_id', 'exception_class', 'error_fingerprint', 'source_file'];
 
   function removeLastFilter() {
+    // Remove excludes first (last added)
+    var exKeys = Object.keys(excludes);
+    if (exKeys.length > 0) {
+      delete excludes[exKeys[exKeys.length - 1]];
+      syncHiddenFields();
+      renderFilterChips();
+      applyFilters();
+      return true;
+    }
     var metaKeys = Object.keys(filters.metadata);
     if (metaKeys.length > 0) {
       delete filters.metadata[metaKeys[metaKeys.length - 1]];
@@ -2011,14 +2073,17 @@
     filters.environment = params.get('environment') || '';
     filters.commit_hash = params.get('commit_hash') || '';
     filters.request_id = params.get('request_id') || '';
+    filters.trace_id = params.get('trace_id') || '';
     filters.exception_class = params.get('exception_class') || '';
     filters.error_fingerprint = params.get('error_fingerprint') || '';
     filters.source_file = params.get('source_file') || '';
     filters.start = params.get('start') || '';
     filters.end = params.get('end') || '';
     filters.metadata = {};
+    excludes = {};
     params.forEach(function(v, k) {
       if (k.indexOf('meta.') === 0) filters.metadata[k.substring(5)] = v;
+      if (k.indexOf('exclude_') === 0) excludes[k.substring(8)] = v;
     });
     syncHiddenFields();
     renderFilterChips();
@@ -2040,12 +2105,21 @@
     filterSummaryChips.querySelectorAll('.term-filter-chip').forEach(function(el) {
       el.addEventListener('click', function() {
         var k = el.getAttribute('data-filter-key');
+        // Handle exclusion chip removal
+        if (k.indexOf('!') === 0) {
+          delete excludes[k.substring(1)];
+          syncHiddenFields();
+          renderFilterChips();
+          applyFilters();
+          return;
+        }
         if (k === 'search') k = 'query';
         else if (k === 'type') k = 'event_type';
         else if (k === 'time') k = 'time_range';
         else if (k === 'env') k = 'environment';
         else if (k === 'commit') k = 'commit_hash';
         else if (k === 'rid') k = 'request_id';
+        else if (k === 'trace') k = 'trace_id';
         else if (k === 'error') k = 'exception_class';
         else if (k === 'fingerprint') k = 'error_fingerprint';
         else if (k === 'file') k = 'source_file';
@@ -2192,17 +2266,22 @@ document.addEventListener('click', function(e) {
   var activeIdx = -1;
   var items     = [];
 
+  // Portal dropdown to body so it escapes overflow:hidden ancestors
+  document.body.appendChild(dropdown);
+
   var prefixes = [
-    { label: 'level:',       hint: 'filter by log level' },
-    { label: 'service:',     hint: 'filter by service name' },
+    { label: 'level:',       hint: 'filter by log level (use !value to exclude)' },
+    { label: 'service:',     hint: 'filter by service name (use !value to exclude)' },
     { label: 'time:',        hint: 'filter by time range' },
     { label: 'type:',        hint: 'filter by event type' },
     { label: 'env:',         hint: 'filter by environment' },
+    { label: 'trace:',       hint: 'filter by trace/correlation ID' },
     { label: 'commit:',      hint: 'filter by commit hash' },
     { label: 'request_id:',  hint: 'filter by request ID' },
     { label: 'error:',       hint: 'filter by exception class' },
     { label: 'fingerprint:', hint: 'filter by error fingerprint' },
-    { label: 'file:',        hint: 'filter by source file' }
+    { label: 'file:',        hint: 'filter by source file' },
+    { label: 'meta:',        hint: 'filter by metadata key:value' }
   ];
 
   var staticValues = {
@@ -2218,7 +2297,23 @@ document.addEventListener('click', function(e) {
     's':       '/api/services',
     'type':    '/api/event_types',
     'event_type': '/api/event_types',
-    'y':       '/api/event_types'
+    'y':       '/api/event_types',
+    'env':             '/api/log_values?field=environment',
+    'environment':     '/api/log_values?field=environment',
+    'e':               '/api/log_values?field=environment',
+    'error':           '/api/log_values?field=exception_class',
+    'exception_class': '/api/log_values?field=exception_class',
+    'x':               '/api/log_values?field=exception_class',
+    'fingerprint':     '/api/log_values?field=error_fingerprint',
+    'fp':              '/api/log_values?field=error_fingerprint',
+    'error_fingerprint': '/api/log_values?field=error_fingerprint',
+    'commit':          '/api/log_values?field=commit_hash',
+    'commit_hash':     '/api/log_values?field=commit_hash',
+    'c':               '/api/log_values?field=commit_hash',
+    'file':            '/api/log_values?field=source_file',
+    'source_file':     '/api/log_values?field=source_file',
+    'f':               '/api/log_values?field=source_file',
+    'meta':            '/api/log_values?field=metadata_key'
   };
 
   var cache = {};
@@ -2258,6 +2353,13 @@ document.addEventListener('click', function(e) {
     return { text: before.substring(start), start: start, end: pos };
   }
 
+  function positionDropdown() {
+    var rect = cmdInput.getBoundingClientRect();
+    dropdown.style.top = (rect.bottom + window.scrollY) + 'px';
+    dropdown.style.left = (rect.left + window.scrollX) + 'px';
+    dropdown.style.width = rect.width + 'px';
+  }
+
   function renderDropdown(list) {
     items = list;
     activeIdx = -1;
@@ -2272,6 +2374,7 @@ document.addEventListener('click', function(e) {
     }
     dropdown.innerHTML = html;
     dropdown.style.display = '';
+    positionDropdown();
 
     dropdown.querySelectorAll('.ac-item').forEach(function(el) {
       el.addEventListener('mousedown', function(e) {
@@ -2307,6 +2410,10 @@ document.addEventListener('click', function(e) {
     cmdInput.setSelectionRange(newPos, newPos);
     hide();
     cmdInput.focus();
+    // If this was a meta key selection (meta:KEY → meta.KEY:), re-trigger autocomplete
+    if (item.metaKey) {
+      setTimeout(updateDropdown, 50);
+    }
   }
 
   function navigate(dir) {
@@ -2329,6 +2436,14 @@ document.addEventListener('click', function(e) {
       return;
     }
 
+    // Handle meta.KEY:VALUE pattern — autocomplete metadata values (not supported yet, just hide)
+    var metaDotMatch = text.match(/^meta\.([^:]+):(.*)$/i);
+    if (metaDotMatch) {
+      // No value autocomplete for metadata yet — hide dropdown
+      hide();
+      return;
+    }
+
     var colonIdx = text.indexOf(':');
     if (colonIdx === -1) {
       var lf = text.toLowerCase();
@@ -2339,6 +2454,16 @@ document.addEventListener('click', function(e) {
 
     var prefix = text.substring(0, colonIdx);
     var fragment = text.substring(colonIdx + 1);
+
+    // Special handling for meta: prefix — show metadata keys, selecting one produces meta.KEY:
+    if (prefix.toLowerCase() === 'meta') {
+      fetchValues('meta', fragment, function(vals) {
+        renderDropdown(vals.map(function(v){
+          return { label: 'meta.' + v + ':', hint: 'metadata key', value: 'meta.' + v + ':', metaKey: true };
+        }));
+      });
+      return;
+    }
 
     fetchValues(prefix, fragment, function(vals) {
       renderDropdown(vals.map(function(v){ return { label: prefix + ':' + v, hint: '', value: prefix + ':' + v }; }));
