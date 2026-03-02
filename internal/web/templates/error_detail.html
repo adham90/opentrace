@@ -23,6 +23,72 @@
   .ed-status-unresolved { background: rgba(255,85,85,.15); color: var(--red); }
   .ed-status-resolved { background: rgba(80,200,120,.15); color: var(--green); }
   .ed-status-ignored { background: rgba(150,150,150,.15); color: var(--text-dim); }
+
+  /* ── Histogram ─────────────────────────────────────────── */
+  .ed-histogram-wrapper {
+    margin-bottom: 20px;
+  }
+  .ed-histogram-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .ed-histogram-header .ed-section-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+  }
+  .ed-time-range {
+    display: flex;
+    gap: 2px;
+  }
+  .ed-time-range button {
+    padding: 3px 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    border-radius: 3px;
+    transition: all 0.15s;
+  }
+  .ed-time-range button:hover { border-color: var(--text-dim); color: var(--text); }
+  .ed-time-range button.active { background: var(--red); color: #fff; border-color: var(--red); }
+  .ed-histogram-container {
+    height: 80px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    position: relative;
+    cursor: crosshair;
+    overflow: hidden;
+  }
+  .ed-histogram-container svg { display: block; }
+  .ed-histogram-bar {
+    fill: var(--red);
+    opacity: 0.6;
+    transition: opacity 0.1s;
+  }
+  .ed-histogram-bar:hover { opacity: 1; }
+  .ed-histogram-tooltip {
+    position: absolute;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 4px 8px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text);
+    pointer-events: none;
+    z-index: 20;
+    white-space: nowrap;
+    display: none;
+  }
+
   .ed-message {
     padding: 12px 16px;
     border: 1px solid var(--border);
@@ -54,6 +120,8 @@
   .ed-actions .btn-resolve { border-color: var(--green); color: var(--green); }
   .ed-actions .btn-resolve:hover { background: rgba(80,200,120,.1); }
   .ed-actions .btn-ignore { border-color: var(--text-dim); }
+  .ed-actions .btn-logs { border-color: var(--blue, #5b9fd4); color: var(--blue, #5b9fd4); }
+  .ed-actions .btn-logs:hover { background: rgba(91,159,212,.1); }
   .ed-section-title {
     font-size: 14px;
     font-weight: 600;
@@ -82,16 +150,23 @@
     color: var(--text);
     vertical-align: top;
   }
+  .ed-logs-table tr.clickable-row { cursor: pointer; }
   .ed-logs-table tr:hover td { background: var(--bg-secondary); }
   .ed-logs-table .lvl-ERROR,
   .ed-logs-table .lvl-FATAL { color: var(--red); }
   .ed-logs-table .lvl-WARN { color: var(--yellow); }
   .ed-logs-table .msg-cell {
-    max-width: 500px;
+    max-width: 400px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .ed-logs-table .trace-link {
+    color: var(--blue, #5b9fd4);
+    text-decoration: none;
+    font-size: 11px;
+  }
+  .ed-logs-table .trace-link:hover { text-decoration: underline; }
   .ed-events {
     list-style: none;
     padding: 0;
@@ -125,6 +200,7 @@
     .ed-summary { flex-direction: column; gap: 6px; }
     .ed-actions { flex-wrap: wrap; }
     .msg-cell { max-width: 200px; }
+    .ed-histogram-container { height: 50px; }
   }
 </style>
 
@@ -158,6 +234,18 @@
       <span class="badge badge-dim">{{.Environment}}</span>
     </div>
     {{end}}
+    {{if gt .UniqueUsers 0}}
+    <div class="ed-summary-item">
+      <span class="text-dim">users affected:</span>
+      <strong>{{.UniqueUsers}}</strong>
+    </div>
+    {{end}}
+    {{if gt .ReopenedCount 0}}
+    <div class="ed-summary-item">
+      <span class="text-dim">reopened:</span>
+      <strong>{{.ReopenedCount}}x</strong>
+    </div>
+    {{end}}
     <div class="ed-summary-item">
       <span class="text-dim">first seen:</span>
       {{timeAgo .FirstSeenAt}}
@@ -178,14 +266,32 @@
     </div>
   </div>
 
+  <!-- Occurrence Histogram -->
+  <div class="ed-histogram-wrapper">
+    <div class="ed-histogram-header">
+      <span class="ed-section-label">occurrence timeline</span>
+      <div class="ed-time-range">
+        <button data-range="1h">1h</button>
+        <button data-range="6h">6h</button>
+        <button data-range="24h">24h</button>
+        <button data-range="7d" class="active">7d</button>
+      </div>
+    </div>
+    <div class="ed-histogram-container" id="ed-histogram-container">
+      <svg id="ed-histogram-svg" width="100%" height="100%" preserveAspectRatio="none"></svg>
+      <div class="ed-histogram-tooltip" id="ed-histogram-tooltip"></div>
+    </div>
+  </div>
+
   <div class="ed-message">{{.Message}}</div>
 
-  {{if eq (printf "%s" .Status) "unresolved"}}
   <div class="ed-actions" id="error-actions">
-    <button class="btn-resolve" onclick="resolveError()">resolve</button>
-    <button class="btn-ignore" onclick="ignoreError()">ignore</button>
+    {{if eq (printf "%s" .Status) "unresolved"}}
+    <button class="btn-resolve" id="btn-resolve">resolve</button>
+    <button class="btn-ignore" id="btn-ignore">ignore</button>
+    {{end}}
+    <button class="btn-logs" id="btn-view-logs">view in logs</button>
   </div>
-  {{end}}
   {{end}}
 
   {{if .ErrorLogs}}
@@ -197,15 +303,17 @@
         <th>Level</th>
         <th>Service</th>
         <th>Message</th>
+        <th>Trace</th>
       </tr>
     </thead>
     <tbody>
       {{range .ErrorLogs}}
-      <tr>
-        <td style="white-space:nowrap;color:var(--text-dim)">{{.Timestamp.Format "15:04:05"}}</td>
+      <tr class="clickable-row">
+        <td style="white-space:nowrap;color:var(--text-dim)">{{.Timestamp.Format "Jan 02 15:04:05"}}</td>
         <td><span class="lvl-{{.Level}}">{{.Level}}</span></td>
         <td>{{if .Service}}<span class="badge badge-INFO">{{.Service}}</span>{{end}}</td>
-        <td class="msg-cell" title="{{.Message}}">{{truncate .Message 120}}</td>
+        <td class="msg-cell" title="{{.Message}}">{{truncate .Message 100}}</td>
+        <td>{{if .TraceID}}<a class="trace-link" href="/logs?trace_id={{.TraceID}}">{{truncate .TraceID 12}}</a>{{end}}</td>
       </tr>
       {{end}}
     </tbody>
@@ -220,7 +328,7 @@
   <ul class="ed-events">
     {{range .ErrorGroup.Events}}
     <li>
-      <span class="ev-type">{{.Type}}</span>
+      <span class="ev-type">{{.Action}}</span>
       {{if .Reason}}{{.Reason}}{{end}}
       <span class="ev-time">{{timeAgo .CreatedAt}}</span>
     </li>
@@ -232,30 +340,170 @@
 <script nonce="{{.CSPNonce}}">
 (function() {
   var fp = '{{.ErrorGroup.Fingerprint}}';
+  var histSvg = document.getElementById('ed-histogram-svg');
+  var histTooltip = document.getElementById('ed-histogram-tooltip');
+  var histContainer = document.getElementById('ed-histogram-container');
+  var currentRange = '7d';
+  var lastBuckets = [];
 
-  window.resolveError = function() {
-    if (!confirm('Resolve this error group?')) return;
-    fetch('/api/errors/' + encodeURIComponent(fp) + '/resolve', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({reason: 'Resolved from UI'})
-    }).then(function(r) {
-      if (r.ok) location.reload();
-      else r.json().then(function(d) { alert(d.error || 'Failed'); });
-    });
-  };
+  // ── Histogram ──────────────────────────────────────────
+  function fetchHistogram(range) {
+    currentRange = range;
+    // Update active button
+    var buttons = document.querySelectorAll('.ed-time-range button');
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].classList.toggle('active', buttons[i].getAttribute('data-range') === range);
+    }
 
-  window.ignoreError = function() {
-    if (!confirm('Ignore this error group?')) return;
-    fetch('/api/errors/' + encodeURIComponent(fp) + '/ignore', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({reason: 'Ignored from UI'})
-    }).then(function(r) {
-      if (r.ok) location.reload();
-      else r.json().then(function(d) { alert(d.error || 'Failed'); });
+    fetch('/api/errors/' + encodeURIComponent(fp) + '/histogram?time_range=' + range)
+      .then(function(r) { return r.json(); })
+      .then(function(buckets) {
+        if (!Array.isArray(buckets)) {
+          lastBuckets = [];
+          renderHistogram([]);
+          return;
+        }
+        lastBuckets = buckets;
+        renderHistogram(buckets);
+      })
+      .catch(function() {
+        lastBuckets = [];
+        histSvg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="var(--text-dim)" font-size="11" font-family="var(--font-mono)">unavailable</text>';
+      });
+  }
+
+  function renderHistogram(buckets) {
+    if (!buckets || buckets.length === 0) {
+      histSvg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="var(--text-dim)" font-size="11" font-family="var(--font-mono)">no data</text>';
+      return;
+    }
+
+    var rect = histContainer.getBoundingClientRect();
+    var width = rect.width;
+    var height = rect.height;
+    var barGap = 1;
+    var barWidth = Math.max(2, (width - barGap * buckets.length) / buckets.length);
+    var maxCount = 0;
+    for (var i = 0; i < buckets.length; i++) {
+      if (buckets[i].count > maxCount) maxCount = buckets[i].count;
+    }
+    if (maxCount === 0) {
+      histSvg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="var(--text-dim)" font-size="11" font-family="var(--font-mono)">no occurrences</text>';
+      return;
+    }
+
+    var svgNS = 'http://www.w3.org/2000/svg';
+    while (histSvg.firstChild) histSvg.removeChild(histSvg.firstChild);
+    histSvg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+
+    for (var i = 0; i < buckets.length; i++) {
+      var b = buckets[i];
+      var x = i * (barWidth + barGap);
+      var h = (b.count / maxCount) * (height - 4);
+      if (b.count > 0 && h < 2) h = 2;
+
+      var bar = document.createElementNS(svgNS, 'rect');
+      bar.setAttribute('x', x);
+      bar.setAttribute('y', height - h);
+      bar.setAttribute('width', barWidth);
+      bar.setAttribute('height', h);
+      bar.setAttribute('class', 'ed-histogram-bar');
+      bar.setAttribute('data-idx', i);
+      histSvg.appendChild(bar);
+    }
+  }
+
+  // Tooltip on hover
+  histContainer.addEventListener('mousemove', function(e) {
+    if (!lastBuckets || lastBuckets.length === 0) return;
+    var rect = histContainer.getBoundingClientRect();
+    var x = e.clientX - rect.left;
+    var barGap = 1;
+    var barWidth = Math.max(2, (rect.width - barGap * lastBuckets.length) / lastBuckets.length);
+    var idx = Math.floor(x / (barWidth + barGap));
+    if (idx < 0 || idx >= lastBuckets.length) {
+      histTooltip.style.display = 'none';
+      return;
+    }
+    var b = lastBuckets[idx];
+    var ts = new Date(b.timestamp);
+    var fmt = currentRange === '7d' || currentRange === '24h'
+      ? ts.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + ts.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+      : ts.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    histTooltip.textContent = fmt + ' \u2014 ' + b.count + ' occurrence' + (b.count !== 1 ? 's' : '');
+    histTooltip.style.display = 'block';
+
+    var tipX = e.clientX - rect.left + 10;
+    if (tipX + histTooltip.offsetWidth > rect.width) tipX = tipX - histTooltip.offsetWidth - 20;
+    histTooltip.style.left = tipX + 'px';
+    histTooltip.style.top = '4px';
+  });
+
+  histContainer.addEventListener('mouseleave', function() {
+    histTooltip.style.display = 'none';
+  });
+
+  // Time range buttons
+  var rangeButtons = document.querySelectorAll('.ed-time-range button');
+  for (var i = 0; i < rangeButtons.length; i++) {
+    rangeButtons[i].addEventListener('click', function() {
+      fetchHistogram(this.getAttribute('data-range'));
     });
-  };
+  }
+
+  // Initial load
+  fetchHistogram('7d');
+
+  // ── Actions ──────────────────────────────────────────
+  var btnResolve = document.getElementById('btn-resolve');
+  if (btnResolve) {
+    btnResolve.addEventListener('click', function() {
+      if (!confirm('Resolve this error group?')) return;
+      fetch('/api/errors/' + encodeURIComponent(fp) + '/resolve', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({reason: 'Resolved from UI'})
+      }).then(function(r) {
+        if (r.ok) location.reload();
+        else r.json().then(function(d) { alert(d.error || 'Failed'); });
+      });
+    });
+  }
+
+  var btnIgnore = document.getElementById('btn-ignore');
+  if (btnIgnore) {
+    btnIgnore.addEventListener('click', function() {
+      if (!confirm('Ignore this error group?')) return;
+      fetch('/api/errors/' + encodeURIComponent(fp) + '/ignore', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({reason: 'Ignored from UI'})
+      }).then(function(r) {
+        if (r.ok) location.reload();
+        else r.json().then(function(d) { alert(d.error || 'Failed'); });
+      });
+    });
+  }
+
+  var btnLogs = document.getElementById('btn-view-logs');
+  if (btnLogs) {
+    btnLogs.addEventListener('click', function() {
+      window.location.href = '/logs?error_fingerprint=' + encodeURIComponent(fp);
+    });
+  }
+
+  // Occurrence row clicks → navigate to logs
+  var logsTable = document.querySelector('.ed-logs-table tbody');
+  if (logsTable) {
+    logsTable.addEventListener('click', function(e) {
+      // If clicking a trace link, let the <a> handle it
+      if (e.target.closest('.trace-link')) return;
+      var row = e.target.closest('.clickable-row');
+      if (row) {
+        window.location.href = '/logs?error_fingerprint=' + encodeURIComponent(fp);
+      }
+    });
+  }
 })();
 </script>
 {{end}}

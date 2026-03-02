@@ -1,4 +1,8 @@
 {{define "content"}}
+<style>
+  .watch-row { cursor: pointer; transition: background 0.1s; }
+  .watch-row:hover td { background: var(--bg-secondary); }
+</style>
 <div class="settings-page">
   <div class="page-header">
     <h1><span class="prompt">$</span> watchers <span class="dim">{{if .PendingCount}}&middot; {{.PendingCount}} pending alerts{{end}}</span></h1>
@@ -21,9 +25,9 @@
         <th>Last Checked</th>
       </tr>
     </thead>
-    <tbody>
+    <tbody id="watches-table-body">
       {{range .Watches}}
-      <tr>
+      <tr class="watch-row" data-watch-id="{{.ID}}">
         <td>
           <span class="status-dot {{if eq (printf "%s" .Status) "active"}}status-dot-ok{{else if eq (printf "%s" .Status) "triggered"}}status-dot-err{{else}}status-dot-off{{end}}"></span>
         </td>
@@ -87,18 +91,32 @@
 </div>
 
 <script nonce="{{.CSPNonce}}">
-document.addEventListener('click', function(e) {
-  var btn = e.target.closest('[data-dismiss-id]');
-  if (!btn) return;
-  var id = btn.getAttribute('data-dismiss-id');
-  fetch('/api/watches/alerts/' + id + '/dismiss', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({reason: 'dismissed from UI'})
-  }).then(function(r) {
-    if (r.ok) window.location.reload();
-    else showToast('Failed to dismiss alert', 'error');
-  }).catch(function() { showToast('Network error', 'error'); });
-});
+(function() {
+  // Watch row click → navigate to detail page
+  var tbody = document.getElementById('watches-table-body');
+  if (tbody) {
+    tbody.addEventListener('click', function(e) {
+      var row = e.target.closest('.watch-row');
+      if (row && row.dataset.watchId) {
+        window.location.href = '/watchers/' + encodeURIComponent(row.dataset.watchId);
+      }
+    });
+  }
+
+  // Alert dismiss
+  document.addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-dismiss-id]');
+    if (!btn) return;
+    var id = btn.getAttribute('data-dismiss-id');
+    fetch('/api/watches/alerts/' + id + '/dismiss', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({reason: 'dismissed from UI'})
+    }).then(function(r) {
+      if (r.ok) window.location.reload();
+      else showToast('Failed to dismiss alert', 'error');
+    }).catch(function() { showToast('Network error', 'error'); });
+  });
+})();
 </script>
 {{end}}

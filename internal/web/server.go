@@ -290,6 +290,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Get("/errors", srv.handleErrorsPage)
 		r.Get("/errors/{fingerprint}", srv.handleErrorDetailPage)
 		r.Get("/watchers", srv.handleWatchersPage)
+		r.Get("/watchers/{id}", srv.handleWatchDetailPage)
 		r.Get("/health", srv.handleHealthPage)
 		r.Get("/profile", srv.handleProfilePage)
 		r.Get("/connectors", srv.handleConnectorsPage)
@@ -390,6 +391,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 				r.Get("/errors", srv.handleListErrorGroups)
 				r.Get("/errors/batch", srv.handleBatchErrorGroups)
 				r.Get("/errors/{fingerprint}", srv.handleGetErrorGroup)
+				r.Get("/errors/{fingerprint}/histogram", srv.handleErrorHistogram)
 			}
 
 			// Health checks

@@ -104,8 +104,9 @@ var (
 	logsPageTmpl       *template.Template
 	errorsPageTmpl       *template.Template
 	errorDetailPageTmpl  *template.Template
-	watchersPageTmpl   *template.Template
-	healthPageTmpl     *template.Template
+	watchersPageTmpl       *template.Template
+	watcherDetailPageTmpl  *template.Template
+	healthPageTmpl         *template.Template
 )
 
 func init() {
@@ -142,6 +143,8 @@ func init() {
 		"templates/layout.html", "templates/error_detail.html"))
 	watchersPageTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
 		"templates/layout.html", "templates/watchers.html"))
+	watcherDetailPageTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
+		"templates/layout.html", "templates/watcher_detail.html"))
 	healthPageTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
 		"templates/layout.html", "templates/health.html"))
 }
@@ -329,6 +332,12 @@ type pageData struct {
 	Watches      []store.Watch
 	WatchAlerts  []store.WatchAlert
 	PendingCount int
+
+	// Watcher detail page
+	WatchDetail       *store.Watch
+	WatchRuns         []store.WatchRun
+	WatchDetailAlerts []store.WatchAlert
+	WatchSession      *store.InvestigationSession
 
 	// Health page
 	HealthChecks    []store.HealthCheck
@@ -826,6 +835,67 @@ func (s *Server) handleErrorDetailPage(w http.ResponseWriter, r *http.Request) {
 	tmpl.ExecuteTemplate(w, "layout", data)
 }
 
+func (s *Server) handleErrorHistogram(w http.ResponseWriter, r *http.Request) {
+	fp := chi.URLParam(r, "fingerprint")
+	if fp == "" {
+		writeError(w, http.StatusBadRequest, "fingerprint is required")
+		return
+	}
+	if s.db == nil {
+		writeJSON(w, http.StatusOK, []map[string]any{})
+		return
+	}
+
+	timeRange := r.URL.Query().Get("time_range")
+	if timeRange == "" {
+		timeRange = "7d"
+	}
+
+	var duration, interval time.Duration
+	switch timeRange {
+	case "15m":
+		duration, interval = 15*time.Minute, time.Minute
+	case "1h":
+		duration, interval = time.Hour, 5*time.Minute
+	case "6h":
+		duration, interval = 6*time.Hour, 15*time.Minute
+	case "24h":
+		duration, interval = 24*time.Hour, time.Hour
+	case "7d":
+		duration, interval = 7*24*time.Hour, 6*time.Hour
+	default:
+		duration, interval = 7*24*time.Hour, 6*time.Hour
+	}
+
+	now := time.Now()
+	since := now.Add(-duration)
+	type bucket struct {
+		Timestamp time.Time `json:"timestamp"`
+		Count     int       `json:"count"`
+	}
+	var buckets []bucket
+	for t := since; t.Before(now); t = t.Add(interval) {
+		end := t.Add(interval)
+		if end.After(now) {
+			end = now
+		}
+		var count int
+		err := s.db.QueryRowContext(r.Context(),
+			`SELECT COUNT(*) FROM logs WHERE error_fingerprint = ? AND timestamp >= ? AND timestamp < ?`,
+			fp, t.UTC().Format(time.RFC3339Nano), end.UTC().Format(time.RFC3339Nano),
+		).Scan(&count)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "histogram query failed")
+			return
+		}
+		buckets = append(buckets, bucket{Timestamp: t, Count: count})
+	}
+	if buckets == nil {
+		buckets = []bucket{}
+	}
+	writeJSON(w, http.StatusOK, buckets)
+}
+
 func (s *Server) handleWatchersPage(w http.ResponseWriter, r *http.Request) {
 	data := s.newPageData(r, "Watchers", "watchers")
 	if s.watchStore != nil {
@@ -845,6 +915,56 @@ func (s *Server) handleWatchersPage(w http.ResponseWriter, r *http.Request) {
 	tmpl := s.getTemplate(watchersPageTmpl,
 		"internal/web/templates/layout.html",
 		"internal/web/templates/watchers.html")
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+func (s *Server) handleWatchDetailPage(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		http.Redirect(w, r, "/watchers", http.StatusFound)
+		return
+	}
+	if s.watchStore == nil {
+		writeError(w, http.StatusNotFound, "watch system not configured")
+		return
+	}
+
+	wt, err := s.watchStore.GetByID(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "watch not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get watch")
+		return
+	}
+
+	data := s.newPageData(r, "Watch: "+string(wt.Metric), "watchers")
+	data.WatchDetail = wt
+
+	// Fetch execution runs
+	runs, err := s.watchStore.ListRuns(r.Context(), id, 50)
+	if err == nil {
+		data.WatchRuns = runs
+	}
+
+	// Fetch alerts for this watch
+	alerts, err := s.watchStore.ListAlerts(r.Context(), id, "", 20)
+	if err == nil {
+		data.WatchDetailAlerts = alerts
+	}
+
+	// Look up the investigation session that created this watch
+	if wt.SessionID != "" && s.investigationSessionStore != nil {
+		sess, err := s.investigationSessionStore.GetByID(r.Context(), wt.SessionID)
+		if err == nil {
+			data.WatchSession = sess
+		}
+	}
+
+	tmpl := s.getTemplate(watcherDetailPageTmpl,
+		"internal/web/templates/layout.html",
+		"internal/web/templates/watcher_detail.html")
 	tmpl.ExecuteTemplate(w, "layout", data)
 }
 
