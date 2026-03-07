@@ -21,10 +21,10 @@ func (s *Server) handleEventWebhook(w http.ResponseWriter, r *http.Request) {
 	eventType := store.EventType(chi.URLParam(r, "type"))
 	switch eventType {
 	case store.EventTypePR, store.EventTypeTest, store.EventTypeAlert,
-		store.EventTypeCommit, store.EventTypeCustom:
+		store.EventTypeCommit, store.EventTypeCustom, store.EventTypeDeploy:
 		// valid
 	default:
-		writeError(w, http.StatusBadRequest, "invalid event type: must be pr, test, alert, commit, or custom")
+		writeError(w, http.StatusBadRequest, "invalid event type: must be pr, test, alert, commit, deploy, or custom")
 		return
 	}
 

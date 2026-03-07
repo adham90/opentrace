@@ -915,3 +915,46 @@ func (m *mockTestCorrelationStore) Prune(_ context.Context, _ time.Duration) (in
 	return 0, nil
 }
 
+// mockInvestigationSessionStore implements store.InvestigationSessionStore for testing.
+type mockInvestigationSessionStore struct{}
+
+func (m *mockInvestigationSessionStore) Create(_ context.Context, _ store.CreateInvestigationSessionParams) (*store.InvestigationSession, error) {
+	return &store.InvestigationSession{ID: "test-session"}, nil
+}
+func (m *mockInvestigationSessionStore) GetByID(_ context.Context, _ string) (*store.InvestigationSession, error) {
+	return nil, store.ErrNotFound
+}
+func (m *mockInvestigationSessionStore) Close(_ context.Context, _ string) error {
+	return nil
+}
+func (m *mockInvestigationSessionStore) Update(_ context.Context, _ string, _ store.UpdateInvestigationSessionParams) error {
+	return nil
+}
+func (m *mockInvestigationSessionStore) FindRecent(_ context.Context, _ store.FindRecentSessionParams) (*store.InvestigationSession, error) {
+	return nil, nil
+}
+func (m *mockInvestigationSessionStore) List(_ context.Context, _ store.ListInvestigationSessionParams) ([]store.InvestigationSession, error) {
+	return nil, nil
+}
+func (m *mockInvestigationSessionStore) Stats(_ context.Context) (*store.InvestigationSessionStats, error) {
+	return &store.InvestigationSessionStats{}, nil
+}
+func (m *mockInvestigationSessionStore) Prune(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+func (m *mockInvestigationSessionStore) RecordStep(_ context.Context, _ string, _ string, _ bool) error {
+	return nil
+}
+func (m *mockInvestigationSessionStore) FindByCreatedWatcher(_ context.Context, _ string) (*store.InvestigationSession, error) {
+	return nil, nil
+}
+func (m *mockInvestigationSessionStore) FindByResolvedError(_ context.Context, _ string) (*store.InvestigationSession, error) {
+	return nil, nil
+}
+func (m *mockInvestigationSessionStore) FindByCreatedHealthcheck(_ context.Context, _ string) (*store.InvestigationSession, error) {
+	return nil, nil
+}
+func (m *mockInvestigationSessionStore) FindSimilar(_ context.Context, _ store.FindSimilarParams) ([]store.InvestigationSession, error) {
+	return nil, nil
+}
+

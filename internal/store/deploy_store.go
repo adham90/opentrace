@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -25,9 +26,11 @@ func (s *deployStore) Create(ctx context.Context, params CreateDeployParams) (*D
 	now := time.Now().UTC().Format(time.RFC3339)
 	deployedAtStr := deployedAt.Format(time.RFC3339)
 
-	filesJSON, _ := json.Marshal(params.FilesChanged)
-	if params.FilesChanged == nil {
-		filesJSON = []byte("[]")
+	filesJSON := []byte("[]")
+	if params.FilesChanged != nil {
+		if b, err := json.Marshal(params.FilesChanged); err == nil {
+			filesJSON = b
+		}
 	}
 
 	src := params.DeploySource
@@ -134,9 +137,15 @@ func (s *deployStore) MeasureImpact(ctx context.Context, id int64, impact Deploy
 }
 
 func (s *deployStore) LinkInvestigation(ctx context.Context, id int64, sessionID string) error {
-	// Read current linked IDs, append (dedup), write back
+	// Use a transaction for the read-modify-write to prevent concurrent data loss.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("linking investigation to deploy: %w", err)
+	}
+	defer tx.Rollback()
+
 	var linkedJSON string
-	err := s.db.QueryRowContext(ctx,
+	err = tx.QueryRowContext(ctx,
 		`SELECT linked_investigation_ids_json FROM deploys WHERE id = ?`, id,
 	).Scan(&linkedJSON)
 	if err != nil {
@@ -144,7 +153,9 @@ func (s *deployStore) LinkInvestigation(ctx context.Context, id int64, sessionID
 	}
 
 	var linked []string
-	_ = json.Unmarshal([]byte(linkedJSON), &linked)
+	if err := json.Unmarshal([]byte(linkedJSON), &linked); err != nil {
+		linked = nil
+	}
 
 	// Dedup
 	for _, existing := range linked {
@@ -154,15 +165,18 @@ func (s *deployStore) LinkInvestigation(ctx context.Context, id int64, sessionID
 	}
 	linked = append(linked, sessionID)
 
-	newJSON, _ := json.Marshal(linked)
-	_, err = s.db.ExecContext(ctx,
+	newJSON, err := json.Marshal(linked)
+	if err != nil {
+		return fmt.Errorf("marshaling linked investigations: %w", err)
+	}
+	_, err = tx.ExecContext(ctx,
 		`UPDATE deploys SET linked_investigation_ids_json = ? WHERE id = ?`,
 		string(newJSON), id,
 	)
 	if err != nil {
 		return fmt.Errorf("linking investigation to deploy: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *deployStore) GetPendingMeasurement(ctx context.Context, olderThan time.Duration) ([]Deploy, error) {
@@ -217,8 +231,12 @@ func scanDeploy(row *sql.Row) (*Deploy, error) {
 		return nil, fmt.Errorf("scanning deploy: %w", err)
 	}
 
-	_ = json.Unmarshal([]byte(filesJSON), &d.FilesChanged)
-	_ = json.Unmarshal([]byte(linkedJSON), &d.LinkedInvestigationIDs)
+	if err := json.Unmarshal([]byte(filesJSON), &d.FilesChanged); err != nil {
+		slog.Warn("deploy: malformed files_changed_json", "id", d.ID, "error", err)
+	}
+	if err := json.Unmarshal([]byte(linkedJSON), &d.LinkedInvestigationIDs); err != nil {
+		slog.Warn("deploy: malformed linked_investigation_ids_json", "id", d.ID, "error", err)
+	}
 	if preErr.Valid {
 		d.PreErrorRate = &preErr.Float64
 	}
@@ -262,8 +280,12 @@ func scanDeploys(rows *sql.Rows) ([]Deploy, error) {
 			return nil, fmt.Errorf("scanning deploy: %w", err)
 		}
 
-		_ = json.Unmarshal([]byte(filesJSON), &d.FilesChanged)
-		_ = json.Unmarshal([]byte(linkedJSON), &d.LinkedInvestigationIDs)
+		if err := json.Unmarshal([]byte(filesJSON), &d.FilesChanged); err != nil {
+			slog.Warn("deploy: malformed files_changed_json", "id", d.ID, "error", err)
+		}
+		if err := json.Unmarshal([]byte(linkedJSON), &d.LinkedInvestigationIDs); err != nil {
+			slog.Warn("deploy: malformed linked_investigation_ids_json", "id", d.ID, "error", err)
+		}
 		if preErr.Valid {
 			d.PreErrorRate = &preErr.Float64
 		}

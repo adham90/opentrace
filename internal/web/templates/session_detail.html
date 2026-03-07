@@ -1,229 +1,375 @@
 {{define "content"}}
 <div class="settings-page">
-  <div class="page-header">
-    <h1><span class="prompt">$</span> session <span class="dim">{{truncate .SessionDetail.ID 8}}</span></h1>
-    <div class="actions">
-      <span class="sess-badge sess-badge-{{.SessionDetail.Status}}">{{.SessionDetail.Status}}</span>
-    </div>
-  </div>
+  <!-- Breadcrumb -->
+  <nav class="sd-breadcrumb">
+    <a href="/sessions" class="sd-breadcrumb-link">investigations</a>
+    <span class="sd-breadcrumb-sep">/</span>
+    <span class="sd-breadcrumb-current">{{truncate .SessionDetail.ID 8}}</span>
+  </nav>
 
   {{with .SessionDetail}}
-  <!-- Summary bar -->
-  <div class="sd-summary">
-    <div class="sd-summary-item">
-      <span class="text-dim">user:</span>
-      {{.UserEmail}}
-      {{if .UserRole}}<span class="sd-badge-sm">{{.UserRole}}</span>{{end}}
+  <!-- Hero header with status accent -->
+  <div class="sd-hero sd-hero-{{.Status}}">
+    <div class="sd-hero-top">
+      <div class="sd-hero-title">
+        <h1 class="sd-h1"><span class="prompt">$</span> session <span class="dim">{{truncate .ID 8}}</span></h1>
+        <span class="sess-badge sess-badge-{{.Status}}">{{.Status}}</span>
+      </div>
+      <button class="sd-copy-btn" data-copy-text="{{.ID}}" title="Copy session ID">copy id</button>
     </div>
-    <div class="sd-summary-item">
-      <span class="text-dim">client:</span>
-      <code>{{.ClientName}}{{if .ClientVersion}} v{{.ClientVersion}}{{end}}</code>
-    </div>
-    {{if .PrimaryService}}
-    <div class="sd-summary-item">
-      <span class="text-dim">service:</span>
-      <code>{{.PrimaryService}}</code>
-    </div>
+
+    {{if .Summary}}
+    <div class="sd-hero-summary">{{.Summary}}</div>
     {{end}}
-    <div class="sd-summary-item">
-      <span class="text-dim">steps:</span>
-      {{.TotalSteps}}{{if .TotalErrors}} <span class="sd-errors">({{.TotalErrors}} errors)</span>{{end}}
-    </div>
-    {{if .DurationSeconds}}
-    <div class="sd-summary-item">
-      <span class="text-dim">duration:</span>
-      {{fmtDuration .DurationSeconds}}
-    </div>
-    {{end}}
-    <div class="sd-summary-item">
-      <span class="text-dim">started:</span>
-      {{.StartedAt.Format "2006-01-02 15:04:05 UTC"}}
-    </div>
-    {{if .EndedAt}}
-    <div class="sd-summary-item">
-      <span class="text-dim">ended:</span>
-      {{.EndedAt.Format "2006-01-02 15:04:05 UTC"}}
-    </div>
-    {{end}}
-  </div>
 
-  <!-- Detail sections -->
-  <div class="sd-grid">
-    <!-- Identity -->
-    <div class="sd-card">
-      <h3 class="sd-card-title"><span class="dim">#</span> identity</h3>
-      <dl class="sd-dl">
-        <dt>user</dt><dd>{{.UserEmail}}</dd>
-        <dt>role</dt><dd>{{if .UserRole}}{{.UserRole}}{{else}}<span class="text-dim">-</span>{{end}}</dd>
-        <dt>client</dt><dd><code>{{.ClientName}}{{if .ClientVersion}} v{{.ClientVersion}}{{end}}</code></dd>
-        {{if .Workspace}}<dt>workspace</dt><dd><code>{{.Workspace}}</code></dd>{{end}}
-        <dt>transport</dt><dd>{{.Transport}}</dd>
-        <dt>connection</dt><dd><code class="sd-mono-dim">{{truncate .ConnectionID 12}}</code></dd>
-        <dt>session id</dt><dd><code class="sd-mono-dim">{{.ID}}</code></dd>
-      </dl>
-    </div>
-
-    <!-- Intent -->
-    <div class="sd-card">
-      <h3 class="sd-card-title"><span class="dim">#</span> intent</h3>
-      <dl class="sd-dl">
-        <dt>intent</dt><dd>{{if .Intent}}<span class="sd-intent-value">{{.Intent}}</span>{{else}}<span class="text-dim">unclassified</span>{{end}}</dd>
-        {{if .IntentDetail}}<dt>detail</dt><dd>{{.IntentDetail}}</dd>{{end}}
-        {{if .PrimaryService}}<dt>service</dt><dd><code>{{.PrimaryService}}</code></dd>{{end}}
-      </dl>
-    </div>
-
-    <!-- Outcome -->
-    <div class="sd-card">
-      <h3 class="sd-card-title"><span class="dim">#</span> outcome</h3>
-      <dl class="sd-dl">
-        <dt>status</dt><dd><span class="sess-badge sess-badge-{{.Status}}">{{.Status}}</span></dd>
-        {{if .Summary}}<dt>summary</dt><dd>{{.Summary}}</dd>{{end}}
-        {{if .RootCause}}<dt>root cause</dt><dd>{{.RootCause}}</dd>{{end}}
-        {{if .FixDescription}}<dt>fix</dt><dd>{{.FixDescription}}</dd>{{end}}
-        {{if .RecurrenceGroup}}<dt>recurrence</dt><dd><code>{{.RecurrenceGroup}}</code> ({{.RecurrenceCount}}x)</dd>{{end}}
-        {{if .PreviousSessionID}}<dt>previous</dt><dd><a href="/sessions/{{.PreviousSessionID}}" class="sd-link">{{truncate (derefStr .PreviousSessionID) 8}}</a></dd>{{end}}
-        {{if .FixDurabilitySeconds}}<dt>fix durability</dt><dd>{{fmtDuration (derefInt .FixDurabilitySeconds)}}</dd>{{end}}
-      </dl>
-    </div>
-
-    <!-- Metrics -->
-    <div class="sd-card">
-      <h3 class="sd-card-title"><span class="dim">#</span> metrics</h3>
-      <dl class="sd-dl">
-        <dt>total steps</dt><dd>{{.TotalSteps}}</dd>
-        <dt>total errors</dt><dd>{{if .TotalErrors}}<span class="sd-errors">{{.TotalErrors}}</span>{{else}}0{{end}}</dd>
-        <dt>duration</dt><dd>{{if .DurationSeconds}}{{fmtDuration .DurationSeconds}}{{else}}<span class="text-dim">ongoing</span>{{end}}</dd>
-        {{if .ToolFingerprint}}<dt>fingerprint</dt><dd><code class="sd-mono-dim">{{truncate .ToolFingerprint 40}}</code></dd>{{end}}
-        {{if .ArgSignature}}<dt>arg signature</dt><dd><code class="sd-mono-dim">{{truncate .ArgSignature 40}}</code></dd>{{end}}
-      </dl>
+    <!-- Metadata row -->
+    <div class="sd-meta">
+      <span><span class="text-dim">user:</span> {{.UserEmail}}{{if .UserRole}} <span class="sd-badge-sm">{{.UserRole}}</span>{{end}}</span>
+      <span><span class="text-dim">client:</span> <code>{{.ClientName}}{{if .ClientVersion}} v{{.ClientVersion}}{{end}}</code></span>
+      {{if .PrimaryService}}<span><span class="text-dim">service:</span> <code>{{.PrimaryService}}</code></span>{{end}}
+      {{if .Intent}}<span><span class="text-dim">intent:</span> <span class="sd-intent-value">{{.Intent}}</span></span>{{end}}
+      <span><span class="text-dim">steps:</span> {{.TotalSteps}}{{if .TotalErrors}} <span class="sd-errors">({{.TotalErrors}} errors)</span>{{end}}</span>
+      {{if .DurationSeconds}}<span><span class="text-dim">duration:</span> {{fmtDuration .DurationSeconds}}</span>{{end}}
+      <span><span class="text-dim">started:</span> {{.StartedAt.Format "Jan 02 15:04 UTC"}}</span>
+      {{if .EndedAt}}<span><span class="text-dim">ended:</span> {{.EndedAt.Format "Jan 02 15:04 UTC"}}</span>{{end}}
     </div>
   </div>
 
-  <!-- Tool Sequence -->
-  {{if .ToolSequence}}
+  <!-- Outcome details (only if there's substance beyond status) -->
+  {{if or .RootCause .FixDescription .RecurrenceGroup .PreviousSessionID}}
+  <div class="sd-outcome">
+    <dl class="sd-dl">
+      {{if .RootCause}}<dt>root cause</dt><dd>{{.RootCause}}</dd>{{end}}
+      {{if .FixDescription}}<dt>fix</dt><dd>{{.FixDescription}}</dd>{{end}}
+      {{if .RecurrenceGroup}}<dt>recurrence</dt><dd><code>{{derefStr .RecurrenceGroup}}</code> ({{.RecurrenceCount}}x)</dd>{{end}}
+      {{if .PreviousSessionID}}<dt>previous</dt><dd><a href="/sessions/{{derefStr .PreviousSessionID}}" class="sd-link">{{truncate (derefStr .PreviousSessionID) 8}}</a></dd>{{end}}
+      {{if .FixDurabilitySeconds}}<dt>fix durability</dt><dd>{{fmtDuration (derefInt .FixDurabilitySeconds)}}</dd>{{end}}
+    </dl>
+  </div>
+  {{end}}
+
+  <!-- Linked Artifacts -->
+  {{if or (hasItems .CreatedWatcherIDs) (hasItems .ResolvedErrorGroupIDs) (hasItems .InvestigatedErrorFingerprints) (hasItems .CreatedHealthcheckIDs) (hasItems .TraceIDs) (hasItems .RunbooksExecuted) (hasItems .ExplainedQueries) (hasItems .KilledQueries) (hasItems .CreatedNoteIDs) (hasItems .FilesModified) (hasItems .FilesRead) .TriggeredByWatcherID .TriggeredByHealthcheckID .CorrelatedDeploy .LinkedDeployID}}
   <div class="sd-section">
-    <h3 class="sd-card-title"><span class="dim">#</span> tool sequence <span class="sd-count">({{len .ToolSequence}} calls)</span></h3>
-    <div class="sd-tool-sequence">
-      {{range $i, $tool := .ToolSequence}}
-      <div class="sd-tool-step">
-        <span class="sd-tool-step-num">{{add $i 1}}</span>
-        <code class="sd-tool-step-name">{{$tool}}</code>
+    <h3 class="sd-section-title"><span class="dim">#</span> linked artifacts</h3>
+    <div class="sd-artifacts">
+      {{if .TriggeredByWatcherID}}
+      <div class="sd-artifact-group">
+        <span class="sd-artifact-label">triggered by</span>
+        <a href="/watchers/{{derefStr .TriggeredByWatcherID}}" class="sd-artifact-link sd-artifact-watcher">watcher {{truncate (derefStr .TriggeredByWatcherID) 8}}</a>
+      </div>
+      {{end}}
+
+      {{if .TriggeredByHealthcheckID}}
+      <div class="sd-artifact-group">
+        <span class="sd-artifact-label">triggered by</span>
+        <span class="sd-artifact-chip sd-artifact-health">healthcheck {{truncate (derefStr .TriggeredByHealthcheckID) 8}}</span>
+      </div>
+      {{end}}
+
+      {{if hasItems .CreatedWatcherIDs}}
+      <div class="sd-artifact-group">
+        <span class="sd-artifact-label">watchers created</span>
+        <div class="sd-artifact-chips">
+          {{range .CreatedWatcherIDs}}<a href="/watchers/{{.}}" class="sd-artifact-link sd-artifact-watcher">{{truncate . 8}}</a>{{end}}
+        </div>
+      </div>
+      {{end}}
+
+      {{if hasItems .ResolvedErrorGroupIDs}}
+      <div class="sd-artifact-group">
+        <span class="sd-artifact-label">errors resolved</span>
+        <div class="sd-artifact-chips">
+          {{range .ResolvedErrorGroupIDs}}<a href="/errors/{{.}}" class="sd-artifact-link sd-artifact-error">{{truncate . 12}}</a>{{end}}
+        </div>
+      </div>
+      {{end}}
+
+      {{if hasItems .InvestigatedErrorFingerprints}}
+      <div class="sd-artifact-group">
+        <span class="sd-artifact-label">errors investigated</span>
+        <div class="sd-artifact-chips">
+          {{range .InvestigatedErrorFingerprints}}<a href="/errors/{{.}}" class="sd-artifact-link sd-artifact-error-inv">{{truncate . 12}}</a>{{end}}
+        </div>
+      </div>
+      {{end}}
+
+      {{if hasItems .CreatedHealthcheckIDs}}
+      <div class="sd-artifact-group">
+        <span class="sd-artifact-label">healthchecks created</span>
+        <div class="sd-artifact-chips">
+          {{range .CreatedHealthcheckIDs}}<span class="sd-artifact-chip sd-artifact-health">{{truncate . 8}}</span>{{end}}
+        </div>
+      </div>
+      {{end}}
+
+      {{if hasItems .TraceIDs}}
+      <div class="sd-artifact-group">
+        <span class="sd-artifact-label">traces</span>
+        <div class="sd-artifact-chips">
+          {{range .TraceIDs}}<span class="sd-artifact-chip sd-artifact-trace">{{truncate . 12}}</span>{{end}}
+        </div>
+      </div>
+      {{end}}
+
+      {{if or .CorrelatedDeploy .LinkedDeployID}}
+      <div class="sd-artifact-group">
+        <span class="sd-artifact-label">deploy</span>
+        {{if .CorrelatedDeploy}}<span class="sd-artifact-chip sd-artifact-deploy">{{truncate .CorrelatedDeploy 20}}</span>{{end}}
+      </div>
+      {{end}}
+
+      {{if hasItems .RunbooksExecuted}}
+      <div class="sd-artifact-group">
+        <span class="sd-artifact-label">runbooks</span>
+        <div class="sd-artifact-chips">
+          {{range .RunbooksExecuted}}<span class="sd-artifact-chip sd-artifact-runbook">{{.}}</span>{{end}}
+        </div>
+      </div>
+      {{end}}
+
+      {{if hasItems .ExplainedQueries}}
+      <div class="sd-artifact-group">
+        <span class="sd-artifact-label">queries explained</span>
+        <div class="sd-artifact-chips">
+          {{range .ExplainedQueries}}<code class="sd-artifact-chip sd-artifact-query">{{truncate . 30}}</code>{{end}}
+        </div>
+      </div>
+      {{end}}
+
+      {{if hasItems .KilledQueries}}
+      <div class="sd-artifact-group">
+        <span class="sd-artifact-label">queries killed</span>
+        <div class="sd-artifact-chips">
+          {{range .KilledQueries}}<code class="sd-artifact-chip sd-artifact-killed">{{truncate . 30}}</code>{{end}}
+        </div>
+      </div>
+      {{end}}
+
+      {{if hasItems .FilesModified}}
+      <div class="sd-artifact-group">
+        <span class="sd-artifact-label">files modified</span>
+        <div class="sd-artifact-chips">
+          {{range .FilesModified}}<code class="sd-artifact-chip sd-artifact-file">{{.}}</code>{{end}}
+        </div>
+      </div>
+      {{end}}
+
+      {{if hasItems .FilesRead}}
+      <div class="sd-artifact-group">
+        <span class="sd-artifact-label">files read</span>
+        <div class="sd-artifact-chips">
+          {{range .FilesRead}}<code class="sd-artifact-chip sd-artifact-file-read">{{.}}</code>{{end}}
+        </div>
+      </div>
+      {{end}}
+
+      {{if hasItems .CreatedNoteIDs}}
+      <div class="sd-artifact-group">
+        <span class="sd-artifact-label">notes</span>
+        <div class="sd-artifact-chips">
+          {{range .CreatedNoteIDs}}<span class="sd-artifact-chip sd-artifact-note">{{truncate . 8}}</span>{{end}}
+        </div>
       </div>
       {{end}}
     </div>
   </div>
   {{end}}
+
+  <!-- Pre/Post Investigation Snapshots -->
+  {{if or .PreInvestigationSnapshot .PostInvestigationSnapshot}}
+  <div class="sd-section">
+    <h3 class="sd-section-title"><span class="dim">#</span> investigation impact</h3>
+    <div class="sd-snapshot-grid">
+      {{if .PreInvestigationSnapshot}}
+      <div class="sd-snapshot">
+        <div class="sd-snapshot-label">before</div>
+        <dl class="sd-dl">
+          {{range $k, $v := .PreInvestigationSnapshot}}<dt>{{$k}}</dt><dd>{{fmtFloat $v}}</dd>{{end}}
+        </dl>
+      </div>
+      {{end}}
+      {{if .PostInvestigationSnapshot}}
+      <div class="sd-snapshot">
+        <div class="sd-snapshot-label">after</div>
+        <dl class="sd-dl">
+          {{range $k, $v := .PostInvestigationSnapshot}}<dt>{{$k}}</dt><dd>{{fmtFloat $v}}</dd>{{end}}
+        </dl>
+      </div>
+      {{end}}
+    </div>
+  </div>
   {{end}}
 
-  <!-- Activity Log (MCP tool calls) -->
+  {{end}}{{/* end with .SessionDetail */}}
+
+  <!-- Activity Log -->
   {{if .ActivityEvents}}
   <div class="sd-section">
-    <h3 class="sd-card-title"><span class="dim">#</span> activity log <span class="sd-count">({{len .ActivityEvents}} events)</span></h3>
-    <div class="sd-activity-table-wrap">
-      <table class="sd-activity-table">
-        <thead>
-          <tr>
-            <th class="sd-at-time">Time</th>
-            <th>Tool</th>
-            <th>Type</th>
-            <th class="sd-at-dur">Duration</th>
-            <th>Arguments</th>
-            <th>Result</th>
-            <th class="sd-at-expand"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {{range $i, $ev := .ActivityEvents}}
-          <tr class="sd-al-row{{if .IsError}} sd-activity-error{{end}}" data-al-idx="{{$i}}">
-            <td class="sd-at-time"><code>{{.CreatedAt.Format "15:04:05"}}</code></td>
-            <td><code class="sd-activity-tool-name">{{.ToolName}}</code></td>
-            <td>
-              {{if .IsError}}<span class="sess-badge sess-badge-unresolved">error</span>
-              {{else}}<span class="sd-event-type">{{.EventType}}</span>{{end}}
-            </td>
-            <td class="sd-at-dur">{{if .DurationMs}}{{deref .DurationMs}}ms{{else}}<span class="text-dim">-</span>{{end}}</td>
-            <td class="sd-at-args">{{if .Arguments}}<code class="sd-truncated">{{truncate .Arguments 60}}</code>{{else}}<span class="text-dim">-</span>{{end}}</td>
-            <td class="sd-at-result">{{if .ResultPreview}}<code class="sd-truncated">{{truncate .ResultPreview 60}}</code>{{else}}<span class="text-dim">-</span>{{end}}</td>
-            <td class="sd-at-expand"><span class="sd-expand-icon" data-al-idx="{{$i}}">&#x25B6;</span></td>
-          </tr>
-          <tr class="sd-al-detail" id="al-detail-{{$i}}" style="display:none">
-            <td colspan="7">
-              <div class="sd-al-detail-inner">
-                {{if .Arguments}}
-                <div class="sd-al-detail-block">
-                  <div class="sd-al-detail-label">arguments</div>
-                  <pre class="sd-al-pre">{{.Arguments}}</pre>
-                </div>
-                {{end}}
-                {{if .ResultPreview}}
-                <div class="sd-al-detail-block">
-                  <div class="sd-al-detail-label">result</div>
-                  <pre class="sd-al-pre">{{.ResultPreview}}</pre>
-                </div>
-                {{end}}
-                {{if not .Arguments}}{{if not .ResultPreview}}
-                <span class="text-dim">no details available</span>
-                {{end}}{{end}}
-              </div>
-            </td>
-          </tr>
+    <h3 class="sd-section-title">
+      <span class="dim">#</span> activity log <span class="sd-count">({{len .ActivityEvents}} events)</span>
+      <div class="sd-al-filters">
+        <button class="sd-al-filter-btn sd-al-filter-active" data-filter="all">all</button>
+        <button class="sd-al-filter-btn" data-filter="error">errors</button>
+      </div>
+    </h3>
+    <div class="sd-activity-list">
+      {{range $i, $ev := .ActivityEvents}}
+      <div class="sd-al-item{{if .IsError}} sd-al-item-error{{end}}" data-al-idx="{{$i}}" data-is-error="{{.IsError}}">
+        <div class="sd-al-row" data-al-idx="{{$i}}">
+          <span class="sd-al-num">{{add $i 1}}</span>
+          <span class="sd-al-offset">{{timeOffset $.SessionDetail.StartedAt .CreatedAt}}</span>
+          <code class="sd-al-tool{{if .IsError}} sd-al-tool-err{{end}}">{{.ToolName}}</code>
+          {{if .IsError}}<span class="sd-al-err-badge">error</span>{{end}}
+          <span class="sd-al-spacer"></span>
+          {{if .DurationMs}}<span class="sd-al-dur">{{deref .DurationMs}}ms</span>{{end}}
+          <span class="sd-al-chevron">&#x25B6;</span>
+        </div>
+        <div class="sd-al-detail" id="al-detail-{{$i}}" style="display:none">
+          {{if .Arguments}}
+          <div class="sd-al-detail-block">
+            <div class="sd-al-detail-label">arguments</div>
+            <pre class="sd-al-pre">{{jsonPretty .Arguments}}</pre>
+          </div>
           {{end}}
-        </tbody>
-      </table>
+          {{if .ResultPreview}}
+          <div class="sd-al-detail-block">
+            <div class="sd-al-detail-label">result</div>
+            <pre class="sd-al-pre{{if .IsError}} sd-al-pre-error{{end}}">{{jsonPretty .ResultPreview}}</pre>
+          </div>
+          {{end}}
+          {{if not .Arguments}}{{if not .ResultPreview}}
+          <span class="text-dim">no details available</span>
+          {{end}}{{end}}
+        </div>
+      </div>
+      {{end}}
     </div>
   </div>
   {{end}}
 </div>
 
 <style nonce="{{.CSPNonce}}">
-/* Summary bar */
-.sd-summary {
+/* Breadcrumb */
+.sd-breadcrumb {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1.5rem;
-  padding: 0.6rem 1rem;
-  margin-bottom: 1.25rem;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  margin-bottom: 0.5rem;
+}
+.sd-breadcrumb-link {
+  color: var(--accent, #60a5fa);
+  text-decoration: none;
+}
+.sd-breadcrumb-link:hover { text-decoration: underline; }
+.sd-breadcrumb-sep { color: var(--text-dim); }
+.sd-breadcrumb-current { color: var(--text-dim); }
+
+/* Hero header */
+.sd-hero {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 0.82rem;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  border-left: 3px solid var(--border);
 }
-.sd-summary-item {
-  white-space: nowrap;
+.sd-hero-resolved { border-left-color: var(--green, #4ade80); }
+.sd-hero-unresolved { border-left-color: var(--red, #f87171); }
+.sd-hero-open { border-left-color: var(--yellow, #facc15); }
+.sd-hero-abandoned { border-left-color: var(--text-dim); }
+
+.sd-hero-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
 }
-.sd-errors {
-  color: var(--red, #f87171);
+.sd-hero-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.sd-h1 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+.sd-hero-summary {
+  font-size: 0.85rem;
+  color: var(--text);
+  line-height: 1.5;
+  margin: 0.5rem 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg);
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+/* Metadata row */
+.sd-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.25rem;
+  font-size: 0.78rem;
+}
+.sd-meta code {
+  background: none;
+  padding: 0;
+  font-size: 0.78rem;
 }
 .sd-badge-sm {
-  font-size: 0.65rem;
-  padding: 0 5px;
+  font-size: 0.62rem;
+  padding: 0 4px;
   border-radius: 2px;
   font-family: var(--font-mono);
   color: var(--text-dim);
   border: 1px solid var(--border);
-  margin-left: 4px;
+  margin-left: 2px;
+}
+.sd-errors { color: var(--red, #f87171); }
+.sd-intent-value {
+  color: var(--accent, #60a5fa);
+  font-family: var(--font-mono);
 }
 
-/* Card grid */
-.sd-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
-  margin-bottom: 1.25rem;
+/* Copy button */
+.sd-copy-btn {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
 }
-.sd-card {
+.sd-copy-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.sd-copy-btn.sd-copied { color: var(--green, #4ade80); border-color: rgba(74, 222, 128, 0.4); }
+
+/* Outcome details */
+.sd-outcome {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
 }
-.sd-card-title {
+
+/* Section */
+.sd-section { margin-bottom: 1rem; }
+.sd-section-title {
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--text);
   margin: 0 0 0.5rem 0;
   font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 .sd-count {
   font-weight: 400;
@@ -231,198 +377,204 @@
   font-size: 0.75rem;
 }
 
-/* Definition list in cards */
+/* Definition list */
 .sd-dl {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 2px 0.75rem;
+  gap: 4px 0.75rem;
   font-size: 0.8rem;
   margin: 0;
 }
-.sd-dl dt {
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-.sd-dl dd {
-  margin: 0;
-  word-break: break-word;
-  color: var(--text);
-}
-.sd-mono-dim {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--text-dim);
-  background: none;
-  padding: 0;
-}
-.sd-intent-value {
-  color: var(--accent, #60a5fa);
-  font-family: var(--font-mono);
-}
+.sd-dl dt { color: var(--text-dim); white-space: nowrap; }
+.sd-dl dd { margin: 0; word-break: break-word; color: var(--text); }
 .sd-link {
   color: var(--accent, #60a5fa);
   text-decoration: none;
 }
-.sd-link:hover {
-  text-decoration: underline;
-}
+.sd-link:hover { text-decoration: underline; }
 
-/* Section (tool sequence, activity log) */
-.sd-section {
-  margin-bottom: 1.25rem;
-}
-
-/* Tool sequence */
-.sd-tool-sequence {
+/* Linked Artifacts */
+.sd-artifacts {
   display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  margin-top: 0.5rem;
-}
-.sd-tool-step {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 1rem;
   background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 3px 8px;
-}
-.sd-tool-step-num {
-  font-size: 0.65rem;
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  min-width: 14px;
-  text-align: right;
-}
-.sd-tool-step-name {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--text);
-  background: none;
-  padding: 0;
-}
-
-/* Activity table */
-.sd-activity-table-wrap {
-  overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: 6px;
-  margin-top: 0.5rem;
 }
-.sd-activity-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.78rem;
+.sd-artifact-group {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 0.8rem;
 }
-.sd-activity-table thead {
-  background: var(--bg-tertiary);
+.sd-artifact-label {
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  min-width: 130px;
+  white-space: nowrap;
 }
-.sd-activity-table th {
-  padding: 0.4rem 0.6rem;
-  text-align: left;
+.sd-artifact-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.sd-artifact-chip,
+.sd-artifact-link {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  padding: 1px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  text-decoration: none;
+  transition: all 0.15s;
+}
+.sd-artifact-link:hover { border-color: var(--accent, #60a5fa); color: var(--accent, #60a5fa); }
+.sd-artifact-watcher { border-color: rgba(96, 165, 250, 0.3); color: var(--accent, #60a5fa); }
+.sd-artifact-error { border-color: rgba(248, 113, 113, 0.3); color: var(--red, #f87171); }
+.sd-artifact-error-inv { border-color: rgba(251, 191, 36, 0.3); color: var(--yellow, #fbbf24); }
+.sd-artifact-health { border-color: rgba(74, 222, 128, 0.3); color: var(--green, #4ade80); }
+.sd-artifact-trace { border-color: rgba(167, 139, 250, 0.3); color: #a78bfa; }
+.sd-artifact-deploy { border-color: rgba(96, 165, 250, 0.3); color: var(--accent, #60a5fa); }
+.sd-artifact-runbook { border-color: rgba(251, 191, 36, 0.3); color: var(--yellow, #fbbf24); }
+.sd-artifact-query { border-color: rgba(167, 139, 250, 0.3); color: #a78bfa; }
+.sd-artifact-killed { border-color: rgba(248, 113, 113, 0.3); color: var(--red, #f87171); }
+.sd-artifact-file { border-color: rgba(96, 165, 250, 0.2); color: var(--accent, #60a5fa); }
+.sd-artifact-file-read { border-color: var(--border); color: var(--text-dim); }
+.sd-artifact-note { border-color: rgba(74, 222, 128, 0.3); color: var(--green, #4ade80); }
+
+/* Investigation Impact Snapshots */
+.sd-snapshot-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+.sd-snapshot {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 1rem;
+}
+.sd-snapshot-label {
+  font-size: 0.68rem;
   font-weight: 600;
   color: var(--text-dim);
-  font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-.sd-activity-table td {
-  padding: 0.35rem 0.6rem;
-  border-bottom: 1px solid var(--border);
-  color: var(--text);
-  vertical-align: top;
-}
-.sd-activity-error {
-  background: rgba(248, 113, 113, 0.05);
-}
-.sd-activity-error td {
-  color: var(--text);
-}
-.sd-at-time {
-  width: 70px;
-  white-space: nowrap;
-}
-.sd-at-time code {
+  margin-bottom: 0.4rem;
   font-family: var(--font-mono);
-  font-size: 0.74rem;
-  color: var(--text-dim);
-  background: none;
-  padding: 0;
 }
-.sd-at-dur {
-  width: 70px;
-  text-align: right;
-  white-space: nowrap;
+
+/* Activity log filters */
+.sd-al-filters {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+.sd-al-filter-btn {
   font-family: var(--font-mono);
-  font-size: 0.74rem;
+  font-size: 0.68rem;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
   color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
 }
-.sd-at-args, .sd-at-result {
-  max-width: 250px;
+.sd-al-filter-btn:hover { color: var(--text); }
+.sd-al-filter-btn.sd-al-filter-active {
+  background: var(--bg-secondary);
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+/* Activity list (replaces table) */
+.sd-activity-list {
+  border: 1px solid var(--border);
+  border-radius: 6px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.sd-at-expand {
-  width: 24px;
-  text-align: center;
-  padding: 0 4px !important;
+.sd-al-item {
+  border-bottom: 1px solid var(--border);
 }
-.sd-activity-tool-name {
-  font-family: var(--font-mono);
-  font-size: 0.76rem;
-  color: var(--accent, #60a5fa);
-  background: none;
-  padding: 0;
-}
-.sd-event-type {
-  font-size: 0.72rem;
-  color: var(--text-dim);
-}
-.sd-truncated {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  color: var(--text-dim);
-  background: none;
-  padding: 0;
-}
+.sd-al-item:last-child { border-bottom: none; }
+
 .sd-al-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
   cursor: pointer;
   transition: background 0.1s;
+  font-size: 0.8rem;
 }
-.sd-al-row:hover {
-  background: var(--bg-tertiary);
+.sd-al-row:hover { background: var(--bg-tertiary); }
+.sd-al-row.sd-al-expanded { background: var(--bg-secondary); }
+
+.sd-al-item-error > .sd-al-row {
+  background: rgba(248, 113, 113, 0.04);
 }
-.sd-al-row.sd-al-expanded {
-  background: var(--bg-secondary);
+.sd-al-item-error > .sd-al-row:hover {
+  background: rgba(248, 113, 113, 0.08);
 }
-.sd-expand-icon {
-  display: inline-block;
-  font-size: 0.6rem;
+
+.sd-al-num {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  min-width: 20px;
+  text-align: right;
+}
+.sd-al-offset {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  min-width: 48px;
+}
+.sd-al-tool {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--accent, #60a5fa);
+}
+.sd-al-tool-err { color: var(--red, #f87171) !important; }
+.sd-al-err-badge {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  padding: 0 6px;
+  border-radius: 3px;
+  color: var(--red, #f87171);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  background: rgba(248, 113, 113, 0.08);
+}
+.sd-al-spacer { flex: 1; }
+.sd-al-dur {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+.sd-al-chevron {
+  font-size: 0.55rem;
   color: var(--text-dim);
   transition: transform 0.15s;
   user-select: none;
 }
-.sd-al-expanded .sd-expand-icon {
+.sd-al-expanded .sd-al-chevron {
   transform: rotate(90deg);
 }
-.sd-al-detail td {
-  padding: 0 !important;
-  border-bottom: 1px solid var(--border);
-}
-.sd-al-detail-inner {
-  padding: 0.6rem 1rem;
+
+/* Activity detail */
+.sd-al-detail {
+  padding: 0.6rem 0.75rem 0.6rem 3rem;
   background: var(--bg-secondary);
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  border-top: 1px solid var(--border);
 }
-.sd-al-detail-block {
-  min-width: 0;
-}
+.sd-al-detail-block { min-width: 0; }
 .sd-al-detail-label {
   font-size: 0.68rem;
   font-weight: 600;
@@ -447,8 +599,12 @@
   overflow-y: auto;
   line-height: 1.5;
 }
+.sd-al-pre-error {
+  border-color: rgba(248, 113, 113, 0.3);
+  color: var(--red, #f87171);
+}
 
-/* Reuse badge styles from list page */
+/* Badges */
 .sess-badge {
   display: inline-block;
   font-size: 0.7rem;
@@ -480,17 +636,18 @@
 }
 
 @media (max-width: 799px) {
-  .sd-grid {
-    grid-template-columns: 1fr;
-  }
-  .sd-activity-table td, .sd-activity-table th {
-    padding: 0.3rem 0.4rem;
-  }
+  .sd-hero { padding: 0.75rem; }
+  .sd-meta { gap: 0.3rem 0.75rem; }
+  .sd-snapshot-grid { grid-template-columns: 1fr; }
+  .sd-artifact-group { flex-direction: column; gap: 0.2rem; }
+  .sd-artifact-label { min-width: auto; }
+  .sd-al-detail { padding-left: 0.75rem; }
 }
 </style>
 
 <script nonce="{{.CSPNonce}}">
 (function() {
+  // Expand/collapse activity rows
   document.querySelectorAll('.sd-al-row').forEach(function(row) {
     row.addEventListener('click', function() {
       var idx = row.getAttribute('data-al-idx');
@@ -504,6 +661,46 @@
         detail.style.display = '';
         row.classList.add('sd-al-expanded');
       }
+    });
+  });
+
+  // Copy button feedback
+  document.querySelectorAll('.sd-copy-btn').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var text = btn.getAttribute('data-copy-text');
+      if (text) navigator.clipboard.writeText(text);
+      btn.textContent = 'copied';
+      btn.classList.add('sd-copied');
+      setTimeout(function() {
+        btn.textContent = 'copy id';
+        btn.classList.remove('sd-copied');
+      }, 1500);
+    });
+  });
+
+  // Activity log error filter
+  document.querySelectorAll('.sd-al-filter-btn').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      e.preventDefault();
+      var filter = btn.getAttribute('data-filter');
+      document.querySelectorAll('.sd-al-filter-btn').forEach(function(b) { b.classList.remove('sd-al-filter-active'); });
+      btn.classList.add('sd-al-filter-active');
+
+      document.querySelectorAll('.sd-al-item').forEach(function(item) {
+        var isErr = item.getAttribute('data-is-error') === 'true';
+        if (filter === 'all') {
+          item.style.display = '';
+        } else if (filter === 'error') {
+          item.style.display = isErr ? '' : 'none';
+        }
+        // Close expanded details on filter change
+        var detail = item.querySelector('.sd-al-detail');
+        if (detail) detail.style.display = 'none';
+        var row = item.querySelector('.sd-al-row');
+        if (row) row.classList.remove('sd-al-expanded');
+      });
     });
   });
 })();

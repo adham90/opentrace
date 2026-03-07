@@ -33,32 +33,38 @@ func (s *runbookEffectivenessStore) RecordExecution(ctx context.Context, runbook
 }
 
 func (s *runbookEffectivenessStore) UpdateOutcome(ctx context.Context, params UpdateRunbookEffectivenessParams) error {
-	var col string
+	// Use separate queries per outcome to avoid dynamic column interpolation.
 	switch params.Outcome {
 	case "resolved":
-		col = "resolved_sessions"
+		_, err := s.db.ExecContext(ctx,
+			`UPDATE runbook_effectiveness SET
+			    resolved_sessions = resolved_sessions + 1,
+			    avg_steps_after = (avg_steps_after * resolved_sessions + ?) / (resolved_sessions + 1),
+			    avg_session_duration_seconds = (avg_session_duration_seconds * resolved_sessions + ?) / (resolved_sessions + 1)
+			 WHERE runbook_name = ?`,
+			params.StepsAfter, params.DurationSec, params.RunbookName,
+		)
+		if err != nil {
+			return fmt.Errorf("updating runbook outcome: %w", err)
+		}
+		return nil
 	case "abandoned":
-		col = "abandoned_sessions"
+		_, err := s.db.ExecContext(ctx,
+			`UPDATE runbook_effectiveness SET
+			    abandoned_sessions = abandoned_sessions + 1,
+			    avg_steps_after = (avg_steps_after * abandoned_sessions + ?) / (abandoned_sessions + 1),
+			    avg_session_duration_seconds = (avg_session_duration_seconds * abandoned_sessions + ?) / (abandoned_sessions + 1)
+			 WHERE runbook_name = ?`,
+			params.StepsAfter, params.DurationSec, params.RunbookName,
+		)
+		if err != nil {
+			return fmt.Errorf("updating runbook outcome: %w", err)
+		}
+		return nil
 	default:
 		return nil // ignore unknown outcomes
 	}
-
-	// Update outcome count and recalculate running averages.
-	_, err := s.db.ExecContext(ctx,
-		fmt.Sprintf(`UPDATE runbook_effectiveness SET
-		    %s = %s + 1,
-		    avg_steps_after = (avg_steps_after * (%s) + ?) / (%s + 1),
-		    avg_session_duration_seconds = (avg_session_duration_seconds * (%s) + ?) / (%s + 1)
-		 WHERE runbook_name = ?`,
-			col, col, col, col, col, col),
-		params.StepsAfter, params.DurationSec, params.RunbookName,
-	)
-	if err != nil {
-		return fmt.Errorf("updating runbook outcome: %w", err)
-	}
-	return nil
 }
-
 func (s *runbookEffectivenessStore) GetMostEffective(ctx context.Context) (*RunbookEffectiveness, error) {
 	var re RunbookEffectiveness
 	var lastExec string
@@ -90,7 +96,8 @@ func (s *runbookEffectivenessStore) List(ctx context.Context) ([]RunbookEffectiv
 		`SELECT runbook_name, total_executions, resolved_sessions, abandoned_sessions,
 		        avg_steps_after, avg_session_duration_seconds, last_executed_at
 		 FROM runbook_effectiveness
-		 ORDER BY total_executions DESC`,
+		 ORDER BY total_executions DESC
+		 LIMIT 100`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing runbook effectiveness: %w", err)

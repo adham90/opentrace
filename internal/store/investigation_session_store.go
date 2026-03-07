@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -603,7 +604,11 @@ func scanSession(row *sql.Row) (*InvestigationSession, error) {
 	// JSON array columns
 	unmarshalStringSlice := func(raw string) []string {
 		var s []string
-		json.Unmarshal([]byte(raw), &s)
+		if raw != "" && raw != "[]" {
+			if err := json.Unmarshal([]byte(raw), &s); err != nil {
+				slog.Warn("investigation_session: malformed JSON array", "error", err)
+			}
+		}
 		if s == nil {
 			return []string{}
 		}
@@ -784,7 +789,11 @@ func scanSessionRow(rows *sql.Rows) (*InvestigationSession, error) {
 	// JSON array columns
 	unmarshalStringSlice := func(raw string) []string {
 		var s []string
-		json.Unmarshal([]byte(raw), &s)
+		if raw != "" && raw != "[]" {
+			if err := json.Unmarshal([]byte(raw), &s); err != nil {
+				slog.Warn("investigation_session: malformed JSON array", "error", err)
+			}
+		}
 		if s == nil {
 			return []string{}
 		}

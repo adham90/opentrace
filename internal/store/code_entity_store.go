@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -229,7 +230,9 @@ func scanCodeEntity(row *sql.Row) (*CodeEntity, error) {
 		}
 	}
 	if metaJSON != "" && metaJSON != "{}" {
-		_ = json.Unmarshal([]byte(metaJSON), &e.Metadata)
+		if err := json.Unmarshal([]byte(metaJSON), &e.Metadata); err != nil {
+			slog.Warn("code_entity: malformed metadata_json", "entity", e.EntityName, "error", err)
+		}
 	}
 	e.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
 	e.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)

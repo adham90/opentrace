@@ -1,7 +1,9 @@
 package web
 
 import (
+	"bytes"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -85,6 +87,33 @@ var tmplFuncs = template.FuncMap{
 		default:
 			return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 		}
+	},
+	"timeOffset": func(base, t time.Time) string {
+		d := t.Sub(base)
+		if d < 0 {
+			d = 0
+		}
+		secs := int(d.Seconds())
+		if secs < 60 {
+			return fmt.Sprintf("+%ds", secs)
+		}
+		if secs < 3600 {
+			return fmt.Sprintf("+%dm%ds", secs/60, secs%60)
+		}
+		return fmt.Sprintf("+%dh%dm", secs/3600, (secs%3600)/60)
+	},
+	"jsonPretty": func(s string) string {
+		if s == "" {
+			return s
+		}
+		var buf bytes.Buffer
+		if err := json.Indent(&buf, []byte(s), "", "  "); err != nil {
+			return s
+		}
+		return buf.String()
+	},
+	"hasItems": func(items []string) bool {
+		return len(items) > 0
 	},
 }
 

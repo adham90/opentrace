@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -150,7 +151,11 @@ func scanEvent(row *sql.Row) (*Event, error) {
 		return nil, err
 	}
 
-	json.Unmarshal([]byte(metadataJSON), &e.Metadata)
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &e.Metadata); err != nil {
+			slog.Warn("event: malformed metadata_json", "id", e.ID, "error", err)
+		}
+	}
 	e.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	return &e, nil
 }
@@ -168,7 +173,11 @@ func scanEventRow(rows *sql.Rows) (*Event, error) {
 		return nil, err
 	}
 
-	json.Unmarshal([]byte(metadataJSON), &e.Metadata)
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &e.Metadata); err != nil {
+			slog.Warn("event: malformed metadata_json", "id", e.ID, "error", err)
+		}
+	}
 	e.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	return &e, nil
 }
