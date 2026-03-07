@@ -50,34 +50,12 @@
     <div class="status-bar" role="banner">
       <div class="status-bar-left">
         <a href="/" class="status-brand status-ok" id="status-brand">opentrace</a>
-        <nav class="status-nav" aria-label="Main navigation">
-          <a href="/logs"{{if eq .Nav "logs"}} class="active"{{end}}>logs</a>
-          <a href="/errors"{{if eq .Nav "errors"}} class="active"{{end}}>errors</a>
-          <a href="/watchers"{{if eq .Nav "watchers"}} class="active"{{end}}>watchers</a>
-          <a href="/health"{{if eq .Nav "health"}} class="active"{{end}}>health</a>
-          <a href="/sessions"{{if eq .Nav "sessions"}} class="active"{{end}}>investigations</a>
-          <a href="/connectors"{{if eq .Nav "connectors"}} class="active"{{end}}>connectors</a>
-        </nav>
+        <span class="status-hint" onclick="openCommandBar()" title="Command bar (⌘K)">&#x2318;K</span>
       </div>
       <div class="status-bar-right">
-        <nav class="user-menu" id="user-menu" aria-label="User menu">
-          <button class="user-menu-trigger" id="user-menu-trigger-btn" aria-expanded="false" aria-haspopup="true" aria-label="User menu for {{.User.DisplayName}}">
-            {{.User.DisplayName}}
-            <svg width="8" height="5" viewBox="0 0 8 5" fill="currentColor" aria-hidden="true"><path d="M0 0l4 5 4-5z"/></svg>
-          </button>
-          <div class="user-menu-dropdown" id="user-menu-dropdown" role="menu">
-            <button class="user-menu-item" id="theme-toggle-btn" role="menuitem" aria-label="Toggle theme">theme: <span id="dropdown-theme-label">system</span></button>
-            <div class="user-menu-divider" role="separator"></div>
-            <a href="/profile" class="user-menu-item" role="menuitem">profile</a>
-            <a href="/settings" class="user-menu-item" role="menuitem">settings</a>
-            <a href="/setup" class="user-menu-item" role="menuitem">setup</a>
-            <div class="user-menu-divider" role="separator"></div>
-            <form method="POST" action="/logout" style="margin:0">
-              <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-              <button type="submit" class="user-menu-item user-menu-item-danger" role="menuitem">logout</button>
-            </form>
-          </div>
-        </nav>
+        <a href="/settings" class="status-icon" aria-label="Settings" title="Settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        </a>
       </div>
     </div>
   </div>
@@ -137,23 +115,23 @@
       return localStorage.getItem('opentrace-theme') || 'system';
     }
 
-    function applyTheme(t) {
+    window.applyTheme = function(t) {
       if (t === 'dark' || t === 'light') {
         document.documentElement.setAttribute('data-theme', t);
       } else {
         document.documentElement.removeAttribute('data-theme');
       }
-    }
+    };
 
     window.cycleTheme = function() {
       var current = getTheme();
       var idx = themes.indexOf(current);
       var next = themes[(idx + 1) % themes.length];
       localStorage.setItem('opentrace-theme', next);
-      applyTheme(next);
+      window.applyTheme(next);
     };
 
-    applyTheme(getTheme());
+    window.applyTheme(getTheme());
   })();
 
   // Toast notification system
@@ -260,39 +238,6 @@
       if (e.target === this) toggleShortcuts();
     });
 
-    // User menu toggle
-    var menuTrigger = document.getElementById('user-menu-trigger-btn');
-    if (menuTrigger) {
-      menuTrigger.addEventListener('click', function(e) {
-        e.stopPropagation();
-        var dd = document.getElementById('user-menu-dropdown');
-        var isOpen = dd.classList.toggle('user-menu-open');
-        menuTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-      });
-      document.addEventListener('click', function(e) {
-        var dd = document.getElementById('user-menu-dropdown');
-        if (dd && dd.classList.contains('user-menu-open') && !e.target.closest('.user-menu')) {
-          dd.classList.remove('user-menu-open');
-          menuTrigger.setAttribute('aria-expanded', 'false');
-        }
-      });
-    }
-
-    // Theme toggle
-    var themeBtn = document.getElementById('theme-toggle-btn');
-    if (themeBtn) {
-      var themes = ['system', 'dark', 'light'];
-      function updateLabel() {
-        var el = document.getElementById('dropdown-theme-label');
-        if (el) el.textContent = localStorage.getItem('opentrace-theme') || 'system';
-      }
-      updateLabel();
-      themeBtn.addEventListener('click', function() {
-        window.cycleTheme();
-        updateLabel();
-      });
-    }
-
     // Command bar
     var cmdOverlay = document.getElementById('cmd-overlay');
     var cmdInput = document.getElementById('cmd-bar-input');
@@ -301,14 +246,8 @@
     var cmdPages = [
       {label: 'Dashboard', hint: '/', icon: '~', href: '/'},
       {label: 'Logs', hint: '/logs', icon: '>', href: '/logs'},
-      {label: 'Errors', hint: '/errors', icon: '!', href: '/errors'},
-      {label: 'Watchers', hint: '/watchers', icon: '#', href: '/watchers'},
-      {label: 'Health', hint: '/health', icon: '+', href: '/health'},
-      {label: 'Investigations', hint: '/sessions', icon: '?', href: '/sessions'},
-      {label: 'Connectors', hint: '/connectors', icon: '@', href: '/connectors'},
       {label: 'Settings', hint: '/settings', icon: '*', href: '/settings'},
       {label: 'Setup', hint: '/setup', icon: '$', href: '/setup'},
-      {label: 'Tools', hint: '/tools', icon: '%', href: '/tools'},
       {label: 'Profile', hint: '/profile', icon: '&', href: '/profile'},
     ];
 
@@ -400,13 +339,6 @@
         var overlay = document.getElementById('shortcut-overlay');
         if (overlay && overlay.style.display !== 'none') {
           overlay.style.display = 'none';
-          return;
-        }
-        var userMenu = document.getElementById('user-menu-dropdown');
-        if (userMenu && userMenu.classList.contains('user-menu-open')) {
-          userMenu.classList.remove('user-menu-open');
-          var mt = document.getElementById('user-menu-trigger-btn');
-          if (mt) mt.setAttribute('aria-expanded', 'false');
           return;
         }
         var modals = document.querySelectorAll('.modal[style*="flex"]');

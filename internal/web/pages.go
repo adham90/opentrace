@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -44,6 +45,12 @@ var tmplFuncs = template.FuncMap{
 	},
 	"fmtFloat": func(f float64) string {
 		return fmt.Sprintf("%.1f", f)
+	},
+	"divPercent": func(a, b int) float64 {
+		if b == 0 {
+			return 0
+		}
+		return float64(a) / float64(b) * 100
 	},
 	"deref": func(p *int64) int64 {
 		if p == nil {
@@ -297,14 +304,66 @@ type dashboardActivityItem struct {
 	Time   string `json:"time"`
 }
 
+// dashboardSignal represents a service/endpoint health dot.
+type dashboardSignal struct {
+	Name   string  `json:"name"`
+	Status string  `json:"status"` // "up", "down", "degraded"
+	Uptime float64 `json:"uptime"`
+	AvgMs  float64 `json:"avg_ms"`
+}
+
+// dashboardTimelineItem represents an event in the system timeline.
+type dashboardTimelineItem struct {
+	Icon    string `json:"icon"`    // "investigation", "alert", "deploy", "error", "resolved"
+	Status  string `json:"status"`  // "ok", "error", "warn", "info"
+	Title   string `json:"title"`
+	Detail  string `json:"detail"`
+	Time    string `json:"time"`
+	Link    string `json:"link"`
+	SortKey int64  `json:"-"` // unix timestamp for sorting
+}
+
+type dashboardEndpoint struct {
+	Method    string  `json:"method"`
+	Path      string  `json:"path"`
+	Requests  int     `json:"requests"`
+	ErrorRate float64 `json:"error_rate"`
+	AvgMs     float64 `json:"avg_ms"`
+	P95Ms     float64 `json:"p95_ms"`
+}
+
+type dashboardTraffic struct {
+	TotalRequests int     `json:"total_requests"`
+	ErrorRate     float64 `json:"error_rate"`
+	AvgMs         float64 `json:"avg_ms"`
+	P95Ms         float64 `json:"p95_ms"`
+}
+
+type dashboardServer struct {
+	Name   string `json:"name"`
+	Status string `json:"status"` // "online", "offline", "unknown"
+}
+
+type dashboardSparkBucket struct {
+	Hour       int `json:"hour"`
+	ErrorCount int `json:"error_count"`
+	Total      int `json:"total"`
+}
+
 type dashboardData struct {
-	SystemStatus dashboardSystemStatus    `json:"system_status"`
-	LastSession  *dashboardLastSession    `json:"last_session"`
-	Attention    []dashboardAttentionItem `json:"attention"`
-	Glance       dashboardGlance          `json:"glance"`
-	QuietMinutes int                      `json:"quiet_minutes"`
-	LastIncident string                   `json:"last_incident"`
-	Activity     []dashboardActivityItem  `json:"activity"`
+	SystemStatus   dashboardSystemStatus    `json:"system_status"`
+	LastSession    *dashboardLastSession    `json:"last_session"`
+	Attention      []dashboardAttentionItem `json:"attention"`
+	Glance         dashboardGlance          `json:"glance"`
+	QuietMinutes   int                      `json:"quiet_minutes"`
+	LastIncident   string                   `json:"last_incident"`
+	Activity       []dashboardActivityItem  `json:"activity"`
+	Signals        []dashboardSignal        `json:"signals"`
+	Timeline       []dashboardTimelineItem  `json:"timeline"`
+	Traffic        *dashboardTraffic        `json:"traffic"`
+	TopEndpoints   []dashboardEndpoint      `json:"top_endpoints"`
+	Servers        []dashboardServer        `json:"servers"`
+	ErrorSpark     []dashboardSparkBucket   `json:"error_spark"`
 }
 
 type pageData struct {
@@ -351,6 +410,12 @@ type pageData struct {
 	DashQuietMinutes int
 	DashLastIncident string
 	DashActivity     []dashboardActivityItem
+	DashSignals      []dashboardSignal
+	DashTimeline     []dashboardTimelineItem
+	DashTraffic        *dashboardTraffic
+	DashEndpoints      []dashboardEndpoint
+	DashServers        []dashboardServer
+	DashErrorSpark     []dashboardSparkBucket
 
 	// Errors page
 	ErrorGroups []store.ErrorGroup
@@ -488,9 +553,16 @@ func (s *Server) gatherDashboardData(r *http.Request) dashboardData {
 				MaxAge: 24 * time.Hour,
 			})
 			if err == nil && sess != nil {
+				intent := sess.Intent
+				if intent == "" {
+					intent = sess.PrimaryService
+				}
+				if intent == "" {
+					intent = "an issue"
+				}
 				dd.LastSession = &dashboardLastSession{
 					ID:      sess.ID,
-					Intent:  sess.Intent,
+					Intent:  intent,
 					Service: sess.PrimaryService,
 					Status:  string(sess.Status),
 					TimeAgo: formatTimeAgo(sess.LastActivityAt),
@@ -512,7 +584,7 @@ func (s *Server) gatherDashboardData(r *http.Request) dashboardData {
 					Severity: "error",
 					Type:     "error",
 					Title:    eg.ExceptionClass,
-					Detail:   truncateStr(eg.Message, 80),
+					Detail:   truncateStr(eg.Message, 50),
 					Velocity: "stable",
 					Time:     formatTimeAgo(eg.LastSeenAt),
 					Link:     "/errors",
@@ -552,8 +624,8 @@ func (s *Server) gatherDashboardData(r *http.Request) dashboardData {
 				dd.Attention = append(dd.Attention, dashboardAttentionItem{
 					Severity: "warn",
 					Type:     "watch",
-					Title:    a.Summary,
-					Detail:   fmt.Sprintf("%s = %.1f (threshold: %.1f)", a.TriggerMetric, a.TriggerValue, a.ThresholdValue),
+					Title:    truncateStr(a.Summary, 50),
+					Detail:   fmt.Sprintf("%s = %.1f", a.TriggerMetric, a.TriggerValue),
 					Velocity: "stable",
 					Time:     formatTimeAgo(a.CreatedAt),
 					Link:     "/watchers",
@@ -657,6 +729,225 @@ func (s *Server) gatherDashboardData(r *http.Request) dashboardData {
 		dd.Activity = dd.Activity[:6]
 	}
 
+	// ── Signals (service health dots) ─────────────────────────
+	if s.healthCheckStore != nil {
+		summaries, err := s.healthCheckStore.UptimeSummaries(ctx, oneDayAgo)
+		if err == nil {
+			for _, sum := range summaries {
+				dd.Signals = append(dd.Signals, dashboardSignal{
+					Name:   sum.Name,
+					Status: sum.CurrentStatus,
+					Uptime: sum.UptimePct,
+					AvgMs:  sum.AvgResponseMs,
+				})
+			}
+		}
+	}
+
+	// ── Timeline (unified event stream) ───────────────────────
+	if s.investigationSessionStore != nil {
+		sessions, err := s.investigationSessionStore.List(ctx, store.ListInvestigationSessionParams{
+			Limit: 5,
+		})
+		if err == nil {
+			// Group consecutive investigations with same status
+			investCounts := make(map[string]int) // status -> count
+			var lastInvestSession *store.InvestigationSession
+			for _, sess := range sessions {
+				investCounts[string(sess.Status)]++
+				if lastInvestSession == nil {
+					lastInvestSession = &sess
+				}
+			}
+			for statusStr, count := range investCounts {
+				sess := *lastInvestSession
+				icon := "investigation"
+				status := "info"
+				title := "investigation opened"
+				if store.InvestigationSessionStatus(statusStr) == store.InvestigationStatusResolved {
+					icon = "resolved"
+					status = "ok"
+					title = "investigation resolved"
+				} else if store.InvestigationSessionStatus(statusStr) == store.InvestigationStatusUnresolved {
+					status = "error"
+					title = "investigation unresolved"
+				}
+				if count > 1 {
+					title = fmt.Sprintf("%d investigations %s", count, statusStr)
+				}
+				detail := ""
+				if count == 1 {
+					if sess.Summary != "" {
+						detail = truncateStr(sess.Summary, 80)
+					} else if sess.PrimaryService != "" {
+						detail = sess.PrimaryService
+						if sess.Intent != "" {
+							detail += " — " + sess.Intent
+						}
+					} else if sess.Intent != "" {
+						detail = sess.Intent
+					} else {
+						detail = sess.UserEmail + " via " + sess.ClientName
+					}
+				} else {
+					detail = sess.UserEmail + " via " + sess.ClientName
+				}
+				link := "/sessions/" + sess.ID
+				if count > 1 {
+					link = "/sessions"
+				}
+				dd.Timeline = append(dd.Timeline, dashboardTimelineItem{
+					Icon:    icon,
+					Status:  status,
+					Title:   title,
+					Detail:  detail,
+					Time:    formatTimeAgo(sess.LastActivityAt),
+					Link:    link,
+					SortKey: sess.LastActivityAt.Unix(),
+				})
+			}
+		}
+	}
+
+	if s.watchStore != nil {
+		alerts, err := s.watchStore.ListAlerts(ctx, "", "", 5)
+		if err == nil {
+			for _, a := range alerts {
+				status := "warn"
+				icon := "alert"
+				if a.Status == "dismissed" {
+					status = "ok"
+					icon = "resolved"
+				}
+				dd.Timeline = append(dd.Timeline, dashboardTimelineItem{
+					Icon:    icon,
+					Status:  status,
+					Title:   "watcher: " + truncateStr(a.Summary, 40),
+					Detail:  fmt.Sprintf("%s = %.1f", a.TriggerMetric, a.TriggerValue),
+					Time:    formatTimeAgo(a.CreatedAt),
+					Link:    "/watchers",
+					SortKey: a.CreatedAt.Unix(),
+				})
+			}
+		}
+	}
+
+	if s.deployStore != nil {
+		deploys, err := s.deployStore.GetRecent(ctx, "", 3)
+		if err == nil {
+			for _, d := range deploys {
+				detail := d.CommitHash
+				if len(detail) > 8 {
+					detail = detail[:8]
+				}
+				if d.Author != "" {
+					detail += " by " + d.Author
+				}
+				if d.Branch != "" {
+					detail += " (" + d.Branch + ")"
+				}
+				dd.Timeline = append(dd.Timeline, dashboardTimelineItem{
+					Icon:    "deploy",
+					Status:  "info",
+					Title:   "deploy: " + d.Service,
+					Detail:  detail,
+					Time:    formatTimeAgo(d.DeployedAt),
+					Link:    "",
+					SortKey: d.DeployedAt.Unix(),
+				})
+			}
+		}
+	}
+
+	// Sort timeline by time descending
+	sort.Slice(dd.Timeline, func(i, j int) bool {
+		return dd.Timeline[i].SortKey > dd.Timeline[j].SortKey
+	})
+	if len(dd.Timeline) > 10 {
+		dd.Timeline = dd.Timeline[:10]
+	}
+
+	// ── Traffic Summary ───────────────────────────────────────
+	if s.analyticsStore != nil {
+		summary, err := s.analyticsStore.TrafficSummary(ctx, store.AnalyticsParams{
+			Since: oneDayAgo, Until: now,
+		})
+		if err == nil && summary != nil && summary.TotalRequests > 0 {
+			dd.Traffic = &dashboardTraffic{
+				TotalRequests: summary.TotalRequests,
+				ErrorRate:     summary.ErrorRate,
+				AvgMs:         summary.AvgDurationMs,
+				P95Ms:         summary.P95DurationMs,
+			}
+		}
+	}
+
+	// ── Top Endpoints (by p95) ────────────────────────────────
+	if s.analyticsStore != nil {
+		eps, err := s.analyticsStore.TopEndpoints(ctx, store.TopEndpointParams{
+			Since:  oneDayAgo,
+			Until:  now,
+			SortBy: "p95_duration",
+			Limit:  5,
+		})
+		if err == nil {
+			for _, ep := range eps {
+				path := ep.PathPattern
+				if path == "" {
+					path = ep.Controller + "#" + ep.Action
+				}
+				errRate := 0.0
+				if ep.RequestCount > 0 {
+					errRate = float64(ep.ErrorCount) / float64(ep.RequestCount) * 100
+				}
+				dd.TopEndpoints = append(dd.TopEndpoints, dashboardEndpoint{
+					Method:    ep.Method,
+					Path:      path,
+					Requests:  ep.RequestCount,
+					ErrorRate: errRate,
+					AvgMs:     ep.AvgDurationMs,
+					P95Ms:     ep.P95DurationMs,
+				})
+			}
+		}
+	}
+
+	// ── Servers ───────────────────────────────────────────────
+	if s.serverStore != nil {
+		servers, err := s.serverStore.List(ctx, store.ListServerParams{})
+		if err == nil {
+			for _, srv := range servers {
+				name := srv.DisplayName
+				if name == "" {
+					name = srv.Hostname
+				}
+				dd.Servers = append(dd.Servers, dashboardServer{
+					Name:   name,
+					Status: string(srv.Status),
+				})
+			}
+		}
+	}
+
+	// ── Error Sparkline (24h, hourly buckets) ─────────────────
+	if s.logStore != nil {
+		buckets, err := s.logStore.Histogram(ctx, store.LogHistogramParams{
+			Since:    oneDayAgo,
+			Until:    now,
+			Interval: time.Hour,
+			Level:    "ERROR",
+		})
+		if err == nil && len(buckets) > 0 {
+			for i, b := range buckets {
+				dd.ErrorSpark = append(dd.ErrorSpark, dashboardSparkBucket{
+					Hour:       i,
+					ErrorCount: b.Total, // when filtered by ERROR level, Total = error count
+					Total:      b.Total,
+				})
+			}
+		}
+	}
+
 	return dd
 }
 
@@ -692,6 +983,12 @@ func (s *Server) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
 	data.DashQuietMinutes = dd.QuietMinutes
 	data.DashLastIncident = dd.LastIncident
 	data.DashActivity = dd.Activity
+	data.DashSignals = dd.Signals
+	data.DashTimeline = dd.Timeline
+	data.DashTraffic = dd.Traffic
+	data.DashEndpoints = dd.TopEndpoints
+	data.DashServers = dd.Servers
+	data.DashErrorSpark = dd.ErrorSpark
 
 	tmpl := s.getTemplate(dashboardTmpl,
 		"internal/web/templates/layout.html",
@@ -1527,6 +1824,15 @@ func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 			data.MCPName = v
 		}
 	}
+
+	// Users list for inline management
+	if s.userStore != nil {
+		users, err := s.userStore.List(r.Context())
+		if err == nil {
+			data.Users = users
+		}
+	}
+	data.IsAdmin = data.User.Role == "admin"
 
 	tmpl := s.getTemplate(settingsTmpl,
 		"internal/web/templates/layout.html",

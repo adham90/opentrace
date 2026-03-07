@@ -71,7 +71,7 @@
     background: rgba(185, 28, 28, 0.09);
 }
 [data-theme="light"] .status-bar {
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    box-shadow: none;
 }
 [data-theme="light"] .cmd-box {
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
@@ -133,7 +133,7 @@
         background: rgba(185, 28, 28, 0.09);
     }
     :root:not([data-theme="dark"]) .status-bar {
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        box-shadow: none;
     }
 }
 
@@ -253,11 +253,6 @@ button:focus-visible,
 
 /* ===== Status Bar ===== */
 .status-bar-wrap {
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-secondary);
-    position: sticky;
-    top: 0;
-    z-index: 10;
     flex-shrink: 0;
 }
 .status-bar {
@@ -266,8 +261,7 @@ button:focus-visible,
     justify-content: space-between;
     max-width: 1100px;
     margin: 0 auto;
-    padding: 8px 16px;
-    min-height: 44px;
+    padding: 14px 24px 0;
 }
 .status-bar-left {
     display: flex;
@@ -282,14 +276,18 @@ button:focus-visible,
     flex-shrink: 0;
 }
 .status-brand {
-    font-weight: 700;
-    font-size: 15px;
-    color: var(--green);
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text-dim);
     text-decoration: none;
     flex-shrink: 0;
+    opacity: 0.6;
+    transition: opacity 0.15s;
 }
 .status-brand:hover {
     text-decoration: none;
+    opacity: 1;
 }
 .status-health {
     display: flex;
@@ -342,69 +340,19 @@ button:focus-visible,
 .status-stat-err {
     color: var(--text-dim);
 }
-/* ===== User Menu Dropdown ===== */
-.user-menu {
-    position: relative;
-}
-.user-menu-trigger {
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 4px 10px;
-    font-family: var(--font-mono);
-    font-size: 11px;
+/* ===== Status Bar Icons ===== */
+.status-icon {
     display: flex;
     align-items: center;
-    gap: 6px;
-    transition:
-        color 0.15s,
-        border-color 0.15s;
-}
-.user-menu-trigger:hover {
-    color: var(--text);
-    border-color: var(--text-dim);
-}
-.user-menu-dropdown {
-    display: none;
-    position: absolute;
-    top: calc(100% + 4px);
-    right: 0;
-    min-width: 160px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    z-index: 100;
-    padding: 4px 0;
-}
-.user-menu-open {
-    display: block;
-}
-.user-menu-item {
-    display: block;
-    width: 100%;
-    padding: 6px 12px;
-    font-size: 12px;
-    font-family: var(--font-mono);
-    color: var(--text);
-    background: none;
-    border: none;
-    text-align: left;
+    justify-content: center;
+    color: var(--text-dim);
+    opacity: 0.6;
+    transition: opacity 0.15s;
     text-decoration: none;
-    cursor: pointer;
-    transition: background 0.1s;
 }
-.user-menu-item:hover {
-    background: var(--bg-tertiary);
-}
-.user-menu-item-danger {
-    color: var(--red);
-}
-.user-menu-divider {
-    height: 1px;
-    background: var(--border);
-    margin: 4px 0;
+.status-icon:hover {
+    opacity: 1;
+    text-decoration: none;
 }
 
 /* Hide stats on mobile */
@@ -503,7 +451,11 @@ button:focus-visible,
 
 /* ===== Content Area ===== */
 .main-content {
-    padding: 16px;
+    padding: 16px 24px;
+    max-width: 1100px;
+    margin: 0 auto;
+    width: 100%;
+    box-sizing: border-box;
 }
 .main-content.logs-page {
     flex: 1;
@@ -2743,43 +2695,32 @@ th.sortable.sort-desc::after {
     }
 }
 .status-brand.status-ok {
+    color: var(--green);
+    opacity: 0.7;
     animation: pulse-ok 3s ease-in-out infinite;
 }
 .status-brand.status-warn {
     color: var(--yellow);
+    opacity: 1;
     animation: pulse-warn 2s ease-in-out infinite;
 }
 .status-brand.status-critical {
     color: var(--red);
+    opacity: 1;
     animation: pulse-critical 1.5s ease-in-out infinite;
 }
 
 /* Nav links in status bar */
-.status-nav {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    padding-left: 12px;
-    border-left: 1px solid var(--border);
-}
-.status-nav a {
+.status-hint {
+    font-family: var(--font-mono);
+    font-size: 10px;
     color: var(--text-dim);
-    text-decoration: none;
-    font-size: 11px;
-    padding: 3px 8px;
-    border-radius: 3px;
-    transition:
-        color 0.15s,
-        background 0.15s;
-}
-.status-nav a:hover {
-    color: var(--text);
-    background: var(--bg-tertiary);
-    text-decoration: none;
-}
-.status-nav a.active {
-    color: var(--green);
-    background: var(--green-dim);
+    opacity: 0.5;
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    margin-left: 8px;
+    cursor: pointer;
 }
 
 /* Command bar (⌘K) */
@@ -3400,11 +3341,6 @@ th.sortable.sort-desc::after {
         right: 8px;
         left: 8px;
         max-width: none;
-    }
-
-    /* Dashboard nav */
-    .status-nav {
-        display: none;
     }
 
     /* Dashboard glance grid */

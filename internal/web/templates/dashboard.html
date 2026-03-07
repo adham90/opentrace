@@ -1,180 +1,535 @@
 {{define "content"}}
-<div class="dashboard-content">
-  <!-- ── System Status Row ─────────────────────────────────── -->
+<div class="dash">
+
   {{if .DashSystemStatus}}
-  <div class="system-status" id="system-status">
-    <div class="system-status-item">
-      <span class="dot {{if eq .DashSystemStatus.OverallStatus "critical"}}dot-err{{else if eq .DashSystemStatus.OverallStatus "warn"}}dot-warn{{else}}dot-ok{{end}}"></span>
-      <span class="system-status-label">services</span>
-      <span class="system-status-value" id="ss-services">{{.DashSystemStatus.ServicesUp}}/{{.DashSystemStatus.ServicesTotal}} up</span>
+  <div class="d-top">
+    <div class="d-top-left">
+      <span>{{.DashSystemStatus.LogsPerHour}} logs/h</span>
+      {{if .DashSystemStatus.ErrorsPerHour}}<span class="d-err">{{.DashSystemStatus.ErrorsPerHour}} errors/h</span>{{end}}
+      {{if .DashGlance}}{{if .DashGlance.Uptime}}<span>{{fmtFloat .DashGlance.Uptime}}%</span>{{end}}{{end}}
+      {{if .DashTraffic}}<span>{{.DashTraffic.TotalRequests}} reqs</span>{{end}}
+      {{if .DashGlance}}{{if .DashGlance.ErrorGroups}}<span class="d-err">{{.DashGlance.ErrorGroups}} errors</span>{{end}}{{end}}
     </div>
-    <div class="system-status-sep"></div>
-    <div class="system-status-item">
-      <span class="system-status-label">errors</span>
-      <span class="system-status-value{{if gt .DashSystemStatus.ErrorsPerHour 3}} system-status-hot{{end}}" id="ss-errors">{{.DashSystemStatus.ErrorsPerHour}}/hr</span>
-    </div>
-    <div class="system-status-sep"></div>
-    <div class="system-status-item">
-      <span class="system-status-label">logs</span>
-      <span class="system-status-value" id="ss-logs">{{.DashSystemStatus.LogsPerHour}}/hr</span>
-    </div>
-    <div class="system-status-sep"></div>
-    <div class="system-status-item">
-      <span class="system-status-label">watchers</span>
-      <span class="system-status-value" id="ss-watchers">{{.DashSystemStatus.WatchersActive}} active</span>
-    </div>
-    <div class="system-status-sep"></div>
-    <div class="system-status-item">
-      <span class="system-status-label">investigations</span>
-      <span class="system-status-value{{if gt .DashSystemStatus.InvestOpen 0}} system-status-warn{{end}}" id="ss-invest">{{.DashSystemStatus.InvestOpen}} open</span>
+    <div class="d-top-right">
+      {{range .DashSignals}}
+      <span class="d-svc d-svc-{{.Status}}"><span class="d-dot"></span>{{.Name}}</span>
+      {{end}}
+      {{range .DashServers}}
+      <span class="d-svc d-svc-{{.Status}}"><span class="d-dot"></span>{{.Name}}</span>
+      {{end}}
     </div>
   </div>
   {{end}}
 
-  <!-- ── Last Session Context ──────────────────────────────── -->
-  {{if .DashLastSession}}
-  <a href="/sessions/{{.DashLastSession.ID}}" class="last-session">
-    <span class="last-session-label">last session:</span>
-    <span class="last-session-text">You were investigating <span class="last-session-link">{{.DashLastSession.Intent}}</span> &mdash; {{.DashLastSession.Service}} ({{.DashLastSession.Status}})</span>
-    <span class="last-session-time">{{.DashLastSession.TimeAgo}}</span>
-    <span style="color:var(--text-dim)">&rarr;</span>
-  </a>
-  {{end}}
-
-  <!-- ── Needs Attention ───────────────────────────────────── -->
-  {{if .DashAttention}}
-  <div class="section-header">
-    <span class="section-title">Needs Attention</span>
-    <a href="/errors" class="section-link">view all errors &rarr;</a>
-  </div>
-  <div class="attention-list" id="attention-list">
-    {{range .DashAttention}}
-    <div class="attention-item sev-{{.Severity}}"{{if .Link}} data-href="{{.Link}}"{{end}}>
-      <span class="dot dot-{{if eq .Severity "error"}}err{{else if eq .Severity "warn"}}warn{{else}}info{{end}}"></span>
-      <span class="attention-type" style="color:var(--{{if eq .Severity "error"}}red{{else if eq .Severity "warn"}}yellow{{else}}blue{{end}})">{{.Type}}</span>
-      <span class="attention-desc">{{.Title}}{{if .Detail}} &mdash; {{.Detail}}{{end}}</span>
-      {{if .Velocity}}<span class="velocity velocity-{{if eq .Velocity "accelerating"}}up{{else if eq .Velocity "slowing"}}down{{else}}stable{{end}}">{{if eq .Velocity "accelerating"}}&#x2197; {{else if eq .Velocity "slowing"}}&#x2198; {{else}}&mdash; {{end}}{{.Velocity}}</span>{{end}}
-      <span class="attention-time">{{.Time}}</span>
-    </div>
+  <div class="d-chart" id="chart-wrap">
+    {{if .DashErrorSpark}}
+    <svg class="d-chart-svg" id="error-chart" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="area-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--red)" stop-opacity="0.2"/>
+          <stop offset="100%" stop-color="var(--red)" stop-opacity="0.01"/>
+        </linearGradient>
+      </defs>
+      <path class="d-chart-area" />
+      <path class="d-chart-line" />
+      <line class="d-chart-cross" x1="0" y1="0" x2="0" y2="0" />
+      <circle class="d-chart-dot" cx="0" cy="0" r="3.5" />
+      {{range $i, $b := .DashErrorSpark}}
+      <rect class="d-chart-hit" data-idx="{{$i}}" data-count="{{$b.ErrorCount}}" data-hour="{{$b.Hour}}" />
+      {{end}}
+    </svg>
+    <div class="d-chart-tip" id="chart-tip"></div>
+    <div class="d-chart-hours" id="chart-hours"></div>
+    {{else}}
+    <div class="d-chart-empty">No error data in the last 24h</div>
     {{end}}
   </div>
+
+  <hr class="d-rule">
+
+  {{if .DashLastSession}}
+  <a href="/sessions/{{.DashLastSession.ID}}" class="d-resume">
+    You were investigating <strong>{{.DashLastSession.Intent}}</strong>{{if .DashLastSession.Service}} — {{.DashLastSession.Service}}{{end}}
+    <span class="d-meta">{{.DashLastSession.TimeAgo}}</span>
+  </a>
+  <hr class="d-rule">
   {{end}}
 
-  <!-- ── Last 24 Hours ─────────────────────────────────────── -->
-  {{if .DashGlance}}
-  <div class="section-header">
-    <span class="section-title">Last 24 Hours</span>
-  </div>
-  <div class="glance-grid" id="glance-grid">
-    <a href="/logs" class="glance-card">
-      <div class="glance-card-label">Total Logs</div>
-      <div class="glance-card-value" id="gl-logs">{{.DashGlance.TotalLogs}}</div>
-    </a>
-    <a href="/errors" class="glance-card">
-      <div class="glance-card-label">Error Groups</div>
-      <div class="glance-card-value" id="gl-errors">{{.DashGlance.ErrorGroups}}</div>
-    </a>
-    <a href="/watchers" class="glance-card">
-      <div class="glance-card-label">Watcher Triggers</div>
-      <div class="glance-card-value" id="gl-triggers">{{.DashGlance.WatcherTriggers}}</div>
-    </a>
-    <a href="/sessions" class="glance-card">
-      <div class="glance-card-label">Investigations</div>
-      <div class="glance-card-value" id="gl-invest">{{.DashGlance.Investigations}}</div>
-    </a>
-    <a href="/health" class="glance-card">
-      <div class="glance-card-label">Uptime</div>
-      <div class="glance-card-value" id="gl-uptime">{{if gt .DashGlance.Uptime 0.0}}{{fmtFloat .DashGlance.Uptime}}%{{else}}-{{end}}</div>
-    </a>
-  </div>
+  {{if .DashAttention}}
+  <h3 class="d-label">Attention <span class="d-label-count">{{len .DashAttention}}</span></h3>
+  {{range .DashAttention}}
+  <a class="d-item"{{if .Link}} href="{{.Link}}"{{end}}>
+    <span class="d-dot d-dot-{{.Severity}}"></span>
+    <div class="d-item-body">
+      <div class="d-item-title">{{.Title}}</div>
+      {{if .Detail}}<div class="d-item-sub">{{.Detail}}</div>{{end}}
+    </div>
+    <span class="d-meta">{{.Time}}</span>
+  </a>
+  {{end}}
+  {{else if gt .DashQuietMinutes 0}}
+  <p class="d-quiet">All clear — quiet for {{.DashQuietMinutes}}m</p>
   {{end}}
 
-  <!-- ── Quiet Banner ──────────────────────────────────────── -->
-  {{if and (not .DashAttention) (gt .DashQuietMinutes 0)}}
-  <div class="quiet-banner" id="quiet-banner">
-    <span class="dot dot-ok"></span>
-    No new incidents in the last <strong style="color:var(--text)">{{.DashQuietMinutes}} minutes</strong>{{if .DashLastIncident}} &middot; last: {{.DashLastIncident}}{{end}}
-  </div>
-  {{end}}
+  <hr class="d-rule">
 
-  <!-- ── Recent Activity ───────────────────────────────────── -->
-  {{if .DashActivity}}
-  <div class="section-header">
-    <span class="section-title">Recent Activity</span>
-    <a href="/sessions" class="section-link">view all &rarr;</a>
-  </div>
-  <div class="table-wrap">
-    <table class="data-table" id="activity-table">
-      <thead><tr><th style="width:26px"></th><th>Type</th><th>Description</th><th class="col-right">When</th></tr></thead>
-      <tbody>
-      {{range .DashActivity}}
-      <tr>
-        <td><span class="dot dot-{{if eq .Status "ok"}}ok{{else if eq .Status "error"}}err{{else if eq .Status "warn"}}warn{{else}}off{{end}}"></span></td>
-        <td><span class="badge badge-{{if eq .Status "ok"}}ok{{else if eq .Status "error"}}err{{else if eq .Status "warn"}}warn{{else}}dim{{end}}">{{.Type}}</span></td>
-        <td class="wide">{{.Desc}}</td>
-        <td class="col-right" style="color:var(--text-dim)">{{.Time}}</td>
-      </tr>
+  {{if .DashEndpoints}}
+  <div class="d-grid">
+    <div class="d-col-main">
+      <h3 class="d-label">Slow endpoints</h3>
+      {{range .DashEndpoints}}
+      <div class="d-ep">
+        <span class="d-ep-name"><span class="d-ep-method">{{.Method}}</span>{{.Path}}</span>
+        <span class="d-ep-ms">{{fmtFloat .P95Ms}}</span>
+      </div>
       {{end}}
-      </tbody>
-    </table>
+    </div>
   </div>
+  <hr class="d-rule">
   {{end}}
 
-  <!-- ── Empty State ───────────────────────────────────────── -->
-  {{if and (not .DashAttention) (not .DashActivity) (eq .DashQuietMinutes 0)}}
-  <div class="empty-state" style="margin-top:60px">
-    <div class="empty-state-title">Welcome to OpenTrace</div>
-    <div class="empty-state-desc">Start by <a href="/setup">setting up log ingestion</a> or <a href="/connectors">adding a database connector</a>.</div>
-  </div>
+  {{if .DashTimeline}}
+  <h3 class="d-label">Recent</h3>
+  {{range .DashTimeline}}
+  <a class="d-feed"{{if .Link}} href="{{.Link}}"{{end}}>
+    <span class="d-dot d-dot-{{.Status}}"></span>
+    <div class="d-feed-body">
+      <span class="d-feed-title">{{.Title}}</span>
+      {{if .Detail}}<span class="d-feed-detail">{{.Detail}}</span>{{end}}
+    </div>
+    <span class="d-meta">{{.Time}}</span>
+  </a>
+  {{end}}
+  {{end}}
+
+  {{if and (not .DashAttention) (not .DashTimeline) (not .DashSignals) (eq .DashQuietMinutes 0)}}
+  <p class="d-quiet">No data yet. <a href="/setup">Set up log ingestion</a> to get started.</p>
   {{end}}
 </div>
 
+<style nonce="{{.CSPNonce}}">
+.dash {
+  width: 100%;
+  padding-top: 8px;
+}
+
+/* ── Top bar ──────────────────────────────────── */
+.d-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 8px 0 16px;
+}
+.d-top-left {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+}
+.d-top-right {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+/* ── Shared ───────────────────────────────────── */
+.d-err { color: var(--red); }
+
+.d-dot {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  opacity: 0.25;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.d-dot-error { background: var(--red); opacity: 1; }
+.d-dot-warn { background: var(--yellow); opacity: 1; }
+.d-dot-ok, .d-dot-info { background: var(--green); opacity: 1; }
+
+.d-meta {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+.d-rule {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+  opacity: 0.5;
+}
+
+.d-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  margin: 8px 0 14px;
+  letter-spacing: 0;
+}
+.d-label-count {
+  font-family: var(--font-mono);
+  color: var(--red);
+  opacity: 1;
+}
+
+/* ── Services ─────────────────────────────────── */
+.d-svc {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-dim);
+  opacity: 0.5;
+}
+.d-svc-up, .d-svc-online { opacity: 0.8; }
+.d-svc-up .d-dot, .d-svc-online .d-dot { background: var(--green); opacity: 1; }
+.d-svc-down .d-dot { background: var(--red); opacity: 1; }
+.d-svc-down { opacity: 0.8; }
+.d-svc-degraded .d-dot { background: var(--yellow); opacity: 1; }
+
+/* ── Chart ────────────────────────────────────── */
+.d-chart {
+  position: relative;
+  margin: 4px 0 0;
+}
+.d-chart-svg {
+  display: block;
+  width: 100%;
+  height: 100px;
+  cursor: crosshair;
+}
+.d-chart-area {
+  fill: url(#area-fill);
+}
+.d-chart-line {
+  fill: none;
+  stroke: var(--red);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+.d-chart-cross {
+  stroke: var(--text-dim);
+  stroke-width: 1;
+  opacity: 0;
+  stroke-dasharray: 2 2;
+}
+.d-chart-dot {
+  fill: var(--red);
+  opacity: 0;
+}
+.d-chart-hit {
+  fill: transparent;
+  cursor: crosshair;
+}
+.d-chart-tip {
+  position: absolute;
+  top: 0;
+  pointer-events: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.1s;
+  z-index: 2;
+}
+.d-chart-hours {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  opacity: 0.35;
+  padding: 4px 0 0;
+  user-select: none;
+}
+.d-chart-empty {
+  height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--text-dim);
+  opacity: 0.4;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+}
+
+/* ── Resume ───────────────────────────────────── */
+.d-resume {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0;
+  text-decoration: none;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+.d-resume:hover { color: var(--text); text-decoration: none; }
+.d-resume strong { color: var(--text); font-weight: 500; }
+
+/* ── Grid ─────────────────────────────────────── */
+.d-grid {
+  display: grid;
+  grid-template-columns: 5fr 3fr;
+  gap: 0 40px;
+  align-items: start;
+}
+.d-col-main { min-width: 0; }
+.d-col-side { min-width: 0; }
+
+/* ── Attention items ──────────────────────────── */
+.d-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+  color: var(--text);
+  text-decoration: none;
+}
+.d-item:hover { opacity: 0.7; text-decoration: none; }
+.d-item .d-dot { margin-top: 7px; }
+.d-item-body { flex: 1; min-width: 0; }
+.d-item-title { font-size: 14px; font-weight: 500; }
+.d-item-sub {
+  font-size: 13px;
+  color: var(--text-dim);
+  opacity: 0.55;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+.d-item .d-meta { padding-top: 2px; }
+
+/* ── Endpoints ────────────────────────────────── */
+.d-ep {
+  display: flex;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 13px;
+}
+.d-ep-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+.d-ep-method {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.5;
+  margin-right: 4px;
+}
+.d-ep-ms {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  opacity: 0.5;
+  margin-left: 12px;
+  flex-shrink: 0;
+}
+.d-ep-ms::after { content: 'ms'; font-size: 10px; opacity: 0.6; margin-left: 1px; }
+
+/* ── Feed (timeline) ─────────────────────────── */
+.d-feed {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 0;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 14px;
+}
+.d-feed:hover { opacity: 0.7; text-decoration: none; }
+.d-feed .d-dot { margin-top: 7px; }
+.d-feed-body {
+  flex: 1;
+  min-width: 0;
+}
+.d-feed-title {
+  font-weight: 500;
+  display: block;
+}
+.d-feed-detail {
+  display: block;
+  color: var(--text-dim);
+  opacity: 0.45;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+.d-feed .d-meta { padding-top: 2px; }
+
+.d-quiet {
+  font-size: 13px;
+  color: var(--text-dim);
+  opacity: 0.6;
+  padding: 20px 0;
+}
+.d-quiet a { color: var(--text); opacity: 1; }
+
+@media (max-width: 700px) {
+  .d-grid { grid-template-columns: 1fr; }
+  .d-top { flex-direction: column; gap: 8px; }
+  .d-top-right { justify-content: flex-start; }
+  .d-feed-detail { display: none; }
+  .d-item-sub { display: none; }
+}
+</style>
+
 <script nonce="{{.CSPNonce}}">
 (function() {
-  // Click handler for attention items with data-href
+  var hits = document.querySelectorAll('.d-chart-hit');
+  if (!hits.length) return;
+
+  var svg = document.getElementById('error-chart');
+  var tip = document.getElementById('chart-tip');
+  var hoursEl = document.getElementById('chart-hours');
+  var cross = svg.querySelector('.d-chart-cross');
+  var dot = svg.querySelector('.d-chart-dot');
+  var wrap = document.getElementById('chart-wrap');
+
+  var data = [];
+  var max = 1;
+  hits.forEach(function(h) {
+    var c = parseInt(h.getAttribute('data-count'), 10) || 0;
+    var hr = parseInt(h.getAttribute('data-hour'), 10);
+    data.push({ count: c, hour: hr });
+    if (c > max) max = c;
+  });
+
+  var n = data.length;
+  if (n < 2) return;
+
+  var rect = svg.getBoundingClientRect();
+  var W = rect.width;
+  var H = 100;
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+
+  var pad = 4;
+  var chartH = H - pad * 2;
+  var stepX = W / (n - 1);
+
+  function xPos(i) { return i * stepX; }
+  function yPos(v) { return pad + chartH - (v / max) * chartH; }
+
+  // Store computed positions
+  var positions = [];
+  var lineParts = [];
+  for (var i = 0; i < n; i++) {
+    var px = xPos(i);
+    var py = yPos(data[i].count);
+    positions.push({ x: px, y: py });
+    lineParts.push((i === 0 ? 'M' : 'L') + px.toFixed(1) + ',' + py.toFixed(1));
+  }
+
+  var linePath = lineParts.join(' ');
+  var areaPath = linePath + ' L' + xPos(n-1).toFixed(1) + ',' + H + ' L0,' + H + ' Z';
+
+  svg.querySelector('.d-chart-area').setAttribute('d', areaPath);
+  svg.querySelector('.d-chart-line').setAttribute('d', linePath);
+
+  // Set invisible hit zones for each data point
+  var hitW = W / n;
+  hits.forEach(function(h, i) {
+    h.setAttribute('x', (positions[i].x - hitW / 2).toFixed(1));
+    h.setAttribute('y', '0');
+    h.setAttribute('width', hitW.toFixed(1));
+    h.setAttribute('height', H);
+  });
+
+  // Crosshair line full height
+  cross.setAttribute('y1', '0');
+  cross.setAttribute('y2', H);
+
+  function showTip(i) {
+    var d = data[i];
+    var p = positions[i];
+    var hr = (d.hour < 10 ? '0' : '') + d.hour + ':00';
+    var label = d.count === 1 ? '1 error' : d.count + ' errors';
+
+    cross.setAttribute('x1', p.x.toFixed(1));
+    cross.setAttribute('x2', p.x.toFixed(1));
+    cross.style.opacity = '0.3';
+
+    dot.setAttribute('cx', p.x.toFixed(1));
+    dot.setAttribute('cy', p.y.toFixed(1));
+    dot.style.opacity = '1';
+
+    tip.textContent = hr + '  ' + label;
+    tip.style.opacity = '1';
+
+    // Position tooltip
+    var tipRect = tip.getBoundingClientRect();
+    var wrapRect = wrap.getBoundingClientRect();
+    var left = p.x - tipRect.width / 2;
+    if (left < 0) left = 0;
+    if (left + tipRect.width > W) left = W - tipRect.width;
+    tip.style.left = left + 'px';
+    tip.style.top = (p.y - 28) + 'px';
+  }
+
+  function hideTip() {
+    cross.style.opacity = '0';
+    dot.style.opacity = '0';
+    tip.style.opacity = '0';
+  }
+
+  hits.forEach(function(h, i) {
+    h.addEventListener('mouseenter', function() { showTip(i); });
+  });
+  svg.addEventListener('mouseleave', hideTip);
+
+  // Hour labels
+  if (hoursEl) {
+    var step = Math.max(1, Math.floor(n / 6));
+    for (var i = 0; i < n; i += step) {
+      var span = document.createElement('span');
+      var hr = data[i].hour;
+      span.textContent = (hr < 10 ? '0' : '') + hr + ':00';
+      hoursEl.appendChild(span);
+    }
+  }
+
+  // Click handler for data-href elements
   document.addEventListener('click', function(e) {
     var item = e.target.closest('[data-href]');
     if (item) window.location = item.getAttribute('data-href');
   });
 
-  // Poll dashboard data every 30 seconds
-  function pollDashboard() {
+  // Auto-refresh status
+  setInterval(function() {
     fetch('/api/dashboard')
       .then(function(r) { return r.json(); })
       .then(function(d) {
-        // Update brand pulse
         var brand = document.getElementById('status-brand');
         if (brand) {
           brand.className = 'status-brand status-' + d.system_status.overall_status;
         }
-        // Update system status numbers
-        var el;
-        el = document.getElementById('ss-errors');
-        if (el) el.textContent = d.system_status.errors_per_hour + '/hr';
-        el = document.getElementById('ss-logs');
-        if (el) el.textContent = d.system_status.logs_per_hour + '/hr';
-        el = document.getElementById('ss-watchers');
-        if (el) el.textContent = d.system_status.watchers_active + ' active';
-        el = document.getElementById('ss-invest');
-        if (el) el.textContent = d.system_status.invest_open + ' open';
-        el = document.getElementById('ss-services');
-        if (el) el.textContent = d.system_status.services_up + '/' + d.system_status.services_total + ' up';
-        // Update glance
-        el = document.getElementById('gl-logs');
-        if (el) el.textContent = d.glance.total_logs;
-        el = document.getElementById('gl-errors');
-        if (el) el.textContent = d.glance.error_groups;
-        el = document.getElementById('gl-triggers');
-        if (el) el.textContent = d.glance.watcher_triggers;
-        el = document.getElementById('gl-invest');
-        if (el) el.textContent = d.glance.investigations;
-        el = document.getElementById('gl-uptime');
-        if (el) el.textContent = d.glance.uptime > 0 ? d.glance.uptime.toFixed(1) + '%' : '-';
       })
       .catch(function() {});
-  }
-
-  setInterval(pollDashboard, 30000);
+  }, 30000);
 })();
 </script>
 {{end}}

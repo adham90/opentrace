@@ -124,7 +124,7 @@ func runSeed() error {
 		svc := services[rand.Intn(len(services))]
 		msgs := messages[level]
 		msg := msgs[rand.Intn(len(msgs))]
-		ts := now.Add(-time.Duration(rand.Intn(7200)) * time.Second) // last 2 hours
+		ts := now.Add(-time.Duration(rand.Intn(86400)) * time.Second) // last 24 hours
 
 		entry := store.LogEntry{
 			Timestamp: ts,
@@ -168,7 +168,7 @@ func runSeed() error {
 		{"deploy.completed", "gateway", "Deployment v2.14.3 completed successfully"},
 	}
 	for _, ev := range eventEntries {
-		ts := now.Add(-time.Duration(rand.Intn(7200)) * time.Second)
+		ts := now.Add(-time.Duration(rand.Intn(86400)) * time.Second)
 		entry := store.LogEntry{
 			Timestamp: ts,
 			Level:     "INFO",
