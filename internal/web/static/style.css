@@ -254,6 +254,7 @@ button:focus-visible,
 /* ===== Status Bar ===== */
 .status-bar-wrap {
     flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
 }
 .status-bar {
     display: flex;
@@ -261,7 +262,7 @@ button:focus-visible,
     justify-content: space-between;
     max-width: 1100px;
     margin: 0 auto;
-    padding: 14px 24px 0;
+    padding: 10px 24px;
 }
 .status-bar-left {
     display: flex;
@@ -340,6 +341,34 @@ button:focus-visible,
 .status-stat-err {
     color: var(--text-dim);
 }
+/* ===== Status Bar Nav ===== */
+.status-nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding-left: 12px;
+    border-left: 1px solid var(--border);
+}
+.status-nav-link {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    text-decoration: none;
+    padding: 3px 8px;
+    border-radius: 4px;
+    opacity: 0.6;
+    transition: opacity 0.15s, background 0.15s;
+}
+.status-nav-link:hover {
+    opacity: 1;
+    text-decoration: none;
+}
+.status-nav-link.active {
+    opacity: 1;
+    color: var(--text);
+    background: var(--bg-tertiary);
+}
+
 /* ===== Status Bar Icons ===== */
 .status-icon {
     display: flex;
@@ -355,9 +384,12 @@ button:focus-visible,
     text-decoration: none;
 }
 
-/* Hide stats on mobile */
+/* Hide stats and nav on mobile */
 @media (max-width: 639px) {
     .status-stats {
+        display: none;
+    }
+    .status-nav {
         display: none;
     }
 }

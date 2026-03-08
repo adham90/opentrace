@@ -50,6 +50,13 @@
     <div class="status-bar" role="banner">
       <div class="status-bar-left">
         <a href="/" class="status-brand status-ok" id="status-brand">opentrace</a>
+        <nav class="status-nav" aria-label="Main navigation">
+          <a href="/logs" class="status-nav-link{{if eq .Nav "logs"}} active{{end}}">logs</a>
+          <a href="/errors" class="status-nav-link{{if eq .Nav "errors"}} active{{end}}">errors</a>
+          <a href="/watchers" class="status-nav-link{{if eq .Nav "watchers"}} active{{end}}">watchers</a>
+          <a href="/health" class="status-nav-link{{if eq .Nav "health"}} active{{end}}">health</a>
+          <a href="/connectors" class="status-nav-link{{if eq .Nav "connectors"}} active{{end}}">connectors</a>
+        </nav>
         <span class="status-hint" onclick="openCommandBar()" title="Command bar (⌘K)">&#x2318;K</span>
       </div>
       <div class="status-bar-right">

@@ -27,11 +27,6 @@
     </div>
   </form>
 
-  <div class="histogram-container" id="histogram-container">
-    <svg id="histogram-svg" width="100%" height="100%" preserveAspectRatio="none"></svg>
-    <div class="histogram-tooltip" id="histogram-tooltip" style="display:none"></div>
-  </div>
-
   <div class="term-output" id="term-output" aria-live="polite" aria-relevant="additions">
     <div class="filter-summary-bar" id="filter-summary-bar">
       <span style="color:var(--text-dim)">Filtered:</span>
@@ -526,57 +521,6 @@
 .term-filter-chip.chip-exclude .chip-key { color: var(--red); }
 .term-filter-chip.chip-exclude .chip-val { color: var(--text-secondary); }
 
-/* ── Histogram ─────────────────────────────────────────────── */
-.histogram-container {
-  flex-shrink: 0;
-  height: 60px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-  position: relative;
-  cursor: crosshair;
-}
-.histogram-container svg {
-  display: block;
-}
-.histogram-bar {
-  fill: var(--green);
-  opacity: 0.6;
-  transition: opacity 0.1s;
-}
-.histogram-bar:hover {
-  opacity: 1;
-}
-.histogram-bar-error {
-  fill: var(--red);
-  opacity: 0.8;
-  transition: opacity 0.1s;
-}
-.histogram-bar-error:hover {
-  opacity: 1;
-}
-.histogram-tooltip {
-  position: absolute;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 4px 8px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text);
-  pointer-events: none;
-  z-index: 20;
-  white-space: nowrap;
-}
-.histogram-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-
 /* ── Loading sentinel ──────────────────────────────────────── */
 .logs-sentinel {
   padding: 8px 12px;
@@ -628,7 +572,6 @@
   .term-detail-cards { grid-template-columns: 1fr; }
   .term-detail-header { flex-direction: column; align-items: flex-start; gap: 6px; }
   .term-detail-stats { flex-direction: column; }
-  .histogram-container { height: 40px; }
 }
 
 /* ── Autocomplete dropdown (opens downward, portaled to body) ── */
@@ -681,18 +624,6 @@ body > .ac-dropdown {
 }
 .term-detail-val-filter:hover {
   border-bottom-color: var(--cyan);
-}
-
-/* ── Histogram brush selection ────────────────────────────── */
-.histogram-brush {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  background: rgba(99, 179, 237, 0.15);
-  border-left: 1px solid var(--cyan);
-  border-right: 1px solid var(--cyan);
-  pointer-events: none;
-  z-index: 10;
 }
 
 /* ── Sticky filter summary bar ────────────────────────────── */
@@ -1393,7 +1324,6 @@ body > .ac-dropdown {
   function applyFilters() {
     pushFilterURL();
     htmx.trigger(form, 'submit');
-    fetchHistogram();
   }
 
   // ── Command line parsing ──────────────────────────────────
@@ -1806,213 +1736,6 @@ body > .ac-dropdown {
       });
   }
 
-  // ── Histogram (pure SVG) ───────────────────────────────────
-  var histogramSvg = document.getElementById('histogram-svg');
-  var histogramTooltip = document.getElementById('histogram-tooltip');
-  var histogramContainer = document.getElementById('histogram-container');
-  var histogramTimer = null;
-  var lastBuckets = [];
-
-  function fetchHistogram() {
-    var params = new URLSearchParams();
-    var tr = filters.time_range || '1h';
-    params.set('time_range', tr);
-    if (filters.service) params.set('service', filters.service);
-    if (filters.level) params.set('level', filters.level);
-
-    fetch('/api/logs/histogram?' + params.toString())
-      .then(function(r) { return r.json(); })
-      .then(function(buckets) {
-        if (!Array.isArray(buckets)) {
-          lastBuckets = [];
-          renderHistogram([]);
-          return;
-        }
-        lastBuckets = buckets;
-        renderHistogram(buckets);
-      })
-      .catch(function() {
-        lastBuckets = [];
-        histogramSvg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="var(--text-dim)" font-size="11" font-family="var(--font-mono)">histogram unavailable</text>';
-      });
-  }
-
-  function renderHistogram(buckets) {
-    if (!buckets || buckets.length === 0) {
-      histogramSvg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="var(--text-dim)" font-size="11" font-family="var(--font-mono)">no data</text>';
-      return;
-    }
-
-    var rect = histogramContainer.getBoundingClientRect();
-    var width = rect.width;
-    var height = rect.height;
-    var barGap = 1;
-    var barWidth = Math.max(2, (width - barGap * buckets.length) / buckets.length);
-    var maxTotal = 0;
-    for (var i = 0; i < buckets.length; i++) {
-      if (buckets[i].total > maxTotal) maxTotal = buckets[i].total;
-    }
-    if (maxTotal === 0) maxTotal = 1;
-
-    var svgNS = 'http://www.w3.org/2000/svg';
-    // Clear existing
-    while (histogramSvg.firstChild) histogramSvg.removeChild(histogramSvg.firstChild);
-
-    histogramSvg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
-
-    for (var i = 0; i < buckets.length; i++) {
-      var b = buckets[i];
-      var x = i * (barWidth + barGap);
-      var totalH = (b.total / maxTotal) * (height - 4);
-      var errorH = (b.error_count / maxTotal) * (height - 4);
-
-      // Total bar (green)
-      var totalBar = document.createElementNS(svgNS, 'rect');
-      totalBar.setAttribute('x', x);
-      totalBar.setAttribute('y', height - totalH);
-      totalBar.setAttribute('width', barWidth);
-      totalBar.setAttribute('height', totalH);
-      totalBar.setAttribute('class', 'histogram-bar');
-      totalBar.setAttribute('data-idx', i);
-      histogramSvg.appendChild(totalBar);
-
-      // Error bar (red, stacked on bottom)
-      if (b.error_count > 0) {
-        var errorBar = document.createElementNS(svgNS, 'rect');
-        errorBar.setAttribute('x', x);
-        errorBar.setAttribute('y', height - errorH);
-        errorBar.setAttribute('width', barWidth);
-        errorBar.setAttribute('height', errorH);
-        errorBar.setAttribute('class', 'histogram-bar-error');
-        errorBar.setAttribute('data-idx', i);
-        histogramSvg.appendChild(errorBar);
-      }
-    }
-  }
-
-  // Histogram hover tooltip
-  histogramContainer.addEventListener('mousemove', function(e) {
-    if (!lastBuckets || lastBuckets.length === 0) return;
-    var rect = histogramContainer.getBoundingClientRect();
-    var x = e.clientX - rect.left;
-    var barGap = 1;
-    var barWidth = Math.max(2, (rect.width - barGap * lastBuckets.length) / lastBuckets.length);
-    var idx = Math.floor(x / (barWidth + barGap));
-    if (idx < 0 || idx >= lastBuckets.length) {
-      histogramTooltip.style.display = 'none';
-      return;
-    }
-    var b = lastBuckets[idx];
-    var ts = new Date(b.timestamp);
-    var timeStr = ts.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-    histogramTooltip.textContent = timeStr + ' — ' + b.total + ' logs, ' + b.error_count + ' errors';
-
-    var tipX = Math.min(x + 10, rect.width - 200);
-    histogramTooltip.style.left = tipX + 'px';
-    histogramTooltip.style.top = '4px';
-    histogramTooltip.style.display = '';
-  });
-
-  histogramContainer.addEventListener('mouseleave', function() {
-    histogramTooltip.style.display = 'none';
-  });
-
-  // Histogram click + brush-select → filter by time range
-  var brushEl = document.createElement('div');
-  brushEl.className = 'histogram-brush';
-  brushEl.style.display = 'none';
-  histogramContainer.appendChild(brushEl);
-
-  var brushState = { active: false, startX: 0, startIdx: -1 };
-
-  function getBucketIdx(clientX) {
-    if (!lastBuckets || lastBuckets.length === 0) return -1;
-    var rect = histogramContainer.getBoundingClientRect();
-    var x = clientX - rect.left;
-    var barGap = 1;
-    var barWidth = Math.max(2, (rect.width - barGap * lastBuckets.length) / lastBuckets.length);
-    var idx = Math.floor(x / (barWidth + barGap));
-    return Math.max(0, Math.min(idx, lastBuckets.length - 1));
-  }
-
-  function applyBucketRange(fromIdx, toIdx) {
-    if (fromIdx > toIdx) { var tmp = fromIdx; fromIdx = toIdx; toIdx = tmp; }
-    fromIdx = Math.max(0, fromIdx);
-    toIdx = Math.min(lastBuckets.length - 1, toIdx);
-    var startTime = new Date(lastBuckets[fromIdx].timestamp);
-    var endTime;
-    if (toIdx + 1 < lastBuckets.length) {
-      endTime = new Date(lastBuckets[toIdx + 1].timestamp);
-    } else {
-      endTime = new Date();
-    }
-    filters.start = startTime.toISOString();
-    filters.end = endTime.toISOString();
-    filters.time_range = '';
-    syncHiddenFields();
-    renderFilterChips();
-    pushFilterURL();
-    htmx.trigger(form, 'submit');
-  }
-
-  histogramContainer.addEventListener('mousedown', function(e) {
-    if (!lastBuckets || lastBuckets.length === 0) return;
-    if (e.button !== 0) return;
-    var rect = histogramContainer.getBoundingClientRect();
-    brushState.active = true;
-    brushState.startX = e.clientX - rect.left;
-    brushState.startIdx = getBucketIdx(e.clientX);
-    brushEl.style.display = 'none';
-    e.preventDefault();
-  });
-
-  document.addEventListener('mousemove', function(e) {
-    if (!brushState.active) return;
-    var rect = histogramContainer.getBoundingClientRect();
-    var currentX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-    var dx = Math.abs(currentX - brushState.startX);
-    if (dx > 5) {
-      var left = Math.min(brushState.startX, currentX);
-      brushEl.style.left = left + 'px';
-      brushEl.style.width = dx + 'px';
-      brushEl.style.display = '';
-    }
-  });
-
-  document.addEventListener('mouseup', function(e) {
-    if (!brushState.active) return;
-    brushState.active = false;
-    var wasBrush = brushEl.style.display !== 'none';
-    brushEl.style.display = 'none';
-    if (!lastBuckets || lastBuckets.length === 0) return;
-
-    if (wasBrush) {
-      applyBucketRange(brushState.startIdx, getBucketIdx(e.clientX));
-    } else {
-      var idx = brushState.startIdx;
-      if (idx >= 0 && idx < lastBuckets.length) {
-        applyBucketRange(idx, idx);
-      }
-    }
-  });
-
-  // Refresh histogram on resize
-  var resizeTimer;
-  window.addEventListener('resize', function() {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(function() {
-      renderHistogram(lastBuckets);
-    }, 200);
-  });
-
-  // Auto-refresh histogram every 30s when live
-  function scheduleHistogramRefresh() {
-    if (histogramTimer) clearInterval(histogramTimer);
-    if (live) {
-      histogramTimer = setInterval(fetchHistogram, 30000);
-    }
-  }
-
   // ── Error badges ───────────────────────────────────────────
   var badgeCache = {};
   var badgeFetchTimer = null;
@@ -2088,7 +1811,6 @@ body > .ac-dropdown {
     syncHiddenFields();
     renderFilterChips();
     htmx.trigger(form, 'submit');
-    fetchHistogram();
   });
 
   // ── Sticky filter summary bar ─────────────────────────────
@@ -2190,7 +1912,6 @@ body > .ac-dropdown {
   syncHiddenFields();
   renderFilterChips();
   fetchHistogram();
-  scheduleHistogramRefresh();
   setTimeout(scheduleBadgeFetch, 100);
 
   // ── Event bindings ────────────────────────────────────────
