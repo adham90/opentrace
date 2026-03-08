@@ -27,6 +27,7 @@ type LogStore interface {
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
 	CountByLevel(ctx context.Context, params LogCountParams) (map[string]int, error)
 	CountByService(ctx context.Context, params LogCountParams) ([]ServiceLogCount, error)
+	Histogram(ctx context.Context, params LogHistogramParams) ([]LogHistogramBucket, error)
 	DistinctValues(ctx context.Context, field string, params LogCountParams) ([]string, error)
 	MetadataKeys(ctx context.Context, params LogCountParams) ([]string, error)
 	GetByID(ctx context.Context, id int64) (*LogEntry, error)
@@ -122,7 +123,10 @@ type MCPActivityStore interface {
 	Log(ctx context.Context, params LogMCPActivityParams) error
 	Stats(ctx context.Context) (*MCPActivityStats, error)
 	Recent(ctx context.Context, limit int) ([]MCPActivityEvent, error)
+	ListByInvestigationSession(ctx context.Context, sessionID string) ([]MCPActivityEvent, error)
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
+	SetSuggestionTracking(ctx context.Context, invSessionID string, stepIndex int, wasSuggested bool, rank int) error
+	UpdateFollowedBy(ctx context.Context, invSessionID string, stepIndex int, followedBy string) error
 }
 
 // AuditStore tracks admin actions for security audit trail.
@@ -261,11 +265,113 @@ type WatchStore interface {
 	CountPendingAlerts(ctx context.Context) (int, error)
 }
 
+// InvestigationSessionStore manages MCP investigation session lifecycle.
+type InvestigationSessionStore interface {
+	Create(ctx context.Context, params CreateInvestigationSessionParams) (*InvestigationSession, error)
+	GetByID(ctx context.Context, id string) (*InvestigationSession, error)
+	Close(ctx context.Context, id string) error
+	Update(ctx context.Context, id string, params UpdateInvestigationSessionParams) error
+
+	// Session lookup
+	FindRecent(ctx context.Context, params FindRecentSessionParams) (*InvestigationSession, error)
+
+	// Listing / analytics
+	List(ctx context.Context, params ListInvestigationSessionParams) ([]InvestigationSession, error)
+	Stats(ctx context.Context) (*InvestigationSessionStats, error)
+
+	// Retention
+	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
+
+	// Step tracking
+	RecordStep(ctx context.Context, sessionID string, toolName string, isError bool) error
+
+	// Subsystem link lookups (return nil, nil when not found)
+	FindByCreatedWatcher(ctx context.Context, watcherID string) (*InvestigationSession, error)
+	FindByResolvedError(ctx context.Context, fingerprint string) (*InvestigationSession, error)
+	FindByCreatedHealthcheck(ctx context.Context, healthcheckID string) (*InvestigationSession, error)
+
+	// Similarity search for investigation context
+	FindSimilar(ctx context.Context, params FindSimilarParams) ([]InvestigationSession, error)
+}
+
+// ToolTransitionStore tracks tool-to-tool transitions for ranking suggestions.
+type ToolTransitionStore interface {
+	Increment(ctx context.Context, fromTool, toTool, intent string) error
+	IncrementWithOutcome(ctx context.Context, fromTool, toTool, intent, outcome string) error
+	GetTransitions(ctx context.Context, params GetTransitionsParams) ([]ToolTransition, error)
+	GetDeadEnds(ctx context.Context, intent string) ([]ToolTransition, error)
+	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
+}
+
+// WorkflowTemplateStore manages curated and learned workflow templates.
+type WorkflowTemplateStore interface {
+	Seed(ctx context.Context, templates []WorkflowTemplate) error
+	GetNextStep(ctx context.Context, intent string, stepOrder int) ([]WorkflowTemplate, error)
+	GetByName(ctx context.Context, name string) ([]WorkflowTemplate, error)
+	List(ctx context.Context, intent string) ([]WorkflowTemplate, error)
+}
+
+// QueryMemoryStore manages historical explain_query findings across sessions.
+type QueryMemoryStore interface {
+	Get(ctx context.Context, fingerprint string) (*QueryMemory, error)
+	Upsert(ctx context.Context, params UpsertQueryMemoryParams) error
+	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
+}
+
+// RunbookEffectivenessStore tracks playbook resolution rates.
+type RunbookEffectivenessStore interface {
+	RecordExecution(ctx context.Context, runbookName string) error
+	UpdateOutcome(ctx context.Context, params UpdateRunbookEffectivenessParams) error
+	GetMostEffective(ctx context.Context) (*RunbookEffectiveness, error)
+	List(ctx context.Context) ([]RunbookEffectiveness, error)
+}
+
 // TraceStore manages distributed trace reassembly status.
 type TraceStore interface {
 	UpsertTraceStatus(ctx context.Context, traceID string, entry LogEntry) error
 	GetTraceStatus(ctx context.Context, traceID string) (*TraceStatus, error)
 	ListRecentTraces(ctx context.Context, limit, offset int) ([]TraceStatus, int, error)
 	MarkStaleTraces(ctx context.Context, olderThan time.Duration) (int, error)
+}
+
+// CodeEntityStore manages code entity risk tracking (Stage 5).
+type CodeEntityStore interface {
+	Upsert(ctx context.Context, params UpsertCodeEntityParams) (*CodeEntity, error)
+	GetByName(ctx context.Context, entityType CodeEntityType, entityName, service string) (*CodeEntity, error)
+	TopByRisk(ctx context.Context, service string, limit int) ([]CodeEntity, error)
+	BatchGetRisk(ctx context.Context, entityType CodeEntityType, names []string, service string) ([]CodeEntity, error)
+	IncrementError(ctx context.Context, entityType CodeEntityType, entityName, service string) error
+	IncrementInvestigation(ctx context.Context, entityType CodeEntityType, entityName, service string) error
+	BatchRecomputeRisk(ctx context.Context) error
+	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
+}
+
+// DeployStore manages deploy lifecycle and impact measurement (Stage 5).
+type DeployStore interface {
+	Create(ctx context.Context, params CreateDeployParams) (*Deploy, error)
+	GetByID(ctx context.Context, id int64) (*Deploy, error)
+	GetByCommit(ctx context.Context, commitHash string) (*Deploy, error)
+	GetRecent(ctx context.Context, service string, limit int) ([]Deploy, error)
+	MeasureImpact(ctx context.Context, id int64, impact DeployImpact) error
+	LinkInvestigation(ctx context.Context, id int64, sessionID string) error
+	GetPendingMeasurement(ctx context.Context, olderThan time.Duration) ([]Deploy, error)
+	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
+}
+
+// EventStore manages generic CI/CD and integration events (Stage 6).
+type EventStore interface {
+	Create(ctx context.Context, params CreateEventParams) (*Event, error)
+	GetByID(ctx context.Context, id int64) (*Event, error)
+	List(ctx context.Context, params ListEventParams) ([]Event, error)
+	GetByExternalID(ctx context.Context, eventType EventType, externalID string) (*Event, error)
+	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
+}
+
+// TestCorrelationStore manages uncovered error path analysis (Stage 6).
+type TestCorrelationStore interface {
+	RefreshUncoveredPaths(ctx context.Context) error
+	TopByPriority(ctx context.Context, service string, limit int) ([]UncoveredErrorPath, error)
+	GetByFingerprint(ctx context.Context, fingerprint string) (*UncoveredErrorPath, error)
+	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
 }
 

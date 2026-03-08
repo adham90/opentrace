@@ -36,7 +36,7 @@
     };
   })();
   </script>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v={{.CSPNonce}}">
   <script src="/static/htmx.min.js"></script>
 </head>
 <body>
@@ -44,13 +44,58 @@
   <div hx-get="/api/version/banner" hx-trigger="load" hx-swap="innerHTML" id="version-banner-container"></div>
   <div class="toast-container" id="toast-container" aria-live="polite" role="status"></div>
 
+  {{if .User}}
+  <!-- ── Global Status Bar ─────────────────────────────────── -->
+  <div class="status-bar-wrap">
+    <div class="status-bar" role="banner">
+      <div class="status-bar-left">
+        <a href="/" class="status-brand status-ok" id="status-brand">opentrace</a>
+        <nav class="status-nav" aria-label="Main navigation">
+          <a href="/logs" class="status-nav-link{{if eq .Nav "logs"}} active{{end}}">logs</a>
+          <a href="/errors" class="status-nav-link{{if eq .Nav "errors"}} active{{end}}">errors</a>
+          <a href="/watchers" class="status-nav-link{{if eq .Nav "watchers"}} active{{end}}">watchers</a>
+          <a href="/health" class="status-nav-link{{if eq .Nav "health"}} active{{end}}">health</a>
+          <a href="/connectors" class="status-nav-link{{if eq .Nav "connectors"}} active{{end}}">connectors</a>
+        </nav>
+        <span class="status-hint" onclick="openCommandBar()" title="Command bar (⌘K)">&#x2318;K</span>
+      </div>
+      <div class="status-bar-right">
+        <a href="/settings" class="status-icon" aria-label="Settings" title="Settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Command Bar (⌘K) ──────────────────────────────────── -->
+  <div class="cmd-overlay" id="cmd-overlay" role="dialog" aria-modal="true" aria-label="Command bar">
+    <div class="cmd-box">
+      <div class="cmd-input-wrap">
+        <span class="cmd-icon">&#x2318;</span>
+        <input type="text" class="cmd-input" id="cmd-bar-input" placeholder="Search logs, errors, services, investigations..." autocomplete="off">
+        <span class="cmd-hint">esc to close</span>
+      </div>
+      <div class="cmd-results" id="cmd-results"></div>
+      <div class="cmd-footer">
+        <span><kbd>↑</kbd> <kbd>↓</kbd> navigate</span>
+        <span><kbd>↵</kbd> open</span>
+        <span><kbd>esc</kbd> close</span>
+      </div>
+    </div>
+  </div>
+  {{end}}
+
   <!-- Keyboard shortcut overlay -->
   <div id="shortcut-overlay" class="shortcut-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="shortcut-dialog-title">
     <div class="shortcut-dialog">
       <div class="shortcut-title" id="shortcut-dialog-title">Keyboard Shortcuts</div>
       <div class="shortcut-section">
+        <div class="shortcut-section-label">Navigation</div>
+        <div class="shortcut-row"><kbd>⌘K</kbd><span>Command bar</span></div>
+        <div class="shortcut-row"><kbd>/</kbd><span>Focus search / command line</span></div>
+      </div>
+      <div class="shortcut-section">
         <div class="shortcut-section-label">Log Filters</div>
-        <div class="shortcut-row"><kbd>/</kbd><span>Focus command line</span></div>
         <div class="shortcut-row"><kbd>c</kbd><span>Clear all filters</span></div>
         <div class="shortcut-row"><kbd>p</kbd><span>Toggle live/paused</span></div>
       </div>
@@ -64,7 +109,7 @@
   </div>
 
   <div class="layout-container">
-    <main id="main-content" class="main-content{{if eq .Nav "dashboard"}} dashboard-page{{end}}{{if eq .Nav "logs"}} logs-page{{end}}" tabindex="-1">
+    <main id="main-content" class="main-content{{if eq .Nav "logs"}} logs-page{{end}}" tabindex="-1">
       {{template "content" .}}
     </main>
   </div>
@@ -77,23 +122,23 @@
       return localStorage.getItem('opentrace-theme') || 'system';
     }
 
-    function applyTheme(t) {
+    window.applyTheme = function(t) {
       if (t === 'dark' || t === 'light') {
         document.documentElement.setAttribute('data-theme', t);
       } else {
         document.documentElement.removeAttribute('data-theme');
       }
-    }
+    };
 
     window.cycleTheme = function() {
       var current = getTheme();
       var idx = themes.indexOf(current);
       var next = themes[(idx + 1) % themes.length];
       localStorage.setItem('opentrace-theme', next);
-      applyTheme(next);
+      window.applyTheme(next);
     };
 
-    applyTheme(getTheme());
+    window.applyTheme(getTheme());
   })();
 
   // Toast notification system
@@ -189,7 +234,7 @@
     };
   })();
 
-  // Keyboard shortcut overlay
+  // Keyboard shortcut overlay + command bar + user menu
   (function(){
     window.toggleShortcuts = function() {
       var overlay = document.getElementById('shortcut-overlay');
@@ -200,7 +245,89 @@
       if (e.target === this) toggleShortcuts();
     });
 
+    // Command bar
+    var cmdOverlay = document.getElementById('cmd-overlay');
+    var cmdInput = document.getElementById('cmd-bar-input');
+    var cmdResults = document.getElementById('cmd-results');
+
+    var cmdPages = [
+      {label: 'Dashboard', hint: '/', icon: '~', href: '/'},
+      {label: 'Logs', hint: '/logs', icon: '>', href: '/logs'},
+      {label: 'Settings', hint: '/settings', icon: '*', href: '/settings'},
+      {label: 'Setup', hint: '/setup', icon: '$', href: '/setup'},
+      {label: 'Profile', hint: '/profile', icon: '&', href: '/profile'},
+    ];
+
+    function openCmd() {
+      if (!cmdOverlay) return;
+      cmdOverlay.classList.add('open');
+      cmdInput.value = '';
+      renderCmdResults('');
+      setTimeout(function() { cmdInput.focus(); }, 50);
+    }
+    function closeCmd() {
+      if (!cmdOverlay) return;
+      cmdOverlay.classList.remove('open');
+    }
+    window.openCommandBar = openCmd;
+
+    function renderCmdResults(q) {
+      if (!cmdResults) return;
+      var filtered = cmdPages;
+      if (q) {
+        var lower = q.toLowerCase();
+        filtered = cmdPages.filter(function(p) {
+          return p.label.toLowerCase().indexOf(lower) >= 0 || p.hint.toLowerCase().indexOf(lower) >= 0;
+        });
+      }
+      cmdResults.innerHTML = filtered.map(function(p, i) {
+        return '<a href="' + p.href + '" class="cmd-item' + (i === 0 ? ' cmd-active' : '') + '">' +
+          '<span class="cmd-item-icon">' + p.icon + '</span>' +
+          '<span class="cmd-item-label">' + p.label + '</span>' +
+          '<span class="cmd-item-hint">' + p.hint + '</span>' +
+          '</a>';
+      }).join('');
+    }
+
+    if (cmdInput) {
+      cmdInput.addEventListener('input', function() { renderCmdResults(this.value); });
+      cmdInput.addEventListener('keydown', function(e) {
+        var items = cmdResults.querySelectorAll('.cmd-item');
+        var active = cmdResults.querySelector('.cmd-active');
+        var idx = Array.prototype.indexOf.call(items, active);
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (active) active.classList.remove('cmd-active');
+          idx = (idx + 1) % items.length;
+          if (items[idx]) items[idx].classList.add('cmd-active');
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          if (active) active.classList.remove('cmd-active');
+          idx = idx <= 0 ? items.length - 1 : idx - 1;
+          if (items[idx]) items[idx].classList.add('cmd-active');
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          if (active && active.href) window.location.href = active.href;
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          closeCmd();
+        }
+      });
+    }
+    if (cmdOverlay) {
+      cmdOverlay.addEventListener('click', function(e) {
+        if (e.target === cmdOverlay) closeCmd();
+      });
+    }
+
     document.addEventListener('keydown', function(e) {
+      // ⌘K / Ctrl+K — open command bar
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        if (cmdOverlay && cmdOverlay.classList.contains('open')) { closeCmd(); } else { openCmd(); }
+        return;
+      }
+
       var tag = e.target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -211,17 +338,14 @@
         return;
       }
       if (e.key === 'Escape') {
+        // Close command bar first
+        if (cmdOverlay && cmdOverlay.classList.contains('open')) {
+          closeCmd();
+          return;
+        }
         var overlay = document.getElementById('shortcut-overlay');
         if (overlay && overlay.style.display !== 'none') {
           overlay.style.display = 'none';
-          return;
-        }
-        // Close user menu if open
-        var userMenu = document.getElementById('user-menu-dropdown');
-        if (userMenu && userMenu.classList.contains('user-menu-open')) {
-          userMenu.classList.remove('user-menu-open');
-          var menuTrigger = document.getElementById('user-menu-trigger-btn');
-          if (menuTrigger) menuTrigger.setAttribute('aria-expanded', 'false');
           return;
         }
         var modals = document.querySelectorAll('.modal[style*="flex"]');

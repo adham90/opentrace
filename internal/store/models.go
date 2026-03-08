@@ -11,6 +11,9 @@ type ConnectorType string
 const (
 	ConnectorLogs          ConnectorType = "logs"
 	ConnectorDatabase      ConnectorType = "database"
+	ConnectorMySQL         ConnectorType = "mysql"
+	ConnectorRedis         ConnectorType = "redis"
+	ConnectorTurso         ConnectorType = "turso"
 	ConnectorMonitoring    ConnectorType = "monitoring"
 	ConnectorServerMetrics ConnectorType = "server_metrics"
 )
@@ -138,6 +141,7 @@ type LogSearchParams struct {
 	Offset           int               `json:"offset,omitempty"`
 	SinceID          int64             `json:"since_id,omitempty"`
 	MetadataFilter   map[string]string `json:"metadata_filter,omitempty"` // key-value filters on metadata JSON
+	Exclude          map[string]string `json:"exclude,omitempty"`         // field -> comma-separated values to exclude (NOT IN)
 	SortAsc          bool              `json:"sort_asc,omitempty"`        // true for oldest-first (default: newest-first)
 }
 
@@ -154,6 +158,22 @@ type ServiceLogCount struct {
 	Service    string `json:"service"`
 	Total      int    `json:"total"`
 	ErrorCount int    `json:"error_count"`
+}
+
+// LogHistogramParams defines parameters for log volume histogram queries.
+type LogHistogramParams struct {
+	Since    time.Time
+	Until    time.Time
+	Interval time.Duration
+	Service  string
+	Level    string
+}
+
+// LogHistogramBucket holds aggregated log counts for a single time bucket.
+type LogHistogramBucket struct {
+	Timestamp  time.Time `json:"timestamp"`
+	Total      int       `json:"total"`
+	ErrorCount int       `json:"error_count"`
 }
 
 // ServerStatus represents the health status of a monitored server.
@@ -279,14 +299,20 @@ type MCPActivityEvent struct {
 
 // LogMCPActivityParams defines input for logging an MCP activity event.
 type LogMCPActivityParams struct {
-	SessionID     string
-	UserID        string
-	ToolName      string
-	Arguments     string
-	ResultPreview string
-	IsError       bool
-	DurationMs    *int64
-	EventType     string // "tool_call", "connect", "disconnect"
+	SessionID              string
+	UserID                 string
+	ToolName               string
+	Arguments              string
+	ResultPreview          string
+	IsError                bool
+	DurationMs             *int64
+	EventType              string // "tool_call", "connect", "disconnect"
+	InvestigationSessionID string // links to investigation_sessions.id
+	StepIndex              int    // step number within the investigation session
+	WasSuggested           bool   // whether this tool was in the previous suggested_tools
+	SuggestionRank         int    // rank in the suggestion list (0 if not suggested)
+	FollowedBy             string // tool name that followed this one (unused in INSERT, kept for compat)
+	PreviousStepIndex      int    // step index of the previous tool (for updating followed_by)
 }
 
 // MCPActivityStats holds aggregated MCP activity statistics.
@@ -980,6 +1006,228 @@ type ErrorGroupWithImpact struct {
 }
 
 // ---------------------------------------------------------------------------
+// Investigation Sessions (MCP session tracking)
+// ---------------------------------------------------------------------------
+
+// InvestigationSessionStatus represents the lifecycle state of an investigation session.
+type InvestigationSessionStatus string
+
+const (
+	InvestigationStatusOpen       InvestigationSessionStatus = "open"
+	InvestigationStatusResolved   InvestigationSessionStatus = "resolved"
+	InvestigationStatusUnresolved InvestigationSessionStatus = "unresolved"
+	InvestigationStatusAbandoned  InvestigationSessionStatus = "abandoned"
+)
+
+// InvestigationSession represents a complete MCP investigation session.
+type InvestigationSession struct {
+	ID string `json:"id"`
+
+	// Identity
+	UserID    string `json:"user_id"`
+	UserEmail string `json:"user_email"`
+	UserRole  string `json:"user_role"`
+
+	// Client
+	ClientName    string `json:"client_name"`
+	ClientVersion string `json:"client_version"`
+	Workspace     string `json:"workspace"`
+	Transport     string `json:"transport"`
+	ConnectionID  string `json:"connection_id"`
+
+	// Classification
+	Intent              string `json:"intent"`
+	IntentDetail        string `json:"intent_detail"`
+	PrimaryService      string `json:"primary_service"`
+	PrimaryDatasourceID *int   `json:"primary_datasource_id,omitempty"`
+
+	// Outcome
+	Status         InvestigationSessionStatus `json:"status"`
+	Summary        string                     `json:"summary"`
+	RootCause      string                     `json:"root_cause"`
+	FixDescription string                     `json:"fix_description"`
+
+	// Metrics
+	TotalSteps      int      `json:"total_steps"`
+	TotalErrors     int      `json:"total_errors"`
+	ToolSequence    []string `json:"tool_sequence"`
+	ToolFingerprint string   `json:"tool_fingerprint"`
+	ArgSignature    string   `json:"arg_signature"`
+
+	// Timing
+	StartedAt       time.Time  `json:"started_at"`
+	LastActivityAt  time.Time  `json:"last_activity_at"`
+	EndedAt         *time.Time `json:"ended_at,omitempty"`
+	DurationSeconds int        `json:"duration_seconds"`
+
+	// Subsystem Links
+	CreatedWatcherIDs             []string `json:"created_watcher_ids,omitempty"`
+	TriggeredByWatcherID          *string  `json:"triggered_by_watcher_id,omitempty"`
+	ResolvedErrorGroupIDs         []string `json:"resolved_error_group_ids,omitempty"`
+	InvestigatedErrorFingerprints []string `json:"investigated_error_fingerprints,omitempty"`
+	CreatedHealthcheckIDs         []string `json:"created_healthcheck_ids,omitempty"`
+	TriggeredByHealthcheckID      *string  `json:"triggered_by_healthcheck_id,omitempty"`
+
+	// Stage 4: Additional Subsystem Links
+	CreatedNoteIDs            []string           `json:"created_note_ids,omitempty"`
+	AutoNoteIDs               []string           `json:"auto_note_ids,omitempty"`
+	RunbooksExecuted          []string           `json:"runbooks_executed,omitempty"`
+	ExplainedQueries          []string           `json:"explained_queries,omitempty"`
+	KilledQueries             []string           `json:"killed_queries,omitempty"`
+	TraceIDs                  []string           `json:"trace_ids,omitempty"`
+	CorrelatedDeploy          string             `json:"correlated_deploy,omitempty"`
+	PreInvestigationSnapshot  map[string]float64 `json:"pre_investigation_snapshot,omitempty"`
+	PostInvestigationSnapshot map[string]float64 `json:"post_investigation_snapshot,omitempty"`
+	TriggeredByAlertID        *string            `json:"triggered_by_alert_id,omitempty"`
+
+	// Recurrence
+	RecurrenceGroup      *string `json:"recurrence_group,omitempty"`
+	RecurrenceCount      int     `json:"recurrence_count"`
+	PreviousSessionID    *string `json:"previous_session_id,omitempty"`
+	FixDurabilitySeconds *int    `json:"fix_durability_seconds,omitempty"`
+
+	// Stage 6: Development session tracking
+	FilesModified  []string `json:"files_modified,omitempty"`
+	FilesRead      []string `json:"files_read,omitempty"`
+	LinkedDeployID *int64   `json:"linked_deploy_id,omitempty"`
+}
+
+// CreateInvestigationSessionParams defines input for creating an investigation session.
+type CreateInvestigationSessionParams struct {
+	UserID        string `json:"user_id"`
+	UserEmail     string `json:"user_email"`
+	UserRole      string `json:"user_role"`
+	ClientName    string `json:"client_name"`
+	ClientVersion string `json:"client_version"`
+	Workspace     string `json:"workspace"`
+	Transport     string `json:"transport"`
+	ConnectionID  string `json:"connection_id"`
+}
+
+// UpdateInvestigationSessionParams defines fields that can be updated on a session.
+type UpdateInvestigationSessionParams struct {
+	Intent              *string                     `json:"intent,omitempty"`
+	IntentDetail        *string                     `json:"intent_detail,omitempty"`
+	PrimaryService      *string                     `json:"primary_service,omitempty"`
+	PrimaryDatasourceID *int                        `json:"primary_datasource_id,omitempty"`
+	Status              *InvestigationSessionStatus `json:"status,omitempty"`
+	Summary             *string                     `json:"summary,omitempty"`
+	RootCause           *string                     `json:"root_cause,omitempty"`
+	FixDescription      *string                     `json:"fix_description,omitempty"`
+	TotalSteps          *int                        `json:"total_steps,omitempty"`
+	TotalErrors         *int                        `json:"total_errors,omitempty"`
+	ToolSequence        []string                    `json:"tool_sequence,omitempty"`
+	ToolFingerprint     *string                     `json:"tool_fingerprint,omitempty"`
+	ArgSignature        *string                     `json:"arg_signature,omitempty"`
+
+	// Subsystem links
+	CreatedWatcherIDs             []string `json:"created_watcher_ids,omitempty"`
+	TriggeredByWatcherID          *string  `json:"triggered_by_watcher_id,omitempty"`
+	ResolvedErrorGroupIDs         []string `json:"resolved_error_group_ids,omitempty"`
+	InvestigatedErrorFingerprints []string `json:"investigated_error_fingerprints,omitempty"`
+	CreatedHealthcheckIDs         []string `json:"created_healthcheck_ids,omitempty"`
+	TriggeredByHealthcheckID      *string  `json:"triggered_by_healthcheck_id,omitempty"`
+
+	// Stage 4: Additional Subsystem Links
+	RunbooksExecuted          []string `json:"runbooks_executed,omitempty"`
+	ExplainedQueries          []string `json:"explained_queries,omitempty"`
+	KilledQueries             []string `json:"killed_queries,omitempty"`
+	TraceIDs                  []string `json:"trace_ids,omitempty"`
+	CorrelatedDeploy          *string  `json:"correlated_deploy,omitempty"`
+	PreInvestigationSnapshot  *string  `json:"pre_investigation_snapshot,omitempty"`  // JSON string
+	PostInvestigationSnapshot *string  `json:"post_investigation_snapshot,omitempty"` // JSON string
+	AutoNoteIDs               []string `json:"auto_note_ids,omitempty"`
+	CreatedNoteIDs            []string `json:"created_note_ids,omitempty"`
+
+	// Recurrence
+	RecurrenceGroup      *string `json:"recurrence_group,omitempty"`
+	RecurrenceCount      *int    `json:"recurrence_count,omitempty"`
+	PreviousSessionID    *string `json:"previous_session_id,omitempty"`
+	FixDurabilitySeconds *int    `json:"fix_durability_seconds,omitempty"`
+
+	// Stage 6: Development session tracking
+	FilesModified  []string `json:"files_modified,omitempty"`
+	FilesRead      []string `json:"files_read,omitempty"`
+	LinkedDeployID *int64   `json:"linked_deploy_id,omitempty"`
+}
+
+// FindRecentSessionParams defines criteria for finding a recent resumable session.
+type FindRecentSessionParams struct {
+	UserID    string
+	Workspace string
+	MaxAge    time.Duration
+	Status    InvestigationSessionStatus
+}
+
+// ListInvestigationSessionParams defines filters for listing investigation sessions.
+type ListInvestigationSessionParams struct {
+	UserID  string                     `json:"user_id,omitempty"`
+	Status  InvestigationSessionStatus `json:"status,omitempty"`
+	Intent  string                     `json:"intent,omitempty"`
+	Service string                     `json:"service,omitempty"`
+	Since   time.Time                  `json:"since"`
+	Limit   int                        `json:"limit,omitempty"`
+	Offset  int                        `json:"offset,omitempty"`
+}
+
+// InvestigationSessionStats holds aggregated investigation session statistics.
+type InvestigationSessionStats struct {
+	TotalSessions    int     `json:"total_sessions"`
+	OpenSessions     int     `json:"open_sessions"`
+	ResolvedSessions int     `json:"resolved_sessions"`
+	AvgSteps         float64 `json:"avg_steps"`
+	AvgDurationSecs  float64 `json:"avg_duration_secs"`
+}
+
+// ---------------------------------------------------------------------------
+// Tool Transitions & Workflow Templates (Investigation Memory Stage 3)
+// ---------------------------------------------------------------------------
+
+// ToolTransition tracks how often tool A is followed by tool B.
+type ToolTransition struct {
+	FromTool       string    `json:"from_tool"`
+	ToTool         string    `json:"to_tool"`
+	Intent         string    `json:"intent"`
+	TotalCount     int       `json:"total_count"`
+	ResolvedCount  int       `json:"resolved_count"`
+	AbandonedCount int       `json:"abandoned_count"`
+	AvgDurationMs  int       `json:"avg_duration_ms"`
+	LastSeenAt     time.Time `json:"last_seen_at"`
+}
+
+// WorkflowTemplate defines a curated or learned workflow step.
+type WorkflowTemplate struct {
+	ID                   int       `json:"id"`
+	Intent               string    `json:"intent"`
+	Name                 string    `json:"name"`
+	StepOrder            int       `json:"step_order"`
+	ToolName             string    `json:"tool_name"`
+	ArgsHint             string    `json:"args_hint"`
+	Source               string    `json:"source"` // "curated" or "learned"
+	ResolvedSessionCount int       `json:"resolved_session_count"`
+	CreatedAt            time.Time `json:"created_at"`
+}
+
+// FindSimilarParams defines criteria for finding similar past sessions.
+type FindSimilarParams struct {
+	Service          string
+	Intent           string
+	ToolFingerprint  string
+	ExcludeSessionID string
+	MaxResults       int
+	MinSteps         int
+	OnlyResolved     bool
+}
+
+// GetTransitionsParams defines criteria for querying tool transitions.
+type GetTransitionsParams struct {
+	FromTool   string
+	Intent     string
+	MinSupport int // minimum total_count
+	MaxAgeDays int // exclude older than N days
+}
+
+// ---------------------------------------------------------------------------
 // Log Sampling
 // ---------------------------------------------------------------------------
 
@@ -1005,4 +1253,225 @@ type TraceStatus struct {
 	DurationMs    float64  `json:"duration_ms"`
 	Status        string   `json:"status"`     // "partial", "complete", "timeout"
 	HasErrors     bool     `json:"has_errors"`
+}
+
+// ---------------------------------------------------------------------------
+// Query Memory & Runbook Effectiveness (Investigation Memory Stage 4)
+// ---------------------------------------------------------------------------
+
+// QueryMemory stores historical explain_query findings.
+type QueryMemory struct {
+	Fingerprint                string    `json:"fingerprint"`
+	LastInvestigationSessionID string    `json:"last_investigation_session_id"`
+	InvestigationCount         int       `json:"investigation_count"`
+	LastRootCause              string    `json:"last_root_cause"`
+	LastFix                    string    `json:"last_fix"`
+	AvgDurationBeforeMs        *int      `json:"avg_duration_before_ms,omitempty"`
+	AvgDurationAfterMs         *int      `json:"avg_duration_after_ms,omitempty"`
+	FirstSeenAt                time.Time `json:"first_seen_at"`
+	LastSeenAt                 time.Time `json:"last_seen_at"`
+}
+
+// UpsertQueryMemoryParams defines input for creating/updating query memory.
+type UpsertQueryMemoryParams struct {
+	Fingerprint string
+	SessionID   string
+	RootCause   string
+	Fix         string
+	DurationMs  *int
+}
+
+// RunbookEffectiveness tracks how well each playbook resolves issues.
+type RunbookEffectiveness struct {
+	RunbookName               string    `json:"runbook_name"`
+	TotalExecutions           int       `json:"total_executions"`
+	ResolvedSessions          int       `json:"resolved_sessions"`
+	AbandonedSessions         int       `json:"abandoned_sessions"`
+	AvgStepsAfter             int       `json:"avg_steps_after"`
+	AvgSessionDurationSeconds int       `json:"avg_session_duration_seconds"`
+	LastExecutedAt            time.Time `json:"last_executed_at"`
+}
+
+// UpdateRunbookEffectivenessParams defines input for updating runbook effectiveness.
+type UpdateRunbookEffectivenessParams struct {
+	RunbookName string
+	Outcome     string // "resolved" or "abandoned"
+	StepsAfter  int
+	DurationSec int
+}
+
+// ---------------------------------------------------------------------------
+// Code Entity Registry (Stage 5)
+// ---------------------------------------------------------------------------
+
+// CodeEntityType identifies the kind of source code entity.
+type CodeEntityType string
+
+const (
+	CodeEntityFile       CodeEntityType = "file"
+	CodeEntityController CodeEntityType = "controller"
+	CodeEntityEndpoint   CodeEntityType = "endpoint"
+)
+
+// CodeEntity represents a tracked source code path with risk scoring.
+type CodeEntity struct {
+	ID                 int64          `json:"id"`
+	EntityType         CodeEntityType `json:"entity_type"`
+	EntityName         string         `json:"entity_name"`
+	Service            string         `json:"service"`
+	RiskScore          float64        `json:"risk_score"`
+	ErrorCount         int            `json:"error_count"`
+	InvestigationCount int            `json:"investigation_count"`
+	AvgDurationMs      *float64       `json:"avg_duration_ms,omitempty"`
+	LastErrorAt        *time.Time     `json:"last_error_at,omitempty"`
+	LastInvestigationAt *time.Time    `json:"last_investigation_at,omitempty"`
+	Metadata           map[string]any `json:"metadata,omitempty"`
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          time.Time      `json:"updated_at"`
+}
+
+// UpsertCodeEntityParams defines input for creating or updating a code entity.
+type UpsertCodeEntityParams struct {
+	EntityType CodeEntityType
+	EntityName string
+	Service    string
+}
+
+// ---------------------------------------------------------------------------
+// Deploy Intelligence (Stage 5)
+// ---------------------------------------------------------------------------
+
+// DeployStatus represents the lifecycle state of a deploy.
+type DeployStatus string
+
+const (
+	DeployStatusPending  DeployStatus = "pending"
+	DeployStatusMeasured DeployStatus = "measured"
+	DeployStatusIncident DeployStatus = "incident"
+)
+
+// DeploySource identifies how the deploy was recorded.
+type DeploySource string
+
+const (
+	DeploySourceWebhook      DeploySource = "webhook"
+	DeploySourceAutoDetected DeploySource = "auto-detected"
+	DeploySourceManual       DeploySource = "manual"
+)
+
+// Deploy represents a recorded deployment event.
+type Deploy struct {
+	ID                     int64        `json:"id"`
+	Service                string       `json:"service"`
+	Environment            string       `json:"environment"`
+	CommitHash             string       `json:"commit_hash"`
+	Branch                 string       `json:"branch"`
+	Author                 string       `json:"author"`
+	FilesChanged           []string     `json:"files_changed,omitempty"`
+	DeploySource           DeploySource `json:"deploy_source"`
+	PreErrorRate           *float64     `json:"pre_error_rate,omitempty"`
+	PostErrorRate          *float64     `json:"post_error_rate,omitempty"`
+	PreAvgDurationMs       *float64     `json:"pre_avg_duration_ms,omitempty"`
+	PostAvgDurationMs      *float64     `json:"post_avg_duration_ms,omitempty"`
+	ImpactMeasuredAt       *time.Time   `json:"impact_measured_at,omitempty"`
+	LinkedInvestigationIDs []string     `json:"linked_investigation_ids,omitempty"`
+	Status                 DeployStatus `json:"status"`
+	DeployedAt             time.Time    `json:"deployed_at"`
+	CreatedAt              time.Time    `json:"created_at"`
+}
+
+// CreateDeployParams defines input for recording a new deploy.
+type CreateDeployParams struct {
+	Service      string
+	Environment  string
+	CommitHash   string
+	Branch       string
+	Author       string
+	FilesChanged []string
+	DeploySource DeploySource
+	DeployedAt   *time.Time // nil = now
+}
+
+// DeployImpact holds measured before/after metrics for a deploy.
+type DeployImpact struct {
+	PreErrorRate       float64 `json:"pre_error_rate"`
+	PostErrorRate      float64 `json:"post_error_rate"`
+	PreAvgDurationMs   float64 `json:"pre_avg_duration_ms"`
+	PostAvgDurationMs  float64 `json:"post_avg_duration_ms"`
+	ErrorRateChangePct float64 `json:"error_rate_change_pct"`
+	DurationChangePct  float64 `json:"duration_change_pct"`
+	IsIncident         bool    `json:"is_incident"`
+}
+
+// ---------------------------------------------------------------------------
+// Generic Events (Stage 6)
+// ---------------------------------------------------------------------------
+
+// EventType identifies the kind of CI/CD or integration event.
+type EventType string
+
+const (
+	EventTypeDeploy EventType = "deploy"
+	EventTypePR     EventType = "pr"
+	EventTypeTest   EventType = "test"
+	EventTypeAlert  EventType = "alert"
+	EventTypeCommit EventType = "commit"
+	EventTypeCustom EventType = "custom"
+)
+
+// Event represents a generic CI/CD or integration event.
+type Event struct {
+	ID          int64          `json:"id"`
+	EventType   EventType      `json:"event_type"`
+	Source      string         `json:"source"`
+	Service     string         `json:"service"`
+	Title       string         `json:"title"`
+	Description string         `json:"description"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	ExternalID  string         `json:"external_id,omitempty"`
+	ExternalURL string         `json:"external_url,omitempty"`
+	Author      string         `json:"author,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+}
+
+// CreateEventParams defines input for creating an event.
+type CreateEventParams struct {
+	EventType   EventType      `json:"event_type"`
+	Source      string         `json:"source"`
+	Service     string         `json:"service"`
+	Title       string         `json:"title"`
+	Description string         `json:"description"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	ExternalID  string         `json:"external_id,omitempty"`
+	ExternalURL string         `json:"external_url,omitempty"`
+	Author      string         `json:"author,omitempty"`
+}
+
+// ListEventParams defines filters for listing events.
+type ListEventParams struct {
+	EventType EventType `json:"event_type,omitempty"`
+	Service   string    `json:"service,omitempty"`
+	Since     time.Time `json:"since,omitempty"`
+	Limit     int       `json:"limit,omitempty"`
+}
+
+// ---------------------------------------------------------------------------
+// Uncovered Error Paths / Test Correlation (Stage 6)
+// ---------------------------------------------------------------------------
+
+// UncoveredErrorPath tracks production error paths that lack test coverage.
+type UncoveredErrorPath struct {
+	ID                 int64     `json:"id"`
+	Service            string    `json:"service"`
+	ErrorFingerprint   string    `json:"error_fingerprint"`
+	ErrorClass         string    `json:"error_class"`
+	SourceFile         string    `json:"source_file"`
+	Endpoint           string    `json:"endpoint"`
+	ErrorCount         int       `json:"error_count"`
+	UserImpactScore    float64   `json:"user_impact_score"`
+	InvestigationCount int       `json:"investigation_count"`
+	PriorityScore      float64   `json:"priority_score"`
+	LastSeenAt         time.Time `json:"last_seen_at"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }

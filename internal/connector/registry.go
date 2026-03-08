@@ -70,6 +70,11 @@ func (r *Registry) HasDataConnectors() bool {
 	return len(r.connectors) > 0
 }
 
+// CircuitBreakerProvider is implemented by connectors that expose circuit breaker state.
+type CircuitBreakerProvider interface {
+	CircuitBreakerState() CircuitState
+}
+
 // ConnectorStatus returns the circuit breaker state for the given connector type.
 // Returns CircuitClosed if the connector is not registered or has no circuit breaker.
 func (r *Registry) ConnectorStatus(ct ConnectorType) CircuitState {
@@ -79,8 +84,8 @@ func (r *Registry) ConnectorStatus(ct ConnectorType) CircuitState {
 	if !ok {
 		return CircuitClosed
 	}
-	if dc, ok := c.(*DatabaseConnector); ok && dc.cb != nil {
-		return dc.cb.State()
+	if cbp, ok := c.(CircuitBreakerProvider); ok {
+		return cbp.CircuitBreakerState()
 	}
 	return CircuitClosed
 }

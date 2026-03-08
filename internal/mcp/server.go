@@ -51,6 +51,9 @@ Use add_note / get_notes to save and recall persistent context about services, q
 - Uptime: uptime_status, list_healthchecks, create_healthcheck
 - Watches: watch_status, watch, investigate, dismiss_watch
 - Runbooks: runbook (composite playbooks that run multiple diagnostics at once)
+- Code Intelligence: code_context, whats_fragile, code_risk (source code risk tracking)
+- Deploys: deploy_history, deploy_impact, record_deploy (deploy lifecycle + impact measurement)
+- Agent Assistant: context (task-specific production context), check_alerts (unified alert view), test_gaps (uncovered error paths), test_priority (error detail for writing tests)
 `
 
 // Deps holds the dependencies for the MCP server.
@@ -91,6 +94,25 @@ type Deps struct {
 
 	// Error Impact (Phase 3 features)
 	ErrorImpactStore store.ErrorImpactStore
+
+	// Investigation Memory (Plan 012)
+	InvestigationSessionStore store.InvestigationSessionStore
+
+	// Investigation Memory Stage 3 — Ranking + Context
+	ToolTransitionStore   store.ToolTransitionStore
+	WorkflowTemplateStore store.WorkflowTemplateStore
+
+	// Investigation Memory Stage 4 — All Integrations
+	QueryMemoryStore          store.QueryMemoryStore
+	RunbookEffectivenessStore store.RunbookEffectivenessStore
+
+	// Investigation Memory Stage 5 — Code Intelligence + Deploys
+	CodeEntityStore store.CodeEntityStore
+	DeployStore     store.DeployStore
+
+	// Investigation Memory Stage 6 — Agent Assistant
+	EventStore           store.EventStore
+	TestCorrelationStore store.TestCorrelationStore
 }
 
 // NewConfiguredServer creates an MCPServer and registers tools based on the
@@ -98,7 +120,7 @@ type Deps struct {
 // registered; otherwise only read-only tools are registered.
 // This is used by both the stdio transport (Serve) and the SSE transport
 // (web server).
-func NewConfiguredServer(deps Deps, isAdmin bool) *server.MCPServer {
+func NewConfiguredServer(deps Deps, isAdmin bool, hooks *server.Hooks) *server.MCPServer {
 	name := deps.ServerName
 	if name == "" {
 		name = "opentrace"
@@ -114,11 +136,19 @@ func NewConfiguredServer(deps Deps, isAdmin bool) *server.MCPServer {
 		activityLogger = NewActivityLogger(alCtx, deps.MCPActivityStore, 256, 2)
 	}
 
+	opts := []server.ServerOption{
+		server.WithToolCapabilities(false),
+		server.WithResourceCapabilities(false, true),
+		server.WithInstructions(mcpInstructions),
+	}
+	if hooks != nil {
+		opts = append(opts, server.WithHooks(hooks))
+	}
+
 	s := server.NewMCPServer(
 		name,
 		"0.1.0",
-		server.WithToolCapabilities(false),
-		server.WithInstructions(mcpInstructions),
+		opts...,
 	)
 
 	b := &CatalogBuilder{}
@@ -127,6 +157,9 @@ func NewConfiguredServer(deps Deps, isAdmin bool) *server.MCPServer {
 	if isAdmin {
 		addWriteTools(s, deps, b)
 	}
+
+	// Register MCP resources
+	addResources(s, deps)
 
 	// Clear the package-level store after registration.
 	activityStoreForLogging = nil
@@ -147,6 +180,7 @@ func Serve(deps Deps) error {
 	// Determine access level.
 	isAdmin := true // default: full access (backward compat)
 	hasAccess := true
+	var authUser *store.User
 
 	if deps.UserStore != nil && deps.MCPToken != "" {
 		parentCtx := deps.Ctx
@@ -161,6 +195,7 @@ func Serve(deps Deps) error {
 			hasAccess = false
 		} else {
 			isAdmin = user.Role == store.RoleAdmin
+			authUser = user
 		}
 	}
 
@@ -174,8 +209,98 @@ func Serve(deps Deps) error {
 		return server.ServeStdio(s)
 	}
 
-	s := NewConfiguredServer(deps, isAdmin)
-	return server.ServeStdio(s)
+	// Set up investigation session tracking hooks.
+	hooks := &server.Hooks{}
+	appCtx := deps.Ctx
+	if appCtx == nil {
+		appCtx = context.Background()
+	}
+
+	if deps.InvestigationSessionStore != nil {
+		sessionTracker = NewSessionTracker(appCtx, deps.InvestigationSessionStore, authUser, "stdio")
+		sessionTracker.RegisterHooks(hooks)
+		recurrenceDetector = NewRecurrenceDetector(deps.InvestigationSessionStore)
+
+		// Stage 3: Wire transition and activity stores into session tracker
+		if deps.ToolTransitionStore != nil {
+			sessionTracker.SetTransitionStore(deps.ToolTransitionStore)
+		}
+		if deps.MCPActivityStore != nil {
+			sessionTracker.SetActivityStore(deps.MCPActivityStore)
+		}
+
+		// Stage 4: Wire additional stores into session tracker
+		if deps.AgentNoteStore != nil {
+			sessionTracker.SetNoteStore(deps.AgentNoteStore)
+		}
+		if deps.RunbookEffectivenessStore != nil {
+			sessionTracker.SetRunbookStore(deps.RunbookEffectivenessStore)
+		}
+		if deps.QueryMemoryStore != nil {
+			sessionTracker.SetQueryMemoryStore(deps.QueryMemoryStore)
+		}
+		if deps.TrendStore != nil {
+			sessionTracker.SetTrendStore(deps.TrendStore)
+		}
+		if deps.AuditStore != nil {
+			sessionTracker.SetAuditStore(deps.AuditStore)
+		}
+
+		// Stage 5: Wire code entity + deploy stores into session tracker
+		if deps.CodeEntityStore != nil {
+			sessionTracker.SetCodeEntityStore(deps.CodeEntityStore)
+		}
+		if deps.ErrorGroupStore != nil {
+			sessionTracker.SetErrorGroupStore(deps.ErrorGroupStore)
+		}
+		if deps.DeployStore != nil {
+			sessionTracker.SetDeployStore(deps.DeployStore)
+		}
+
+		// Stage 6: Wire event + test correlation stores into session tracker
+		if deps.EventStore != nil {
+			sessionTracker.SetEventStore(deps.EventStore)
+		}
+		if deps.TestCorrelationStore != nil {
+			sessionTracker.SetTestCorrelationStore(deps.TestCorrelationStore)
+		}
+	}
+
+	// Stage 3: Initialize ranking service and context injector
+	if deps.ToolTransitionStore != nil {
+		rankingService = NewRankingService(deps.ToolTransitionStore, deps.WorkflowTemplateStore)
+	}
+	if deps.InvestigationSessionStore != nil && deps.ToolTransitionStore != nil {
+		contextInjector = NewContextInjector(deps.InvestigationSessionStore, deps.ToolTransitionStore, ContextInjectorDeps{
+			NoteStore:        deps.AgentNoteStore,
+			RunbookStore:     deps.RunbookEffectivenessStore,
+			QueryMemoryStore: deps.QueryMemoryStore,
+			AnalyticsStore:   deps.AnalyticsStore,
+			AuditStore:       deps.AuditStore,
+			TrendStore:       deps.TrendStore,
+			CodeEntityStore:  deps.CodeEntityStore,
+			DeployStore:      deps.DeployStore,
+		})
+	}
+
+	// Seed workflow templates for cold start
+	if deps.WorkflowTemplateStore != nil {
+		SeedDefaultTemplates(appCtx, deps.WorkflowTemplateStore)
+	}
+
+	s := NewConfiguredServer(deps, isAdmin, hooks)
+
+	err := server.ServeStdio(s)
+
+	// Clean up on exit.
+	if sessionTracker != nil {
+		sessionTracker.CloseSession()
+	}
+	if activityLogger != nil {
+		activityLogger.Close()
+	}
+
+	return err
 }
 
 // activityStore is set by NewConfiguredServer when an MCPActivityStore is
@@ -183,6 +308,22 @@ func Serve(deps Deps) error {
 // This is package-level to avoid threading it through every addXxxTools call.
 var activityStoreForLogging store.MCPActivityStore
 var activityLogger *ActivityLogger
+
+// sessionTracker is set by Serve/NewConfiguredServer when an
+// InvestigationSessionStore is available. Used by wrapWithActivityLog to
+// tag activity with real session/user identity.
+var sessionTracker *SessionTracker
+
+// recurrenceDetector is set alongside sessionTracker when an
+// InvestigationSessionStore is available. Used by tool handlers
+// to link subsystem entities and detect recurring investigations.
+var recurrenceDetector *RecurrenceDetector
+
+// rankingService replaces static tool suggestions with data-driven rankings.
+var rankingService *RankingService
+
+// contextInjector enriches tool responses with investigation memory.
+var contextInjector *ContextInjector
 
 // maybeAddTool registers a tool on the MCP server if s is non-nil.
 // When s is nil (catalog-only mode), this is a no-op.
@@ -209,6 +350,13 @@ func wrapWithMetrics(toolName string, handler server.ToolHandlerFunc) server.Too
 // wrapWithActivityLog wraps a tool handler to log its execution to the activity store.
 func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Snapshot the suggestions from the PREVIOUS tool's response before this
+		// handler runs and overwrites them with its own suggestions.
+		var priorSuggestions []ToolSuggestion
+		if sessionTracker != nil {
+			priorSuggestions = sessionTracker.SnapshotLastSuggestions()
+		}
+
 		start := time.Now()
 		result, err := handler(ctx, request)
 		elapsed := time.Since(start).Milliseconds()
@@ -236,22 +384,68 @@ func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler ser
 			isError = isError || result.IsError
 		}
 
-		// Determine session ID — use a hash of the context pointer as a rough identifier.
+		// Get real identity from session tracker.
 		sessionID := "mcp"
 		userID := ""
+		invSessionID := ""
+		stepIndex := 0
+		if sessionTracker != nil {
+			if uid := sessionTracker.UserID(); uid != "" {
+				userID = uid
+			}
+			if sid := sessionTracker.CurrentSessionID(); sid != "" {
+				invSessionID = sid
+				sessionID = sid
+			}
+			stepIndex = sessionTracker.RecordStep(toolName, isError, priorSuggestions)
+		}
 
-		// Log via bounded activity logger to avoid unbounded goroutine growth
+		// Check if this tool was in the prior suggestions (before handler overwrote them).
+		wasSuggested := false
+		suggestionRank := 0
+		for i, s := range priorSuggestions {
+			if s.Tool == toolName {
+				wasSuggested = true
+				suggestionRank = i + 1
+				break
+			}
+		}
+
+		// Log via bounded activity logger to avoid unbounded goroutine growth.
+		// WasSuggested/SuggestionRank and PreviousStepIndex are included so the
+		// Log method can handle both INSERT and previous-step UPDATE atomically,
+		// avoiding races between async INSERT and sync UPDATE.
 		if activityLogger != nil {
+			prevStep := 0
+			if stepIndex > 1 {
+				prevStep = stepIndex - 1
+			}
 			activityLogger.Log(store.LogMCPActivityParams{
-				SessionID:     sessionID,
-				UserID:        userID,
-				ToolName:      toolName,
-				Arguments:     argsPreview,
-				ResultPreview: resultPreview,
-				IsError:       isError,
-				DurationMs:    &elapsed,
-				EventType:     "tool_call",
+				SessionID:              sessionID,
+				UserID:                 userID,
+				ToolName:               toolName,
+				Arguments:              argsPreview,
+				ResultPreview:          resultPreview,
+				IsError:                isError,
+				DurationMs:             &elapsed,
+				EventType:              "tool_call",
+				InvestigationSessionID: invSessionID,
+				StepIndex:              stepIndex,
+				WasSuggested:           wasSuggested,
+				SuggestionRank:         suggestionRank,
+				PreviousStepIndex:      prevStep,
 			})
+		}
+
+		// Inject investigation context for investigation-intent sessions.
+		if contextInjector != nil && sessionTracker != nil && result != nil && !result.IsError && len(result.Content) > 0 {
+			if sess := sessionTracker.CurrentSession(); sess != nil && sess.Intent == IntentInvestigation {
+				if txt, ok := result.Content[0].(mcp.TextContent); ok {
+					if enriched := InjectContextIntoResult(contextInjector, sess, toolName, txt.Text); enriched != txt.Text {
+						result.Content[0] = mcp.NewTextContent(enriched)
+					}
+				}
+			}
 		}
 
 		return result, err
@@ -717,7 +911,7 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 				mcp.WithDescription("Run a composite investigation playbook that executes multiple diagnostic queries at once. Available playbooks: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike. Use when you need a comprehensive investigation rather than individual tool calls."),
 				mcp.WithString("playbook", mcp.Required(), mcp.Description("Playbook to run: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike")),
 			),
-			runbookHandler(deps.Registry, deps.LogStore),
+			runbookHandler(deps.Registry, deps.LogStore, deps.RunbookEffectivenessStore),
 		)
 		b.Add("runbook", "Run a composite investigation playbook (slow_database, connection_exhaustion, etc.)", "Database Introspection", "read", "database connector")
 	}
@@ -916,6 +1110,85 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			b.Add("investigate", "Investigate an alert or collect data about a service", "Watches", "read", "")
 		}
 	}
+
+	// Code Intelligence (Stage 5 — read-only).
+	if deps.CodeEntityStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("code_context",
+				mcp.WithDescription("Get error history, risk score, and investigation context for a code path (file, controller, or endpoint). Use to understand if a code path is fragile before or during an investigation."),
+				mcp.WithString("entity_name", mcp.Required(), mcp.Description("File path, controller name, or endpoint (e.g. 'users_controller.rb', 'UsersController', '/api/users')")),
+				mcp.WithString("service", mcp.Description("Filter by service name")),
+			),
+			codeContextHandler(deps.CodeEntityStore, deps.ErrorGroupStore),
+		)
+		b.Add("code_context", "Get error history and risk score for a code path", "Code Intelligence", "read", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("whats_fragile",
+				mcp.WithDescription("List the riskiest code entities ranked by a composite risk score (errors × investigations × recency). Use for proactive risk assessment or to identify hot spots."),
+				mcp.WithString("service", mcp.Description("Filter by service name")),
+				mcp.WithNumber("limit", mcp.Description("Max results (default: 10, max: 50)")),
+			),
+			whatsFragileHandler(deps.CodeEntityStore),
+		)
+		b.Add("whats_fragile", "List riskiest code entities by composite risk score", "Code Intelligence", "read", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("code_risk",
+				mcp.WithDescription("Get bulk risk scores for a list of files — useful as a pre-deploy safety check. Returns risk for each file and an overall assessment."),
+				mcp.WithString("service", mcp.Description("Service name for the files")),
+				mcp.WithArray("files", mcp.Description("Array of file paths to check")),
+			),
+			codeRiskHandler(deps.CodeEntityStore),
+		)
+		b.Add("code_risk", "Bulk risk scores for files (pre-deploy safety check)", "Code Intelligence", "read", "")
+	}
+
+	// Deploy Intelligence (Stage 5 — read-only).
+	if deps.DeployStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("deploy_history",
+				mcp.WithDescription("List recent deploys with status and impact metrics. Shows commit, author, error rate changes, and linked investigations."),
+				mcp.WithString("service", mcp.Description("Filter by service name")),
+				mcp.WithNumber("limit", mcp.Description("Max results (default: 10, max: 50)")),
+			),
+			deployHistoryHandler(deps.DeployStore),
+		)
+		b.Add("deploy_history", "List recent deploys with status and impact metrics", "Deploys", "read", "")
+
+		maybeAddTool(s,
+			mcp.NewTool("deploy_impact",
+				mcp.WithDescription("Get before/after impact metrics for a specific deploy by commit hash. Shows error rate and response time changes."),
+				mcp.WithString("commit_hash", mcp.Required(), mcp.Description("Commit hash of the deploy to inspect")),
+			),
+			deployImpactHandler(deps.DeployStore),
+		)
+		b.Add("deploy_impact", "Get before/after impact metrics for a deploy", "Deploys", "read", "")
+	}
+
+	// Agent Assistant (Stage 6 — read-only).
+	// Context meta-tool
+	if deps.ErrorGroupStore != nil || deps.CodeEntityStore != nil || deps.DeployStore != nil {
+		maybeAddTool(s, contextToolDef(), contextMetaToolHandler(deps))
+		b.Add("context", "Get task-specific context (errors, risks, deploys)", "Agent Assistant", "read", "")
+	}
+
+	// Check alerts
+	if deps.ErrorGroupStore != nil || deps.WatchStore != nil || deps.DeployStore != nil {
+		maybeAddTool(s, checkAlertsToolDef(), checkAlertsHandler(deps))
+		b.Add("check_alerts", "Check pending alerts, error spikes, deploy incidents", "Agent Assistant", "read", "")
+	}
+
+	// Test correlation
+	if deps.TestCorrelationStore != nil {
+		maybeAddTool(s, testGapsToolDef(), testGapsHandler(deps.TestCorrelationStore))
+		b.Add("test_gaps", "List uncovered production error paths ranked by impact", "Agent Assistant", "read", "")
+
+		if deps.ErrorGroupStore != nil {
+			maybeAddTool(s, testPriorityToolDef(), testPriorityHandler(deps.TestCorrelationStore, deps.ErrorGroupStore))
+			b.Add("test_priority", "Get detailed error context for writing tests", "Agent Assistant", "read", "")
+		}
+	}
 }
 
 // addWriteTools registers write/admin tools (connector tools, create_watcher, preview_watcher).
@@ -937,7 +1210,7 @@ func addWriteTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 			mcp.WithBoolean("analyze", mcp.Description("Actually execute the query for real timing (default: true). Set to false for estimated-only plan.")),
 			mcp.WithBoolean("buffers", mcp.Description("Include buffer usage statistics (default: true). Requires analyze=true.")),
 		),
-		explainQueryHandler(deps.Registry),
+		explainQueryHandler(deps.Registry, deps.QueryMemoryStore),
 	)
 	b.Add("explain_query", "Run EXPLAIN ANALYZE on a query and return the execution plan with optimization tips", "Database Introspection", "admin", "database connector")
 
@@ -956,14 +1229,15 @@ func addWriteTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 	if deps.DataSourceStore != nil {
 		maybeAddTool(s,
 			mcp.NewTool("create_connector",
-				mcp.WithDescription("Create a new database or log connector. After creating, use test_connector to verify the connection and activate it."),
+				mcp.WithDescription("Create a new connector. Supported types: database (PostgreSQL), mysql, redis, turso (libSQL), logs. After creating, use test_connector to verify the connection and activate it."),
 				mcp.WithString("name", mcp.Required(), mcp.Description("Display name for the connector")),
-				mcp.WithString("type", mcp.Required(), mcp.Description("Connector type: 'database' or 'logs'")),
-				mcp.WithString("connection_string", mcp.Description("PostgreSQL connection string (required for database type)")),
+				mcp.WithString("type", mcp.Required(), mcp.Description("Connector type: 'database', 'mysql', 'redis', 'turso', or 'logs'")),
+				mcp.WithString("connection_string", mcp.Description("Connection string (required for database, mysql, redis, turso). Format: PostgreSQL DSN, MySQL DSN or mysql:// URL, redis:// URL, or libsql:// URL")),
+				mcp.WithString("auth_token", mcp.Description("Auth token (required for Turso connectors)")),
 			),
 			createConnectorHandler(deps.DataSourceStore),
 		)
-		b.Add("create_connector", "Create a new database or log connector", "Connectors", "admin", "")
+		b.Add("create_connector", "Create a new connector (database, mysql, redis, turso, logs)", "Connectors", "admin", "")
 
 		if deps.Registry != nil && deps.Config != nil {
 			maybeAddTool(s,
@@ -1096,6 +1370,31 @@ func addWriteTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 		b.Add("delete_note", "Remove a saved agent note", "Agent Memory", "admin", "")
 	}
 
+	// Investigation session summary (write).
+	if deps.InvestigationSessionStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("set_session_summary",
+				mcp.WithDescription(
+					"Provide a summary of the current investigation session. "+
+						"Call this when you've completed an investigation or identified a root cause. "+
+						"This helps future investigations of similar issues.",
+				),
+				mcp.WithString("summary", mcp.Required(),
+					mcp.Description("One sentence describing what was investigated and found")),
+				mcp.WithString("root_cause",
+					mcp.Description("The root cause if identified")),
+				mcp.WithString("fix_applied",
+					mcp.Description("What fix was applied, if any")),
+				mcp.WithString("outcome",
+					mcp.Description("Session outcome: resolved, unresolved, or partial")),
+				mcp.WithString("primary_service",
+					mcp.Description("The primary service investigated (e.g., 'payments', 'auth')")),
+			),
+			setSessionSummaryHandler(),
+		)
+		b.Add("set_session_summary", "Save a summary of the current investigation for future reference", "Investigation Memory", "admin", "")
+	}
+
 	// Agent-first watch tools (write).
 	if deps.WatchStore != nil && deps.LogStore != nil && deps.WatchMetrics != nil {
 		maybeAddTool(s, watchTool(), watchHandler(deps.WatchStore, deps.LogStore, deps.WatchMetrics))
@@ -1103,6 +1402,23 @@ func addWriteTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 
 		maybeAddTool(s, dismissWatchTool(), dismissWatchHandler(deps.WatchStore))
 		b.Add("dismiss_watch", "Stop a watch or dismiss/acknowledge an alert", "Watches", "admin", "")
+	}
+
+	// Deploy Intelligence — write tools (Stage 5).
+	if deps.DeployStore != nil {
+		maybeAddTool(s,
+			mcp.NewTool("record_deploy",
+				mcp.WithDescription("Record a new deploy event. Use to manually track deploys or integrate with CI/CD. Impact metrics are auto-measured ~15min after deployment."),
+				mcp.WithString("service", mcp.Required(), mcp.Description("Service that was deployed")),
+				mcp.WithString("commit", mcp.Required(), mcp.Description("Git commit hash")),
+				mcp.WithString("author", mcp.Description("Deploy author (email or name)")),
+				mcp.WithString("branch", mcp.Description("Git branch name")),
+				mcp.WithString("environment", mcp.Description("Target environment (production, staging, etc.)")),
+				mcp.WithArray("files", mcp.Description("Array of changed file paths")),
+			),
+			recordDeployHandler(deps.DeployStore),
+		)
+		b.Add("record_deploy", "Record a deploy event for impact tracking", "Deploys", "admin", "")
 	}
 }
 

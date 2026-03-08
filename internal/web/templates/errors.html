@@ -1,0 +1,83 @@
+{{define "content"}}
+<style>
+  .error-row:hover td { background: var(--bg-secondary); }
+  .error-row { transition: background 0.1s; }
+</style>
+<div class="settings-page">
+  <div class="page-header">
+    <h1><span class="prompt">$</span> errors</h1>
+    <div class="actions">
+      <select id="status-filter">
+        <option value="">all statuses</option>
+        <option value="unresolved">unresolved</option>
+        <option value="resolved">resolved</option>
+        <option value="ignored">ignored</option>
+      </select>
+    </div>
+  </div>
+
+  {{if .ErrorGroups}}
+  <table>
+    <thead>
+      <tr>
+        <th style="width:12px"></th>
+        <th>Exception</th>
+        <th>Message</th>
+        <th>Service</th>
+        <th style="text-align:right">Count</th>
+        <th>First Seen</th>
+        <th>Last Seen</th>
+      </tr>
+    </thead>
+    <tbody id="errors-table-body">
+      {{range .ErrorGroups}}
+      <tr class="error-row" data-fingerprint="{{.Fingerprint}}" style="cursor:pointer">
+        <td>
+          <span class="status-dot {{if eq (printf "%s" .Status) "unresolved"}}status-dot-err{{else if eq (printf "%s" .Status) "ignored"}}status-dot-off{{else}}status-dot-ok{{end}}"></span>
+        </td>
+        <td style="font-weight:500;color:var(--text-bright)">{{.ExceptionClass}}</td>
+        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim)">{{truncate .Message 80}}</td>
+        <td>{{if .Service}}<span class="badge badge-INFO">{{.Service}}</span>{{end}}</td>
+        <td style="text-align:right;font-weight:600">{{.OccurrenceCount}}</td>
+        <td style="color:var(--text-dim);font-size:11px">{{timeAgo .FirstSeenAt}}</td>
+        <td style="color:var(--text-dim);font-size:11px">{{timeAgo .LastSeenAt}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <div class="empty-state">
+    <div class="empty-state-title">No error groups</div>
+    <div class="empty-state-desc">Error groups will appear here when errors are ingested with fingerprints.</div>
+  </div>
+  {{end}}
+</div>
+
+<script nonce="{{.CSPNonce}}">
+(function() {
+  // Row click → navigate to error detail
+  var tbody = document.getElementById('errors-table-body');
+  if (tbody) {
+    tbody.addEventListener('click', function(e) {
+      var row = e.target.closest('.error-row');
+      if (row && row.dataset.fingerprint) {
+        window.location.href = '/errors/' + encodeURIComponent(row.dataset.fingerprint);
+      }
+    });
+  }
+
+  var filter = document.getElementById('status-filter');
+  if (filter) {
+    // Set initial value from URL
+    var params = new URLSearchParams(window.location.search);
+    if (params.get('status')) filter.value = params.get('status');
+
+    filter.addEventListener('change', function() {
+      var url = '/errors';
+      if (this.value) url += '?status=' + encodeURIComponent(this.value);
+      window.location.href = url;
+    });
+  }
+})();
+</script>
+{{end}}

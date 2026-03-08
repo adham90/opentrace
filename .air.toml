@@ -1,0 +1,19 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  bin = "./tmp/opentrace"
+  cmd = "go build -o ./tmp/opentrace ./cmd/opentrace"
+  delay = 1000
+  exclude_dir = ["tmp", "vendor", ".git", "node_modules", "deploy", "docs"]
+  exclude_regex = ["_test\\.go$"]
+  include_ext = ["go", "html", "css", "js", "sql"]
+  kill_delay = "1s"
+  send_interrupt = true
+  stop_on_error = true
+
+[log]
+  time = false
+
+[misc]
+  clean_on_exit = true

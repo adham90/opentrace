@@ -4,11 +4,50 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/adham90/opentrace/internal/store"
 )
+
+func (s *Server) handleBatchErrorGroups(w http.ResponseWriter, r *http.Request) {
+	fps := r.URL.Query().Get("fingerprints")
+	if fps == "" {
+		writeJSON(w, http.StatusOK, map[string]any{})
+		return
+	}
+
+	fingerprints := strings.Split(fps, ",")
+	if len(fingerprints) > 50 {
+		fingerprints = fingerprints[:50]
+	}
+
+	type batchEntry struct {
+		OccurrenceCount int    `json:"occurrence_count"`
+		Status          string `json:"status"`
+		ExceptionClass  string `json:"exception_class"`
+	}
+
+	result := make(map[string]batchEntry)
+	for _, fp := range fingerprints {
+		fp = strings.TrimSpace(fp)
+		if fp == "" {
+			continue
+		}
+		eg, err := s.errorGroupStore.Get(r.Context(), fp)
+		if err != nil {
+			continue
+		}
+		result[fp] = batchEntry{
+			OccurrenceCount: eg.OccurrenceCount,
+			Status:          string(eg.Status),
+			ExceptionClass:  eg.ExceptionClass,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
 
 func (s *Server) handleListErrorGroups(w http.ResponseWriter, r *http.Request) {
 	params := store.ListErrorGroupParams{

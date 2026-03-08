@@ -33,6 +33,72 @@ func TestCreateConnector_Database(t *testing.T) {
 	}
 }
 
+func TestCreateConnector_MySQL_MissingConnStr(t *testing.T) {
+	ds := store.DataSource{
+		Type:   store.ConnectorMySQL,
+		Config: map[string]any{},
+	}
+	_, err := CreateConnector(context.Background(), ds, nil, nil, nil)
+	if err == nil {
+		t.Fatal("expected error for missing connection_string")
+	}
+}
+
+func TestCreateConnector_MySQL_EmptyConnStr(t *testing.T) {
+	ds := store.DataSource{
+		Type:   store.ConnectorMySQL,
+		Config: map[string]any{"connection_string": ""},
+	}
+	_, err := CreateConnector(context.Background(), ds, nil, nil, nil)
+	if err == nil {
+		t.Fatal("expected error for empty connection_string")
+	}
+}
+
+func TestCreateConnector_Redis_MissingConnStr(t *testing.T) {
+	ds := store.DataSource{
+		Type:   store.ConnectorRedis,
+		Config: map[string]any{},
+	}
+	_, err := CreateConnector(context.Background(), ds, nil, nil, nil)
+	if err == nil {
+		t.Fatal("expected error for missing connection_string")
+	}
+}
+
+func TestCreateConnector_Redis_EmptyConnStr(t *testing.T) {
+	ds := store.DataSource{
+		Type:   store.ConnectorRedis,
+		Config: map[string]any{"connection_string": ""},
+	}
+	_, err := CreateConnector(context.Background(), ds, nil, nil, nil)
+	if err == nil {
+		t.Fatal("expected error for empty connection_string")
+	}
+}
+
+func TestCreateConnector_Turso_MissingConnStr(t *testing.T) {
+	ds := store.DataSource{
+		Type:   store.ConnectorTurso,
+		Config: map[string]any{},
+	}
+	_, err := CreateConnector(context.Background(), ds, nil, nil, nil)
+	if err == nil {
+		t.Fatal("expected error for missing connection_string")
+	}
+}
+
+func TestCreateConnector_Turso_EmptyConnStr(t *testing.T) {
+	ds := store.DataSource{
+		Type:   store.ConnectorTurso,
+		Config: map[string]any{"connection_string": ""},
+	}
+	_, err := CreateConnector(context.Background(), ds, nil, nil, nil)
+	if err == nil {
+		t.Fatal("expected error for empty connection_string")
+	}
+}
+
 func TestCreateConnector_Unknown(t *testing.T) {
 	ds := store.DataSource{
 		Type:   "unknown_type",

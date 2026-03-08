@@ -158,3 +158,82 @@ func TestRegistry_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 }
+
+// mockCBDataSource is a mock that implements CircuitBreakerProvider.
+type mockCBDataSource struct {
+	connType ConnectorType
+	cbState  CircuitState
+	tools    []Tool
+	closed   atomic.Bool
+}
+
+func (m *mockCBDataSource) Type() ConnectorType                      { return m.connType }
+func (m *mockCBDataSource) TestConnection(ctx context.Context) error { return nil }
+func (m *mockCBDataSource) Tools() []Tool                            { return m.tools }
+func (m *mockCBDataSource) Close() error {
+	m.closed.Store(true)
+	return nil
+}
+func (m *mockCBDataSource) CircuitBreakerState() CircuitState { return m.cbState }
+
+func TestRegistry_ConnectorStatus_WithCBProvider(t *testing.T) {
+	r := NewRegistry()
+	ds := &mockCBDataSource{connType: ConnectorMySQL, cbState: CircuitOpen}
+	r.Register(ds)
+
+	state := r.ConnectorStatus(ConnectorMySQL)
+	if state != CircuitOpen {
+		t.Fatalf("ConnectorStatus() = %q, want %q", state, CircuitOpen)
+	}
+}
+
+func TestRegistry_ConnectorStatus_WithoutCBProvider(t *testing.T) {
+	r := NewRegistry()
+	ds := &mockDataSource{connType: ConnectorLogs}
+	r.Register(ds)
+
+	state := r.ConnectorStatus(ConnectorLogs)
+	if state != CircuitClosed {
+		t.Fatalf("ConnectorStatus() = %q, want %q (no CB provider)", state, CircuitClosed)
+	}
+}
+
+func TestRegistry_ConnectorStatus_NotRegistered(t *testing.T) {
+	r := NewRegistry()
+	state := r.ConnectorStatus(ConnectorRedis)
+	if state != CircuitClosed {
+		t.Fatalf("ConnectorStatus() = %q, want %q (not registered)", state, CircuitClosed)
+	}
+}
+
+func TestRegistry_AllTools_MultipleTypes(t *testing.T) {
+	r := NewRegistry()
+
+	r.Register(&mockDataSource{
+		connType: ConnectorMySQL,
+		tools:    []Tool{{Name: "mysql_search"}},
+	})
+	r.Register(&mockDataSource{
+		connType: ConnectorRedis,
+		tools:    []Tool{{Name: "redis_info"}, {Name: "redis_keys"}},
+	})
+	r.Register(&mockDataSource{
+		connType: ConnectorTurso,
+		tools:    []Tool{{Name: "turso_search"}},
+	})
+
+	tools := r.AllTools()
+	if len(tools) != 4 {
+		t.Fatalf("len(AllTools()) = %d, want 4", len(tools))
+	}
+
+	names := map[string]bool{}
+	for _, tool := range tools {
+		names[tool.Name] = true
+	}
+	for _, expected := range []string{"mysql_search", "redis_info", "redis_keys", "turso_search"} {
+		if !names[expected] {
+			t.Errorf("missing tool: %s", expected)
+		}
+	}
+}

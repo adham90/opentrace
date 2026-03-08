@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/adham90/opentrace/internal/connector"
+	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/metrics"
 	"github.com/adham90/opentrace/internal/store"
 )
@@ -280,6 +281,14 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 					if s.errorImpactStore != nil && e.UserID != "" {
 						_ = s.errorImpactStore.TrackImpact(r.Context(), e.ErrorFingerprint, e.UserID, e.Metadata, e.ID, e.Service)
 					}
+				}
+			}
+		}
+		// Populate code entities from error log stack traces (Stage 5).
+		if s.codeEntityStore != nil {
+			for _, e := range logEntries {
+				if e.Level == "error" || e.Level == "fatal" {
+					go mcpserver.PopulateFromErrorLog(context.Background(), s.codeEntityStore, e)
 				}
 			}
 		}

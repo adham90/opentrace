@@ -207,6 +207,10 @@ func (m *mockLogStore) CountByService(_ context.Context, params store.LogCountPa
 	return result, nil
 }
 
+func (m *mockLogStore) Histogram(_ context.Context, _ store.LogHistogramParams) ([]store.LogHistogramBucket, error) {
+	return nil, nil
+}
+
 func TestLogStatsHandler_GroupByLevel(t *testing.T) {
 	now := time.Now().UTC()
 	ls := &mockLogStore{

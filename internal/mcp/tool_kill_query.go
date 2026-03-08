@@ -9,6 +9,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/store"
 )
 
 // killQueryHandler returns a handler that cancels or terminates a backend
@@ -103,6 +104,17 @@ func killQueryHandler(registry *connector.Registry) server.ToolHandlerFunc {
 
 		if !force && success {
 			resp["hint"] = "Query was cancelled gracefully. If the process doesn't stop, use force=true to terminate it."
+		}
+
+		// Track killed PID on session
+		if success && sessionTracker != nil {
+			if sess := sessionTracker.CurrentSession(); sess != nil {
+				killed := append([]string{}, sess.KilledQueries...)
+				killed = append(killed, fmt.Sprintf("%d", pid))
+				sessionTracker.UpdateSession(store.UpdateInvestigationSessionParams{
+					KilledQueries: killed,
+				})
+			}
 		}
 
 		data, err := json.Marshal(resp)

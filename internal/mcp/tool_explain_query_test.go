@@ -20,7 +20,7 @@ func TestExplainQueryHandler_ValidSelect(t *testing.T) {
 		},
 	})
 
-	handler := explainQueryHandler(registry)
+	handler := explainQueryHandler(registry, nil)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"query": "SELECT * FROM users",
 	}))
@@ -60,7 +60,7 @@ func TestExplainQueryHandler_NonSelectRejected(t *testing.T) {
 		result:         &connector.QueryResult{},
 	})
 
-	handler := explainQueryHandler(registry)
+	handler := explainQueryHandler(registry, nil)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"query": "DELETE FROM users WHERE id = 1",
 	}))
@@ -78,7 +78,7 @@ func TestExplainQueryHandler_NonSelectRejected(t *testing.T) {
 
 func TestExplainQueryHandler_MissingQuery(t *testing.T) {
 	registry := connector.NewRegistry()
-	handler := explainQueryHandler(registry)
+	handler := explainQueryHandler(registry, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{}))
 	if err != nil {
@@ -91,7 +91,7 @@ func TestExplainQueryHandler_MissingQuery(t *testing.T) {
 
 func TestExplainQueryHandler_NoConnector(t *testing.T) {
 	registry := connector.NewRegistry()
-	handler := explainQueryHandler(registry)
+	handler := explainQueryHandler(registry, nil)
 
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"query": "SELECT 1",
@@ -117,7 +117,7 @@ func TestExplainQueryHandler_AnalyzeFalse(t *testing.T) {
 		captureQuery: &capturedQuery,
 	})
 
-	handler := explainQueryHandler(registry)
+	handler := explainQueryHandler(registry, nil)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"query":   "SELECT * FROM users",
 		"analyze": false,
@@ -151,7 +151,7 @@ func TestExplainQueryHandler_FormatJSON(t *testing.T) {
 		captureQuery: &capturedQuery,
 	})
 
-	handler := explainQueryHandler(registry)
+	handler := explainQueryHandler(registry, nil)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"query":  "SELECT * FROM users",
 		"format": "json",
@@ -175,7 +175,7 @@ func TestExplainQueryHandler_QueryError(t *testing.T) {
 		err:            errors.New("relation does not exist"),
 	})
 
-	handler := explainQueryHandler(registry)
+	handler := explainQueryHandler(registry, nil)
 	result, err := handler(context.Background(), makeRequest(map[string]any{
 		"query": "SELECT * FROM nonexistent_table",
 	}))

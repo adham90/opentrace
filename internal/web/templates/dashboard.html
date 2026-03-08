@@ -1,972 +1,535 @@
 {{define "content"}}
-<div class="app-shell">
-  <!-- ── Status Bar ─────────────────────────────────────────── -->
-  <header class="status-bar" role="banner">
-    <div class="status-bar-left">
-      <a href="/" class="status-brand">opentrace</a>
-      <span class="status-health" id="status-health" role="status" aria-live="polite">
-        <span class="status-dot status-dot-ok" id="status-dot"></span>
-        <span class="status-health-text" id="status-health-text">OK</span>
-      </span>
-      <span class="status-stats" id="status-stats" role="status" aria-live="polite">
-        <span class="status-stat" id="stat-rate" title="logs/hour">-/hr</span>
-        <span class="status-stat status-stat-err" id="stat-errors" title="errors/hour">0 err</span>
-      </span>
+<div class="dash">
+
+  {{if .DashSystemStatus}}
+  <div class="d-top">
+    <div class="d-top-left">
+      <span>{{.DashSystemStatus.LogsPerHour}} logs/h</span>
+      {{if .DashSystemStatus.ErrorsPerHour}}<span class="d-err">{{.DashSystemStatus.ErrorsPerHour}} errors/h</span>{{end}}
+      {{if .DashGlance}}{{if .DashGlance.Uptime}}<span>{{fmtFloat .DashGlance.Uptime}}%</span>{{end}}{{end}}
+      {{if .DashTraffic}}<span>{{.DashTraffic.TotalRequests}} reqs</span>{{end}}
+      {{if .DashGlance}}{{if .DashGlance.ErrorGroups}}<span class="d-err">{{.DashGlance.ErrorGroups}} errors</span>{{end}}{{end}}
     </div>
-    <div class="status-bar-right">
-      {{if .User}}
-      <nav class="user-menu" id="user-menu" aria-label="User menu">
-        <button class="user-menu-trigger" id="user-menu-trigger-btn" aria-expanded="false" aria-haspopup="true" aria-label="User menu for {{.User.DisplayName}}">
-          {{.User.DisplayName}}
-          <svg width="8" height="5" viewBox="0 0 8 5" fill="currentColor" aria-hidden="true"><path d="M0 0l4 5 4-5z"/></svg>
-        </button>
-        <div class="user-menu-dropdown" id="user-menu-dropdown" role="menu">
-          <button class="user-menu-item" id="theme-toggle-btn" role="menuitem" aria-label="Toggle theme">theme: <span id="dropdown-theme-label">system</span></button>
-          <div class="user-menu-divider" role="separator"></div>
-          <a href="/profile" class="user-menu-item" role="menuitem">Profile</a>
-          <a href="/settings" class="user-menu-item" role="menuitem">Settings</a>
-          <a href="/setup" class="user-menu-item" role="menuitem">Setup</a>
-          <a href="/connectors" class="user-menu-item" role="menuitem">Connectors</a>
-          <a href="/tools" class="user-menu-item" role="menuitem">Tools</a>
-          {{if .IsAdmin}}<a href="/users" class="user-menu-item" role="menuitem">Users</a>{{end}}
-          <div class="user-menu-divider" role="separator"></div>
-          <a href="/logout" class="user-menu-item user-menu-item-danger" id="logout-link" role="menuitem">Logout</a>
-        </div>
-      </nav>
+    <div class="d-top-right">
+      {{range .DashSignals}}
+      <span class="d-svc d-svc-{{.Status}}"><span class="d-dot"></span>{{.Name}}</span>
+      {{end}}
+      {{range .DashServers}}
+      <span class="d-svc d-svc-{{.Status}}"><span class="d-dot"></span>{{.Name}}</span>
       {{end}}
     </div>
-  </header>
+  </div>
+  {{end}}
 
-  <!-- ── Attention Zone ─────────────────────────────────────── -->
-  <div class="attention-zone" id="attention-zone" style="display:none" aria-live="polite" role="region" aria-label="Alerts and attention items">
-    <div class="attention-list" id="attention-list"></div>
+  <div class="d-chart" id="chart-wrap">
+    {{if .DashErrorSpark}}
+    <svg class="d-chart-svg" id="error-chart" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="area-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--red)" stop-opacity="0.2"/>
+          <stop offset="100%" stop-color="var(--red)" stop-opacity="0.01"/>
+        </linearGradient>
+      </defs>
+      <path class="d-chart-area" />
+      <path class="d-chart-line" />
+      <line class="d-chart-cross" x1="0" y1="0" x2="0" y2="0" />
+      <circle class="d-chart-dot" cx="0" cy="0" r="3.5" />
+      {{range $i, $b := .DashErrorSpark}}
+      <rect class="d-chart-hit" data-idx="{{$i}}" data-count="{{$b.ErrorCount}}" data-hour="{{$b.Hour}}" />
+      {{end}}
+    </svg>
+    <div class="d-chart-tip" id="chart-tip"></div>
+    <div class="d-chart-hours" id="chart-hours"></div>
+    {{else}}
+    <div class="d-chart-empty">No error data in the last 24h</div>
+    {{end}}
   </div>
 
-  <!-- ── Log Stream ─────────────────────────────────────────── -->
-  <div class="log-stream" id="log-stream" role="region" aria-label="Log stream">
-    <div class="term-output" id="term-output" aria-live="polite" aria-relevant="additions">
-      <div id="logs-list" data-max-id="{{.MaxLogID}}">
-      {{if .Logs}}
-      <div class="log-list">
-        {{range .Logs}}
-        <div class="term-entry" data-log-id="{{.ID}}">
-          <div class="term-line level-{{.Level}}">
-            <span class="term-ts" title="{{.Timestamp.Format "2006-01-02T15:04:05.000Z07:00"}}">{{.Timestamp.Format "15:04:05.000"}}</span>
-            <span class="term-level level-{{.Level}}">{{.Level}}</span>
-            <span class="term-source" title="{{.Service}}">{{if .Service}}{{.Service}}{{end}}</span>
-            <span class="term-msg">{{.Message}}</span>
-            {{if .ExceptionClass}}<span class="term-exc">{{.ExceptionClass}}</span>{{end}}
-          </div>
-          <div class="term-detail"></div>
-        </div>
-        {{end}}
-      </div>
-      {{else}}
-      <div class="term-empty">
-        <div class="term-empty-prompt">$ tail -f /var/log/app.log</div>
-        <div class="term-empty-msg">
-          no logs found<br>
-          logs will appear here once ingested via POST /api/logs
-        </div>
+  <hr class="d-rule">
+
+  {{if .DashLastSession}}
+  <a href="/sessions/{{.DashLastSession.ID}}" class="d-resume">
+    You were investigating <strong>{{.DashLastSession.Intent}}</strong>{{if .DashLastSession.Service}} — {{.DashLastSession.Service}}{{end}}
+    <span class="d-meta">{{.DashLastSession.TimeAgo}}</span>
+  </a>
+  <hr class="d-rule">
+  {{end}}
+
+  {{if .DashAttention}}
+  <h3 class="d-label">Attention <span class="d-label-count">{{len .DashAttention}}</span></h3>
+  {{range .DashAttention}}
+  <a class="d-item"{{if .Link}} href="{{.Link}}"{{end}}>
+    <span class="d-dot d-dot-{{.Severity}}"></span>
+    <div class="d-item-body">
+      <div class="d-item-title">{{.Title}}</div>
+      {{if .Detail}}<div class="d-item-sub">{{.Detail}}</div>{{end}}
+    </div>
+    <span class="d-meta">{{.Time}}</span>
+  </a>
+  {{end}}
+  {{else if gt .DashQuietMinutes 0}}
+  <p class="d-quiet">All clear — quiet for {{.DashQuietMinutes}}m</p>
+  {{end}}
+
+  <hr class="d-rule">
+
+  {{if .DashEndpoints}}
+  <div class="d-grid">
+    <div class="d-col-main">
+      <h3 class="d-label">Slow endpoints</h3>
+      {{range .DashEndpoints}}
+      <div class="d-ep">
+        <span class="d-ep-name"><span class="d-ep-method">{{.Method}}</span>{{.Path}}</span>
+        <span class="d-ep-ms">{{fmtFloat .P95Ms}}</span>
       </div>
       {{end}}
-      </div>
     </div>
-
-    <button class="term-new-indicator" id="new-indicator" style="display:none" aria-live="polite" aria-label="Scroll to new logs">
-      <span id="new-indicator-count">0</span> new logs
-    </button>
   </div>
+  <hr class="d-rule">
+  {{end}}
 
-  <!-- ── Command Line ───────────────────────────────────────── -->
-  <form id="filter-form" class="term-cmdline" autocomplete="off" role="search" aria-label="Log filter">
-    <input type="hidden" name="service" id="f-service" value="{{.LogFilters.Service}}">
-    <input type="hidden" name="level" id="f-level" value="{{.LogFilters.Level}}">
-    <input type="hidden" name="event_type" id="f-event-type" value="{{.LogFilters.EventType}}">
-    <input type="hidden" name="time_range" id="f-time-range" value="{{.LogFilters.TimeRange}}">
-    <input type="hidden" name="query" id="f-query" value="{{.LogFilters.Query}}">
-    <input type="hidden" name="environment" id="f-environment" value="{{.LogFilters.Environment}}">
-    <input type="hidden" name="commit_hash" id="f-commit-hash" value="{{.LogFilters.CommitHash}}">
-    <input type="hidden" name="request_id" id="f-request-id" value="{{.LogFilters.RequestID}}">
-    <input type="hidden" name="exception_class" id="f-exception-class" value="{{.LogFilters.ExceptionClass}}">
-    <input type="hidden" name="error_fingerprint" id="f-error-fingerprint" value="{{.LogFilters.ErrorFingerprint}}">
-    <input type="hidden" name="source_file" id="f-source-file" value="{{.LogFilters.SourceFile}}">
-
-    <div class="term-cmdline-inner">
-      <span class="term-prompt-symbol" aria-hidden="true">$</span>
-      <div class="term-active-filters" id="active-filters" aria-label="Active filters"></div>
-      <input type="text" id="cmd-input" class="term-cmd-input" placeholder="level:error service:api-svc or search text" spellcheck="false" aria-label="Log filter command line" aria-autocomplete="list" aria-controls="ac-dropdown">
-      <button type="button" class="term-live-badge" id="live-badge" title="toggle live tail (p)" aria-label="Toggle live tail" aria-pressed="true">
-        <span class="term-live-dot" id="live-dot" aria-hidden="true"></span>
-        <span id="live-label">LIVE</span>
-      </button>
-      <div class="ac-dropdown" id="ac-dropdown" style="display:none" role="listbox" aria-label="Filter suggestions"></div>
+  {{if .DashTimeline}}
+  <h3 class="d-label">Recent</h3>
+  {{range .DashTimeline}}
+  <a class="d-feed"{{if .Link}} href="{{.Link}}"{{end}}>
+    <span class="d-dot d-dot-{{.Status}}"></span>
+    <div class="d-feed-body">
+      <span class="d-feed-title">{{.Title}}</span>
+      {{if .Detail}}<span class="d-feed-detail">{{.Detail}}</span>{{end}}
     </div>
-  </form>
+    <span class="d-meta">{{.Time}}</span>
+  </a>
+  {{end}}
+  {{end}}
+
+  {{if and (not .DashAttention) (not .DashTimeline) (not .DashSignals) (eq .DashQuietMinutes 0)}}
+  <p class="d-quiet">No data yet. <a href="/setup">Set up log ingestion</a> to get started.</p>
+  {{end}}
 </div>
 
+<style nonce="{{.CSPNonce}}">
+.dash {
+  width: 100%;
+  padding-top: 8px;
+}
+
+/* ── Top bar ──────────────────────────────────── */
+.d-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 8px 0 16px;
+}
+.d-top-left {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+}
+.d-top-right {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+/* ── Shared ───────────────────────────────────── */
+.d-err { color: var(--red); }
+
+.d-dot {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  opacity: 0.25;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.d-dot-error { background: var(--red); opacity: 1; }
+.d-dot-warn { background: var(--yellow); opacity: 1; }
+.d-dot-ok, .d-dot-info { background: var(--green); opacity: 1; }
+
+.d-meta {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+.d-rule {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+  opacity: 0.5;
+}
+
+.d-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  margin: 8px 0 14px;
+  letter-spacing: 0;
+}
+.d-label-count {
+  font-family: var(--font-mono);
+  color: var(--red);
+  opacity: 1;
+}
+
+/* ── Services ─────────────────────────────────── */
+.d-svc {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-dim);
+  opacity: 0.5;
+}
+.d-svc-up, .d-svc-online { opacity: 0.8; }
+.d-svc-up .d-dot, .d-svc-online .d-dot { background: var(--green); opacity: 1; }
+.d-svc-down .d-dot { background: var(--red); opacity: 1; }
+.d-svc-down { opacity: 0.8; }
+.d-svc-degraded .d-dot { background: var(--yellow); opacity: 1; }
+
+/* ── Chart ────────────────────────────────────── */
+.d-chart {
+  position: relative;
+  margin: 4px 0 0;
+}
+.d-chart-svg {
+  display: block;
+  width: 100%;
+  height: 100px;
+  cursor: crosshair;
+}
+.d-chart-area {
+  fill: url(#area-fill);
+}
+.d-chart-line {
+  fill: none;
+  stroke: var(--red);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+.d-chart-cross {
+  stroke: var(--text-dim);
+  stroke-width: 1;
+  opacity: 0;
+  stroke-dasharray: 2 2;
+}
+.d-chart-dot {
+  fill: var(--red);
+  opacity: 0;
+}
+.d-chart-hit {
+  fill: transparent;
+  cursor: crosshair;
+}
+.d-chart-tip {
+  position: absolute;
+  top: 0;
+  pointer-events: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.1s;
+  z-index: 2;
+}
+.d-chart-hours {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  opacity: 0.35;
+  padding: 4px 0 0;
+  user-select: none;
+}
+.d-chart-empty {
+  height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--text-dim);
+  opacity: 0.4;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+}
+
+/* ── Resume ───────────────────────────────────── */
+.d-resume {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0;
+  text-decoration: none;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+.d-resume:hover { color: var(--text); text-decoration: none; }
+.d-resume strong { color: var(--text); font-weight: 500; }
+
+/* ── Grid ─────────────────────────────────────── */
+.d-grid {
+  display: grid;
+  grid-template-columns: 5fr 3fr;
+  gap: 0 40px;
+  align-items: start;
+}
+.d-col-main { min-width: 0; }
+.d-col-side { min-width: 0; }
+
+/* ── Attention items ──────────────────────────── */
+.d-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+  color: var(--text);
+  text-decoration: none;
+}
+.d-item:hover { opacity: 0.7; text-decoration: none; }
+.d-item .d-dot { margin-top: 7px; }
+.d-item-body { flex: 1; min-width: 0; }
+.d-item-title { font-size: 14px; font-weight: 500; }
+.d-item-sub {
+  font-size: 13px;
+  color: var(--text-dim);
+  opacity: 0.55;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+.d-item .d-meta { padding-top: 2px; }
+
+/* ── Endpoints ────────────────────────────────── */
+.d-ep {
+  display: flex;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 13px;
+}
+.d-ep-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+.d-ep-method {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.5;
+  margin-right: 4px;
+}
+.d-ep-ms {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  opacity: 0.5;
+  margin-left: 12px;
+  flex-shrink: 0;
+}
+.d-ep-ms::after { content: 'ms'; font-size: 10px; opacity: 0.6; margin-left: 1px; }
+
+/* ── Feed (timeline) ─────────────────────────── */
+.d-feed {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 0;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 14px;
+}
+.d-feed:hover { opacity: 0.7; text-decoration: none; }
+.d-feed .d-dot { margin-top: 7px; }
+.d-feed-body {
+  flex: 1;
+  min-width: 0;
+}
+.d-feed-title {
+  font-weight: 500;
+  display: block;
+}
+.d-feed-detail {
+  display: block;
+  color: var(--text-dim);
+  opacity: 0.45;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+.d-feed .d-meta { padding-top: 2px; }
+
+.d-quiet {
+  font-size: 13px;
+  color: var(--text-dim);
+  opacity: 0.6;
+  padding: 20px 0;
+}
+.d-quiet a { color: var(--text); opacity: 1; }
+
+@media (max-width: 700px) {
+  .d-grid { grid-template-columns: 1fr; }
+  .d-top { flex-direction: column; gap: 8px; }
+  .d-top-right { justify-content: flex-start; }
+  .d-feed-detail { display: none; }
+  .d-item-sub { display: none; }
+}
+</style>
 
 <script nonce="{{.CSPNonce}}">
-(function(){
-  // ── Helpers ──────────────────────────────────────────────
-  function escH(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
-  function getTimeAgo(dateStr) {
-    if (!dateStr) return '';
-    var now = new Date(), date = new Date(dateStr);
-    var diff = Math.floor((now - date) / 1000);
-    if (diff < 0) return 'just now';
-    if (diff < 60) return diff + 's ago';
-    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
-    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-    return Math.floor(diff / 86400) + 'd ago';
+(function() {
+  var hits = document.querySelectorAll('.d-chart-hit');
+  if (!hits.length) return;
+
+  var svg = document.getElementById('error-chart');
+  var tip = document.getElementById('chart-tip');
+  var hoursEl = document.getElementById('chart-hours');
+  var cross = svg.querySelector('.d-chart-cross');
+  var dot = svg.querySelector('.d-chart-dot');
+  var wrap = document.getElementById('chart-wrap');
+
+  var data = [];
+  var max = 1;
+  hits.forEach(function(h) {
+    var c = parseInt(h.getAttribute('data-count'), 10) || 0;
+    var hr = parseInt(h.getAttribute('data-hour'), 10);
+    data.push({ count: c, hour: hr });
+    if (c > max) max = c;
+  });
+
+  var n = data.length;
+  if (n < 2) return;
+
+  var rect = svg.getBoundingClientRect();
+  var W = rect.width;
+  var H = 100;
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+
+  var pad = 4;
+  var chartH = H - pad * 2;
+  var stepX = W / (n - 1);
+
+  function xPos(i) { return i * stepX; }
+  function yPos(v) { return pad + chartH - (v / max) * chartH; }
+
+  // Store computed positions
+  var positions = [];
+  var lineParts = [];
+  for (var i = 0; i < n; i++) {
+    var px = xPos(i);
+    var py = yPos(data[i].count);
+    positions.push({ x: px, y: py });
+    lineParts.push((i === 0 ? 'M' : 'L') + px.toFixed(1) + ',' + py.toFixed(1));
   }
 
-  // ── DOM refs ─────────────────────────────────────────────
-  var termOutput = document.getElementById('term-output');
-  var cmdInput   = document.getElementById('cmd-input');
-  var form       = document.getElementById('filter-form');
-  var liveBadge  = document.getElementById('live-badge');
-  var liveLabel  = document.getElementById('live-label');
-  var newIndicator = document.getElementById('new-indicator');
-  var newIndicatorCount = document.getElementById('new-indicator-count');
-  var activeFiltersEl = document.getElementById('active-filters');
+  var linePath = lineParts.join(' ');
+  var areaPath = linePath + ' L' + xPos(n-1).toFixed(1) + ',' + H + ' L0,' + H + ' Z';
 
-  // ── Status bar + attention polling ───────────────────────
-  function loadStatus() {
-    fetch('/api/overview').then(function(r){ return r.json(); }).then(function(d) {
-      var logs = d.logs ? d.logs.last_hour : 0;
-      var errs = d.logs ? d.logs.errors_last_hour : 0;
-      document.getElementById('stat-rate').textContent = logs + '/hr';
-      var errEl = document.getElementById('stat-errors');
-      errEl.textContent = errs + ' err';
-      if (errs > 0) { errEl.classList.add('status-stat-hot'); } else { errEl.classList.remove('status-stat-hot'); }
+  svg.querySelector('.d-chart-area').setAttribute('d', areaPath);
+  svg.querySelector('.d-chart-line').setAttribute('d', linePath);
 
-      // Health dot
-      var dot = document.getElementById('status-dot');
-      var txt = document.getElementById('status-health-text');
-      if (errs > 5) {
-        dot.className = 'status-dot status-dot-warn';
-        txt.textContent = 'DEGRADED';
-      } else {
-        dot.className = 'status-dot status-dot-ok';
-        txt.textContent = 'OK';
-      }
-    }).catch(function(){});
+  // Set invisible hit zones for each data point
+  var hitW = W / n;
+  hits.forEach(function(h, i) {
+    h.setAttribute('x', (positions[i].x - hitW / 2).toFixed(1));
+    h.setAttribute('y', '0');
+    h.setAttribute('width', hitW.toFixed(1));
+    h.setAttribute('height', H);
+  });
+
+  // Crosshair line full height
+  cross.setAttribute('y1', '0');
+  cross.setAttribute('y2', H);
+
+  function showTip(i) {
+    var d = data[i];
+    var p = positions[i];
+    var hr = (d.hour < 10 ? '0' : '') + d.hour + ':00';
+    var label = d.count === 1 ? '1 error' : d.count + ' errors';
+
+    cross.setAttribute('x1', p.x.toFixed(1));
+    cross.setAttribute('x2', p.x.toFixed(1));
+    cross.style.opacity = '0.3';
+
+    dot.setAttribute('cx', p.x.toFixed(1));
+    dot.setAttribute('cy', p.y.toFixed(1));
+    dot.style.opacity = '1';
+
+    tip.textContent = hr + '  ' + label;
+    tip.style.opacity = '1';
+
+    // Position tooltip
+    var tipRect = tip.getBoundingClientRect();
+    var wrapRect = wrap.getBoundingClientRect();
+    var left = p.x - tipRect.width / 2;
+    if (left < 0) left = 0;
+    if (left + tipRect.width > W) left = W - tipRect.width;
+    tip.style.left = left + 'px';
+    tip.style.top = (p.y - 28) + 'px';
   }
 
-  function loadAttention() {
-    var items = [];
-    var done = 0;
-    function finish() {
-      done++;
-      if (done < 2) return;
-      var zone = document.getElementById('attention-zone');
-      var list = document.getElementById('attention-list');
-      if (items.length === 0) { zone.style.display = 'none'; return; }
-      items.sort(function(a,b){ return new Date(b.time) - new Date(a.time); });
-      var html = '';
-      items.slice(0, 8).forEach(function(it) {
-        var sevClass = it.severity === 'error' ? 'sev-error' : (it.severity === 'warn' ? 'sev-warn' : 'sev-info');
-        var clickable = it.filterKey && it.filterValue;
-        html += '<div class="attention-item attention-' + it.severity + ' ' + sevClass + (clickable ? ' attention-clickable' : '') + '"';
-        if (clickable) {
-          html += ' data-filter-key="' + escH(it.filterKey) + '" data-filter-value="' + escH(it.filterValue) + '"';
-          html += ' title="Click to filter logs by ' + escH(it.filterKey.replace('_', ' ')) + '"';
-        }
-        html += '>';
-        html += '<span class="attention-dot"></span>';
-        html += '<span class="attention-desc">' + escH(it.desc) + '</span>';
-        html += '<span class="attention-time">' + getTimeAgo(it.time) + '</span>';
-        if (it.dismissId) {
-          html += '<button class="attention-dismiss" data-dismiss-type="' + escH(it.dismissType) + '" data-dismiss-id="' + escH(it.dismissId) + '" title="' + (it.dismissType === 'error' ? 'Resolve error' : 'Dismiss watch') + '" aria-label="' + (it.dismissType === 'error' ? 'Resolve error' : 'Dismiss watch') + '">\u00d7</button>';
-        }
-        html += '</div>';
-      });
-      list.innerHTML = html;
-      zone.style.display = '';
-      list.querySelectorAll('.attention-clickable').forEach(function(el) {
-        el.addEventListener('click', function(e) {
-          if (e.target.closest('.attention-dismiss')) return; // let dismiss handle it
-          // Clear all filters first so attention clicks don't stack
-          filters = { query: '', service: '', level: '', event_type: '', time_range: '', environment: '', commit_hash: '', request_id: '', exception_class: '', error_fingerprint: '', source_file: '', start: '', end: '', metadata: {} };
-          setFilter(el.getAttribute('data-filter-key'), el.getAttribute('data-filter-value'));
-        });
-      });
-      list.querySelectorAll('.attention-dismiss').forEach(function(btn) {
-        btn.addEventListener('click', function(e) {
-          e.stopPropagation();
-          var type = btn.getAttribute('data-dismiss-type');
-          var id = btn.getAttribute('data-dismiss-id');
-          var item = btn.closest('.attention-item');
-          btn.disabled = true;
-          btn.textContent = '...';
-          var req;
-          if (type === 'error') {
-            req = fetch('/api/errors/' + encodeURIComponent(id) + '/resolve', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ reason: 'dismissed from dashboard' })
-            });
-          } else {
-            req = fetch('/api/watches/' + encodeURIComponent(id), { method: 'DELETE' });
-          }
-          req.then(function(r) {
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            item.style.transition = 'opacity 0.3s, max-height 0.3s';
-            item.style.opacity = '0';
-            item.style.maxHeight = item.offsetHeight + 'px';
-            setTimeout(function() {
-              item.style.maxHeight = '0';
-              item.style.overflow = 'hidden';
-              item.style.padding = '0 12px';
-              item.style.borderBottom = 'none';
-              item.style.minHeight = '0';
-            }, 50);
-            setTimeout(function() {
-              item.remove();
-              if (!document.querySelector('.attention-item')) {
-                document.getElementById('attention-zone').style.display = 'none';
-              }
-            }, 350);
-          }).catch(function() {
-            btn.disabled = false;
-            btn.textContent = '\u00d7';
-          });
-        });
-      });
+  function hideTip() {
+    cross.style.opacity = '0';
+    dot.style.opacity = '0';
+    tip.style.opacity = '0';
+  }
+
+  hits.forEach(function(h, i) {
+    h.addEventListener('mouseenter', function() { showTip(i); });
+  });
+  svg.addEventListener('mouseleave', hideTip);
+
+  // Hour labels
+  if (hoursEl) {
+    var step = Math.max(1, Math.floor(n / 6));
+    for (var i = 0; i < n; i += step) {
+      var span = document.createElement('span');
+      var hr = data[i].hour;
+      span.textContent = (hr < 10 ? '0' : '') + hr + ':00';
+      hoursEl.appendChild(span);
     }
-
-    fetch('/api/errors?status=unresolved&limit=5&sort_by=occurrence_count').then(function(r){
-      if (!r.ok) throw new Error();
-      return r.json();
-    }).then(function(errors) {
-      (errors || []).forEach(function(eg) {
-        items.push({
-          severity: 'error',
-          desc: (eg.exception_class || 'Error') + (eg.occurrence_count > 1 ? ' (' + eg.occurrence_count + 'x)' : '') + (eg.service ? ' on ' + eg.service : ''),
-          time: eg.last_seen_at || eg.last_seen || eg.created_at,
-          filterKey: 'exception_class',
-          filterValue: eg.exception_class || '',
-          dismissType: 'error',
-          dismissId: eg.fingerprint || ''
-        });
-      });
-      finish();
-    }).catch(function(){ finish(); });
-
-    fetch('/api/watches?status=triggered').then(function(r){
-      if (!r.ok) throw new Error();
-      return r.json();
-    }).then(function(watches) {
-      (watches || []).forEach(function(w) {
-        items.push({
-          severity: 'warn',
-          desc: w.metric + (w.service ? ' on ' + w.service : ''),
-          time: w.updated_at || w.created_at,
-          filterKey: w.service ? 'service' : '',
-          filterValue: w.service || '',
-          dismissType: 'watch',
-          dismissId: w.id || ''
-        });
-      });
-      finish();
-    }).catch(function(){ finish(); });
   }
 
-  function loadStatusAll() { loadStatus(); loadAttention(); }
-  loadStatusAll();
-  setInterval(loadStatusAll, 30000);
-
-  // ── User Menu ─────────────────────────────────────────────
-  window.toggleUserMenu = function() {
-    var dd = document.getElementById('user-menu-dropdown');
-    dd.classList.toggle('user-menu-open');
-    var trigger = document.getElementById('user-menu-trigger-btn');
-    if (trigger) trigger.setAttribute('aria-expanded', dd.classList.contains('user-menu-open') ? 'true' : 'false');
-  };
-  window.updateDropdownTheme = function() {
-    var el = document.getElementById('dropdown-theme-label');
-    if (el) el.textContent = localStorage.getItem('opentrace-theme') || 'system';
-  };
-  updateDropdownTheme();
+  // Click handler for data-href elements
   document.addEventListener('click', function(e) {
-    var menu = document.getElementById('user-menu');
-    if (menu && !menu.contains(e.target)) {
-      document.getElementById('user-menu-dropdown').classList.remove('user-menu-open');
-      var trigger = document.getElementById('user-menu-trigger-btn');
-      if (trigger) trigger.setAttribute('aria-expanded', 'false');
-    }
+    var item = e.target.closest('[data-href]');
+    if (item) window.location = item.getAttribute('data-href');
   });
 
-  // ── Filter state ────────────────────────────────────────
-  var filters = {
-    query: '{{.LogFilters.Query}}',
-    service: '{{.LogFilters.Service}}',
-    level: '{{.LogFilters.Level}}',
-    event_type: '{{.LogFilters.EventType}}',
-    time_range: '{{.LogFilters.TimeRange}}',
-    environment: '{{.LogFilters.Environment}}',
-    commit_hash: '{{.LogFilters.CommitHash}}',
-    request_id: '{{.LogFilters.RequestID}}',
-    exception_class: '{{.LogFilters.ExceptionClass}}',
-    error_fingerprint: '{{.LogFilters.ErrorFingerprint}}',
-    source_file: '{{.LogFilters.SourceFile}}',
-    start: '',
-    end: '',
-    metadata: {}
-  };
-
-  // ── Auto-scroll ─────────────────────────────────────────
-  var autoScroll = true;
-  var pendingNew = 0;
-
-  function isNearBottom() {
-    return (termOutput.scrollHeight - termOutput.scrollTop - termOutput.clientHeight) < 60;
-  }
-  function scrollToBottom() {
-    termOutput.scrollTop = termOutput.scrollHeight;
-    autoScroll = true;
-    pendingNew = 0;
-    newIndicator.style.display = 'none';
-  }
-  window.scrollToBottom = scrollToBottom;
-
-  termOutput.addEventListener('scroll', function() {
-    if (isNearBottom()) {
-      autoScroll = true; pendingNew = 0; newIndicator.style.display = 'none';
-    } else {
-      autoScroll = false;
-    }
-  });
-  setTimeout(scrollToBottom, 50);
-
-  // ── Inline detail expand/collapse ────────────────────────
-  document.addEventListener('click', function(e) {
-    // Only toggle when clicking the summary row, not the detail panel
-    var line = e.target.closest('.term-line');
-    if (!line) return;
-    var entry = line.closest('.term-entry');
-    if (!entry) return;
-    if (window.getSelection().toString()) return;
-
-    var expanding = !line.classList.contains('expanded');
-    line.classList.toggle('expanded');
-
-    if (expanding) {
-      var detail = entry.querySelector('.term-detail');
-      if (detail && !entry.getAttribute('data-loaded')) {
-        var logId = entry.getAttribute('data-log-id');
-        detail.innerHTML = '<div class="term-detail-row"><span class="term-detail-val" style="color:var(--text-dim)">Loading...</span></div>';
-        fetch('/api/logs/' + logId)
-          .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-          .then(function(data) {
-            if (data.error) { detail.innerHTML = '<div class="term-detail-row"><span class="term-detail-val" style="color:var(--red)">' + escH(data.error) + '</span></div>'; return; }
-            entry.setAttribute('data-loaded', '1');
-            detail._logData = data;
-            renderInlineDetail(detail, data);
-          })
-          .catch(function(err) { detail.innerHTML = '<div class="term-detail-row"><span class="term-detail-val" style="color:var(--red)">' + escH(err.message || 'Failed to load') + '</span></div>'; });
-      }
-    }
-  });
-
-  function statusClass(s) {
-    if (s >= 200 && s < 300) return 'status-2xx';
-    if (s >= 300 && s < 400) return 'status-3xx';
-    if (s >= 400 && s < 500) return 'status-4xx';
-    if (s >= 500) return 'status-5xx';
-    return '';
-  }
-
-  function dRow(key, val) {
-    return '<div class="term-detail-row"><span class="term-detail-key">' + escH(key) +
-      '</span><span class="term-detail-val">' + escH(String(val)) + '</span></div>';
-  }
-
-  function renderInlineDetail(el, log) {
-    var html = '';
-    html += '<button class="term-copy-btn" title="Copy log details" aria-label="Copy log details">Copy</button>';
-    html += '<div class="term-detail-section">';
-    html += dRow('id', log.id);
-    if (log.trace_id) html += dRow('trace_id', log.trace_id);
-    if (log.span_id) html += dRow('span_id', log.span_id);
-    if (log.parent_span_id) html += dRow('parent_span_id', log.parent_span_id);
-    if (log.service) html += dRow('service', log.service);
-    if (log.event_type) html += dRow('event_type', log.event_type);
-    if (log.request_id) html += dRow('request_id', log.request_id);
-    if (log.environment) html += dRow('environment', log.environment);
-    if (log.commit_hash) html += dRow('commit_hash', log.commit_hash);
-    if (log.exception_class) html += dRow('exception_class', log.exception_class);
-    if (log.error_fingerprint) html += dRow('error_fingerprint', log.error_fingerprint);
-    if (log.source_file) {
-      var src = log.source_file;
-      if (log.source_line > 0) src += ':' + log.source_line;
-      html += dRow('source', src);
-    }
-    html += '</div>';
-
-    var rs = log.request_summary;
-    if (rs) {
-      html += '<div class="term-detail-section"><div class="term-detail-section-title">Request</div>';
-      if (rs.method || rs.path) html += dRow('endpoint', (rs.method || '') + ' ' + (rs.path || ''));
-      if (rs.controller || rs.action) html += dRow('action', (rs.controller || '') + '#' + (rs.action || ''));
-      if (rs.status) { var sc = statusClass(rs.status); html += '<div class="term-detail-row"><span class="term-detail-key">status</span><span class="term-detail-val term-detail-status ' + sc + '">' + rs.status + '</span></div>'; }
-      if (rs.duration_ms) html += dRow('duration', rs.duration_ms.toFixed(1) + ' ms');
-      if (rs.db_time_ms) html += dRow('db_time', rs.db_time_ms.toFixed(1) + ' ms');
-      if (rs.view_time_ms) html += dRow('view_time', rs.view_time_ms.toFixed(1) + ' ms');
-      html += '</div>';
-
-      if (rs.sql_count > 0) {
-        html += '<div class="term-detail-section"><div class="term-detail-section-title">SQL (' + rs.sql_count + ' queries)</div>';
-        if (rs.sql_slowest_ms) html += dRow('slowest', rs.sql_slowest_ms.toFixed(1) + ' ms');
-        if (rs.n_plus_one) html += '<div class="term-detail-row"><span class="term-detail-key">N+1</span><span class="term-detail-val term-detail-flag">DETECTED</span></div>';
-        html += '</div>';
-      }
-    }
-
-    if (log.metadata && Object.keys(log.metadata).length > 0) {
-      html += '<div class="term-detail-section"><div class="term-detail-section-title">Metadata</div>';
-      Object.keys(log.metadata).sort().forEach(function(k) {
-        var v = log.metadata[k];
-        if (v == null) { html += dRow(k, ''); return; }
-        if (k === 'backtrace' && Array.isArray(v)) {
-          html += '<div class="term-detail-row"><span class="term-detail-key">backtrace</span><span class="term-detail-val"></span></div>';
-          html += '<pre class="term-detail-stack">' + escH(v.join('\n')) + '</pre>';
-          return;
+  // Auto-refresh status
+  setInterval(function() {
+    fetch('/api/dashboard')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var brand = document.getElementById('status-brand');
+        if (brand) {
+          brand.className = 'status-brand status-' + d.system_status.overall_status;
         }
-        if (typeof v === 'object') { html += dRow(k, JSON.stringify(v)); return; }
-        html += dRow(k, String(v));
-      });
-      html += '</div>';
-    }
-    el.innerHTML = html;
-  }
-
-  // ── Filter helpers ──────────────────────────────────────
-  function setFilter(key, val) {
-    filters[key] = val;
-    syncHiddenFields(); renderFilterChips(); applyFilters();
-  }
-  function removeFilter(key) {
-    filters[key] = '';
-    syncHiddenFields(); renderFilterChips(); applyFilters();
-  }
-  function clearAllFilters() {
-    filters = { query: '', service: '', level: '', event_type: '', time_range: '', environment: '', commit_hash: '', request_id: '', exception_class: '', error_fingerprint: '', source_file: '', start: '', end: '', metadata: {} };
-    syncHiddenFields(); renderFilterChips(); applyFilters();
-  }
-
-  function syncHiddenFields() {
-    document.getElementById('f-service').value = filters.service;
-    document.getElementById('f-level').value = filters.level;
-    document.getElementById('f-event-type').value = filters.event_type;
-    document.getElementById('f-time-range').value = filters.time_range;
-    document.getElementById('f-query').value = filters.query;
-    document.getElementById('f-environment').value = filters.environment;
-    document.getElementById('f-commit-hash').value = filters.commit_hash;
-    document.getElementById('f-request-id').value = filters.request_id;
-    document.getElementById('f-exception-class').value = filters.exception_class;
-    document.getElementById('f-error-fingerprint').value = filters.error_fingerprint;
-    document.getElementById('f-source-file').value = filters.source_file;
-    form.querySelectorAll('.dynamic-field').forEach(function(el) { el.remove(); });
-    if (filters.start) addHiddenField('start', filters.start);
-    if (filters.end) addHiddenField('end', filters.end);
-    Object.keys(filters.metadata).forEach(function(k) {
-      if (filters.metadata[k]) addHiddenField('meta.' + k, filters.metadata[k]);
-    });
-  }
-
-  function addHiddenField(name, value) {
-    var input = document.createElement('input');
-    input.type = 'hidden'; input.name = name; input.value = value; input.className = 'dynamic-field';
-    form.appendChild(input);
-  }
-
-  function hasActiveFilters() {
-    return filters.query || filters.service || filters.level ||
-           filters.event_type || filters.time_range ||
-           filters.environment || filters.commit_hash || filters.request_id ||
-           filters.exception_class || filters.error_fingerprint || filters.source_file ||
-           filters.start || filters.end || Object.keys(filters.metadata).length > 0;
-  }
-
-  function renderFilterChips() {
-    var html = '';
-    if (filters.level) html += chip('level', filters.level);
-    if (filters.service) html += chip('service', filters.service);
-    if (filters.event_type) html += chip('type', filters.event_type);
-    if (filters.time_range) html += chip('time', filters.time_range);
-    if (filters.environment) html += chip('env', filters.environment);
-    if (filters.commit_hash) html += chip('commit', filters.commit_hash);
-    if (filters.request_id) html += chip('rid', filters.request_id);
-    if (filters.exception_class) html += chip('error', filters.exception_class);
-    if (filters.error_fingerprint) html += chip('fingerprint', filters.error_fingerprint);
-    if (filters.source_file) html += chip('file', filters.source_file);
-    if (filters.query) html += chip('search', filters.query);
-    Object.keys(filters.metadata).forEach(function(k) { html += chip('meta.' + k, filters.metadata[k]); });
-    activeFiltersEl.innerHTML = html;
-    if (html) { activeFiltersEl.classList.add('has-filters'); } else { activeFiltersEl.classList.remove('has-filters'); }
-    activeFiltersEl.querySelectorAll('.term-filter-chip').forEach(function(el) {
-      el.addEventListener('click', function() {
-        var k = el.getAttribute('data-filter-key');
-        if (k === 'search') k = 'query';
-        else if (k === 'type') k = 'event_type';
-        else if (k === 'time') k = 'time_range';
-        else if (k === 'env') k = 'environment';
-        else if (k === 'commit') k = 'commit_hash';
-        else if (k === 'rid') k = 'request_id';
-        else if (k === 'error') k = 'exception_class';
-        else if (k === 'fingerprint') k = 'error_fingerprint';
-        else if (k === 'file') k = 'source_file';
-        else if (k === 'range') { filters.start = ''; filters.end = ''; syncHiddenFields(); renderFilterChips(); applyFilters(); return; }
-        else if (k.indexOf('meta.') === 0) { delete filters.metadata[k.substring(5)]; syncHiddenFields(); renderFilterChips(); applyFilters(); return; }
-        removeFilter(k);
-      });
-    });
-  }
-
-  function chip(key, val) {
-    return '<span class="term-filter-chip" data-filter-key="' + escH(key) + '">' +
-      '<span class="chip-key">' + escH(key) + ':</span>' +
-      '<span class="chip-val">' + escH(val) + '</span>' +
-      '<span class="chip-x">\u00d7</span></span>';
-  }
-
-  function buildFilterParams() {
-    var params = new URLSearchParams();
-    if (filters.query) params.set('query', filters.query);
-    if (filters.service) params.set('service', filters.service);
-    if (filters.level) params.set('level', filters.level);
-    if (filters.event_type) params.set('event_type', filters.event_type);
-    if (filters.time_range) params.set('time_range', filters.time_range);
-    if (filters.environment) params.set('environment', filters.environment);
-    if (filters.commit_hash) params.set('commit_hash', filters.commit_hash);
-    if (filters.request_id) params.set('request_id', filters.request_id);
-    if (filters.exception_class) params.set('exception_class', filters.exception_class);
-    if (filters.error_fingerprint) params.set('error_fingerprint', filters.error_fingerprint);
-    if (filters.source_file) params.set('source_file', filters.source_file);
-    if (filters.start) params.set('start', filters.start);
-    if (filters.end) params.set('end', filters.end);
-    Object.keys(filters.metadata).forEach(function(k) { if (filters.metadata[k]) params.set('meta.' + k, filters.metadata[k]); });
-    return params;
-  }
-
-  function pushFilterURL() {
-    var params = buildFilterParams();
-    var qs = params.toString();
-    var url = '/' + (qs ? '?' + qs : '');
-    history.pushState(null, '', url);
-  }
-
-  function applyFilters() {
-    pushFilterURL();
-    // Fetch filtered logs via API and replace the log list
-    var params = buildFilterParams();
-    params.set('limit', '50');
-    fetch('/logs?' + params.toString(), { headers: { 'HX-Request': 'true' } })
-      .then(function(r){
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        var ct = r.headers.get('content-type') || '';
-        if (ct.indexOf('text/html') === -1) throw new Error('unexpected response');
-        return r.text();
       })
-      .then(function(html) {
-        var el = document.getElementById('logs-list');
-        if (el) {
-          el.innerHTML = html.trim();
-          // When filters are active and no logs match, show a helpful message
-          if (hasActiveFilters()) {
-            var emptyMsg = el.querySelector('.term-empty-msg');
-            if (emptyMsg) {
-              emptyMsg.innerHTML = 'no logs matching current filters<br>try clearing filters with <kbd style="background:var(--bg-tertiary);padding:1px 5px;border-radius:3px;border:1px solid var(--border)">Esc</kbd> or <kbd style="background:var(--bg-tertiary);padding:1px 5px;border-radius:3px;border:1px solid var(--border)">c</kbd>';
-            }
-            var emptyPrompt = el.querySelector('.term-empty-prompt');
-            if (emptyPrompt) {
-              emptyPrompt.textContent = '$ grep "match" — 0 results';
-            }
-          }
-          // Update max-id from new content
-          var logList = el.querySelector('.log-list');
-          if (logList) {
-            var entries = logList.querySelectorAll('.term-entry');
-            var maxId = 0;
-            for (var i = 0; i < entries.length; i++) {
-              var id = parseInt(entries[i].getAttribute('data-log-id'), 10);
-              if (id > maxId) maxId = id;
-            }
-            if (maxId > 0) el.setAttribute('data-max-id', maxId);
-          }
-        }
-        setTimeout(scrollToBottom, 50);
-      })
-      .catch(function(){});
-  }
-
-  // ── Command line parsing ────────────────────────────────
-  function parseCommand(input) {
-    input = input.trim();
-    if (!input) return;
-    if (input === 'clear') { clearAllFilters(); cmdInput.value = ''; if (!live) window.toggleLive(); return; }
-
-    var parts = input.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
-    var searchParts = [];
-    var changed = false;
-
-    parts.forEach(function(part) {
-      var m = part.match(/^(level|l|service|svc|s|time|t|type|event_type|y|env|environment|e|commit|commit_hash|c|request_id|rid|r|error|exception_class|x|fingerprint|fp|error_fingerprint|file|source_file|f):(.+)$/i);
-      if (m) {
-        var key = m[1].toLowerCase(), val = m[2].replace(/^"(.*)"$/, '$1');
-        changed = true;
-        switch (key) {
-          case 'level': case 'l': filters.level = val.toUpperCase(); break;
-          case 'service': case 'svc': case 's': filters.service = val; break;
-          case 'time': case 't': filters.time_range = val; break;
-          case 'type': case 'event_type': case 'y': filters.event_type = val; break;
-          case 'env': case 'environment': case 'e': filters.environment = val; break;
-          case 'commit': case 'commit_hash': case 'c': filters.commit_hash = val; break;
-          case 'request_id': case 'rid': case 'r': filters.request_id = val; break;
-          case 'error': case 'exception_class': case 'x': filters.exception_class = val; break;
-          case 'fingerprint': case 'fp': case 'error_fingerprint': filters.error_fingerprint = val; break;
-          case 'file': case 'source_file': case 'f': filters.source_file = val; break;
-        }
-      } else { searchParts.push(part); }
-    });
-    if (searchParts.length > 0) { filters.query = searchParts.join(' '); changed = true; }
-    if (changed) { syncHiddenFields(); renderFilterChips(); applyFilters(); }
-    cmdInput.value = '';
-  }
-
-  var filterOrder = ['query', 'time_range', 'event_type', 'service', 'level', 'environment', 'commit_hash', 'request_id', 'exception_class', 'error_fingerprint', 'source_file'];
-  function removeLastFilter() {
-    var metaKeys = Object.keys(filters.metadata);
-    if (metaKeys.length > 0) { delete filters.metadata[metaKeys[metaKeys.length - 1]]; syncHiddenFields(); renderFilterChips(); applyFilters(); return true; }
-    if (filters.start || filters.end) { filters.start = ''; filters.end = ''; syncHiddenFields(); renderFilterChips(); applyFilters(); return true; }
-    for (var i = 0; i < filterOrder.length; i++) {
-      if (filters[filterOrder[i]]) { removeFilter(filterOrder[i]); return true; }
-    }
-    return false;
-  }
-
-  // ── Command input handlers ──────────────────────────────
-  cmdInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') { e.preventDefault(); parseCommand(cmdInput.value); }
-    if (e.key === 'Escape') {
-      if (cmdInput.value) { cmdInput.value = ''; }
-      else if (hasActiveFilters()) { clearAllFilters(); }
-      else { cmdInput.blur(); }
-    }
-    if (e.key === 'Backspace' && cmdInput.value === '' && cmdInput.selectionStart === 0) { e.preventDefault(); removeLastFilter(); }
-  });
-
-  // ── Keyboard shortcuts ──────────────────────────────────
-  document.addEventListener('keydown', function(e) {
-    var tag = document.activeElement.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-    var overlay = document.getElementById('shortcut-overlay');
-    if (overlay && overlay.style.display !== 'none') return;
-    switch (e.key) {
-      case '/': e.preventDefault(); cmdInput.focus(); break;
-      case 'c': e.preventDefault(); clearAllFilters(); break;
-      case 'p': e.preventDefault(); window.toggleLive(); break;
-    }
-  });
-
-  // ── Live polling ────────────────────────────────────────
-  var live = true;
-  var timer = null;
-  var POLL_INTERVAL = 2000;
-
-  function getMaxID() {
-    var el = document.getElementById('logs-list');
-    return el ? (el.getAttribute('data-max-id') || '0') : '0';
-  }
-  function setMaxID(id) {
-    var el = document.getElementById('logs-list');
-    if (el) el.setAttribute('data-max-id', id);
-  }
-
-  function poll() {
-    if (!live) return;
-    var sinceID = getMaxID();
-    var f = buildFilterParams().toString();
-    var url = '/api/logs/poll?since_id=' + sinceID + (f ? '&' + f : '');
-    fetch(url).then(function(r){ return r.text(); }).then(function(html) {
-      if (!live) return;
-      html = html.trim();
-      if (!html) return;
-      var container = document.createElement('div');
-      container.innerHTML = html;
-      var newMaxEl = container.querySelector('[data-new-max-id]');
-      if (newMaxEl) { setMaxID(newMaxEl.getAttribute('data-new-max-id')); newMaxEl.remove(); }
-      var logList = document.querySelector('.log-list');
-      if (!logList) {
-        var listEl = document.getElementById('logs-list');
-        if (listEl) { listEl.innerHTML = '<div class="log-list">' + container.innerHTML + '</div>'; }
-        if (autoScroll) scrollToBottom();
-        return;
-      }
-      var newEntries = container.querySelectorAll('.term-entry');
-      var count = 0;
-      for (var i = 0; i < newEntries.length; i++) { newEntries[i].classList.add('term-entry-new'); logList.appendChild(newEntries[i]); count++; }
-      if (count > 0) {
-        if (autoScroll) { scrollToBottom(); } else { pendingNew += count; newIndicatorCount.textContent = pendingNew; newIndicator.style.display = ''; }
-      }
-    }).catch(function(){});
-  }
-
-  function startPolling() { if (timer) return; timer = setInterval(poll, POLL_INTERVAL); poll(); }
-  function stopPolling() { if (timer) { clearInterval(timer); timer = null; } }
-
-  window.toggleLive = function() {
-    live = !live;
-    if (live) {
-      liveBadge.classList.remove('live-off'); liveBadge.classList.add('live-on');
-      liveBadge.setAttribute('aria-pressed', 'true');
-      liveLabel.textContent = 'LIVE'; startPolling(); scrollToBottom();
-    } else {
-      liveBadge.classList.remove('live-on'); liveBadge.classList.add('live-off');
-      liveBadge.setAttribute('aria-pressed', 'false');
-      liveLabel.textContent = 'PAUSED'; stopPolling();
-    }
-  };
-  liveBadge.classList.add('live-on');
-  startPolling();
-
-  // ── Infinite scroll upward ──────────────────────────────
-  var loadingOlder = false;
-  var currentOffset = {{.LogOffset}} + {{.LogLimit}};
-  var hasMoreOlder = {{if .HasMore}}true{{else}}false{{end}};
-
-  termOutput.addEventListener('scroll', function() {
-    if (loadingOlder || !hasMoreOlder) return;
-    if (termOutput.scrollTop < 80) { loadOlderLogs(); }
-  });
-
-  function loadOlderLogs() {
-    if (loadingOlder || !hasMoreOlder) return;
-    loadingOlder = true;
-    var params = buildFilterParams();
-    params.set('offset', currentOffset);
-    params.set('limit', '50');
-    var prevHeight = termOutput.scrollHeight;
-    fetch('/logs?' + params.toString(), { headers: { 'HX-Request': 'true' } })
-      .then(function(r) { return r.text(); })
-      .then(function(html) {
-        html = html.trim();
-        if (!html) { hasMoreOlder = false; loadingOlder = false; return; }
-        var logList = document.querySelector('.log-list');
-        if (!logList) { loadingOlder = false; return; }
-        var temp = document.createElement('div');
-        temp.innerHTML = html;
-        var sentinel = temp.querySelector('.logs-sentinel');
-        if (sentinel) { hasMoreOlder = true; sentinel.remove(); } else { hasMoreOlder = false; }
-        var entries = temp.querySelectorAll('.term-entry, .log-entry');
-        if (entries.length === 0) { hasMoreOlder = false; loadingOlder = false; return; }
-        var frag = document.createDocumentFragment();
-        for (var i = 0; i < entries.length; i++) { frag.appendChild(entries[i]); }
-        logList.insertBefore(frag, logList.firstChild);
-        currentOffset += entries.length;
-        termOutput.scrollTop += (termOutput.scrollHeight - prevHeight);
-        loadingOlder = false;
-      })
-      .catch(function() { loadingOlder = false; });
-  }
-
-  // ── Browser back/forward ────────────────────────────────
-  window.addEventListener('popstate', function() {
-    var params = new URLSearchParams(window.location.search);
-    filters.query = params.get('query') || '';
-    filters.service = params.get('service') || '';
-    filters.level = params.get('level') || '';
-    filters.event_type = params.get('event_type') || '';
-    filters.time_range = params.get('time_range') || '';
-    filters.environment = params.get('environment') || '';
-    filters.commit_hash = params.get('commit_hash') || '';
-    filters.request_id = params.get('request_id') || '';
-    filters.exception_class = params.get('exception_class') || '';
-    filters.error_fingerprint = params.get('error_fingerprint') || '';
-    filters.source_file = params.get('source_file') || '';
-    filters.start = params.get('start') || '';
-    filters.end = params.get('end') || '';
-    filters.metadata = {};
-    params.forEach(function(v, k) { if (k.indexOf('meta.') === 0) filters.metadata[k.substring(5)] = v; });
-    syncHiddenFields(); renderFilterChips(); applyFilters();
-  });
-
-  window.clearFilters = clearAllFilters;
-  syncHiddenFields(); renderFilterChips();
-
-  // ── Event bindings (replacing inline handlers) ────────────
-  var userMenuTrigger = document.getElementById('user-menu-trigger-btn');
-  if (userMenuTrigger) {
-    userMenuTrigger.addEventListener('click', function() { toggleUserMenu(); });
-  }
-  var themeToggleBtn = document.getElementById('theme-toggle-btn');
-  if (themeToggleBtn) {
-    themeToggleBtn.addEventListener('click', function() { cycleTheme(); updateDropdownTheme(); });
-  }
-  var logoutLink = document.getElementById('logout-link');
-  if (logoutLink) {
-    logoutLink.addEventListener('click', function(e) {
-      if (!confirm('Log out?')) { e.preventDefault(); }
-    });
-  }
-  newIndicator.addEventListener('click', function() { scrollToBottom(); });
-  form.addEventListener('submit', function(e) { e.preventDefault(); });
-  liveBadge.addEventListener('click', function() { window.toggleLive(); });
-})();
-
-// ── Copy log detail to clipboard ───────────────────────────
-function copyLogDetail(btn) {
-  var detail = btn.closest('.term-detail');
-  if (!detail || !detail._logData) return;
-  var text = JSON.stringify(detail._logData, null, 2);
-  navigator.clipboard.writeText(text).then(function() {
-    var orig = btn.textContent;
-    btn.textContent = 'Copied!';
-    setTimeout(function() { btn.textContent = orig; }, 1500);
-  }).catch(function() {
-    btn.textContent = 'Failed';
-    setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
-  });
-}
-document.addEventListener('click', function(e) {
-  if (e.target.classList.contains('term-copy-btn')) {
-    copyLogDetail(e.target);
-  }
-});
-
-// ── Autocomplete ──────────────────────────────────────────
-(function(){
-  var cmdInput  = document.getElementById('cmd-input');
-  var dropdown  = document.getElementById('ac-dropdown');
-  var activeIdx = -1;
-  var items     = [];
-
-  var prefixes = [
-    { label: 'level:', hint: 'filter by log level' },
-    { label: 'service:', hint: 'filter by service name' },
-    { label: 'time:', hint: 'filter by time range' },
-    { label: 'type:', hint: 'filter by event type' },
-    { label: 'env:', hint: 'filter by environment' },
-    { label: 'commit:', hint: 'filter by commit hash' },
-    { label: 'request_id:', hint: 'filter by request ID' },
-    { label: 'error:', hint: 'filter by exception class' },
-    { label: 'fingerprint:', hint: 'filter by error fingerprint' },
-    { label: 'file:', hint: 'filter by source file' }
-  ];
-
-  var staticValues = {
-    'level': ['DEBUG','INFO','WARN','ERROR'], 'l': ['DEBUG','INFO','WARN','ERROR'],
-    'time': ['15m','1h','6h','24h','7d'], 't': ['15m','1h','6h','24h','7d']
-  };
-  var apiMap = {
-    'service': '/api/services', 'svc': '/api/services', 's': '/api/services',
-    'type': '/api/event_types', 'event_type': '/api/event_types', 'y': '/api/event_types'
-  };
-  var cache = {};
-  var CACHE_TTL = 30000;
-
-  function escH(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
-
-  function fetchValues(prefix, fragment, cb) {
-    var key = prefix.toLowerCase();
-    if (staticValues[key]) return cb(filterBy(staticValues[key], fragment));
-    var url = apiMap[key];
-    if (!url) return cb([]);
-    var cached = cache[url];
-    if (cached && (Date.now() - cached.ts < CACHE_TTL)) return cb(filterBy(cached.data, fragment));
-    fetch(url).then(function(r){ return r.json(); }).then(function(data) {
-      if (!Array.isArray(data)) data = [];
-      cache[url] = { data: data, ts: Date.now() };
-      cb(filterBy(data, fragment));
-    }).catch(function(){ cb([]); });
-  }
-
-  function filterBy(arr, frag) {
-    if (!frag) return arr;
-    var lf = frag.toLowerCase();
-    return arr.filter(function(v){ return v.toLowerCase().indexOf(lf) !== -1; });
-  }
-
-  function getCurrentToken() {
-    var val = cmdInput.value, pos = cmdInput.selectionStart;
-    var before = val.substring(0, pos);
-    var start = before.lastIndexOf(' ') + 1;
-    return { text: before.substring(start), start: start, end: pos };
-  }
-
-  function renderDropdown(list) {
-    items = list; activeIdx = -1;
-    if (list.length === 0) { hide(); return; }
-    var html = '';
-    for (var i = 0; i < list.length; i++) {
-      html += '<div class="ac-item" data-idx="' + i + '"><span>' + escH(list[i].label) + '</span>' +
-        (list[i].hint ? '<span class="ac-hint">' + escH(list[i].hint) + '</span>' : '') + '</div>';
-    }
-    dropdown.innerHTML = html;
-    dropdown.style.display = '';
-    dropdown.querySelectorAll('.ac-item').forEach(function(el) {
-      el.addEventListener('mousedown', function(e) { e.preventDefault(); selectItem(parseInt(el.getAttribute('data-idx'))); });
-    });
-  }
-
-  function hide() { dropdown.style.display = 'none'; dropdown.innerHTML = ''; items = []; activeIdx = -1; }
-
-  function selectItem(idx) {
-    if (idx < 0 || idx >= items.length) return;
-    var replacement = items[idx].value || items[idx].label;
-    var token = getCurrentToken();
-    var val = cmdInput.value;
-    var newVal = val.substring(0, token.start) + replacement + val.substring(token.end);
-    cmdInput.value = newVal;
-    var newPos = token.start + replacement.length;
-    cmdInput.setSelectionRange(newPos, newPos);
-    hide(); cmdInput.focus();
-  }
-
-  function navigate(dir) {
-    if (items.length === 0) return;
-    var els = dropdown.querySelectorAll('.ac-item');
-    if (activeIdx >= 0 && activeIdx < els.length) els[activeIdx].classList.remove('ac-active');
-    activeIdx += dir;
-    if (activeIdx < 0) activeIdx = items.length - 1;
-    if (activeIdx >= items.length) activeIdx = 0;
-    els[activeIdx].classList.add('ac-active');
-    els[activeIdx].scrollIntoView({ block: 'nearest' });
-  }
-
-  function updateDropdown() {
-    var token = getCurrentToken();
-    var text = token.text;
-    if (text === '') { renderDropdown(prefixes.map(function(p){ return { label: p.label, hint: p.hint, value: p.label }; })); return; }
-    var colonIdx = text.indexOf(':');
-    if (colonIdx === -1) {
-      var lf = text.toLowerCase();
-      var matched = prefixes.filter(function(p){ return p.label.toLowerCase().indexOf(lf) !== -1; });
-      renderDropdown(matched.map(function(p){ return { label: p.label, hint: p.hint, value: p.label }; }));
-      return;
-    }
-    var prefix = text.substring(0, colonIdx), fragment = text.substring(colonIdx + 1);
-    fetchValues(prefix, fragment, function(vals) {
-      renderDropdown(vals.map(function(v){ return { label: prefix + ':' + v, hint: '', value: prefix + ':' + v }; }));
-    });
-  }
-
-  cmdInput.addEventListener('input', updateDropdown);
-  cmdInput.addEventListener('focus', updateDropdown);
-  cmdInput.addEventListener('blur', function() { setTimeout(hide, 150); });
-
-  cmdInput.addEventListener('keydown', function(e) {
-    if (dropdown.style.display === 'none') return;
-    if (e.key === 'ArrowDown') { e.preventDefault(); navigate(1); return; }
-    if (e.key === 'ArrowUp') { e.preventDefault(); navigate(-1); return; }
-    if (e.key === 'Tab') { if (items.length > 0) { e.preventDefault(); selectItem(activeIdx >= 0 ? activeIdx : 0); return; } }
-    if (e.key === 'Enter') { if (activeIdx >= 0 && items.length > 0) { e.preventDefault(); e.stopImmediatePropagation(); selectItem(activeIdx); return; } hide(); return; }
-    if (e.key === 'Escape') { hide(); }
-  }, true);
-
-  document.addEventListener('click', function(e) { if (!dropdown.contains(e.target) && e.target !== cmdInput) hide(); });
+      .catch(function() {});
+  }, 30000);
 })();
 </script>
 {{end}}

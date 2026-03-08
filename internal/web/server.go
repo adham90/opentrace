@@ -79,8 +79,13 @@ type Server struct {
 	journeyStore       store.JourneyStore
 	errorImpactStore   store.ErrorImpactStore
 	traceStore         store.TraceStore
-	reliabilityProvider ReliabilityProvider
-	versionChecker     *versionChecker
+	investigationSessionStore store.InvestigationSessionStore
+	codeEntityStore          store.CodeEntityStore
+	deployStore              store.DeployStore
+	eventStore               store.EventStore
+	testCorrelationStore     store.TestCorrelationStore
+	reliabilityProvider      ReliabilityProvider
+	versionChecker           *versionChecker
 	sseServer      *mcpgoserver.SSEServer
 	loginLimiter   *RateLimiter
 	apiLimiter     *RateLimiter
@@ -135,9 +140,14 @@ type ServerDeps struct {
 	AnalyticsStore       store.AnalyticsStore
 	JourneyStore         store.JourneyStore
 	ErrorImpactStore     store.ErrorImpactStore
-	TraceStore           store.TraceStore
-	IngestQueue          *IngestQueue
-	ReliabilityProvider  ReliabilityProvider
+	TraceStore                   store.TraceStore
+	InvestigationSessionStore    store.InvestigationSessionStore
+	CodeEntityStore              store.CodeEntityStore
+	DeployStore                  store.DeployStore
+	EventStore                   store.EventStore
+	TestCorrelationStore         store.TestCorrelationStore
+	IngestQueue                  *IngestQueue
+	ReliabilityProvider          ReliabilityProvider
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
@@ -176,9 +186,14 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		analyticsStore:     deps.AnalyticsStore,
 		journeyStore:       deps.JourneyStore,
 		errorImpactStore:   deps.ErrorImpactStore,
-		traceStore:          deps.TraceStore,
-		ingestQueue:         deps.IngestQueue,
-		reliabilityProvider: deps.ReliabilityProvider,
+		traceStore:                deps.TraceStore,
+		investigationSessionStore: deps.InvestigationSessionStore,
+		codeEntityStore:           deps.CodeEntityStore,
+		deployStore:               deps.DeployStore,
+		eventStore:                deps.EventStore,
+		testCorrelationStore:      deps.TestCorrelationStore,
+		ingestQueue:               deps.IngestQueue,
+		reliabilityProvider:       deps.ReliabilityProvider,
 		versionChecker:      newVersionChecker("adham90", "opentrace"),
 		auditCh:            make(chan auditEntry, 256),
 	}
@@ -270,10 +285,18 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Group(func(r chi.Router) {
 		r.Use(srv.RedirectToOnboardingIfNeeded)
 		r.Get("/", srv.handleDashboardPage)
-		r.Get("/logs", srv.handleLogsFragment)
+		r.Get("/logs", srv.handleLogsPage)
+		r.Get("/logs/fragment", srv.handleLogsFragment)
+		r.Get("/errors", srv.handleErrorsPage)
+		r.Get("/errors/{fingerprint}", srv.handleErrorDetailPage)
+		r.Get("/watchers", srv.handleWatchersPage)
+		r.Get("/watchers/{id}", srv.handleWatchDetailPage)
+		r.Get("/health", srv.handleHealthPage)
 		r.Get("/profile", srv.handleProfilePage)
 		r.Get("/connectors", srv.handleConnectorsPage)
 		r.Get("/tools", srv.handleToolsPage)
+		r.Get("/sessions", srv.handleSessionsPage)
+		r.Get("/sessions/{id}", srv.handleSessionDetailPage)
 	})
 
 	// Settings (admin)
@@ -323,6 +346,16 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		// Log ingestion with dynamic API key auth + rate limiting
 		r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/logs", srv.handleIngestLogs)
 
+		// Deploy webhook with dynamic API key auth + rate limiting
+		if srv.deployStore != nil {
+			r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/events/deploy", srv.handleDeployWebhook)
+		}
+
+		// Generic event webhooks with dynamic API key auth + rate limiting
+		if srv.eventStore != nil {
+			r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/events/{type}", srv.handleEventWebhook)
+		}
+
 		// Server registration and metric push with dynamic API key auth + rate limiting
 		if srv.serverStore != nil && srv.metricStore != nil {
 			r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/servers/register", srv.handleRegisterServer)
@@ -334,11 +367,14 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Use(srv.requireAuthOrOnboardingAPI)
 			r.Get("/services", srv.handleListServices)
 			r.Get("/event_types", srv.handleListEventTypes)
+			r.Get("/log_values", srv.handleLogValues)
 			r.Get("/connectors", srv.handleListConnectors)
 			r.Get("/connectors/{id}", srv.handleGetConnectorAPI)
 			r.Get("/overview", srv.handleOverviewAPI)
+			r.Get("/dashboard", srv.handleDashboardAPI)
 			r.Get("/tools", srv.handleToolsAPI)
 			r.Get("/logs/poll", srv.handleLogsPoll)
+			r.Get("/logs/histogram", srv.handleLogsHistogram)
 			r.Get("/logs/{id}", srv.handleGetLogDetail)
 			// Watches (agent-first)
 			if srv.watchStore != nil {
@@ -353,7 +389,9 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			// Error groups
 			if srv.errorGroupStore != nil {
 				r.Get("/errors", srv.handleListErrorGroups)
+				r.Get("/errors/batch", srv.handleBatchErrorGroups)
 				r.Get("/errors/{fingerprint}", srv.handleGetErrorGroup)
+				r.Get("/errors/{fingerprint}/histogram", srv.handleErrorHistogram)
 			}
 
 			// Health checks
@@ -401,10 +439,38 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 				r.Get("/traces/{traceID}/status", srv.handleGetTraceStatus)
 			}
 
+			// Deploys
+			if srv.deployStore != nil {
+				r.Get("/deploys", srv.handleListDeploys)
+			}
+
+			// Events
+			if srv.eventStore != nil {
+				r.Get("/events", srv.handleListEvents)
+			}
+
+			// Code entities
+			if srv.codeEntityStore != nil {
+				r.Get("/code-entities", srv.handleListCodeEntities)
+			}
+
+			// Test gaps
+			if srv.testCorrelationStore != nil {
+				r.Get("/test-gaps", srv.handleListTestGaps)
+			}
+
 			// MCP activity
 			if srv.mcpActivityStore != nil {
 				r.Get("/mcp/activity/stats", srv.handleMCPActivityStats)
 				r.Get("/mcp/activity", srv.handleMCPActivity)
+			}
+
+			// Investigation sessions
+			if srv.investigationSessionStore != nil {
+				r.Get("/investigations", srv.handleListInvestigations)
+				r.Get("/investigations/stats", srv.handleInvestigationStats)
+				r.Get("/investigations/{id}", srv.handleGetInvestigation)
+				r.Get("/investigations/{id}/steps", srv.handleInvestigationSteps)
 			}
 
 			if srv.serverStore != nil && srv.metricStore != nil {

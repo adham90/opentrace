@@ -44,8 +44,17 @@ type appDeps struct {
 	trendStore         store.TrendStore
 	analyticsStore     store.AnalyticsStore
 	journeyStore       store.JourneyStore
-	errorImpactStore   store.ErrorImpactStore
-	traceStore         store.TraceStore
+	errorImpactStore            store.ErrorImpactStore
+	traceStore                  store.TraceStore
+	investigationSessionStore    store.InvestigationSessionStore
+	toolTransitionStore          store.ToolTransitionStore
+	workflowTemplateStore        store.WorkflowTemplateStore
+	queryMemoryStore             store.QueryMemoryStore
+	runbookEffectivenessStore    store.RunbookEffectivenessStore
+	codeEntityStore              store.CodeEntityStore
+	deployStore                  store.DeployStore
+	eventStore                   store.EventStore
+	testCorrelationStore         store.TestCorrelationStore
 	registry           *connector.Registry
 	cfg              *config.Config
 }
@@ -154,6 +163,15 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	journeyStore := store.NewJourneyStore(db)
 	errorImpactStore := store.NewErrorImpactStore(db)
 	traceStore := store.NewTraceStore(db)
+	investigationSessionStore := store.NewInvestigationSessionStore(db)
+	toolTransitionStore := store.NewToolTransitionStore(db)
+	workflowTemplateStore := store.NewWorkflowTemplateStore(db)
+	queryMemoryStore := store.NewQueryMemoryStore(db)
+	runbookEffectivenessStore := store.NewRunbookEffectivenessStore(db)
+	codeEntityStore := store.NewCodeEntityStore(db)
+	deployStore := store.NewDeployStore(db)
+	eventStore := store.NewEventStore(db)
+	testCorrelationStore := store.NewTestCorrelationStore(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
@@ -178,9 +196,18 @@ func initApp(ctx context.Context) (*appDeps, error) {
 		analyticsStore:     analyticsStore,
 		journeyStore:       journeyStore,
 		errorImpactStore:   errorImpactStore,
-		traceStore:         traceStore,
-		registry:           registry,
-		cfg:                cfg,
+		traceStore:                  traceStore,
+		investigationSessionStore:    investigationSessionStore,
+		toolTransitionStore:          toolTransitionStore,
+		workflowTemplateStore:        workflowTemplateStore,
+		queryMemoryStore:             queryMemoryStore,
+		runbookEffectivenessStore:    runbookEffectivenessStore,
+		codeEntityStore:              codeEntityStore,
+		deployStore:                  deployStore,
+		eventStore:                   eventStore,
+		testCorrelationStore:         testCorrelationStore,
+		registry:                     registry,
+		cfg:                         cfg,
 	}, nil
 }
 
@@ -229,7 +256,16 @@ func runMCP() error {
 		TrendStore:         deps.trendStore,
 		AnalyticsStore:     deps.analyticsStore,
 		JourneyStore:       deps.journeyStore,
-		ErrorImpactStore:   deps.errorImpactStore,
+		ErrorImpactStore:             deps.errorImpactStore,
+		InvestigationSessionStore:    deps.investigationSessionStore,
+		ToolTransitionStore:          deps.toolTransitionStore,
+		WorkflowTemplateStore:        deps.workflowTemplateStore,
+		QueryMemoryStore:             deps.queryMemoryStore,
+		RunbookEffectivenessStore:    deps.runbookEffectivenessStore,
+		CodeEntityStore:              deps.codeEntityStore,
+		DeployStore:                  deps.deployStore,
+		EventStore:                   deps.eventStore,
+		TestCorrelationStore:         deps.testCorrelationStore,
 	})
 }
 
@@ -294,6 +330,10 @@ func run() error {
 		AnalyticsStore:  deps.analyticsStore,
 		JourneyStore:    deps.journeyStore,
 		ErrorImpactStore: deps.errorImpactStore,
+		CodeEntityStore:          deps.codeEntityStore,
+		DeployStore:              deps.deployStore,
+		EventStore:               deps.eventStore,
+		TestCorrelationStore:     deps.testCorrelationStore,
 	})
 
 	// Agent-first watch evaluator + stream (reactive on log ingestion)
@@ -330,8 +370,13 @@ func run() error {
 		AnalyticsStore:       deps.analyticsStore,
 		JourneyStore:         deps.journeyStore,
 		ErrorImpactStore:     deps.errorImpactStore,
-		TraceStore:           deps.traceStore,
-		ReliabilityProvider:  hcSched,
+		TraceStore:                deps.traceStore,
+		InvestigationSessionStore: deps.investigationSessionStore,
+		CodeEntityStore:           deps.codeEntityStore,
+		DeployStore:               deps.deployStore,
+		EventStore:                deps.eventStore,
+		TestCorrelationStore:      deps.testCorrelationStore,
+		ReliabilityProvider:       hcSched,
 	})
 
 	httpServer := &http.Server{
@@ -492,6 +537,34 @@ func run() error {
 						slog.Info("pruned old agent notes", "count", n)
 					}
 				}
+				if deps.codeEntityStore != nil {
+					if n, err := deps.codeEntityStore.Prune(ctx, retention); err != nil {
+						slog.Warn("code entity prune failed", "error", err)
+					} else if n > 0 {
+						slog.Info("pruned stale code entities", "count", n)
+					}
+				}
+				if deps.deployStore != nil {
+					if n, err := deps.deployStore.Prune(ctx, retention); err != nil {
+						slog.Warn("deploy prune failed", "error", err)
+					} else if n > 0 {
+						slog.Info("pruned old deploys", "count", n)
+					}
+				}
+				if deps.eventStore != nil {
+					if n, err := deps.eventStore.Prune(ctx, retention); err != nil {
+						slog.Warn("event prune failed", "error", err)
+					} else if n > 0 {
+						slog.Info("pruned old events", "count", n)
+					}
+				}
+				if deps.testCorrelationStore != nil {
+					if n, err := deps.testCorrelationStore.Prune(ctx, retention); err != nil {
+						slog.Warn("uncovered paths prune failed", "error", err)
+					} else if n > 0 {
+						slog.Info("pruned stale uncovered paths", "count", n)
+					}
+				}
 			}
 
 			// Metric retention: env override > DB setting > global retention
@@ -575,6 +648,28 @@ func run() error {
 					return nil
 				})
 			}
+			if deps.codeEntityStore != nil {
+				g.Go(func() error {
+					if err := deps.codeEntityStore.BatchRecomputeRisk(gctx); err != nil {
+						slog.Warn("code entity risk recomputation failed", "error", err)
+					}
+					return nil
+				})
+			}
+			if deps.deployStore != nil && deps.analyticsStore != nil {
+				g.Go(func() error {
+					measureDeployImpacts(gctx, deps.deployStore, deps.analyticsStore)
+					return nil
+				})
+			}
+			if deps.testCorrelationStore != nil {
+				g.Go(func() error {
+					if err := deps.testCorrelationStore.RefreshUncoveredPaths(gctx); err != nil {
+						slog.Warn("test correlation refresh failed", "error", err)
+					}
+					return nil
+				})
+			}
 			_ = g.Wait()
 			running.Unlock()
 		}
@@ -640,6 +735,69 @@ func run() error {
 	}
 
 	return nil
+}
+
+// measureDeployImpacts finds deploys older than 15 minutes that haven't been measured yet,
+// computes before/after error rates and durations using the analytics store, and updates
+// each deploy with its impact metrics.
+func measureDeployImpacts(ctx context.Context, ds store.DeployStore, as store.AnalyticsStore) {
+	pending, err := ds.GetPendingMeasurement(ctx, 15*time.Minute)
+	if err != nil {
+		slog.Warn("failed to get pending deploy measurements", "error", err)
+		return
+	}
+	for _, d := range pending {
+		window := 15 * time.Minute
+
+		preSummary, err := as.TrafficSummary(ctx, store.AnalyticsParams{
+			Service: d.Service,
+			Since:   d.DeployedAt.Add(-window),
+			Until:   d.DeployedAt,
+		})
+		if err != nil {
+			slog.Warn("deploy impact: pre-deploy traffic summary failed", "deploy_id", d.ID, "error", err)
+			continue
+		}
+
+		postSummary, err := as.TrafficSummary(ctx, store.AnalyticsParams{
+			Service: d.Service,
+			Since:   d.DeployedAt,
+			Until:   d.DeployedAt.Add(window),
+		})
+		if err != nil {
+			slog.Warn("deploy impact: post-deploy traffic summary failed", "deploy_id", d.ID, "error", err)
+			continue
+		}
+
+		impact := store.DeployImpact{
+			PreErrorRate:      preSummary.ErrorRate,
+			PostErrorRate:     postSummary.ErrorRate,
+			PreAvgDurationMs:  preSummary.AvgDurationMs,
+			PostAvgDurationMs: postSummary.AvgDurationMs,
+		}
+
+		if preSummary.ErrorRate > 0 {
+			impact.ErrorRateChangePct = ((postSummary.ErrorRate - preSummary.ErrorRate) / preSummary.ErrorRate) * 100
+		}
+		if preSummary.AvgDurationMs > 0 {
+			impact.DurationChangePct = ((postSummary.AvgDurationMs - preSummary.AvgDurationMs) / preSummary.AvgDurationMs) * 100
+		}
+
+		// Mark as incident if error rate increased >50% or response time >2x
+		impact.IsIncident = impact.ErrorRateChangePct > 50 || impact.DurationChangePct > 100
+
+		if err := ds.MeasureImpact(ctx, d.ID, impact); err != nil {
+			slog.Warn("deploy impact: failed to record measurement", "deploy_id", d.ID, "error", err)
+		} else {
+			status := "measured"
+			if impact.IsIncident {
+				status = "incident"
+			}
+			slog.Info("measured deploy impact", "deploy_id", d.ID, "status", status,
+				"error_rate_change_pct", impact.ErrorRateChangePct,
+				"duration_change_pct", impact.DurationChangePct)
+		}
+	}
 }
 
 // runBackup creates a safe backup of the SQLite database.

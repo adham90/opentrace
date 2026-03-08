@@ -123,6 +123,16 @@ func errorDetailHandler(egs store.ErrorGroupStore, ls store.LogStore) server.Too
 			return mcp.NewToolResultError(fmt.Sprintf("error group not found: %v", err)), nil
 		}
 
+		// Link investigated error to investigation session.
+		if recurrenceDetector != nil && sessionTracker != nil {
+			if sid := sessionTracker.CurrentSessionID(); sid != "" {
+				recurrenceDetector.LinkInvestigatedError(ctx, sid, fingerprint)
+				if eg.ReopenedCount > 0 {
+					recurrenceDetector.DetectErrorRecurrence(ctx, sid, fingerprint, eg.ReopenedCount)
+				}
+			}
+		}
+
 		// Fetch lifecycle events.
 		events, _ := egs.ListEvents(ctx, fingerprint, 10)
 
@@ -189,6 +199,13 @@ func errorDetailHandler(egs store.ErrorGroupStore, ls store.LogStore) server.Too
 			}
 		}
 
+		// Inject recurrence context for reopened errors.
+		if eg.ReopenedCount > 0 && recurrenceDetector != nil && sessionTracker != nil {
+			if sid := sessionTracker.CurrentSessionID(); sid != "" {
+				recurrenceDetector.InjectRecurrenceContext(ctx, sid, resp)
+			}
+		}
+
 		// Suggest next steps.
 		var suggestions []ToolSuggestion
 		if eg.ExceptionClass != "" {
@@ -232,6 +249,13 @@ func resolveErrorHandler(egs store.ErrorGroupStore) server.ToolHandlerFunc {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to resolve: %v", err)), nil
 		}
 
+		// Link resolved error to investigation session.
+		if recurrenceDetector != nil && sessionTracker != nil {
+			if sid := sessionTracker.CurrentSessionID(); sid != "" {
+				recurrenceDetector.LinkResolvedError(ctx, sid, fingerprint)
+			}
+		}
+
 		resp := map[string]any{
 			"status":      "resolved",
 			"fingerprint": fingerprint,
@@ -263,6 +287,13 @@ func ignoreErrorHandler(egs store.ErrorGroupStore) server.ToolHandlerFunc {
 
 		if err := egs.Ignore(ctx, fingerprint, reason); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to ignore: %v", err)), nil
+		}
+
+		// Link resolved (ignored) error to investigation session.
+		if recurrenceDetector != nil && sessionTracker != nil {
+			if sid := sessionTracker.CurrentSessionID(); sid != "" {
+				recurrenceDetector.LinkResolvedError(ctx, sid, fingerprint)
+			}
 		}
 
 		resp := map[string]any{

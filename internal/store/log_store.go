@@ -205,31 +205,34 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 		conditions = append(conditions, "logs_fts MATCH ?")
 		args = append(args, params.Query)
 	}
+	// Multi-value inclusion helper: "a,b" → col COLLATE NOCASE IN (?,?)
+	multiIn := func(col, value string) {
+		vals := strings.Split(value, ",")
+		if len(vals) == 1 {
+			conditions = append(conditions, col+" = ? COLLATE NOCASE")
+			args = append(args, strings.TrimSpace(vals[0]))
+		} else {
+			ph := make([]string, len(vals))
+			for i, v := range vals {
+				ph[i] = "?"
+				args = append(args, strings.TrimSpace(v))
+			}
+			conditions = append(conditions, col+" COLLATE NOCASE IN ("+strings.Join(ph, ",")+")")
+		}
+	}
+
 	if params.Service != "" {
-		conditions = append(conditions, "l.service = ? COLLATE NOCASE")
-		args = append(args, params.Service)
+		multiIn("l.service", params.Service)
 	}
 	if params.Level != "" {
-		levels := strings.Split(params.Level, ",")
-		if len(levels) == 1 {
-			conditions = append(conditions, "l.level = ? COLLATE NOCASE")
-			args = append(args, levels[0])
-		} else {
-			placeholders := make([]string, len(levels))
-			for i, lv := range levels {
-				placeholders[i] = "?"
-				args = append(args, strings.TrimSpace(lv))
-			}
-			conditions = append(conditions, "l.level COLLATE NOCASE IN ("+strings.Join(placeholders, ",")+")")
-		}
+		multiIn("l.level", params.Level)
 	}
 	if params.TraceID != "" {
 		conditions = append(conditions, "l.trace_id = ?")
 		args = append(args, params.TraceID)
 	}
 	if params.Environment != "" {
-		conditions = append(conditions, "l.environment = ?")
-		args = append(args, params.Environment)
+		multiIn("l.environment", params.Environment)
 	}
 	if params.CommitHash != "" {
 		if len(params.CommitHash) < 40 {
@@ -245,20 +248,42 @@ func (s *logStore) Search(ctx context.Context, params LogSearchParams) ([]LogEnt
 		args = append(args, params.RequestID)
 	}
 	if params.EventType != "" {
-		conditions = append(conditions, "l.event_type = ?")
-		args = append(args, params.EventType)
+		multiIn("l.event_type", params.EventType)
 	}
 	if params.ExceptionClass != "" {
-		conditions = append(conditions, "l.exception_class = ?")
-		args = append(args, params.ExceptionClass)
+		multiIn("l.exception_class", params.ExceptionClass)
 	}
 	if params.ErrorFingerprint != "" {
-		conditions = append(conditions, "l.error_fingerprint = ?")
-		args = append(args, params.ErrorFingerprint)
+		multiIn("l.error_fingerprint", params.ErrorFingerprint)
 	}
 	if params.SourceFile != "" {
-		conditions = append(conditions, "l.source_file = ?")
-		args = append(args, params.SourceFile)
+		multiIn("l.source_file", params.SourceFile)
+	}
+
+	// Negation/exclusion filters: col NOT IN (?,?) or col != ?
+	excludeColMap := map[string]string{
+		"service": "l.service", "level": "l.level", "environment": "l.environment",
+		"event_type": "l.event_type", "exception_class": "l.exception_class",
+		"error_fingerprint": "l.error_fingerprint", "source_file": "l.source_file",
+		"commit_hash": "l.commit_hash",
+	}
+	for field, rawVal := range params.Exclude {
+		col, ok := excludeColMap[field]
+		if !ok {
+			continue
+		}
+		vals := strings.Split(rawVal, ",")
+		if len(vals) == 1 {
+			conditions = append(conditions, col+" != ? COLLATE NOCASE")
+			args = append(args, strings.TrimSpace(vals[0]))
+		} else {
+			ph := make([]string, len(vals))
+			for i, v := range vals {
+				ph[i] = "?"
+				args = append(args, strings.TrimSpace(v))
+			}
+			conditions = append(conditions, col+" COLLATE NOCASE NOT IN ("+strings.Join(ph, ",")+")")
+		}
 	}
 	if params.SinceID > 0 {
 		conditions = append(conditions, "l.id > ?")
@@ -430,6 +455,44 @@ func (s *logStore) CountByLevel(ctx context.Context, params LogCountParams) (map
 	return result, rows.Err()
 }
 
+func (s *logStore) Histogram(ctx context.Context, params LogHistogramParams) ([]LogHistogramBucket, error) {
+	var buckets []LogHistogramBucket
+
+	for t := params.Since; t.Before(params.Until); t = t.Add(params.Interval) {
+		bucketEnd := t.Add(params.Interval)
+		if bucketEnd.After(params.Until) {
+			bucketEnd = params.Until
+		}
+
+		query := `SELECT COUNT(*) AS total,
+		          COALESCE(SUM(CASE WHEN level IN ('ERROR', 'error', 'FATAL', 'fatal') THEN 1 ELSE 0 END), 0) AS error_count
+		          FROM logs WHERE timestamp >= ? AND timestamp < ?`
+		args := []any{t.UTC().Format(time.RFC3339Nano), bucketEnd.UTC().Format(time.RFC3339Nano)}
+
+		if params.Service != "" {
+			query += ` AND service = ? COLLATE NOCASE`
+			args = append(args, params.Service)
+		}
+		if params.Level != "" {
+			query += ` AND level = ? COLLATE NOCASE`
+			args = append(args, params.Level)
+		}
+
+		var total, errorCount int
+		if err := s.db.QueryRowContext(ctx, query, args...).Scan(&total, &errorCount); err != nil {
+			return nil, fmt.Errorf("histogram bucket query: %w", err)
+		}
+
+		buckets = append(buckets, LogHistogramBucket{
+			Timestamp:  t,
+			Total:      total,
+			ErrorCount: errorCount,
+		})
+	}
+
+	return buckets, nil
+}
+
 func (s *logStore) CountByService(ctx context.Context, params LogCountParams) ([]ServiceLogCount, error) {
 	query := `SELECT service,
 	                 COUNT(*) AS total,
@@ -550,6 +613,7 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*LogEntry, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, timestamp, level, service, environment, commit_hash,
 			trace_id, span_id, parent_span_id, request_id,
+			user_id, session_id,
 			message, event_type, exception_class, error_fingerprint,
 			source_file, source_line, metadata
 		FROM logs WHERE id = ?`, id)
@@ -558,10 +622,12 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*LogEntry, error) {
 	var tsStr string
 	var metaJSON sql.NullString
 	var environment, commitHash, spanID, parentSpanID, requestID sql.NullString
+	var userID, sessionID sql.NullString
 	var eventType, exceptionClass, errorFingerprint, sourceFile sql.NullString
 	var sourceLine sql.NullInt64
 	if err := row.Scan(&entry.ID, &tsStr, &entry.Level, &entry.Service, &environment, &commitHash,
 		&entry.TraceID, &spanID, &parentSpanID, &requestID,
+		&userID, &sessionID,
 		&entry.Message, &eventType, &exceptionClass, &errorFingerprint,
 		&sourceFile, &sourceLine, &metaJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -584,6 +650,12 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*LogEntry, error) {
 	}
 	if requestID.Valid {
 		entry.RequestID = requestID.String
+	}
+	if userID.Valid {
+		entry.UserID = userID.String
+	}
+	if sessionID.Valid {
+		entry.SessionID = sessionID.String
 	}
 	if eventType.Valid {
 		entry.EventType = eventType.String

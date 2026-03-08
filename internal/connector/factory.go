@@ -24,6 +24,30 @@ func CreateConnector(ctx context.Context, ds store.DataSource, logStore store.Lo
 		maxRows, stmtTimeout := resolveQueryGuardrails(ctx, cfg, ss)
 		return NewDatabaseConnector(ctx, connStr, maxRows, stmtTimeout)
 
+	case store.ConnectorMySQL:
+		connStr, ok := ds.Config["connection_string"].(string)
+		if !ok || connStr == "" {
+			return nil, fmt.Errorf("MySQL connector requires connection_string in config")
+		}
+		maxRows, stmtTimeout := resolveQueryGuardrails(ctx, cfg, ss)
+		return NewMySQLConnector(ctx, connStr, maxRows, stmtTimeout)
+
+	case store.ConnectorRedis:
+		connStr, ok := ds.Config["connection_string"].(string)
+		if !ok || connStr == "" {
+			return nil, fmt.Errorf("Redis connector requires connection_string in config")
+		}
+		return NewRedisConnector(ctx, connStr)
+
+	case store.ConnectorTurso:
+		connStr, ok := ds.Config["connection_string"].(string)
+		if !ok || connStr == "" {
+			return nil, fmt.Errorf("Turso connector requires connection_string in config")
+		}
+		authToken, _ := ds.Config["auth_token"].(string)
+		maxRows, _ := resolveQueryGuardrails(ctx, cfg, ss)
+		return NewTursoConnector(ctx, connStr, authToken, maxRows)
+
 	default:
 		return nil, fmt.Errorf("unknown connector type: %q", ds.Type)
 	}

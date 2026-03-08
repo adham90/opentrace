@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -11,11 +12,20 @@ import (
 
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/guardrail"
+	"github.com/adham90/opentrace/internal/store"
 )
+
+// queryFingerprintRe strips string/numeric literals to create a query fingerprint.
+var queryFingerprintRe = regexp.MustCompile(`'[^']*'|"[^"]*"|\b\d+(\.\d+)?\b`)
+
+// normalizeQueryFingerprint creates a stable fingerprint by replacing literals with ?.
+func normalizeQueryFingerprint(query string) string {
+	return strings.TrimSpace(queryFingerprintRe.ReplaceAllString(query, "?"))
+}
 
 // explainQueryHandler returns a handler that runs EXPLAIN ANALYZE on a query
 // to show the execution plan, actual vs estimated rows, and timing.
-func explainQueryHandler(registry *connector.Registry) server.ToolHandlerFunc {
+func explainQueryHandler(registry *connector.Registry, qmStore store.QueryMemoryStore) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 
@@ -99,6 +109,30 @@ func explainQueryHandler(registry *connector.Registry) server.ToolHandlerFunc {
 
 		if len(warnings) > 0 {
 			resp["warnings"] = warnings
+		}
+
+		// Query memory: check for prior investigation of this query
+		fingerprint := normalizeQueryFingerprint(query)
+		if qmStore != nil && fingerprint != "" {
+			qm, qmErr := qmStore.Get(ctx, fingerprint)
+			if qmErr == nil && qm != nil {
+				resp["query_memory"] = map[string]any{
+					"investigation_count": qm.InvestigationCount,
+					"last_root_cause":     qm.LastRootCause,
+					"last_fix":            qm.LastFix,
+				}
+			}
+		}
+
+		// Track fingerprint on session
+		if sessionTracker != nil {
+			if sess := sessionTracker.CurrentSession(); sess != nil && fingerprint != "" {
+				explained := append([]string{}, sess.ExplainedQueries...)
+				explained = append(explained, fingerprint)
+				sessionTracker.UpdateSession(store.UpdateInvestigationSessionParams{
+					ExplainedQueries: explained,
+				})
+			}
 		}
 
 		data, err := json.Marshal(resp)

@@ -95,6 +95,13 @@ func watchHandler(watchStore store.WatchStore, logStore store.LogStore, metrics 
 			w, _ = watchStore.GetByID(ctx, w.ID)
 		}
 
+		// Link created watcher to investigation session.
+		if recurrenceDetector != nil && sessionTracker != nil {
+			if sid := sessionTracker.CurrentSessionID(); sid != "" {
+				recurrenceDetector.LinkCreatedWatcher(ctx, sid, w.ID)
+			}
+		}
+
 		data, _ := json.Marshal(w)
 		return mcp.NewToolResultText(string(data)), nil
 	}
@@ -193,6 +200,18 @@ func watchStatusHandler(watchStore store.WatchStore) func(ctx context.Context, r
 			"pending_alerts": pendingCount,
 		}
 
+		// Link first triggered watch to investigation session.
+		if recurrenceDetector != nil && sessionTracker != nil {
+			if sid := sessionTracker.CurrentSessionID(); sid != "" {
+				for _, w := range watches {
+					if w.Status == store.WatchStatusTriggered {
+						recurrenceDetector.LinkTriggeredWatcher(ctx, sid, w.ID)
+						break
+					}
+				}
+			}
+		}
+
 		// Suggest next actions based on alert state.
 		var suggestions []ToolSuggestion
 		if pendingCount > 0 {
@@ -240,6 +259,13 @@ func investigateHandler(watchStore store.WatchStore, logStore store.LogStore, me
 			alert, err := watchStore.GetAlert(ctx, alertID)
 			if err != nil {
 				return nil, fmt.Errorf("getting alert: %w", err)
+			}
+
+			// Link triggered watcher to investigation session.
+			if recurrenceDetector != nil && sessionTracker != nil {
+				if sid := sessionTracker.CurrentSessionID(); sid != "" {
+					recurrenceDetector.LinkTriggeredWatcher(ctx, sid, alert.WatchID)
+				}
 			}
 
 			// Wrap alert in a map so we can attach suggestions.

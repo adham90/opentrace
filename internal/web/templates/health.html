@@ -1,0 +1,68 @@
+{{define "content"}}
+<div class="settings-page">
+  <div class="page-header">
+    <h1><span class="prompt">$</span> health</h1>
+  </div>
+
+  {{if .UptimeSummaries}}
+  <div class="health-grid">
+    {{range .UptimeSummaries}}
+    <div class="health-card">
+      <div class="health-card-header">
+        <span class="health-card-name">{{.Name}}</span>
+        <span class="health-card-status {{if eq .CurrentStatus "up"}}hc-up{{else if eq .CurrentStatus "down"}}hc-down{{else}}hc-degraded{{end}}">
+          <span class="status-dot {{if eq .CurrentStatus "up"}}status-dot-ok{{else if eq .CurrentStatus "down"}}status-dot-err{{else}}status-dot-warn{{end}}"></span>
+          {{.CurrentStatus}}
+        </span>
+      </div>
+      <div class="health-card-stats">
+        <span>uptime: <span class="hc-val">{{fmtFloat .UptimePct}}%</span></span>
+        <span>avg: <span class="hc-val">{{fmtFloat .AvgResponseMs}}ms</span></span>
+        <span>checks: <span class="hc-val">{{.TotalChecks}}</span></span>
+      </div>
+    </div>
+    {{end}}
+  </div>
+  {{end}}
+
+  {{if .HealthChecks}}
+  <div class="section-header">
+    <span class="section-title">Health Checks</span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>URL</th>
+        <th>Method</th>
+        <th>Interval</th>
+        <th>Timeout</th>
+        <th>Expected</th>
+        <th>Enabled</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .HealthChecks}}
+      <tr>
+        <td style="font-weight:500;color:var(--text-bright)">{{.Name}}</td>
+        <td style="color:var(--cyan);max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{.URL}}</td>
+        <td>{{.Method}}</td>
+        <td>{{fmtDuration .IntervalSecs}}</td>
+        <td>{{fmtDuration .TimeoutSecs}}</td>
+        <td>{{.ExpectedStatus}}</td>
+        <td>
+          {{if .Enabled}}<span class="badge badge-connected">enabled</span>
+          {{else}}<span class="badge badge-disconnected">disabled</span>{{end}}
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <div class="empty-state">
+    <div class="empty-state-title">No health checks configured</div>
+    <div class="empty-state-desc">Health checks can be created through the MCP server to monitor endpoints.</div>
+  </div>
+  {{end}}
+</div>
+{{end}}

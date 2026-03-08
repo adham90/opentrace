@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "opentrace-web",
+      "runtimeExecutable": "/Users/adhameldeeb/go/bin/air",
+      "runtimeArgs": [],
+      "port": 8080
+    },
+    {
+      "name": "opentrace-web-no-reload",
+      "runtimeExecutable": "go",
+      "runtimeArgs": ["run", "./cmd/opentrace"],
+      "port": 8080
+    }
+  ]
+}
