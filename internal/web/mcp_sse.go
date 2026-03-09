@@ -11,16 +11,21 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-// skipCompressForSSE strips Accept-Encoding for /mcp/ paths so the
-// downstream Compress middleware leaves the SSE stream uncompressed.
-// SSE requires raw, unflushed writes; gzip wrapping breaks event delivery.
-func skipCompressForSSE(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/mcp/") {
-			r.Header.Del("Accept-Encoding")
-		}
-		next.ServeHTTP(w, r)
-	})
+// wrapCompressSkipMCP wraps chi's Compress middleware so that /mcp/ paths
+// bypass it entirely. Simply stripping Accept-Encoding is not enough because
+// chi's compressResponseWriter still wraps the http.ResponseWriter, which
+// breaks http.Flusher — causing SSE events to be buffered until close.
+func wrapCompressSkipMCP(compressMw func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		compressed := compressMw(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/mcp/") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			compressed.ServeHTTP(w, r)
+		})
+	}
 }
 
 // MCPTokenAuth is middleware that authenticates requests using a Bearer token
