@@ -35,6 +35,7 @@ func normalizePath(path string) string {
 }
 
 // statusRecorder wraps http.ResponseWriter to capture the status code.
+// It implements http.Flusher so SSE streaming works through this middleware.
 type statusRecorder struct {
 	http.ResponseWriter
 	statusCode int
@@ -44,6 +45,18 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(code int) {
 	r.statusCode = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+// Flush delegates to the underlying ResponseWriter if it supports flushing.
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap returns the underlying ResponseWriter for middleware compatibility.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
 }
 
 // PrometheusMiddleware records HTTP request counts and duration as Prometheus metrics.
