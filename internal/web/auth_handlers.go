@@ -14,6 +14,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/adham90/opentrace/internal/store"
+	webviews "github.com/adham90/opentrace/internal/web/views"
 )
 
 const (
@@ -73,13 +74,6 @@ func (lt *loginTracker) recordSuccess(email string) {
 	delete(lt.entries, email)
 }
 
-// authPageData extends pageData with auth-specific fields.
-type authPageData struct {
-	pageData
-	Error   string
-	Success string
-	Users   []store.User
-}
 
 const sessionDuration = 24 * time.Hour          // default: 1 day
 const rememberMeDuration = 7 * 24 * time.Hour    // "Remember me": 7 days
@@ -102,11 +96,8 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	data := authPageData{pageData: s.newPageData(r, "Login", "")}
-	tmpl := s.getTemplate(loginTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/login.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	layout := s.layoutData(r, "Login", "")
+	webviews.LoginPage(layout, "").Render(r.Context(), w)
 }
 
 func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
@@ -175,15 +166,9 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) renderLoginError(w http.ResponseWriter, r *http.Request, msg string) {
-	data := authPageData{
-		pageData: s.newPageData(r, "Login", ""),
-		Error:    msg,
-	}
+	layout := s.layoutData(r, "Login", "")
 	w.WriteHeader(http.StatusBadRequest)
-	tmpl := s.getTemplate(loginTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/login.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	webviews.LoginPage(layout, msg).Render(r.Context(), w)
 }
 
 // --- Register ---
@@ -208,11 +193,8 @@ func (s *Server) handleRegisterPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := authPageData{pageData: s.newPageData(r, "Register", "")}
-	tmpl := s.getTemplate(registerTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/register.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	layout := s.layoutData(r, "Register", "")
+	webviews.RegisterPage(layout, "").Render(r.Context(), w)
 }
 
 func (s *Server) handleRegisterSubmit(w http.ResponseWriter, r *http.Request) {
@@ -299,15 +281,9 @@ func (s *Server) handleRegisterSubmit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) renderRegisterError(w http.ResponseWriter, r *http.Request, msg string) {
-	data := authPageData{
-		pageData: s.newPageData(r, "Register", ""),
-		Error:    msg,
-	}
+	layout := s.layoutData(r, "Register", "")
 	w.WriteHeader(http.StatusBadRequest)
-	tmpl := s.getTemplate(registerTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/register.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	webviews.RegisterPage(layout, msg).Render(r.Context(), w)
 }
 
 // --- Logout ---
@@ -330,14 +306,8 @@ func (s *Server) handleProfilePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := authPageData{pageData: s.newPageData(r, "Profile", "profile")}
-	if msg := r.URL.Query().Get("success"); msg != "" {
-		data.Success = msg
-	}
-	tmpl := s.getTemplate(profileTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/profile.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	layout := s.layoutData(r, "Profile", "profile")
+	webviews.ProfilePage(layout, user).Render(r.Context(), w)
 }
 
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {

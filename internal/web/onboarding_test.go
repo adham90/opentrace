@@ -27,7 +27,7 @@ func TestOnboardingPage_ShowsWhenNoUsers(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "setup") {
+	if !strings.Contains(strings.ToLower(rec.Body.String()), "setup") {
 		t.Fatal("expected onboarding page content")
 	}
 }

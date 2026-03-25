@@ -9,14 +9,11 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/adham90/opentrace/internal/store"
+	webviews "github.com/adham90/opentrace/internal/web/views"
 )
 
-type onboardingData struct {
-	pageData
-	Error   string
-	Step    int
-	BaseURL string
-}
+// onboardingData is unused but kept for reference during migration cleanup.
+// TODO: remove after verifying all onboarding handlers use templ.
 
 func (s *Server) handleOnboardingPage(w http.ResponseWriter, r *http.Request) {
 	if s.userStore != nil {
@@ -32,14 +29,8 @@ func (s *Server) handleOnboardingPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	data := onboardingData{
-		pageData: s.newPageData(r, "Setup", ""),
-		Step:     1,
-	}
-	tmpl := s.getTemplate(onboardingTmpl,
-		"internal/web/templates/layout_minimal.html",
-		"internal/web/templates/onboarding.html")
-	tmpl.ExecuteTemplate(w, "layout_minimal", data)
+	layout := s.layoutData(r, "Setup", "")
+	webviews.OnboardingPage(layout, 1, "", "", "").Render(r.Context(), w)
 }
 
 func (s *Server) handleOnboardingSubmit(w http.ResponseWriter, r *http.Request) {
@@ -141,29 +132,14 @@ func (s *Server) renderOnboardingStep2(w http.ResponseWriter, r *http.Request) {
 		scheme = fwd
 	}
 	baseURL := scheme + "://" + r.Host
+	apiKey := s.getEffectiveAPIKey(r.Context())
 
-	data := onboardingData{
-		pageData: s.newPageData(r, "Setup Complete", ""),
-		Step:     2,
-		BaseURL:  baseURL,
-	}
-	data.pageData.APIKey = s.getEffectiveAPIKey(r.Context())
-
-	tmpl := s.getTemplate(onboardingTmpl,
-		"internal/web/templates/layout_minimal.html",
-		"internal/web/templates/onboarding.html")
-	tmpl.ExecuteTemplate(w, "layout_minimal", data)
+	layout := s.layoutData(r, "Setup Complete", "")
+	webviews.OnboardingPage(layout, 2, "", apiKey, baseURL).Render(r.Context(), w)
 }
 
 func (s *Server) renderOnboardingError(w http.ResponseWriter, r *http.Request, msg string) {
-	data := onboardingData{
-		pageData: s.newPageData(r, "Setup", ""),
-		Error:    msg,
-		Step:     1,
-	}
+	layout := s.layoutData(r, "Setup", "")
 	w.WriteHeader(http.StatusBadRequest)
-	tmpl := s.getTemplate(onboardingTmpl,
-		"internal/web/templates/layout_minimal.html",
-		"internal/web/templates/onboarding.html")
-	tmpl.ExecuteTemplate(w, "layout_minimal", data)
+	webviews.OnboardingPage(layout, 1, msg, "", "").Render(r.Context(), w)
 }

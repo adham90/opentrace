@@ -1,196 +1,27 @@
 package web
 
 import (
-	"bytes"
 	"embed"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
-	"html/template"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	errorviews "github.com/adham90/opentrace/internal/modules/errors/views"
 	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/views"
+	webviews "github.com/adham90/opentrace/internal/web/views"
 )
-
-//go:embed templates/*.html
-var templateFS embed.FS
 
 //go:embed static/*
 var staticFS embed.FS
-
-var tmplFuncs = template.FuncMap{
-	"add": func(a, b int) int { return a + b },
-	"truncate": func(s string, n int) string {
-		if len(s) <= n {
-			return s
-		}
-		return s[:n] + "..."
-	},
-	"fmtDuration": func(secs int) string {
-		if secs < 60 {
-			return fmt.Sprintf("%ds", secs)
-		}
-		if secs < 3600 {
-			return fmt.Sprintf("%dm %ds", secs/60, secs%60)
-		}
-		return fmt.Sprintf("%dh %dm", secs/3600, (secs%3600)/60)
-	},
-	"fmtFloat": func(f float64) string {
-		return fmt.Sprintf("%.1f", f)
-	},
-	"divPercent": func(a, b int) float64 {
-		if b == 0 {
-			return 0
-		}
-		return float64(a) / float64(b) * 100
-	},
-	"deref": func(p *int64) int64 {
-		if p == nil {
-			return 0
-		}
-		return *p
-	},
-	"derefStr": func(p *string) string {
-		if p == nil {
-			return ""
-		}
-		return *p
-	},
-	"derefInt": func(p *int) int {
-		if p == nil {
-			return 0
-		}
-		return *p
-	},
-	"derefFloat": func(p *float64) float64 {
-		if p == nil {
-			return 0
-		}
-		return *p
-	},
-	"derefTime": func(p *time.Time) time.Time {
-		if p == nil {
-			return time.Time{}
-		}
-		return *p
-	},
-	"timeAgo": func(t time.Time) string {
-		d := time.Since(t)
-		switch {
-		case d < time.Minute:
-			return "just now"
-		case d < time.Hour:
-			return fmt.Sprintf("%dm ago", int(d.Minutes()))
-		case d < 24*time.Hour:
-			return fmt.Sprintf("%dh ago", int(d.Hours()))
-		default:
-			return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-		}
-	},
-	"timeOffset": func(base, t time.Time) string {
-		d := t.Sub(base)
-		if d < 0 {
-			d = 0
-		}
-		secs := int(d.Seconds())
-		if secs < 60 {
-			return fmt.Sprintf("+%ds", secs)
-		}
-		if secs < 3600 {
-			return fmt.Sprintf("+%dm%ds", secs/60, secs%60)
-		}
-		return fmt.Sprintf("+%dh%dm", secs/3600, (secs%3600)/60)
-	},
-	"jsonPretty": func(s string) string {
-		if s == "" {
-			return s
-		}
-		var buf bytes.Buffer
-		if err := json.Indent(&buf, []byte(s), "", "  "); err != nil {
-			return s
-		}
-		return buf.String()
-	},
-	"hasItems": func(items []string) bool {
-		return len(items) > 0
-	},
-}
-
-var (
-	dashboardTmpl  *template.Template
-	loginTmpl      *template.Template
-	registerTmpl   *template.Template
-	profileTmpl    *template.Template
-	settingsTmpl   *template.Template
-	setupTmpl      *template.Template
-	usersTmpl       *template.Template
-	connectorsTmpl  *template.Template
-	toolsTmpl       *template.Template
-	sessionsTmpl       *template.Template
-	sessionDetailTmpl  *template.Template
-	onboardingTmpl     *template.Template
-	logsPageTmpl       *template.Template
-	errorsPageTmpl       *template.Template
-	errorDetailPageTmpl  *template.Template
-	watchersPageTmpl       *template.Template
-	watcherDetailPageTmpl  *template.Template
-	healthPageTmpl         *template.Template
-)
-
-func init() {
-	// Each page gets layout + its own content template
-	dashboardTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
-		"templates/layout.html", "templates/dashboard.html"))
-	loginTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/login.html"))
-	registerTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/register.html"))
-	profileTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/profile.html"))
-	settingsTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/settings.html"))
-	setupTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/setup.html"))
-	usersTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/users.html"))
-	connectorsTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/connectors.html"))
-	toolsTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout.html", "templates/tools.html"))
-	sessionsTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
-		"templates/layout.html", "templates/sessions.html"))
-	sessionDetailTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
-		"templates/layout.html", "templates/session_detail.html"))
-	onboardingTmpl = template.Must(template.ParseFS(templateFS,
-		"templates/layout_minimal.html", "templates/onboarding.html"))
-	logsPageTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
-		"templates/layout.html", "templates/logs.html"))
-	errorsPageTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
-		"templates/layout.html", "templates/errors.html"))
-	errorDetailPageTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
-		"templates/layout.html", "templates/error_detail.html"))
-	watchersPageTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
-		"templates/layout.html", "templates/watchers.html"))
-	watcherDetailPageTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
-		"templates/layout.html", "templates/watcher_detail.html"))
-	healthPageTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS,
-		"templates/layout.html", "templates/health.html"))
-}
-
-// logsFragmentTmpl is used for rendering HTMX fragment responses for logs-list
-var logsFragmentTmpl *template.Template
-
-func init() {
-	logsFragmentTmpl = template.Must(template.New("").Funcs(tmplFuncs).ParseFS(templateFS, "templates/logs.html"))
-}
 
 type LogFilters struct {
 	Query            string
@@ -366,113 +197,21 @@ type dashboardData struct {
 	ErrorSpark     []dashboardSparkBucket   `json:"error_spark"`
 }
 
-type pageData struct {
-	Title          string
-	Nav            string
-	ServerID       string
-	DevMode        bool
-	CSPNonce       string
-	CSRFToken      string
-	Connectors     interface{}
-	Logs           []store.LogEntry
-	LogFilters     LogFilters
-	LogOffset      int
-	LogLimit       int
-	HasMore        bool
-	MaxLogID       int64
-	User           *store.User
-	Users          []store.User
-	DataSources    []store.DataSource
-	ToolCategories interface{}
-	IsAdmin        bool
-	RetentionDays       int
-	MetricRetentionDays int
-	APIKey              string
-	EnvKeyOverride      bool
-	CORSOrigins         string
-	CORSEnvOverride     bool
-	MaxQueryRows        int
-	StatementTimeoutMS  int
-	QueryEnvOverride    bool
-	MCPName             string
-	MCPNameEnvOverride  bool
-	// Sessions page
-	Sessions       []store.InvestigationSession
-	SessionStats   *store.InvestigationSessionStats
-	SessionDetail  *store.InvestigationSession
-	ActivityEvents []store.MCPActivityEvent
-
-	// Dashboard
-	DashSystemStatus *dashboardSystemStatus
-	DashLastSession  *dashboardLastSession
-	DashAttention    []dashboardAttentionItem
-	DashGlance       *dashboardGlance
-	DashQuietMinutes int
-	DashLastIncident string
-	DashActivity     []dashboardActivityItem
-	DashSignals      []dashboardSignal
-	DashTimeline     []dashboardTimelineItem
-	DashTraffic        *dashboardTraffic
-	DashEndpoints      []dashboardEndpoint
-	DashServers        []dashboardServer
-	DashErrorSpark     []dashboardSparkBucket
-
-	// Errors page
-	ErrorGroups []store.ErrorGroup
-	ErrorGroup  *store.ErrorGroup
-	ErrorLogs   []store.LogEntry
-
-	// Watchers page
-	Watches      []store.Watch
-	WatchAlerts  []store.WatchAlert
-	PendingCount int
-
-	// Watcher detail page
-	WatchDetail       *store.Watch
-	WatchRuns         []store.WatchRun
-	WatchDetailAlerts []store.WatchAlert
-	WatchSession      *store.InvestigationSession
-
-	// Health page
-	HealthChecks    []store.HealthCheck
-	UptimeSummaries []store.UptimeSummary
-}
-
 func (s *Server) isDevMode() bool {
 	return s.cfg != nil && s.cfg.DevMode
 }
 
-// newPageData creates a pageData with common fields populated from the request context.
-func (s *Server) newPageData(r *http.Request, title, nav string) pageData {
+// layoutData creates a views.LayoutData for templ rendering.
+func (s *Server) layoutData(r *http.Request, title, nav string) views.LayoutData {
 	user := UserFromContext(r.Context())
 	isAdmin := user != nil && user.Role == store.RoleAdmin
-	var apiKey string
-	if isAdmin {
-		apiKey = s.getEffectiveAPIKey(r.Context())
+	return views.LayoutData{
+		Title:   title,
+		Nav:     nav,
+		User:    user,
+		IsAdmin: isAdmin,
+		DevMode: s.isDevMode(),
 	}
-	return pageData{
-		Title:     title,
-		Nav:       nav,
-		DevMode:   s.isDevMode(),
-		CSPNonce:  CSPNonce(r.Context()),
-		CSRFToken: CSRFToken(r.Context()),
-		User:      user,
-		IsAdmin:   isAdmin,
-		APIKey:    apiKey,
-	}
-}
-
-// getTemplate returns a freshly-parsed template from disk in dev mode,
-// or the pre-compiled embedded template in production.
-func (s *Server) getTemplate(fallback *template.Template, files ...string) *template.Template {
-	if !s.isDevMode() {
-		return fallback
-	}
-	t, err := template.New("").Funcs(tmplFuncs).ParseFiles(files...)
-	if err != nil {
-		return fallback
-	}
-	return t
 }
 
 // gatherDashboardData collects all data for the dashboard from stores.
@@ -974,26 +713,99 @@ func truncateStr(s string, n int) string {
 
 func (s *Server) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
 	dd := s.gatherDashboardData(r)
+	layout := s.layoutData(r, "Dashboard", "dashboard")
 
-	data := s.newPageData(r, "Dashboard", "dashboard")
-	data.DashSystemStatus = &dd.SystemStatus
-	data.DashLastSession = dd.LastSession
-	data.DashAttention = dd.Attention
-	data.DashGlance = &dd.Glance
-	data.DashQuietMinutes = dd.QuietMinutes
-	data.DashLastIncident = dd.LastIncident
-	data.DashActivity = dd.Activity
-	data.DashSignals = dd.Signals
-	data.DashTimeline = dd.Timeline
-	data.DashTraffic = dd.Traffic
-	data.DashEndpoints = dd.TopEndpoints
-	data.DashServers = dd.Servers
-	data.DashErrorSpark = dd.ErrorSpark
+	dash := webviews.DashboardData{
+		QuietMinutes: dd.QuietMinutes,
+	}
 
-	tmpl := s.getTemplate(dashboardTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/dashboard.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	// Map system status
+	dash.SystemStatus = &webviews.DashboardSystemStatus{
+		ServicesUp:     dd.SystemStatus.ServicesUp,
+		ServicesTotal:  dd.SystemStatus.ServicesTotal,
+		ErrorsPerHour:  dd.SystemStatus.ErrorsPerHour,
+		LogsPerHour:    dd.SystemStatus.LogsPerHour,
+		WatchersActive: dd.SystemStatus.WatchersActive,
+		InvestOpen:     dd.SystemStatus.InvestOpen,
+		OverallStatus:  dd.SystemStatus.OverallStatus,
+	}
+
+	// Map glance
+	dash.Glance = &webviews.DashboardGlance{
+		TotalLogs:       dd.Glance.TotalLogs,
+		ErrorGroups:     dd.Glance.ErrorGroups,
+		WatcherTriggers: dd.Glance.WatcherTriggers,
+		Investigations:  dd.Glance.Investigations,
+		Uptime:          dd.Glance.Uptime,
+	}
+
+	// Map last session
+	if dd.LastSession != nil {
+		dash.LastSession = &webviews.DashboardLastSession{
+			ID:      dd.LastSession.ID,
+			Intent:  dd.LastSession.Intent,
+			Service: dd.LastSession.Service,
+			Status:  dd.LastSession.Status,
+			TimeAgo: dd.LastSession.TimeAgo,
+		}
+	}
+
+	// Map attention items
+	for _, item := range dd.Attention {
+		dash.Attention = append(dash.Attention, webviews.DashboardAttentionItem{
+			Severity: item.Severity,
+			Type:     item.Type,
+			Title:    item.Title,
+			Detail:   item.Detail,
+			Time:     item.Time,
+			Link:     item.Link,
+		})
+	}
+
+	// Map signals
+	for _, sig := range dd.Signals {
+		dash.Signals = append(dash.Signals, webviews.DashboardSignal{
+			Name:   sig.Name,
+			Status: sig.Status,
+		})
+	}
+
+	// Map servers
+	for _, srv := range dd.Servers {
+		dash.Servers = append(dash.Servers, webviews.DashboardServer{
+			Name:   srv.Name,
+			Status: srv.Status,
+		})
+	}
+
+	// Map timeline
+	for _, item := range dd.Timeline {
+		dash.Timeline = append(dash.Timeline, webviews.DashboardTimelineItem{
+			Status: item.Status,
+			Title:  item.Title,
+			Detail: item.Detail,
+			Time:   item.Time,
+			Link:   item.Link,
+		})
+	}
+
+	// Map endpoints
+	for _, ep := range dd.TopEndpoints {
+		dash.Endpoints = append(dash.Endpoints, webviews.DashboardEndpoint{
+			Method: ep.Method,
+			Path:   ep.Path,
+			P95Ms:  ep.P95Ms,
+		})
+	}
+
+	// Map traffic
+	if dd.Traffic != nil {
+		dash.Traffic = &webviews.DashboardTraffic{
+			TotalRequests: dd.Traffic.TotalRequests,
+		}
+	}
+
+	webviews.DashboardPage(layout, dash).Render(r.Context(), w)
 }
 
 func (s *Server) handleDashboardAPI(w http.ResponseWriter, r *http.Request) {
@@ -1083,22 +895,32 @@ func (s *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	data := s.newPageData(r, "Logs", "logs")
-	data.Logs = logEntries
-	data.LogFilters = filters
-	data.LogOffset = offset
-	data.LogLimit = limit
-	data.HasMore = hasMore
-	data.MaxLogID = maxID
-
-	tmpl := s.getTemplate(logsPageTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/logs.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	layout := s.layoutData(r, "Logs", "logs")
+	logsData := webviews.LogsPageData{
+		Filters: webviews.LogFilters{
+			Query:            filters.Query,
+			Service:          filters.Service,
+			Level:            filters.Level,
+			EventType:        filters.EventType,
+			TimeRange:        filters.TimeRange,
+			Environment:      filters.Environment,
+			CommitHash:       filters.CommitHash,
+			RequestID:        filters.RequestID,
+			TraceID:          filters.TraceID,
+			ExceptionClass:   filters.ExceptionClass,
+			ErrorFingerprint: filters.ErrorFingerprint,
+			SourceFile:       filters.SourceFile,
+		},
+		Logs:     logEntries,
+		MaxLogID: maxID,
+		HasMore:  hasMore,
+	}
+	webviews.LogsPage(layout, logsData).Render(r.Context(), w)
 }
 
 func (s *Server) handleErrorsPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Errors", "errors")
+	layout := s.layoutData(r, "Errors", "errors")
+	var errorGroups []store.ErrorGroup
 	if s.errorGroupStore != nil {
 		status := store.ErrorGroupStatus(r.URL.Query().Get("status"))
 		groups, err := s.errorGroupStore.List(r.Context(), store.ListErrorGroupParams{
@@ -1108,13 +930,10 @@ func (s *Server) handleErrorsPage(w http.ResponseWriter, r *http.Request) {
 			Limit:   100,
 		})
 		if err == nil {
-			data.ErrorGroups = groups
+			errorGroups = groups
 		}
 	}
-	tmpl := s.getTemplate(errorsPageTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/errors.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	errorviews.ErrorsPage(layout, errorGroups).Render(r.Context(), w)
 }
 
 func (s *Server) handleErrorDetailPage(w http.ResponseWriter, r *http.Request) {
@@ -1141,46 +960,43 @@ func (s *Server) handleErrorDetailPage(w http.ResponseWriter, r *http.Request) {
 	events, _ := s.errorGroupStore.ListEvents(r.Context(), fp, 20)
 	eg.Events = events
 
-	data := s.newPageData(r, eg.ExceptionClass, "errors")
-	data.ErrorGroup = eg
+	layout := s.layoutData(r, eg.ExceptionClass, "errors")
 
 	// Fetch recent log entries for this error fingerprint
+	var errorLogs []store.LogEntry
 	if s.logStore != nil {
 		logs, err := s.logStore.Search(r.Context(), store.LogSearchParams{
 			ErrorFingerprint: fp,
 			Limit:            25,
 		})
 		if err == nil {
-			data.ErrorLogs = logs
+			errorLogs = logs
 		}
 	}
 
-	tmpl := s.getTemplate(errorDetailPageTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/error_detail.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	errorviews.ErrorDetailPage(layout, *eg, errorLogs).Render(r.Context(), w)
 }
 
 func (s *Server) handleWatchersPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Watchers", "watchers")
+	layout := s.layoutData(r, "Watchers", "watchers")
+	var watches []store.Watch
+	var watchAlerts []store.WatchAlert
+	var pendingCount int
 	if s.watchStore != nil {
-		watches, err := s.watchStore.List(r.Context(), store.ListWatchParams{Limit: 100})
+		w2, err := s.watchStore.List(r.Context(), store.ListWatchParams{Limit: 100})
 		if err == nil {
-			data.Watches = watches
+			watches = w2
 		}
-		alerts, err := s.watchStore.ListAlerts(r.Context(), "", "", 20)
+		a, err := s.watchStore.ListAlerts(r.Context(), "", "", 20)
 		if err == nil {
-			data.WatchAlerts = alerts
+			watchAlerts = a
 		}
-		pending, err := s.watchStore.CountPendingAlerts(r.Context())
+		p, err := s.watchStore.CountPendingAlerts(r.Context())
 		if err == nil {
-			data.PendingCount = pending
+			pendingCount = p
 		}
 	}
-	tmpl := s.getTemplate(watchersPageTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/watchers.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	webviews.WatchersPage(layout, watches, watchAlerts, pendingCount).Render(r.Context(), w)
 }
 
 func (s *Server) handleWatchDetailPage(w http.ResponseWriter, r *http.Request) {
@@ -1204,52 +1020,51 @@ func (s *Server) handleWatchDetailPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := s.newPageData(r, "Watch: "+string(wt.Metric), "watchers")
-	data.WatchDetail = wt
+	layout := s.layoutData(r, "Watch: "+string(wt.Metric), "watchers")
+
+	detail := webviews.WatcherDetailData{
+		Watch: wt,
+	}
 
 	// Fetch execution runs
 	runs, err := s.watchStore.ListRuns(r.Context(), id, 50)
 	if err == nil {
-		data.WatchRuns = runs
+		detail.Runs = runs
 	}
 
 	// Fetch alerts for this watch
 	alerts, err := s.watchStore.ListAlerts(r.Context(), id, "", 20)
 	if err == nil {
-		data.WatchDetailAlerts = alerts
+		detail.Alerts = alerts
 	}
 
 	// Look up the investigation session that created this watch
 	if wt.SessionID != "" && s.investigationSessionStore != nil {
 		sess, err := s.investigationSessionStore.GetByID(r.Context(), wt.SessionID)
 		if err == nil {
-			data.WatchSession = sess
+			detail.Session = sess
 		}
 	}
 
-	tmpl := s.getTemplate(watcherDetailPageTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/watcher_detail.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	webviews.WatcherDetailPage(layout, detail).Render(r.Context(), w)
 }
 
 func (s *Server) handleHealthPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Health", "health")
+	layout := s.layoutData(r, "Health", "health")
+	var uptimeSummaries []store.UptimeSummary
+	var healthChecks []store.HealthCheck
 	if s.healthCheckStore != nil {
 		checks, err := s.healthCheckStore.List(r.Context(), store.ListHealthCheckParams{})
 		if err == nil {
-			data.HealthChecks = checks
+			healthChecks = checks
 		}
 		oneDayAgo := time.Now().Add(-24 * time.Hour)
 		summaries, err := s.healthCheckStore.UptimeSummaries(r.Context(), oneDayAgo)
 		if err == nil {
-			data.UptimeSummaries = summaries
+			uptimeSummaries = summaries
 		}
 	}
-	tmpl := s.getTemplate(healthPageTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/health.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	webviews.HealthPage(layout, uptimeSummaries, healthChecks).Render(r.Context(), w)
 }
 
 // handleLogsFragment serves HTMX log fragments for the logs page.
@@ -1338,22 +1153,13 @@ func (s *Server) handleLogsFragment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	data := pageData{
-		Logs:       logs,
-		LogFilters: filters,
-		LogOffset:  offset,
-		LogLimit:   limit,
-		HasMore:    hasMore,
-		MaxLogID:   maxID,
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	ft := s.getTemplate(logsFragmentTmpl, "internal/web/templates/logs.html")
-	if offset > 0 {
-		ft.ExecuteTemplate(w, "logs-rows", data)
-	} else {
-		ft.ExecuteTemplate(w, "logs-list", data)
-	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"logs":     logs,
+		"offset":   offset,
+		"limit":    limit,
+		"has_more": hasMore,
+		"max_id":   maxID,
+	})
 }
 
 func (s *Server) handleLogsPoll(w http.ResponseWriter, r *http.Request) {
@@ -1432,8 +1238,10 @@ func (s *Server) handleLogsPoll(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ft := s.getTemplate(logsFragmentTmpl, "internal/web/templates/logs.html")
-	ft.ExecuteTemplate(w, "logs-new", pageData{Logs: logs, MaxLogID: maxID})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"logs":   logs,
+		"max_id": maxID,
+	})
 }
 
 func (s *Server) handleLogsHistogram(w http.ResponseWriter, r *http.Request) {
@@ -1715,125 +1523,102 @@ func (s *Server) handleLogValues(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Settings", "settings")
+	layout := s.layoutData(r, "Settings", "settings")
+
+	sd := webviews.SettingsData{
+		CSRFToken:      CSRFToken(r.Context()),
+		RetentionDays:  30,
+		MaxQueryRows:   500,
+		StatementTimeoutMS: 5000,
+		MCPName:        "opentrace",
+	}
+
 	if s.settingsStore != nil {
 		settings, err := s.settingsStore.GetRetention(r.Context())
 		if err == nil {
-			data.RetentionDays = settings.RetentionDays
-			data.MetricRetentionDays = settings.MetricRetentionDays
-		} else {
-			data.RetentionDays = 30
+			sd.RetentionDays = settings.RetentionDays
+			sd.MetricRetentionDays = settings.MetricRetentionDays
 		}
-	} else {
-		data.RetentionDays = 30
 	}
-	data.EnvKeyOverride = s.cfg != nil && s.cfg.APIKey != ""
-	data.CORSEnvOverride = s.cfg != nil && len(s.cfg.CORSAllowedOrigins) > 0
-	if data.CORSEnvOverride {
-		data.CORSOrigins = strings.Join(s.cfg.CORSAllowedOrigins, ",")
+
+	sd.EnvKeyOverride = s.cfg != nil && s.cfg.APIKey != ""
+	sd.CORSEnvOverride = s.cfg != nil && len(s.cfg.CORSAllowedOrigins) > 0
+	if sd.CORSEnvOverride {
+		sd.CORSOrigins = strings.Join(s.cfg.CORSAllowedOrigins, ",")
 	} else if s.settingsStore != nil {
 		if val, err := s.settingsStore.GetCORSOrigins(r.Context()); err == nil {
-			data.CORSOrigins = val
+			sd.CORSOrigins = val
 		}
 	}
 
 	// Query guardrails
-	data.QueryEnvOverride = os.Getenv("OPENTRACE_MAX_QUERY_ROWS") != "" || os.Getenv("OPENTRACE_STATEMENT_TIMEOUT_MS") != ""
-	data.MaxQueryRows = 500
-	data.StatementTimeoutMS = 5000
-	if data.QueryEnvOverride && s.cfg != nil {
-		data.MaxQueryRows = s.cfg.MaxQueryRows
-		data.StatementTimeoutMS = s.cfg.StatementTimeoutMS
+	sd.QueryEnvOverride = os.Getenv("OPENTRACE_MAX_QUERY_ROWS") != "" || os.Getenv("OPENTRACE_STATEMENT_TIMEOUT_MS") != ""
+	if sd.QueryEnvOverride && s.cfg != nil {
+		sd.MaxQueryRows = s.cfg.MaxQueryRows
+		sd.StatementTimeoutMS = s.cfg.StatementTimeoutMS
 	} else if s.settingsStore != nil {
 		if v, err := s.settingsStore.GetMaxQueryRows(r.Context()); err == nil && v > 0 {
-			data.MaxQueryRows = v
+			sd.MaxQueryRows = v
 		}
 		if v, err := s.settingsStore.GetStatementTimeout(r.Context()); err == nil && v > 0 {
-			data.StatementTimeoutMS = v
+			sd.StatementTimeoutMS = v
 		}
 	}
 
 	// MCP name
-	data.MCPNameEnvOverride = os.Getenv("OPENTRACE_MCP_NAME") != ""
-	data.MCPName = "opentrace"
-	if data.MCPNameEnvOverride {
-		data.MCPName = os.Getenv("OPENTRACE_MCP_NAME")
+	sd.MCPNameEnvOverride = os.Getenv("OPENTRACE_MCP_NAME") != ""
+	if sd.MCPNameEnvOverride {
+		sd.MCPName = os.Getenv("OPENTRACE_MCP_NAME")
 	} else if s.settingsStore != nil {
 		if v, err := s.settingsStore.GetMCPName(r.Context()); err == nil && v != "" {
-			data.MCPName = v
+			sd.MCPName = v
 		}
 	}
 
-	// Users list for inline management
-	if s.userStore != nil {
-		users, err := s.userStore.List(r.Context())
-		if err == nil {
-			data.Users = users
-		}
-	}
-	data.IsAdmin = data.User.Role == "admin"
-
-	tmpl := s.getTemplate(settingsTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/settings.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	webviews.SettingsPage(layout, sd).Render(r.Context(), w)
 }
 
 func (s *Server) handleSetupPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Setup", "setup")
-	tmpl := s.getTemplate(setupTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/setup.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	layout := s.layoutData(r, "Setup", "setup")
+	setup := webviews.SetupData{
+		APIKey: s.getEffectiveAPIKey(r.Context()),
+	}
+	webviews.SetupPage(layout, setup).Render(r.Context(), w)
 }
 
 func (s *Server) handleUsersPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Users", "users")
+	layout := s.layoutData(r, "Users", "users")
+	var users []store.User
 	if s.userStore != nil {
-		users, err := s.userStore.List(r.Context())
+		u, err := s.userStore.List(r.Context())
 		if err == nil {
-			data.Users = users
+			users = u
 		}
 	}
-	tmpl := s.getTemplate(usersTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/users.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	webviews.UsersPage(layout, users, layout.IsAdmin).Render(r.Context(), w)
 }
 
 func (s *Server) handleConnectorsPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Connectors", "connectors")
+	layout := s.layoutData(r, "Connectors", "connectors")
+	var dataSources []store.DataSource
 	if s.dsStore != nil {
 		ds, err := s.dsStore.List(r.Context(), store.ListDataSourceParams{})
 		if err == nil {
-			data.DataSources = ds
+			dataSources = ds
 		}
 	}
-	tmpl := s.getTemplate(connectorsTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/connectors.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	webviews.ConnectorsPage(layout, dataSources).Render(r.Context(), w)
 }
 
 func (s *Server) handleToolsPage(w http.ResponseWriter, r *http.Request) {
-	type toolInfo struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Access      string `json:"access"`
-		Requires    string `json:"requires,omitempty"`
-	}
-	type toolCategory struct {
-		Name        string     `json:"name"`
-		Description string     `json:"description"`
-		Tools       []toolInfo `json:"tools"`
-	}
+	layout := s.layoutData(r, "Tools", "tools")
 
-	var categories []toolCategory
+	var categories []webviews.ToolCategory
 	if s.toolCatalog != nil {
 		for _, cat := range s.toolCatalog.Categories() {
-			tc := toolCategory{Name: cat.Name, Description: cat.Description}
+			tc := webviews.ToolCategory{Name: cat.Name, Description: cat.Description}
 			for _, t := range cat.Tools {
-				tc.Tools = append(tc.Tools, toolInfo{
+				tc.Tools = append(tc.Tools, webviews.ToolInfo{
 					Name:        t.Name,
 					Description: t.Description,
 					Access:      t.Access,
@@ -1846,12 +1631,12 @@ func (s *Server) handleToolsPage(w http.ResponseWriter, r *http.Request) {
 	if s.registry != nil {
 		dynamicTools := s.registry.AllTools()
 		if len(dynamicTools) > 0 {
-			dynCat := toolCategory{
+			dynCat := webviews.ToolCategory{
 				Name:        "Connector Queries",
 				Description: "Dynamic tools registered by active database connectors",
 			}
 			for _, t := range dynamicTools {
-				dynCat.Tools = append(dynCat.Tools, toolInfo{
+				dynCat.Tools = append(dynCat.Tools, webviews.ToolInfo{
 					Name:        t.Name,
 					Description: t.Description,
 					Access:      "admin",
@@ -1862,16 +1647,15 @@ func (s *Server) handleToolsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	data := s.newPageData(r, "Tools", "tools")
-	data.ToolCategories = categories
-	tmpl := s.getTemplate(toolsTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/tools.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	webviews.ToolsPage(layout, categories).Render(r.Context(), w)
 }
 
 func (s *Server) handleSessionsPage(w http.ResponseWriter, r *http.Request) {
-	data := s.newPageData(r, "Sessions", "sessions")
+	layout := s.layoutData(r, "Sessions", "sessions")
+
+	page := webviews.SessionsPageData{
+		Status: r.URL.Query().Get("status"),
+	}
 
 	if s.investigationSessionStore != nil {
 		statusFilter := store.InvestigationSessionStatus(r.URL.Query().Get("status"))
@@ -1881,19 +1665,16 @@ func (s *Server) handleSessionsPage(w http.ResponseWriter, r *http.Request) {
 			Limit:  100,
 		})
 		if err == nil {
-			data.Sessions = sessions
+			page.Sessions = sessions
 		}
 
 		stats, err := s.investigationSessionStore.Stats(r.Context())
 		if err == nil {
-			data.SessionStats = stats
+			page.Stats = stats
 		}
 	}
 
-	tmpl := s.getTemplate(sessionsTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/sessions.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	webviews.SessionsPage(layout, page).Render(r.Context(), w)
 }
 
 func (s *Server) handleSessionDetailPage(w http.ResponseWriter, r *http.Request) {
@@ -1923,13 +1704,12 @@ func (s *Server) handleSessionDetailPage(w http.ResponseWriter, r *http.Request)
 		activities, _ = s.mcpActivityStore.ListByInvestigationSession(r.Context(), id)
 	}
 
-	data := s.newPageData(r, "Session Detail", "sessions")
-	data.SessionDetail = sess
-	data.ActivityEvents = activities
+	layout := s.layoutData(r, "Session Detail", "sessions")
+	detail := webviews.SessionDetailData{
+		Session: sess,
+		Events:  activities,
+	}
 
-	tmpl := s.getTemplate(sessionDetailTmpl,
-		"internal/web/templates/layout.html",
-		"internal/web/templates/session_detail.html")
-	tmpl.ExecuteTemplate(w, "layout", data)
+	webviews.SessionDetailPage(layout, detail).Render(r.Context(), w)
 }
 
