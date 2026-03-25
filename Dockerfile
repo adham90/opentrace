@@ -1,7 +1,5 @@
 FROM golang:1.25-alpine AS builder
 
-RUN apk add --no-cache gcc musl-dev
-
 WORKDIR /app
 
 COPY go.mod go.sum ./
@@ -13,7 +11,7 @@ ARG VERSION=dev
 ARG COMMIT=unknown
 ARG DATE=unknown
 
-RUN CGO_ENABLED=1 go build \
+RUN CGO_ENABLED=0 go build \
     -ldflags "-s -w \
       -X github.com/adham90/opentrace/internal/version.Version=${VERSION} \
       -X github.com/adham90/opentrace/internal/version.Commit=${COMMIT} \

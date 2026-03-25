@@ -39,21 +39,21 @@ func TestDatabaseConnector_Tools(t *testing.T) {
 }
 
 func TestDbSearch_RejectsInsert(t *testing.T) {
-	err := guardrail.ValidateReadOnly("INSERT INTO users (name) VALUES ('test')")
+	err := guardrail.ValidateReadOnlyGeneric("INSERT INTO users (name) VALUES ('test')")
 	if err == nil {
 		t.Fatal("expected error for INSERT")
 	}
 }
 
 func TestDbSearch_RejectsUpdate(t *testing.T) {
-	err := guardrail.ValidateReadOnly("UPDATE users SET name = 'test'")
+	err := guardrail.ValidateReadOnlyGeneric("UPDATE users SET name = 'test'")
 	if err == nil {
 		t.Fatal("expected error for UPDATE")
 	}
 }
 
 func TestDbSearch_RejectsMultiStatement(t *testing.T) {
-	err := guardrail.ValidateReadOnly("SELECT 1; DROP TABLE users")
+	err := guardrail.ValidateReadOnlyGeneric("SELECT 1; DROP TABLE users")
 	if err == nil {
 		t.Fatal("expected error for multi-statement")
 	}

@@ -53,7 +53,7 @@ go build -ldflags "-X github.com/adham90/opentrace/internal/version.Version=dev 
   -o opentrace ./cmd/opentrace
 ```
 
-Note: `pg_query_go` requires CGO. Cross-compilation needs `CGO_ENABLED=1` with appropriate C compiler.
+Note: All dependencies are pure Go. No CGO required — cross-compilation works out of the box.
 
 ## Architecture
 
@@ -107,7 +107,7 @@ SQLite at `~/.opentrace/opentrace.db` (override with `OPENTRACE_DATA_DIR`).
 - **Auto-upgrade**: `docker-compose.prod.yml` includes Watchtower sidecar
 - **Cloud configs**: `deploy/` has DigitalOcean, Hetzner (cloud-init), plus `fly.toml`, `railway.toml`, `render.yaml`
 - **CI**: `.github/workflows/ci.yml` (test + vet + build), `.github/workflows/release.yml` (GoReleaser + Docker)
-- **Constraint**: linux/amd64 only (pg_query_go needs CGO, arm64 QEMU builds too slow)
+- **Platforms**: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64 (pure Go, no CGO)
 
 ## Logging
 

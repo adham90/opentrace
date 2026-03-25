@@ -148,13 +148,13 @@ func (c *DatabaseConnector) ExecuteReadQuery(ctx context.Context, query string) 
 	}
 
 	// Validate SQL is read-only
-	if err := guardrail.ValidateReadOnly(query); err != nil {
+	if err := guardrail.ValidateReadOnlyGeneric(query); err != nil {
 		return nil, fmt.Errorf("query rejected: %w", err)
 	}
 
-	// Add LIMIT if the AST doesn't already contain one
+	// Add LIMIT if the query doesn't already contain one
 	limitedQuery := query
-	if !guardrail.HasLimit(query) {
+	if !guardrail.HasLimitGeneric(query) {
 		limitedQuery = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(query, "; "), c.maxRows)
 	}
 
@@ -239,13 +239,13 @@ func (c *DatabaseConnector) handleDbSearch(ctx context.Context, args map[string]
 	}
 
 	// Validate SQL is read-only
-	if err := guardrail.ValidateReadOnly(query); err != nil {
+	if err := guardrail.ValidateReadOnlyGeneric(query); err != nil {
 		return "", fmt.Errorf("query rejected: %w", err)
 	}
 
-	// Add LIMIT if the AST doesn't already contain one
+	// Add LIMIT if the query doesn't already contain one
 	limitedQuery := query
-	if !guardrail.HasLimit(query) {
+	if !guardrail.HasLimitGeneric(query) {
 		limitedQuery = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(query, "; "), c.maxRows)
 	}
 

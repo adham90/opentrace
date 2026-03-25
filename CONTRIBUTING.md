@@ -12,7 +12,7 @@ go build -o opentrace ./cmd/opentrace
 ./opentrace
 ```
 
-Requires Go 1.25+ with CGO enabled (for `pg_query_go`).
+Requires Go 1.25+. All dependencies are pure Go — no CGO required.
 
 ## Running Tests
 

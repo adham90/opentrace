@@ -35,7 +35,7 @@ func explainQueryHandler(registry *connector.Registry, qmStore store.QueryMemory
 		}
 
 		// Validate that it's a SELECT statement.
-		if err := guardrail.ValidateReadOnly(query); err != nil {
+		if err := guardrail.ValidateReadOnlyGeneric(query); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("only SELECT queries can be explained: %v", err)), nil
 		}
 

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -16,13 +15,13 @@ import (
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/healthcheck"
+	"github.com/adham90/opentrace/internal/jobs"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/store"
 	"github.com/adham90/opentrace/internal/version"
 	"github.com/adham90/opentrace/internal/vmagent"
 	"github.com/adham90/opentrace/internal/watcher"
 	"github.com/adham90/opentrace/internal/web"
-	"golang.org/x/sync/errgroup"
 )
 
 // appDeps holds shared application dependencies initialized by initApp.
@@ -299,8 +298,6 @@ func run() error {
 	ctx, cancelCtx := context.WithCancel(context.Background())
 	defer cancelCtx()
 
-	var bgWg sync.WaitGroup
-
 	deps, err := initApp(ctx)
 	if err != nil {
 		return err
@@ -405,275 +402,23 @@ func run() error {
 	// Start health check scheduler (created above for injection into web server)
 	hcSched.Start(ctx)
 
-	// Background: clean expired sessions every 15 minutes
-	bgWg.Add(1)
-	go func() {
-		defer bgWg.Done()
-		ticker := time.NewTicker(15 * time.Minute)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if n, err := deps.sessionStore.DeleteExpired(ctx); err != nil {
-					slog.Warn("session cleanup failed", "error", err)
-				} else if n > 0 {
-					slog.Info("cleaned expired sessions", "count", n)
-				}
-			}
-		}
-	}()
+	// --- Job Queue: persistent, restart-safe background processing ---
+	jobQueue := jobs.NewQueue(deps.db)
+	jobWorker := jobs.NewWorker(jobQueue)
+	jobScheduler := jobs.NewScheduler(jobQueue)
 
-	// Background: mark stale servers offline every 60s
-	bgWg.Add(1)
-	go func() {
-		defer bgWg.Done()
-		ticker := time.NewTicker(60 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if n, err := deps.serverStore.MarkStaleOffline(ctx, 2*time.Minute); err != nil {
-					slog.Warn("MarkStaleOffline failed", "error", err)
-				} else if n > 0 {
-					slog.Info("marked stale servers offline", "count", n)
-				}
-			}
-		}
-	}()
+	// Register job handlers
+	registerBackgroundJobs(jobWorker, deps)
 
-	// Background: mark stale partial traces as timeout every 60s
-	if deps.traceStore != nil {
-		bgWg.Add(1)
-		go func() {
-			defer bgWg.Done()
-			ticker := time.NewTicker(60 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					if n, err := deps.traceStore.MarkStaleTraces(ctx, 30*time.Second); err != nil {
-						slog.Warn("MarkStaleTraces failed", "error", err)
-					} else if n > 0 {
-						slog.Info("marked stale traces as timeout", "count", n)
-					}
-				}
-			}
-		}()
-	}
+	// Register recurring schedules
+	jobScheduler.Add(jobs.Schedule{Name: "session-cleanup", JobType: "cleanup:sessions", Interval: 15 * time.Minute})
+	jobScheduler.Add(jobs.Schedule{Name: "stale-servers", JobType: "cleanup:stale_servers", Interval: 60 * time.Second})
+	jobScheduler.Add(jobs.Schedule{Name: "stale-traces", JobType: "cleanup:stale_traces", Interval: 60 * time.Second})
+	jobScheduler.Add(jobs.Schedule{Name: "data-retention", JobType: "retention:prune", Interval: 1 * time.Hour})
+	jobScheduler.Add(jobs.Schedule{Name: "aggregation", JobType: "aggregate:all", Interval: 5 * time.Minute})
 
-	// Background: unified data retention job every hour
-	bgWg.Add(1)
-	go func() {
-		defer bgWg.Done()
-		// Env var override for metric retention (checked once at startup, same as before).
-		envMetricRetentionDays := 0
-		if v := os.Getenv("OPENTRACE_METRIC_RETENTION_DAYS"); v != "" {
-			var d int
-			if _, err := fmt.Sscanf(v, "%d", &d); err == nil && d > 0 {
-				envMetricRetentionDays = d
-			}
-		}
-
-		ticker := time.NewTicker(1 * time.Hour)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
-
-			settings, err := deps.settingsStore.GetRetention(ctx)
-			if err != nil {
-				slog.Warn("reading retention settings failed", "error", err)
-				continue
-			}
-
-			globalDays := settings.RetentionDays
-
-			if globalDays > 0 {
-				retention := time.Duration(globalDays) * 24 * time.Hour
-				if n, err := deps.logStore.Prune(ctx, retention); err != nil {
-					slog.Warn("log prune failed", "error", err)
-				} else if n > 0 {
-					slog.Info("pruned old logs", "count", n)
-				}
-				if n, err := deps.mcpActivityStore.Prune(ctx, retention); err != nil {
-					slog.Warn("mcp activity prune failed", "error", err)
-				} else if n > 0 {
-					slog.Info("pruned old mcp activity records", "count", n)
-				}
-				if deps.auditStore != nil {
-					if n, err := deps.auditStore.Prune(ctx, retention); err != nil {
-						slog.Warn("audit log prune failed", "error", err)
-					} else if n > 0 {
-						slog.Info("pruned old audit log entries", "count", n)
-					}
-				}
-				if deps.errorGroupStore != nil {
-					if n, err := deps.errorGroupStore.Prune(ctx, retention); err != nil {
-						slog.Warn("error group prune failed", "error", err)
-					} else if n > 0 {
-						slog.Info("pruned old error groups", "count", n)
-					}
-				}
-				if deps.healthCheckStore != nil {
-					if n, err := deps.healthCheckStore.PruneResults(ctx, retention); err != nil {
-						slog.Warn("healthcheck results prune failed", "error", err)
-					} else if n > 0 {
-						slog.Info("pruned old healthcheck results", "count", n)
-					}
-				}
-				if deps.agentNoteStore != nil {
-					if n, err := deps.agentNoteStore.Prune(ctx, retention); err != nil {
-						slog.Warn("agent note prune failed", "error", err)
-					} else if n > 0 {
-						slog.Info("pruned old agent notes", "count", n)
-					}
-				}
-				if deps.codeEntityStore != nil {
-					if n, err := deps.codeEntityStore.Prune(ctx, retention); err != nil {
-						slog.Warn("code entity prune failed", "error", err)
-					} else if n > 0 {
-						slog.Info("pruned stale code entities", "count", n)
-					}
-				}
-				if deps.deployStore != nil {
-					if n, err := deps.deployStore.Prune(ctx, retention); err != nil {
-						slog.Warn("deploy prune failed", "error", err)
-					} else if n > 0 {
-						slog.Info("pruned old deploys", "count", n)
-					}
-				}
-				if deps.eventStore != nil {
-					if n, err := deps.eventStore.Prune(ctx, retention); err != nil {
-						slog.Warn("event prune failed", "error", err)
-					} else if n > 0 {
-						slog.Info("pruned old events", "count", n)
-					}
-				}
-				if deps.testCorrelationStore != nil {
-					if n, err := deps.testCorrelationStore.Prune(ctx, retention); err != nil {
-						slog.Warn("uncovered paths prune failed", "error", err)
-					} else if n > 0 {
-						slog.Info("pruned stale uncovered paths", "count", n)
-					}
-				}
-			}
-
-			// Metric retention: env override > DB setting > global retention
-			metricDays := envMetricRetentionDays
-			if metricDays == 0 {
-				metricDays = settings.MetricRetentionDays
-			}
-			if metricDays == 0 {
-				metricDays = globalDays
-			}
-			if metricDays > 0 {
-				retention := time.Duration(metricDays) * 24 * time.Hour
-				if n, err := deps.metricStore.Prune(ctx, retention); err != nil {
-					slog.Warn("metric prune failed", "error", err)
-				} else if n > 0 {
-					slog.Info("pruned old metrics", "count", n)
-				}
-			}
-		}
-	}()
-
-	// Background: aggregation jobs for trends, analytics, sessions, and impact scores (every 5 minutes)
-	// Jobs run concurrently via errgroup to interleave computation vs. I/O.
-	// Uses a mutex to prevent overlapping runs if aggregation takes longer than 5 minutes.
-	bgWg.Add(1)
-	go func() {
-		defer bgWg.Done()
-		var running sync.Mutex
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
-
-			if !running.TryLock() {
-				slog.Debug("aggregation still running, skipping tick")
-				continue
-			}
-
-			since := time.Now().UTC().Add(-10 * time.Minute)
-
-			g, gctx := errgroup.WithContext(ctx)
-			if deps.trendStore != nil {
-				g.Go(func() error {
-					if err := deps.trendStore.AggregateBuckets(gctx, "1h", since); err != nil {
-						slog.Warn("trend aggregation failed", "error", err)
-					}
-					return nil // don't cancel other jobs on error
-				})
-			}
-			if deps.analyticsStore != nil {
-				g.Go(func() error {
-					if err := deps.analyticsStore.AggregateEndpointStats(gctx, "1h", since); err != nil {
-						slog.Warn("endpoint stats aggregation failed", "error", err)
-					}
-					return nil
-				})
-				g.Go(func() error {
-					if err := deps.analyticsStore.UpdateTrafficHeatmap(gctx, since); err != nil {
-						slog.Warn("traffic heatmap update failed", "error", err)
-					}
-					return nil
-				})
-			}
-			if deps.journeyStore != nil {
-				g.Go(func() error {
-					if err := deps.journeyStore.BuildSessions(gctx, since); err != nil {
-						slog.Warn("session building failed", "error", err)
-					}
-					return nil
-				})
-			}
-			if deps.errorImpactStore != nil {
-				g.Go(func() error {
-					if err := deps.errorImpactStore.ComputeImpactScores(gctx); err != nil {
-						slog.Warn("impact score computation failed", "error", err)
-					}
-					return nil
-				})
-			}
-			if deps.codeEntityStore != nil {
-				g.Go(func() error {
-					if err := deps.codeEntityStore.BatchRecomputeRisk(gctx); err != nil {
-						slog.Warn("code entity risk recomputation failed", "error", err)
-					}
-					return nil
-				})
-			}
-			if deps.deployStore != nil && deps.analyticsStore != nil {
-				g.Go(func() error {
-					measureDeployImpacts(gctx, deps.deployStore, deps.analyticsStore)
-					return nil
-				})
-			}
-			if deps.testCorrelationStore != nil {
-				g.Go(func() error {
-					if err := deps.testCorrelationStore.RefreshUncoveredPaths(gctx); err != nil {
-						slog.Warn("test correlation refresh failed", "error", err)
-					}
-					return nil
-				})
-			}
-			_ = g.Wait()
-			running.Unlock()
-		}
-	}()
+	jobWorker.Start(ctx)
+	jobScheduler.Start(ctx)
 
 	// Validate TLS certificate and key files exist if configured
 	if deps.cfg.TLSCert != "" && deps.cfg.TLSKey != "" {
@@ -707,19 +452,9 @@ func run() error {
 	cancelCtx()
 	watchSched.Stop()
 	hcSched.Stop()
-
-	// Wait for background goroutines with timeout
-	bgDone := make(chan struct{})
-	go func() {
-		bgWg.Wait()
-		close(bgDone)
-	}()
-	select {
-	case <-bgDone:
-		slog.Info("background jobs stopped")
-	case <-time.After(5 * time.Second):
-		slog.Warn("timed out waiting for background jobs")
-	}
+	jobWorker.Stop()
+	jobScheduler.Stop()
+	slog.Info("background jobs stopped")
 
 	deps.registry.CloseAll()
 

@@ -5,9 +5,8 @@ import (
 	"strings"
 )
 
-// ValidateReadOnlyGeneric performs a basic check that the query is a read-only
-// statement. Unlike ValidateReadOnly which uses the PostgreSQL AST parser, this
-// uses keyword analysis and works for any SQL dialect (MySQL, SQLite/Turso, etc.).
+// ValidateReadOnlyGeneric performs a keyword-based check that the query is a
+// read-only statement. Works for any SQL dialect (PostgreSQL, MySQL, SQLite, Turso).
 func ValidateReadOnlyGeneric(query string) error {
 	cleaned := strings.TrimSpace(query)
 	if cleaned == "" {
@@ -60,6 +59,15 @@ func ValidateReadOnlyGeneric(query string) error {
 		if strings.Contains(upper, "ANALYZE") {
 			return fmt.Errorf("EXPLAIN ANALYZE is not allowed (it executes the query)")
 		}
+		// Validate the inner statement: strip EXPLAIN keyword and optional
+		// parenthesized options like (FORMAT JSON), then check the inner query.
+		inner := stripExplainPrefix(upper)
+		if inner == "" {
+			return fmt.Errorf("empty EXPLAIN statement")
+		}
+		if !isReadOnlyKeyword(inner) {
+			return fmt.Errorf("only SELECT statements are allowed inside EXPLAIN")
+		}
 		return nil
 	case strings.HasPrefix(upper, "SHOW"):
 		return nil
@@ -70,6 +78,42 @@ func ValidateReadOnlyGeneric(query string) error {
 		return nil
 	default:
 		return fmt.Errorf("only SELECT statements are allowed")
+	}
+}
+
+// stripExplainPrefix removes "EXPLAIN" and any optional parenthesized options
+// (e.g., "(FORMAT JSON)") from the beginning of an uppercased query, returning
+// the remaining inner statement.
+func stripExplainPrefix(upper string) string {
+	// Remove "EXPLAIN" keyword
+	inner := strings.TrimSpace(strings.TrimPrefix(upper, "EXPLAIN"))
+
+	// Skip optional parenthesized options: EXPLAIN (FORMAT JSON) SELECT ...
+	if strings.HasPrefix(inner, "(") {
+		if close := strings.Index(inner, ")"); close >= 0 {
+			inner = strings.TrimSpace(inner[close+1:])
+		}
+	}
+
+	return inner
+}
+
+// isReadOnlyKeyword checks whether the uppercased statement begins with a
+// read-only SQL keyword (SELECT, WITH, SHOW, DESCRIBE, PRAGMA).
+func isReadOnlyKeyword(upper string) bool {
+	switch {
+	case strings.HasPrefix(upper, "SELECT"):
+		return true
+	case strings.HasPrefix(upper, "WITH"):
+		return true
+	case strings.HasPrefix(upper, "SHOW"):
+		return true
+	case strings.HasPrefix(upper, "DESCRIBE"), strings.HasPrefix(upper, "DESC "):
+		return true
+	case strings.HasPrefix(upper, "PRAGMA"):
+		return true
+	default:
+		return false
 	}
 }
 

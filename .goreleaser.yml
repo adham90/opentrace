@@ -4,11 +4,13 @@ builds:
   - main: ./cmd/opentrace
     binary: opentrace
     env:
-      - CGO_ENABLED=1
+      - CGO_ENABLED=0
     goos:
       - linux
+      - darwin
     goarch:
       - amd64
+      - arm64
     ldflags:
       - -s -w
       - -X github.com/adham90/opentrace/internal/version.Version={{.Version}}
