@@ -32,17 +32,13 @@ func CSPNonce(ctx context.Context) string {
 	return ""
 }
 
-// ctxKeyCSRFToken is the context key for the per-request CSRF token.
-type csrfTokenKeyType struct{}
-
-var ctxKeyCSRFToken = csrfTokenKeyType{}
+// ctxKeyCSRFToken uses the shared key from the server package so that
+// both web handlers and domain modules can read the CSRF token.
+var ctxKeyCSRFToken = server.CtxKeyCSRFToken
 
 // CSRFToken returns the CSRF token stored in the request context.
 func CSRFToken(ctx context.Context) string {
-	if v, ok := ctx.Value(ctxKeyCSRFToken).(string); ok {
-		return v
-	}
-	return ""
+	return server.CSRFToken(ctx)
 }
 
 const csrfCookieName = "opentrace_csrf"

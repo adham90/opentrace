@@ -298,31 +298,33 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Get("/onboarding", srv.handleOnboardingPage)
 	router.Post("/onboarding", srv.handleOnboardingSubmit)
 
-	// Pages — require auth, redirect to onboarding if no users
+	// Pages — require auth, redirect to onboarding if no users.
+	// The page router reference is exposed via sharedDeps.PageRouter so
+	// domain modules (e.g. dashboard) can register page routes.
 	router.Group(func(r chi.Router) {
 		r.Use(srv.RedirectToOnboardingIfNeeded)
-		r.Get("/", srv.handleDashboardPage)
 		r.Get("/logs", srv.handleLogsPage)
 		r.Get("/logs/fragment", srv.handleLogsFragment)
 		r.Get("/errors", srv.handleErrorsPage)
 		r.Get("/errors/{fingerprint}", srv.handleErrorDetailPage)
-		r.Get("/watchers", srv.handleWatchersPage)
-		r.Get("/watchers/{id}", srv.handleWatchDetailPage)
+		// Watcher page routes are handled by the watches module.
 		r.Get("/health", srv.handleHealthPage)
 		r.Get("/profile", srv.handleProfilePage)
 		r.Get("/connectors", srv.handleConnectorsPage)
 		r.Get("/tools", srv.handleToolsPage)
 		r.Get("/sessions", srv.handleSessionsPage)
 		r.Get("/sessions/{id}", srv.handleSessionDetailPage)
+		// Expose the page router so modules can add page routes
+		if srv.sharedDeps != nil {
+			srv.sharedDeps.PageRouter = r
+		}
 	})
 
-	// Settings (admin)
+	// Settings (admin) — settings, setup, and users page routes are handled
+	// by the settings module via AdminPageRouter.
 	router.Group(func(r chi.Router) {
 		r.Use(srv.RedirectToOnboardingIfNeeded)
 		r.Use(RequireAdmin)
-		r.Get("/settings", srv.handleSettingsPage)
-		r.Get("/setup", srv.handleSetupPage)
-		r.Get("/users", srv.handleUsersPage)
 		// Legacy redirects
 		r.Get("/admin/users", func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/users", http.StatusMovedPermanently)
@@ -330,6 +332,10 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Get("/admin/settings", func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/settings", http.StatusMovedPermanently)
 		})
+		// Expose admin page router for modules
+		if srv.sharedDeps != nil {
+			srv.sharedDeps.AdminPageRouter = r
+		}
 	})
 
 	// Debug/pprof endpoints — admin only
@@ -387,25 +393,16 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Get("/log_values", srv.handleLogValues)
 			r.Get("/connectors", srv.handleListConnectors)
 			r.Get("/connectors/{id}", srv.handleGetConnectorAPI)
-			r.Get("/overview", srv.handleOverviewAPI)
-			r.Get("/dashboard", srv.handleDashboardAPI)
+			// Dashboard and overview API routes are registered by the
+			// dashboard module (see internal/modules/dashboard/).
 			r.Get("/tools", srv.handleToolsAPI)
 			r.Get("/logs/poll", srv.handleLogsPoll)
 			r.Get("/logs/histogram", srv.handleLogsHistogram)
 			r.Get("/logs/{id}", srv.handleGetLogDetail)
-			// Watches (agent-first)
-			if srv.watchStore != nil {
-				r.Get("/watches", srv.handleListWatches)
-				r.Get("/watches/{id}", srv.handleGetWatch)
-				r.Get("/watches/{id}/runs", srv.handleListWatchRuns)
-				r.Get("/watches/{id}/alerts", srv.handleListWatchAlerts)
-				r.Get("/watches/alerts/{alertId}", srv.handleGetWatchAlert)
-				r.Get("/watches/alerts/count", srv.handleWatchAlertCount)
-			}
 
 			// Domain modules handle: errors, healthchecks, trends, analytics,
 			// error impact, journeys, traces, deploys, events, code entities,
-			// test gaps, mcp activity, investigations, servers.
+			// test gaps, mcp activity, investigations, servers, watches, settings.
 			// See internal/modules/ and cmd/opentrace/modules.go.
 		})
 
@@ -416,37 +413,13 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			r.Put("/connectors/{id}", srv.handleUpdateConnectorAPI)
 			r.Post("/connectors/{id}/test", srv.handleTestConnectorAPI)
 			r.Delete("/connectors/{id}", srv.handleDeleteConnectorAPI)
-			// Watches (agent-first) — write
-			if srv.watchStore != nil {
-				r.Post("/watches", srv.handleCreateWatch)
-				r.Delete("/watches/{id}", srv.handleDeleteWatch)
-				r.Post("/watches/alerts/{alertId}/dismiss", srv.handleDismissWatchAlert)
-				r.Post("/watches/alerts/{alertId}/acknowledge", srv.handleAcknowledgeWatchAlert)
-			}
 
-			// Write routes for errors, funnels, healthchecks, servers
+			// Write routes for errors, funnels, healthchecks, servers, watches
 			// are handled by domain modules.
 		})
 
-		// Settings API (admin only)
-		r.Group(func(r chi.Router) {
-			r.Use(srv.requireAdminOrOnboarding)
-			r.Get("/settings/retention", srv.handleGetRetention)
-			r.Put("/settings/retention", srv.handleUpdateRetention)
-			r.Get("/settings/api-key", srv.handleGetAPIKey)
-			r.Post("/settings/api-key", srv.handleRegenerateAPIKey)
-			r.Get("/settings/cors", srv.handleGetCORSOrigins)
-			r.Put("/settings/cors", srv.handleUpdateCORSOrigins)
-			r.Get("/settings/query-guardrails", srv.handleGetQueryGuardrails)
-			r.Put("/settings/query-guardrails", srv.handleUpdateQueryGuardrails)
-			r.Get("/settings/mcp-name", srv.handleGetMCPName)
-			r.Put("/settings/mcp-name", srv.handleUpdateMCPName)
-			r.Get("/settings/sampling", srv.handleGetSamplingRules)
-			r.Put("/settings/sampling", srv.handleUpdateSamplingRules)
-			if srv.auditStore != nil {
-				r.Get("/audit-log", srv.handleAuditLog)
-			}
-		})
+		// Settings and audit-log API routes are handled by the settings module.
+		// See internal/modules/settings/.
 
 		// User management API (admin only)
 		r.Group(func(r chi.Router) {
@@ -597,15 +570,6 @@ func (s *Server) auditWorker() {
 		}
 		cancel()
 	}
-}
-
-func (s *Server) handleAuditLog(w http.ResponseWriter, r *http.Request) {
-	entries, err := s.auditStore.Recent(r.Context(), 100)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to fetch audit log")
-		return
-	}
-	writeJSON(w, http.StatusOK, entries)
 }
 
 func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {

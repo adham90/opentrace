@@ -4,6 +4,7 @@
 package main
 
 import (
+	"github.com/adham90/opentrace/internal/modules/dashboard"
 	"github.com/adham90/opentrace/internal/modules/deploys"
 	"github.com/adham90/opentrace/internal/modules/errorimpact"
 	"github.com/adham90/opentrace/internal/modules/errors"
@@ -13,12 +14,15 @@ import (
 	"github.com/adham90/opentrace/internal/modules/journeys"
 	"github.com/adham90/opentrace/internal/modules/mcpactivity"
 	"github.com/adham90/opentrace/internal/modules/servers"
+	"github.com/adham90/opentrace/internal/modules/settings"
 	"github.com/adham90/opentrace/internal/modules/traces"
 	"github.com/adham90/opentrace/internal/modules/trends"
+	"github.com/adham90/opentrace/internal/modules/watches"
 	"github.com/adham90/opentrace/internal/server"
 )
 
 var modules = []server.Module{
+	dashboard.Module,
 	errors.Module,
 	traces.Module,
 	deploys.Module,
@@ -30,4 +34,6 @@ var modules = []server.Module{
 	trends.Module,
 	servers.Module,
 	events.Module,
+	watches.Module,
+	settings.Module,
 }

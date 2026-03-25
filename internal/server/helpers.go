@@ -2,10 +2,14 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/adham90/opentrace/internal/store"
@@ -18,6 +22,21 @@ const (
 	ctxKeyUser contextKey = iota
 	ctxKeySession
 )
+
+// CSRFTokenKeyType is the context key type for CSRF tokens.
+// Exported so the web middleware can set it and modules can read it.
+type CSRFTokenKeyType struct{}
+
+// CtxKeyCSRFToken is the context key for the per-request CSRF token.
+var CtxKeyCSRFToken = CSRFTokenKeyType{}
+
+// CSRFToken returns the CSRF token stored in the request context.
+func CSRFToken(ctx context.Context) string {
+	if v, ok := ctx.Value(CtxKeyCSRFToken).(string); ok {
+		return v
+	}
+	return ""
+}
 
 // WriteJSON writes a JSON response with the given status code.
 func WriteJSON(w http.ResponseWriter, status int, v any) {
@@ -105,4 +124,69 @@ func ParseDurationWithDays(s string) (time.Duration, error) {
 		}
 	}
 	return 0, err
+}
+
+// RequireAdminAPI is middleware that returns 403 JSON if the user is not an admin.
+func RequireAdminAPI(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := UserFromContext(r.Context())
+		if user == nil {
+			WriteError(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		if user.Role != store.RoleAdmin {
+			WriteError(w, http.StatusForbidden, "admin access required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// Audit logs an admin action to the audit store. Safe to call with a nil store.
+func Audit(r *http.Request, auditStore store.AuditStore, action, targetType, targetID, details string) {
+	if auditStore == nil {
+		return
+	}
+	user := UserFromContext(r.Context())
+	if user == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	if err := auditStore.Log(ctx, store.LogAuditParams{
+		UserID:     user.ID,
+		UserEmail:  user.Email,
+		Action:     action,
+		TargetType: targetType,
+		TargetID:   targetID,
+		Details:    details,
+		IPAddress:  r.RemoteAddr,
+	}); err != nil {
+		slog.Warn("audit log write failed", "action", action, "error", err)
+	}
+}
+
+// GenerateAPIKey creates a new random API key with the "ot_" prefix.
+func GenerateAPIKey() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return "ot_" + hex.EncodeToString(b), nil
+}
+
+// MaskAPIKey returns a masked version of an API key for safe display.
+func MaskAPIKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	if len(key) <= 8 {
+		return key[:1] + "****"
+	}
+	return key[:8] + "****"
+}
+
+// IsMaskedValue returns true if the value looks like a masked API key.
+func IsMaskedValue(val string) bool {
+	return strings.HasSuffix(val, "****")
 }

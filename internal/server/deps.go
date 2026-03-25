@@ -6,6 +6,8 @@ package server
 import (
 	"database/sql"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/jobs"
@@ -52,4 +54,15 @@ type Deps struct {
 	Registry     *connector.Registry
 	Queue        *jobs.Queue
 	WatchMetrics *watcher.WatchMetrics
+
+	// PageRouter is the top-level router group for page routes (with auth
+	// and onboarding-redirect middleware already applied). Modules that
+	// need to register HTML page handlers use this instead of the API
+	// sub-router passed to Mount.
+	PageRouter chi.Router
+
+	// AdminPageRouter is the top-level router group for admin-only page
+	// routes (with auth, onboarding-redirect, and RequireAdmin middleware
+	// already applied). Modules that need admin HTML pages use this.
+	AdminPageRouter chi.Router
 }
