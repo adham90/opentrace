@@ -9,12 +9,16 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/views"
+	webviews "github.com/adham90/opentrace/internal/web/views"
 )
 
 type handler struct {
 	store store.HealthCheckStore
+	cfg   *config.Config
 }
 
 func (h *handler) list(w http.ResponseWriter, r *http.Request) {
@@ -127,4 +131,36 @@ func (h *handler) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	server.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// ── Page handlers ────────────────────────────────────────────
+
+func (h *handler) layoutData(r *http.Request, title, nav string) views.LayoutData {
+	user := server.UserFromContext(r.Context())
+	isAdmin := user != nil && user.Role == store.RoleAdmin
+	return views.LayoutData{
+		Title:   title,
+		Nav:     nav,
+		User:    user,
+		IsAdmin: isAdmin,
+		DevMode: h.cfg != nil && h.cfg.DevMode,
+	}
+}
+
+func (h *handler) healthPage(w http.ResponseWriter, r *http.Request) {
+	layout := h.layoutData(r, "Health", "health")
+	var uptimeSummaries []store.UptimeSummary
+	var healthChecks []store.HealthCheck
+	if h.store != nil {
+		checks, err := h.store.List(r.Context(), store.ListHealthCheckParams{})
+		if err == nil {
+			healthChecks = checks
+		}
+		oneDayAgo := time.Now().Add(-24 * time.Hour)
+		summaries, err := h.store.UptimeSummaries(r.Context(), oneDayAgo)
+		if err == nil {
+			uptimeSummaries = summaries
+		}
+	}
+	webviews.HealthPage(layout, uptimeSummaries, healthChecks).Render(r.Context(), w)
 }

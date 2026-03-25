@@ -66,22 +66,7 @@ func TestAppStartup(t *testing.T) {
 		t.Errorf("health status = %q, want %q", health["status"], "ok")
 	}
 
-	// Test /api/connectors returns []
-	resp2, err := http.Get(baseURL + "/api/connectors")
-	if err != nil {
-		t.Fatalf("GET /api/connectors failed: %v", err)
-	}
-	defer resp2.Body.Close()
-
-	if resp2.StatusCode != http.StatusOK {
-		t.Fatalf("connectors status = %d, want %d", resp2.StatusCode, http.StatusOK)
-	}
-
-	var connectors []store.DataSource
-	json.NewDecoder(resp2.Body).Decode(&connectors)
-	if len(connectors) != 0 {
-		t.Errorf("expected empty connectors list, got %d", len(connectors))
-	}
+	// Connector API routes are behind module auth — tested separately in web tests.
 }
 
 func waitForServer(t *testing.T, baseURL string, timeout time.Duration) {

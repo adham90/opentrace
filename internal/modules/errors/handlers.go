@@ -3,6 +3,7 @@ package errors
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,13 +11,18 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/adham90/opentrace/internal/config"
+	errorviews "github.com/adham90/opentrace/internal/modules/errors/views"
 	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/views"
 )
 
 type handler struct {
-	store store.ErrorGroupStore
-	db    *sql.DB
+	store    store.ErrorGroupStore
+	logStore store.LogStore
+	db       *sql.DB
+	cfg      *config.Config
 }
 
 func (h *handler) batch(w http.ResponseWriter, r *http.Request) {
@@ -140,6 +146,79 @@ func (h *handler) ignore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	server.WriteJSON(w, http.StatusOK, map[string]string{"status": "ignored"})
+}
+
+// ── Page handlers ────────────────────────────────────────────
+
+func (h *handler) layoutData(r *http.Request, title, nav string) views.LayoutData {
+	user := server.UserFromContext(r.Context())
+	isAdmin := user != nil && user.Role == store.RoleAdmin
+	return views.LayoutData{
+		Title:   title,
+		Nav:     nav,
+		User:    user,
+		IsAdmin: isAdmin,
+		DevMode: h.cfg != nil && h.cfg.DevMode,
+	}
+}
+
+func (h *handler) errorsPage(w http.ResponseWriter, r *http.Request) {
+	layout := h.layoutData(r, "Errors", "errors")
+	var errorGroups []store.ErrorGroup
+	if h.store != nil {
+		status := store.ErrorGroupStatus(r.URL.Query().Get("status"))
+		groups, err := h.store.List(r.Context(), store.ListErrorGroupParams{
+			Status:  status,
+			Service: r.URL.Query().Get("service"),
+			SortBy:  "last_seen_at",
+			Limit:   100,
+		})
+		if err == nil {
+			errorGroups = groups
+		}
+	}
+	errorviews.ErrorsPage(layout, errorGroups).Render(r.Context(), w)
+}
+
+func (h *handler) errorDetailPage(w http.ResponseWriter, r *http.Request) {
+	fp := chi.URLParam(r, "fingerprint")
+	if fp == "" {
+		http.Redirect(w, r, "/errors", http.StatusFound)
+		return
+	}
+	if h.store == nil {
+		server.WriteError(w, http.StatusNotFound, "error tracking not available")
+		return
+	}
+
+	eg, err := h.store.Get(r.Context(), fp)
+	if errors.Is(err, store.ErrNotFound) {
+		server.WriteError(w, http.StatusNotFound, "error group not found")
+		return
+	}
+	if err != nil {
+		server.WriteError(w, http.StatusInternalServerError, "failed to get error group")
+		return
+	}
+
+	events, _ := h.store.ListEvents(r.Context(), fp, 20)
+	eg.Events = events
+
+	layout := h.layoutData(r, eg.ExceptionClass, "errors")
+
+	// Fetch recent log entries for this error fingerprint
+	var errorLogs []store.LogEntry
+	if h.logStore != nil {
+		logs, err := h.logStore.Search(r.Context(), store.LogSearchParams{
+			ErrorFingerprint: fp,
+			Limit:            25,
+		})
+		if err == nil {
+			errorLogs = logs
+		}
+	}
+
+	errorviews.ErrorDetailPage(layout, *eg, errorLogs).Render(r.Context(), w)
 }
 
 func (h *handler) histogram(w http.ResponseWriter, r *http.Request) {

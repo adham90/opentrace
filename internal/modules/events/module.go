@@ -19,8 +19,13 @@ func mount(r chi.Router, deps *server.Deps) {
 		testCorrelationStore: deps.TestCorrelationStore,
 	}
 
-	r.Post("/events/{type}", h.webhook)
+	// Read routes (session auth, applied by caller)
 	r.Get("/events", h.list)
 	r.Get("/code-entities", h.listCodeEntities)
 	r.Get("/test-gaps", h.listTestGaps)
+
+	// Webhook route (API key auth, registered on the API router directly)
+	if deps.APIRouter != nil && deps.APIKeyAuth != nil && deps.APIRateLimiter != nil {
+		deps.APIRouter.With(deps.APIRateLimiter, deps.APIKeyAuth).Post("/events/{type}", h.webhook)
+	}
 }

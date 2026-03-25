@@ -4,6 +4,8 @@
 package main
 
 import (
+	authmod "github.com/adham90/opentrace/internal/modules/auth"
+	"github.com/adham90/opentrace/internal/modules/connectors"
 	"github.com/adham90/opentrace/internal/modules/dashboard"
 	"github.com/adham90/opentrace/internal/modules/deploys"
 	"github.com/adham90/opentrace/internal/modules/errorimpact"
@@ -12,9 +14,12 @@ import (
 	"github.com/adham90/opentrace/internal/modules/healthchecks"
 	"github.com/adham90/opentrace/internal/modules/investigations"
 	"github.com/adham90/opentrace/internal/modules/journeys"
+	"github.com/adham90/opentrace/internal/modules/logs"
 	"github.com/adham90/opentrace/internal/modules/mcpactivity"
+	"github.com/adham90/opentrace/internal/modules/onboarding"
 	"github.com/adham90/opentrace/internal/modules/servers"
 	"github.com/adham90/opentrace/internal/modules/settings"
+	"github.com/adham90/opentrace/internal/modules/tools"
 	"github.com/adham90/opentrace/internal/modules/traces"
 	"github.com/adham90/opentrace/internal/modules/trends"
 	"github.com/adham90/opentrace/internal/modules/watches"
@@ -22,6 +27,8 @@ import (
 )
 
 var modules = []server.Module{
+	authmod.Module,
+	onboarding.Module,
 	dashboard.Module,
 	errors.Module,
 	traces.Module,
@@ -36,4 +43,7 @@ var modules = []server.Module{
 	events.Module,
 	watches.Module,
 	settings.Module,
+	logs.Module,
+	connectors.Module,
+	tools.Module,
 }

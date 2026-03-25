@@ -91,7 +91,6 @@ type Server struct {
 	sseServer      *mcpgoserver.SSEServer
 	loginLimiter   *RateLimiter
 	apiLimiter     *RateLimiter
-	loginTracker   *loginTracker
 	secureCookies  bool
 	logsConnMu     sync.Mutex
 	metricsConnMu  sync.Mutex
@@ -226,7 +225,6 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	}
 	srv.loginLimiter = NewRateLimiter(10, 1*time.Minute, trustedProxies)
 	srv.apiLimiter = NewRateLimiter(120, 1*time.Minute, trustedProxies)
-	srv.loginTracker = newLoginTracker()
 	// Use secure cookies unless in dev mode or listening on localhost
 	srv.secureCookies = true
 	if cfg != nil {
@@ -287,34 +285,21 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			StaticCacheHeaders(http.FileServer(http.FS(assetsFS.Files)))))
 	}
 
-	// Always-open auth routes (login/register rate-limited)
-	router.Get("/login", srv.handleLoginPage)
-	router.With(loginLimiter.Middleware).Post("/login", srv.handleLoginSubmit)
-	router.Get("/register", srv.handleRegisterPage)
-	router.With(loginLimiter.Middleware).Post("/register", srv.handleRegisterSubmit)
-	router.Post("/logout", srv.handleLogout)
-
-	// Onboarding routes (open — guarded inside handler)
-	router.Get("/onboarding", srv.handleOnboardingPage)
-	router.Post("/onboarding", srv.handleOnboardingSubmit)
+	// Expose the root router and login limiter so auth/onboarding modules
+	// can register unauthenticated routes (login, register, logout, onboarding).
+	if srv.sharedDeps != nil {
+		srv.sharedDeps.RootRouter = router
+		srv.sharedDeps.LoginLimiter = loginLimiter.Middleware
+		srv.sharedDeps.SecureCookies = srv.secureCookies
+	}
 
 	// Pages — require auth, redirect to onboarding if no users.
 	// The page router reference is exposed via sharedDeps.PageRouter so
 	// domain modules (e.g. dashboard) can register page routes.
 	router.Group(func(r chi.Router) {
 		r.Use(srv.RedirectToOnboardingIfNeeded)
-		r.Get("/logs", srv.handleLogsPage)
-		r.Get("/logs/fragment", srv.handleLogsFragment)
-		r.Get("/errors", srv.handleErrorsPage)
-		r.Get("/errors/{fingerprint}", srv.handleErrorDetailPage)
-		// Watcher page routes are handled by the watches module.
-		r.Get("/health", srv.handleHealthPage)
-		r.Get("/profile", srv.handleProfilePage)
-		r.Get("/connectors", srv.handleConnectorsPage)
-		r.Get("/tools", srv.handleToolsPage)
-		r.Get("/sessions", srv.handleSessionsPage)
-		r.Get("/sessions/{id}", srv.handleSessionDetailPage)
-		// Expose the page router so modules can add page routes
+		// Page routes for logs, errors, health, connectors, tools, sessions,
+		// profile, and watchers are handled by domain modules via PageRouter.
 		if srv.sharedDeps != nil {
 			srv.sharedDeps.PageRouter = r
 		}
@@ -363,80 +348,23 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		// CORS for cross-origin browser requests (JS error tracking)
 		r.Use(srv.DynamicCORSMiddleware)
 
-		// Agent install script (no auth — the script is self-contained)
-		r.Get("/agent/install.sh", srv.handleAgentInstallScript)
-
 		// Log ingestion with dynamic API key auth + rate limiting
 		r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/logs", srv.handleIngestLogs)
 
-		// Deploy webhook with dynamic API key auth + rate limiting
-		if srv.deployStore != nil {
-			r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/events/deploy", srv.handleDeployWebhook)
+		// Expose the API router and middleware so domain modules can
+		// register webhook routes with API key auth (see deploys, events,
+		// servers modules).
+		if srv.sharedDeps != nil {
+			srv.sharedDeps.APIRouter = r
+			srv.sharedDeps.APIKeyAuth = srv.DynamicAPIKeyAuth
+			srv.sharedDeps.APIRateLimiter = apiLimiter.Middleware
 		}
 
-		// Generic event webhooks with dynamic API key auth + rate limiting
-		if srv.eventStore != nil {
-			r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/events/{type}", srv.handleEventWebhook)
-		}
-
-		// Server registration and metric push with dynamic API key auth + rate limiting
-		if srv.serverStore != nil && srv.metricStore != nil {
-			r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/servers/register", srv.handleRegisterServer)
-			r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/servers/{id}/metrics", srv.handlePushMetrics)
-		}
-
-		// Read API — require auth, 503 if onboarding needed
-		r.Group(func(r chi.Router) {
-			r.Use(srv.requireAuthOrOnboardingAPI)
-			r.Get("/services", srv.handleListServices)
-			r.Get("/event_types", srv.handleListEventTypes)
-			r.Get("/log_values", srv.handleLogValues)
-			r.Get("/connectors", srv.handleListConnectors)
-			r.Get("/connectors/{id}", srv.handleGetConnectorAPI)
-			// Dashboard and overview API routes are registered by the
-			// dashboard module (see internal/modules/dashboard/).
-			r.Get("/tools", srv.handleToolsAPI)
-			r.Get("/logs/poll", srv.handleLogsPoll)
-			r.Get("/logs/histogram", srv.handleLogsHistogram)
-			r.Get("/logs/{id}", srv.handleGetLogDetail)
-
-			// Domain modules handle: errors, healthchecks, trends, analytics,
-			// error impact, journeys, traces, deploys, events, code entities,
-			// test gaps, mcp activity, investigations, servers, watches, settings.
-			// See internal/modules/ and cmd/opentrace/modules.go.
-		})
-
-		// Write API — require admin, 503 if onboarding needed
-		r.Group(func(r chi.Router) {
-			r.Use(srv.requireAdminOrOnboarding)
-			r.Post("/connectors", srv.handleCreateConnectorAPI)
-			r.Put("/connectors/{id}", srv.handleUpdateConnectorAPI)
-			r.Post("/connectors/{id}/test", srv.handleTestConnectorAPI)
-			r.Delete("/connectors/{id}", srv.handleDeleteConnectorAPI)
-
-			// Write routes for errors, funnels, healthchecks, servers, watches
-			// are handled by domain modules.
-		})
-
-		// Settings and audit-log API routes are handled by the settings module.
-		// See internal/modules/settings/.
-
-		// User management API (admin only)
-		r.Group(func(r chi.Router) {
-			r.Use(srv.requireAdminOrOnboarding)
-			r.Post("/users/{id}/role", srv.handleUpdateUserRole)
-			r.Post("/users/{id}/mcp", srv.handleToggleMCPAccess)
-			r.Post("/users/{id}/active", srv.handleToggleUserActive)
-			r.Post("/users/{id}/mcp-token", srv.handleRegenerateMCPToken)
-			r.Delete("/users/{id}", srv.handleDeleteUser)
-		})
-
-		// Profile API (auth required)
-		r.Group(func(r chi.Router) {
-			r.Use(srv.requireAuthOrOnboardingAPI)
-			r.Post("/profile/password", srv.handleChangePassword)
-			r.Get("/profile/mcp-token", srv.handleGetOwnMCPToken)
-		})
+		// Read/Write API routes for logs, connectors, tools, errors,
+		// healthchecks, trends, analytics, error impact, journeys, traces,
+		// deploys, events, code entities, test gaps, mcp activity,
+		// investigations, servers, watches, and settings are handled
+		// by domain modules. See internal/modules/ and cmd/opentrace/modules.go.
 
 		// Dev-mode live-reload endpoint
 		if cfg != nil && cfg.DevMode {
@@ -485,7 +413,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 // getEffectiveCORSOrigins returns the CORS allowed origins from the env var (if set) or from the DB.
-// Returns a slice of origin strings parsed from the comma-separated value.
 func (s *Server) getEffectiveCORSOrigins(ctx context.Context) []string {
 	if s.cfg != nil && len(s.cfg.CORSAllowedOrigins) > 0 {
 		return s.cfg.CORSAllowedOrigins
@@ -499,8 +426,6 @@ func (s *Server) getEffectiveCORSOrigins(ctx context.Context) []string {
 	return nil
 }
 
-// parseCORSOriginsString splits a comma-separated origins string into a slice,
-// trimming whitespace from each entry and filtering empty strings.
 func parseCORSOriginsString(s string) []string {
 	parts := strings.Split(s, ",")
 	var result []string
@@ -513,7 +438,6 @@ func parseCORSOriginsString(s string) []string {
 	return result
 }
 
-// getEffectiveAPIKey returns the API key from the env var (if set) or from the DB.
 func (s *Server) getEffectiveAPIKey(ctx context.Context) string {
 	if s.cfg != nil && s.cfg.APIKey != "" {
 		return s.cfg.APIKey
@@ -527,8 +451,6 @@ func (s *Server) getEffectiveAPIKey(ctx context.Context) string {
 	return ""
 }
 
-// audit logs an admin action asynchronously via a bounded channel.
-// Safe to call even if auditStore is nil.
 func (s *Server) audit(r *http.Request, action, targetType, targetID, details string) {
 	if s.auditStore == nil {
 		return
@@ -552,7 +474,6 @@ func (s *Server) audit(r *http.Request, action, targetType, targetID, details st
 	}
 }
 
-// auditWorker drains the audit channel and writes to the store.
 func (s *Server) auditWorker() {
 	defer s.auditWg.Done()
 	for entry := range s.auditCh {
@@ -577,8 +498,6 @@ func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
 		"status":  "ok",
 		"version": version.Version,
 	}
-
-	// Check database connectivity
 	if s.db != nil {
 		if err := s.db.PingContext(r.Context()); err != nil {
 			checks["database"] = "error"
@@ -587,7 +506,6 @@ func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
 			checks["database"] = "ok"
 		}
 	}
-
 	status := http.StatusOK
 	if checks["status"] != "ok" {
 		status = http.StatusServiceUnavailable
@@ -629,7 +547,6 @@ func (s *Server) handleVersionBanner(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(w, `<div class="update-banner" id="update-banner">
   <span>OpenTrace <strong>v%s</strong> is available (you have v%s).</span>
@@ -638,13 +555,11 @@ func (s *Server) handleVersionBanner(w http.ResponseWriter, r *http.Request) {
 </div>`, resp.LatestVersion, resp.CurrentVersion, resp.ReleaseURL)
 }
 
-// isDocker returns true when running inside a Docker container.
 func isDocker() bool {
 	_, err := os.Stat("/.dockerenv")
 	return err == nil
 }
 
-// handleDevHash returns a hash of UI file modification times for live-reload.
 func (s *Server) handleDevHash(w http.ResponseWriter, r *http.Request) {
 	var buf strings.Builder
 	for _, dir := range []string{"internal/web/templates", "internal/web/static"} {

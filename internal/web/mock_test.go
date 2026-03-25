@@ -2,12 +2,20 @@ package web
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 )
+
+// withAdmin injects an admin user into the request context so auth middleware passes.
+func withAdmin(req *http.Request) *http.Request {
+	admin := &store.User{ID: "test-admin", Email: "admin@test.com", Role: store.RoleAdmin, IsActive: true, DisplayName: "Admin"}
+	return req.WithContext(server.WithUser(req.Context(), admin))
+}
 
 type mockDataSourceStore struct {
 	mu      sync.Mutex

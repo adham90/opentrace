@@ -20,12 +20,19 @@ func mount(r chi.Router, deps *server.Deps) {
 		registry:    deps.Registry,
 	}
 
-	r.Post("/servers/register", h.register)
+	// Read/write routes (session auth, applied by caller)
 	r.Get("/servers", h.list)
 	r.Get("/servers/{id}", h.get)
 	r.Put("/servers/{id}", h.update)
 	r.Delete("/servers/{id}", h.delete)
-	r.Post("/servers/{id}/metrics", h.pushMetrics)
 	r.Get("/servers/{id}/metrics", h.queryMetrics)
-	r.Get("/agent/install.sh", h.agentInstallScript)
+
+	// Webhook and agent routes (API key auth or no auth, registered on the
+	// API router directly so they bypass the session-auth group).
+	if deps.APIRouter != nil && deps.APIKeyAuth != nil && deps.APIRateLimiter != nil {
+		deps.APIRouter.With(deps.APIRateLimiter, deps.APIKeyAuth).Post("/servers/register", h.register)
+		deps.APIRouter.With(deps.APIRateLimiter, deps.APIKeyAuth).Post("/servers/{id}/metrics", h.pushMetrics)
+		// Agent install script (no auth -- the script is self-contained)
+		deps.APIRouter.Get("/agent/install.sh", h.agentInstallScript)
+	}
 }

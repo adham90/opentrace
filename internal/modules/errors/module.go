@@ -14,8 +14,10 @@ var Module = server.Module{
 
 func mount(r chi.Router, deps *server.Deps) {
 	h := &handler{
-		store: deps.ErrorGroupStore,
-		db:    deps.DB,
+		store:    deps.ErrorGroupStore,
+		logStore: deps.LogStore,
+		db:       deps.DB,
+		cfg:      deps.Cfg,
 	}
 
 	// Read API
@@ -27,4 +29,10 @@ func mount(r chi.Router, deps *server.Deps) {
 	// Write API
 	r.Post("/errors/{fingerprint}/resolve", h.resolve)
 	r.Post("/errors/{fingerprint}/ignore", h.ignore)
+
+	// Page routes (mounted on the page router with auth middleware)
+	if deps.PageRouter != nil {
+		deps.PageRouter.Get("/errors", h.errorsPage)
+		deps.PageRouter.Get("/errors/{fingerprint}", h.errorDetailPage)
+	}
 }

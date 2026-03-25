@@ -11,6 +11,9 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	authmod "github.com/adham90/opentrace/internal/modules/auth"
+	"github.com/adham90/opentrace/internal/modules/onboarding"
+	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 )
 
@@ -20,11 +23,20 @@ func newTestServer(t *testing.T) (*Server, *mockUserStore, *mockSessionStore) {
 	t.Helper()
 	us := newMockUserStore()
 	ss := newMockSessionStore()
+	sharedDeps := &server.Deps{
+		UserStore:    us,
+		SessionStore: ss,
+	}
 	srv := NewServerWithDeps(ServerDeps{
 		DSStore:      newMockStore(),
 		LogStore:     newMockLogStore(),
 		UserStore:    us,
 		SessionStore: ss,
+		SharedDeps:   sharedDeps,
+		Modules: []server.Module{
+			authmod.Module,
+			onboarding.Module,
+		},
 	})
 	return srv, us, ss
 }
@@ -317,8 +329,8 @@ func TestLogin_LockoutAfterFailedAttempts(t *testing.T) {
 	srv, us, _ := newTestServer(t)
 	createTestUser(t, us, "lockme@example.com", "correctpassword", store.RoleAdmin, true)
 
-	// Fail 5 times.
-	for i := 0; i < maxFailedLogins; i++ {
+	// Fail 5 times (maxFailedLogins = 5 in the auth module).
+	for i := 0; i < 5; i++ {
 		form := url.Values{}
 		form.Set("email", "lockme@example.com")
 		form.Set("password", "wrongpassword")
@@ -340,27 +352,6 @@ func TestLogin_LockoutAfterFailedAttempts(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "temporarily locked") {
 		t.Fatalf("expected lockout message, got: %s", rec.Body.String())
-	}
-}
-
-func TestLogin_LockoutExpires(t *testing.T) {
-	tracker := newLoginTracker()
-
-	// Record enough failures to lock.
-	for i := 0; i < maxFailedLogins; i++ {
-		tracker.recordFailure("expire@example.com")
-	}
-	if !tracker.isLocked("expire@example.com") {
-		t.Fatal("expected account to be locked")
-	}
-
-	// Simulate time passing by directly setting lockedAt in the past.
-	tracker.mu.Lock()
-	tracker.entries["expire@example.com"].lockedAt = time.Now().Add(-(lockoutDuration + time.Second))
-	tracker.mu.Unlock()
-
-	if tracker.isLocked("expire@example.com") {
-		t.Fatal("expected lockout to have expired")
 	}
 }
 
@@ -391,7 +382,7 @@ func TestLogin_SuccessResetsFailureCount(t *testing.T) {
 	}
 
 	// Now fail 4 more times — should NOT be locked (counter was reset).
-	for i := 0; i < maxFailedLogins-1; i++ {
+	for i := 0; i < 4; i++ {
 		form := url.Values{}
 		form.Set("email", "reset@example.com")
 		form.Set("password", "wrongpassword")

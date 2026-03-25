@@ -8,17 +8,39 @@ import (
 	"strings"
 	"testing"
 
+	authmod "github.com/adham90/opentrace/internal/modules/auth"
+	"github.com/adham90/opentrace/internal/modules/onboarding"
+	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 )
 
-func TestOnboardingPage_ShowsWhenNoUsers(t *testing.T) {
+func newOnboardingTestServer(t *testing.T) *Server {
+	t.Helper()
+	us := newMockUserStore()
+	ss := newMockSessionStore()
+	settings := newMockSettingsStore()
+	sharedDeps := &server.Deps{
+		UserStore:     us,
+		SessionStore:  ss,
+		SettingsStore: settings,
+	}
 	srv := NewServerWithDeps(ServerDeps{
 		DSStore:       newMockStore(),
 		LogStore:      newMockLogStore(),
-		UserStore:     newMockUserStore(),
-		SessionStore:  newMockSessionStore(),
-		SettingsStore: newMockSettingsStore(),
+		UserStore:     us,
+		SessionStore:  ss,
+		SettingsStore: settings,
+		SharedDeps:    sharedDeps,
+		Modules: []server.Module{
+			authmod.Module,
+			onboarding.Module,
+		},
 	})
+	return srv
+}
+
+func TestOnboardingPage_ShowsWhenNoUsers(t *testing.T) {
+	srv := newOnboardingTestServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/onboarding", nil)
 	rec := httptest.NewRecorder()
@@ -34,6 +56,8 @@ func TestOnboardingPage_ShowsWhenNoUsers(t *testing.T) {
 
 func TestOnboardingPage_RedirectsWhenUsersExist(t *testing.T) {
 	us := newMockUserStore()
+	ss := newMockSessionStore()
+	settings := newMockSettingsStore()
 	ctx := context.Background()
 	us.Create(ctx, store.CreateUserParams{
 		Email:        "admin@example.com",
@@ -42,12 +66,22 @@ func TestOnboardingPage_RedirectsWhenUsersExist(t *testing.T) {
 		Role:         store.RoleAdmin,
 	})
 
+	sharedDeps := &server.Deps{
+		UserStore:     us,
+		SessionStore:  ss,
+		SettingsStore: settings,
+	}
 	srv := NewServerWithDeps(ServerDeps{
 		DSStore:       newMockStore(),
 		LogStore:      newMockLogStore(),
 		UserStore:     us,
-		SessionStore:  newMockSessionStore(),
-		SettingsStore: newMockSettingsStore(),
+		SessionStore:  ss,
+		SettingsStore: settings,
+		SharedDeps:    sharedDeps,
+		Modules: []server.Module{
+			authmod.Module,
+			onboarding.Module,
+		},
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/onboarding", nil)
@@ -68,12 +102,22 @@ func TestOnboardingSubmit_CreatesAdminAndAPIKey(t *testing.T) {
 	ss := newMockSessionStore()
 	settings := newMockSettingsStore()
 
+	sharedDeps := &server.Deps{
+		UserStore:     us,
+		SessionStore:  ss,
+		SettingsStore: settings,
+	}
 	srv := NewServerWithDeps(ServerDeps{
 		DSStore:       newMockStore(),
 		LogStore:      newMockLogStore(),
 		UserStore:     us,
 		SessionStore:  ss,
 		SettingsStore: settings,
+		SharedDeps:    sharedDeps,
+		Modules: []server.Module{
+			authmod.Module,
+			onboarding.Module,
+		},
 	})
 
 	form := url.Values{
@@ -141,6 +185,8 @@ func TestOnboardingSubmit_CreatesAdminAndAPIKey(t *testing.T) {
 
 func TestOnboardingSubmit_RejectsWhenUsersExist(t *testing.T) {
 	us := newMockUserStore()
+	ss := newMockSessionStore()
+	settings := newMockSettingsStore()
 	ctx := context.Background()
 	us.Create(ctx, store.CreateUserParams{
 		Email:        "admin@example.com",
@@ -149,12 +195,22 @@ func TestOnboardingSubmit_RejectsWhenUsersExist(t *testing.T) {
 		Role:         store.RoleAdmin,
 	})
 
+	sharedDeps := &server.Deps{
+		UserStore:     us,
+		SessionStore:  ss,
+		SettingsStore: settings,
+	}
 	srv := NewServerWithDeps(ServerDeps{
 		DSStore:       newMockStore(),
 		LogStore:      newMockLogStore(),
 		UserStore:     us,
-		SessionStore:  newMockSessionStore(),
-		SettingsStore: newMockSettingsStore(),
+		SessionStore:  ss,
+		SettingsStore: settings,
+		SharedDeps:    sharedDeps,
+		Modules: []server.Module{
+			authmod.Module,
+			onboarding.Module,
+		},
 	})
 
 	form := url.Values{
@@ -175,13 +231,7 @@ func TestOnboardingSubmit_RejectsWhenUsersExist(t *testing.T) {
 }
 
 func TestOnboardingSubmit_ValidationErrors(t *testing.T) {
-	srv := NewServerWithDeps(ServerDeps{
-		DSStore:       newMockStore(),
-		LogStore:      newMockLogStore(),
-		UserStore:     newMockUserStore(),
-		SessionStore:  newMockSessionStore(),
-		SettingsStore: newMockSettingsStore(),
-	})
+	srv := newOnboardingTestServer(t)
 
 	tests := []struct {
 		name     string

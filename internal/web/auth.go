@@ -26,20 +26,13 @@ var (
 	generateAPIKey       = auth.GenerateAPIKey
 )
 
-const sessionCookieName = "opentrace_session"
+// Delegate cookie helpers to the auth package.
+const sessionCookieName = auth.SessionCookieName
 
 func setSessionCookie(w http.ResponseWriter, token string, maxAge int, secure bool) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    token,
-		Path:     "/",
-		MaxAge:   maxAge,
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteStrictMode,
-	})
+	auth.SetSessionCookie(w, token, maxAge, secure)
 }
 
 func clearSessionCookie(w http.ResponseWriter) {
-	setSessionCookie(w, "", -1, true)
+	auth.ClearSessionCookie(w)
 }

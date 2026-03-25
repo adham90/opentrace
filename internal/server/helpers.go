@@ -15,6 +15,26 @@ import (
 	"github.com/adham90/opentrace/internal/store"
 )
 
+// ToolCatalogEntry describes a single MCP tool for display.
+type ToolCatalogEntry struct {
+	Name        string
+	Description string
+	Access      string
+	Requires    string
+}
+
+// ToolCatalogCategory groups related tools under a named section.
+type ToolCatalogCategory struct {
+	Name        string
+	Description string
+	Tools       []ToolCatalogEntry
+}
+
+// ToolCatalogProvider exposes the MCP tool catalog without importing internal/mcp.
+type ToolCatalogProvider interface {
+	CategoriesForDisplay() []ToolCatalogCategory
+}
+
 // contextKey is the type for context value keys in this package.
 type contextKey int
 

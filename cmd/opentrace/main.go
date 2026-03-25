@@ -299,6 +299,7 @@ func run() error {
 		EventStore:               deps.EventStore,
 		TestCorrelationStore:     deps.TestCorrelationStore,
 	})
+	deps.ToolCatalog = toolCatalog
 
 	// Agent-first watch evaluator + stream (reactive on log ingestion)
 	watchEvaluator := watcher.NewWatchEvaluator(watchMetrics, deps.WatchStore)

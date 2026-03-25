@@ -1,5 +1,7 @@
 package mcp
 
+import "github.com/adham90/opentrace/internal/server"
+
 // CatalogEntry describes a single MCP tool for the web tools page.
 type CatalogEntry struct {
 	Name        string `json:"name"`
@@ -27,6 +29,32 @@ func (tc *ToolCatalog) Categories() []CatalogCategory {
 		return nil
 	}
 	return tc.categories
+}
+
+// CategoriesForDisplay implements server.ToolCatalogProvider, returning
+// categories in a package-independent type for use by domain modules.
+func (tc *ToolCatalog) CategoriesForDisplay() []server.ToolCatalogCategory {
+	if tc == nil {
+		return nil
+	}
+	cats := make([]server.ToolCatalogCategory, len(tc.categories))
+	for i, c := range tc.categories {
+		tools := make([]server.ToolCatalogEntry, len(c.Tools))
+		for j, t := range c.Tools {
+			tools[j] = server.ToolCatalogEntry{
+				Name:        t.Name,
+				Description: t.Description,
+				Access:      t.Access,
+				Requires:    t.Requires,
+			}
+		}
+		cats[i] = server.ToolCatalogCategory{
+			Name:        c.Name,
+			Description: c.Description,
+			Tools:       tools,
+		}
+	}
+	return cats
 }
 
 // categoryDescriptions maps category names to their UI descriptions.

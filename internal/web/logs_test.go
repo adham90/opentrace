@@ -12,6 +12,8 @@ import (
 
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/modules/logs"
+	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 )
 
@@ -19,7 +21,18 @@ func setupTestServerWithLogStore() (*Server, *mockLogStore) {
 	ms := newMockStore()
 	ls := newMockLogStore()
 	reg := connector.NewRegistry()
-	srv := NewServer(ms, ls, reg, nil)
+	deps := &server.Deps{
+		DSStore:  ms,
+		LogStore: ls,
+		Registry: reg,
+	}
+	srv := NewServerWithDeps(ServerDeps{
+		DSStore:    ms,
+		LogStore:   ls,
+		Registry:   reg,
+		SharedDeps: deps,
+		Modules:    []server.Module{logs.Module},
+	})
 	return srv, ls
 }
 
@@ -27,7 +40,18 @@ func setupTestServerFull() (*Server, *mockDataSourceStore, *mockLogStore, *conne
 	ms := newMockStore()
 	ls := newMockLogStore()
 	reg := connector.NewRegistry()
-	srv := NewServer(ms, ls, reg, nil)
+	deps := &server.Deps{
+		DSStore:  ms,
+		LogStore: ls,
+		Registry: reg,
+	}
+	srv := NewServerWithDeps(ServerDeps{
+		DSStore:    ms,
+		LogStore:   ls,
+		Registry:   reg,
+		SharedDeps: deps,
+		Modules:    []server.Module{logs.Module},
+	})
 	return srv, ms, ls, reg
 }
 

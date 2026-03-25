@@ -1,19 +1,24 @@
 package investigations
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/views"
+	webviews "github.com/adham90/opentrace/internal/web/views"
 )
 
 type handler struct {
 	sessionStore     store.InvestigationSessionStore
 	mcpActivityStore store.MCPActivityStore
+	cfg              *config.Config
 }
 
 func (h *handler) list(w http.ResponseWriter, r *http.Request) {
@@ -119,4 +124,81 @@ func (h *handler) steps(w http.ResponseWriter, r *http.Request) {
 	}
 
 	server.WriteJSON(w, http.StatusOK, events)
+}
+
+// ── Page handlers ────────────────────────────────────────────
+
+func (h *handler) layoutData(r *http.Request, title, nav string) views.LayoutData {
+	user := server.UserFromContext(r.Context())
+	isAdmin := user != nil && user.Role == store.RoleAdmin
+	return views.LayoutData{
+		Title:   title,
+		Nav:     nav,
+		User:    user,
+		IsAdmin: isAdmin,
+		DevMode: h.cfg != nil && h.cfg.DevMode,
+	}
+}
+
+func (h *handler) sessionsPage(w http.ResponseWriter, r *http.Request) {
+	layout := h.layoutData(r, "Sessions", "sessions")
+
+	page := webviews.SessionsPageData{
+		Status: r.URL.Query().Get("status"),
+	}
+
+	if h.sessionStore != nil {
+		statusFilter := store.InvestigationSessionStatus(r.URL.Query().Get("status"))
+
+		sessions, err := h.sessionStore.List(r.Context(), store.ListInvestigationSessionParams{
+			Status: statusFilter,
+			Limit:  100,
+		})
+		if err == nil {
+			page.Sessions = sessions
+		}
+
+		stats, err := h.sessionStore.Stats(r.Context())
+		if err == nil {
+			page.Stats = stats
+		}
+	}
+
+	webviews.SessionsPage(layout, page).Render(r.Context(), w)
+}
+
+func (h *handler) sessionDetailPage(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		server.WriteError(w, http.StatusBadRequest, "missing session id")
+		return
+	}
+
+	if h.sessionStore == nil {
+		server.WriteError(w, http.StatusNotFound, "sessions not available")
+		return
+	}
+
+	sess, err := h.sessionStore.GetByID(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		server.WriteError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	if err != nil {
+		server.WriteError(w, http.StatusInternalServerError, "failed to get session")
+		return
+	}
+
+	var activities []store.MCPActivityEvent
+	if h.mcpActivityStore != nil {
+		activities, _ = h.mcpActivityStore.ListByInvestigationSession(r.Context(), id)
+	}
+
+	layout := h.layoutData(r, "Session Detail", "sessions")
+	detail := webviews.SessionDetailData{
+		Session: sess,
+		Events:  activities,
+	}
+
+	webviews.SessionDetailPage(layout, detail).Render(r.Context(), w)
 }
