@@ -3,11 +3,9 @@ package web
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -18,7 +16,124 @@ import (
 	"github.com/adham90/opentrace/internal/store"
 )
 
-// handleRegisterServer handles POST /api/servers/register.
+// handleDeployWebhook accepts deploy events from CI/CD pipelines.
+// POST /api/events/deploy (API key auth)
+func (s *Server) handleDeployWebhook(w http.ResponseWriter, r *http.Request) {
+	if s.deployStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "deploy tracking not available")
+		return
+	}
+
+	var body struct {
+		Service      string   `json:"service"`
+		Environment  string   `json:"environment"`
+		CommitHash   string   `json:"commit_hash"`
+		Branch       string   `json:"branch"`
+		Author       string   `json:"author"`
+		FilesChanged []string `json:"files_changed"`
+		DeployedAt   string   `json:"deployed_at"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	if body.CommitHash == "" {
+		writeError(w, http.StatusBadRequest, "commit_hash is required")
+		return
+	}
+
+	params := store.CreateDeployParams{
+		Service:      body.Service,
+		Environment:  body.Environment,
+		CommitHash:   body.CommitHash,
+		Branch:       body.Branch,
+		Author:       body.Author,
+		FilesChanged: body.FilesChanged,
+		DeploySource: store.DeploySourceWebhook,
+	}
+
+	if body.DeployedAt != "" {
+		if t, err := time.Parse(time.RFC3339, body.DeployedAt); err == nil {
+			params.DeployedAt = &t
+		}
+	}
+
+	d, err := s.deployStore.Create(r.Context(), params)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to record deploy")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id":          d.ID,
+		"service":     d.Service,
+		"commit_hash": d.CommitHash,
+		"status":      d.Status,
+		"deployed_at": d.DeployedAt.Format(time.RFC3339),
+	})
+}
+
+// handleEventWebhook accepts generic events from CI/CD pipelines and integrations.
+// POST /api/events/{type} (API key auth)
+func (s *Server) handleEventWebhook(w http.ResponseWriter, r *http.Request) {
+	if s.eventStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "event tracking not available")
+		return
+	}
+
+	eventType := store.EventType(chi.URLParam(r, "type"))
+	switch eventType {
+	case store.EventTypePR, store.EventTypeTest, store.EventTypeAlert,
+		store.EventTypeCommit, store.EventTypeCustom, store.EventTypeDeploy:
+		// valid
+	default:
+		writeError(w, http.StatusBadRequest, "invalid event type: must be pr, test, alert, commit, deploy, or custom")
+		return
+	}
+
+	var body struct {
+		Source      string         `json:"source"`
+		Service     string         `json:"service"`
+		Title       string         `json:"title"`
+		Description string         `json:"description"`
+		Metadata    map[string]any `json:"metadata"`
+		ExternalID  string         `json:"external_id"`
+		ExternalURL string         `json:"external_url"`
+		Author      string         `json:"author"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	if body.Title == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+
+	e, err := s.eventStore.Create(r.Context(), store.CreateEventParams{
+		EventType:   eventType,
+		Source:      body.Source,
+		Service:     body.Service,
+		Title:       body.Title,
+		Description: body.Description,
+		Metadata:    body.Metadata,
+		ExternalID:  body.ExternalID,
+		ExternalURL: body.ExternalURL,
+		Author:      body.Author,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create event")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, e)
+}
+
+// handleRegisterServer handles POST /api/servers/register (API key auth).
 func (s *Server) handleRegisterServer(w http.ResponseWriter, r *http.Request) {
 	var params store.RegisterServerParams
 	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
@@ -50,7 +165,7 @@ type metricBatchRequest struct {
 	Samples   []store.MetricSample `json:"samples"`
 }
 
-// handlePushMetrics handles POST /api/servers/{id}/metrics.
+// handlePushMetrics handles POST /api/servers/{id}/metrics (API key auth).
 func (s *Server) handlePushMetrics(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -83,128 +198,7 @@ func (s *Server) handlePushMetrics(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]int{"count": n})
 }
 
-// handleListServers handles GET /api/servers.
-func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
-	params := store.ListServerParams{}
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			params.Limit = n
-		}
-	}
-	if v := r.URL.Query().Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			params.Offset = n
-		}
-	}
-	servers, err := s.serverStore.List(r.Context(), params)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list servers")
-		return
-	}
-	writeJSON(w, http.StatusOK, servers)
-}
-
-// handleGetServer handles GET /api/servers/{id}.
-func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid server ID")
-		return
-	}
-
-	srv, err := s.serverStore.GetByID(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "server not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "failed to get server")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, srv)
-}
-
-// handleUpdateServer handles PUT /api/servers/{id}.
-func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid server ID")
-		return
-	}
-
-	var params store.UpdateServerParams
-	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-
-	srv, err := s.serverStore.Update(r.Context(), id, params)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "server not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "failed to update server")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, srv)
-}
-
-// handleDeleteServer handles DELETE /api/servers/{id}.
-func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid server ID")
-		return
-	}
-
-	if err := s.serverStore.Delete(r.Context(), id); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "server not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "failed to delete server")
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// handleQueryMetrics handles GET /api/servers/{id}/metrics.
-func (s *Server) handleQueryMetrics(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid server ID")
-		return
-	}
-
-	q := store.MetricQuery{ServerID: id}
-	q.MetricName = r.URL.Query().Get("name")
-
-	if v := r.URL.Query().Get("start"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			q.Start = &t
-		}
-	}
-	if v := r.URL.Query().Get("end"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			q.End = &t
-		}
-	}
-
-	points, err := s.metricStore.Query(r.Context(), q)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to query metrics")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, points)
-}
-
-// ensureMetricsConnector auto-creates and registers a MetricsConnector when
-// the first server registers, following the same pattern as ensureLogsConnector.
+// ensureMetricsConnector auto-registers the server metrics connector on first server registration.
 func (s *Server) ensureMetricsConnector(ctx context.Context) {
 	if s.registry.Get(connector.ConnectorServerMetrics) != nil {
 		return
@@ -217,7 +211,6 @@ func (s *Server) ensureMetricsConnector(ctx context.Context) {
 		return
 	}
 
-	// Create DB row if it doesn't exist
 	sources, err := s.dsStore.List(ctx, store.ListDataSourceParams{Type: store.ConnectorServerMetrics})
 	if err != nil {
 		slog.Warn("ensureMetricsConnector: failed to list data sources", "error", err)
@@ -253,10 +246,8 @@ func (s *Server) ensureMetricsConnector(ctx context.Context) {
 	slog.Info("auto-registered server metrics connector", "data_source_id", dsID.ID)
 }
 
-// handleAgentInstallScript serves GET /api/agent/install.sh — a generated shell
-// script that installs the opentrace agent on a remote server.
+// handleAgentInstallScript serves GET /api/agent/install.sh.
 func (s *Server) handleAgentInstallScript(w http.ResponseWriter, r *http.Request) {
-	// Infer the server URL from the request
 	scheme := "http"
 	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
 		scheme = "https"
@@ -292,7 +283,6 @@ echo "==> OpenTrace Agent Installer"
 echo "    Server: ${OPENTRACE_SERVER_URL}"
 echo ""
 
-# Detect OS and architecture
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 case "$ARCH" in
@@ -306,13 +296,11 @@ esac
 
 echo "==> Detected ${OS}/${ARCH}"
 
-# Try to download pre-built binary from GitHub releases
 REPO="adham90/opentrace"
 BINARY_NAME="opentrace"
 
 install_from_release() {
   echo "==> Downloading from GitHub releases..."
-  # Get latest version tag
   local latest_url="https://github.com/${REPO}/releases/latest"
   local version=""
   if command -v curl &>/dev/null; then
@@ -364,7 +352,6 @@ else
   exit 1
 fi
 
-# Stop existing service before replacing binary
 UPGRADING=false
 if command -v systemctl &>/dev/null && systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
   UPGRADING=true
@@ -376,7 +363,6 @@ if command -v systemctl &>/dev/null && systemctl is-active --quiet "$SERVICE_NAM
   fi
 fi
 
-# Move binary to install dir
 echo "==> Installing to ${INSTALL_DIR}/${BINARY_NAME}"
 chmod +x /tmp/${BINARY_NAME}
 if [ "$(id -u)" -eq 0 ]; then
@@ -385,14 +371,12 @@ else
   sudo mv /tmp/${BINARY_NAME} "${INSTALL_DIR}/${BINARY_NAME}"
 fi
 
-# Verify installation
 if "${INSTALL_DIR}/${BINARY_NAME}" version &>/dev/null 2>&1; then
   echo "==> Binary installed at ${INSTALL_DIR}/${BINARY_NAME}"
 else
   echo "==> Binary installed at ${INSTALL_DIR}/${BINARY_NAME} (could not verify version)"
 fi
 
-# Create systemd service if available
 if command -v systemctl &>/dev/null; then
   if [ "$UPGRADING" = true ]; then
     echo "==> Upgrading existing service..."

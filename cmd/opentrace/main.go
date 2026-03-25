@@ -17,6 +17,7 @@ import (
 	"github.com/adham90/opentrace/internal/healthcheck"
 	"github.com/adham90/opentrace/internal/jobs"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
+	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 	"github.com/adham90/opentrace/internal/version"
 	"github.com/adham90/opentrace/internal/vmagent"
@@ -341,6 +342,41 @@ func run() error {
 	// Create health check scheduler early so we can inject its reliability data into the web server.
 	hcSched := healthcheck.NewScheduler(deps.healthCheckStore, 0)
 
+	// Create job queue early so it can be injected into shared deps
+	jobQueue := jobs.NewQueue(deps.db)
+
+	// Build shared deps for domain modules
+	sharedDeps := &server.Deps{
+		DB:                        deps.db,
+		Cfg:                       deps.cfg,
+		DSStore:                   deps.dsStore,
+		LogStore:                  deps.logStore,
+		ServerStore:               deps.serverStore,
+		MetricStore:               deps.metricStore,
+		UserStore:                 deps.userStore,
+		SessionStore:              deps.sessionStore,
+		SettingsStore:             deps.settingsStore,
+		MCPActivityStore:          deps.mcpActivityStore,
+		AuditStore:                deps.auditStore,
+		WatchStore:                deps.watchStore,
+		ErrorGroupStore:           deps.errorGroupStore,
+		HealthCheckStore:          deps.healthCheckStore,
+		AgentNoteStore:            deps.agentNoteStore,
+		TrendStore:                deps.trendStore,
+		AnalyticsStore:            deps.analyticsStore,
+		JourneyStore:              deps.journeyStore,
+		ErrorImpactStore:          deps.errorImpactStore,
+		TraceStore:                deps.traceStore,
+		InvestigationSessionStore: deps.investigationSessionStore,
+		CodeEntityStore:           deps.codeEntityStore,
+		DeployStore:               deps.deployStore,
+		EventStore:                deps.eventStore,
+		TestCorrelationStore:      deps.testCorrelationStore,
+		Registry:                  deps.registry,
+		Queue:                     jobQueue,
+		WatchMetrics:              watchMetrics,
+	}
+
 	// Create server
 	srv := web.NewServerWithDeps(web.ServerDeps{
 		Ctx:              ctx,
@@ -374,6 +410,8 @@ func run() error {
 		EventStore:                deps.eventStore,
 		TestCorrelationStore:      deps.testCorrelationStore,
 		ReliabilityProvider:       hcSched,
+		SharedDeps:                sharedDeps,
+		Modules:                   modules,
 	})
 
 	httpServer := &http.Server{
@@ -403,7 +441,6 @@ func run() error {
 	hcSched.Start(ctx)
 
 	// --- Job Queue: persistent, restart-safe background processing ---
-	jobQueue := jobs.NewQueue(deps.db)
 	jobWorker := jobs.NewWorker(jobQueue)
 	jobScheduler := jobs.NewScheduler(jobQueue)
 

@@ -24,6 +24,7 @@ import (
 	"github.com/adham90/opentrace/internal/connector"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	mcpgoserver "github.com/mark3labs/mcp-go/server"
+	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 	"github.com/adham90/opentrace/internal/version"
 	"github.com/adham90/opentrace/internal/watcher"
@@ -94,6 +95,10 @@ type Server struct {
 	logsConnMu     sync.Mutex
 	metricsConnMu  sync.Mutex
 
+	// Domain modules (isolated packages mounted on the API router)
+	sharedDeps *server.Deps
+	modules    []server.Module
+
 	// Async log ingestion queue (nil = synchronous fallback)
 	ingestQueue *IngestQueue
 
@@ -148,6 +153,8 @@ type ServerDeps struct {
 	TestCorrelationStore         store.TestCorrelationStore
 	IngestQueue                  *IngestQueue
 	ReliabilityProvider          ReliabilityProvider
+	SharedDeps                   *server.Deps
+	Modules                      []server.Module
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
@@ -194,6 +201,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		testCorrelationStore:      deps.TestCorrelationStore,
 		ingestQueue:               deps.IngestQueue,
 		reliabilityProvider:       deps.ReliabilityProvider,
+		sharedDeps:                deps.SharedDeps,
+		modules:                   deps.Modules,
 		versionChecker:      newVersionChecker("adham90", "opentrace"),
 		auditCh:            make(chan auditEntry, 256),
 	}
@@ -385,98 +394,10 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 				r.Get("/watches/alerts/count", srv.handleWatchAlertCount)
 			}
 
-			// Error groups
-			if srv.errorGroupStore != nil {
-				r.Get("/errors", srv.handleListErrorGroups)
-				r.Get("/errors/batch", srv.handleBatchErrorGroups)
-				r.Get("/errors/{fingerprint}", srv.handleGetErrorGroup)
-				r.Get("/errors/{fingerprint}/histogram", srv.handleErrorHistogram)
-			}
-
-			// Health checks
-			if srv.healthCheckStore != nil {
-				r.Get("/healthchecks", srv.handleListHealthChecks)
-				r.Get("/healthchecks/{id}/results", srv.handleHealthCheckResults)
-				r.Get("/healthchecks/uptime", srv.handleUptimeSummary)
-			}
-
-			// Trends + Analytics
-			if srv.trendStore != nil {
-				r.Get("/trends", srv.handleTrendsAPI)
-				r.Get("/trends/deploys", srv.handleDeployMarkersAPI)
-			}
-			if srv.analyticsStore != nil {
-				r.Get("/analytics/summary", srv.handleAnalyticsSummaryAPI)
-				r.Get("/analytics/endpoints", srv.handleTopEndpointsAPI)
-				r.Get("/analytics/heatmap", srv.handleTrafficHeatmapAPI)
-			}
-
-			// Error Impact (Cohort-Based)
-			if srv.errorImpactStore != nil {
-				r.Get("/errors/impact/top", srv.handleTopErrorsByImpactAPI)
-				r.Get("/errors/user/{userID}", srv.handleUserErrorsAPI)
-				r.Get("/errors/{fingerprint}/impact", srv.handleErrorImpactAPI)
-				r.Get("/errors/{fingerprint}/affected-users", srv.handleAffectedUsersAPI)
-			}
-
-			// User Journey + Session Timeline
-			if srv.journeyStore != nil {
-				r.Get("/journeys/sessions", srv.handleListSessionsAPI)
-				r.Get("/journeys/sessions/{sessionID}", srv.handleGetSessionAPI)
-				r.Get("/journeys/sessions/{sessionID}/requests", srv.handleSessionRequestsAPI)
-				r.Get("/journeys/sessions/{sessionID}/timeline", srv.handleSessionTimelineAPI)
-				r.Get("/journeys/user/{userID}", srv.handleUserJourneyAPI)
-				r.Get("/journeys/paths", srv.handlePathAnalysisAPI)
-				r.Get("/journeys/funnels", srv.handleListFunnelsAPI)
-				r.Get("/journeys/funnels/{funnelID}", srv.handleAnalyzeFunnelAPI)
-				r.Get("/journeys/timeline/{logID}", srv.handleRequestTimelineAPI)
-			}
-
-			// Distributed Trace Reassembly
-			if srv.traceStore != nil {
-				r.Get("/traces/recent", srv.handleListRecentTraces)
-				r.Get("/traces/{traceID}/status", srv.handleGetTraceStatus)
-			}
-
-			// Deploys
-			if srv.deployStore != nil {
-				r.Get("/deploys", srv.handleListDeploys)
-			}
-
-			// Events
-			if srv.eventStore != nil {
-				r.Get("/events", srv.handleListEvents)
-			}
-
-			// Code entities
-			if srv.codeEntityStore != nil {
-				r.Get("/code-entities", srv.handleListCodeEntities)
-			}
-
-			// Test gaps
-			if srv.testCorrelationStore != nil {
-				r.Get("/test-gaps", srv.handleListTestGaps)
-			}
-
-			// MCP activity
-			if srv.mcpActivityStore != nil {
-				r.Get("/mcp/activity/stats", srv.handleMCPActivityStats)
-				r.Get("/mcp/activity", srv.handleMCPActivity)
-			}
-
-			// Investigation sessions
-			if srv.investigationSessionStore != nil {
-				r.Get("/investigations", srv.handleListInvestigations)
-				r.Get("/investigations/stats", srv.handleInvestigationStats)
-				r.Get("/investigations/{id}", srv.handleGetInvestigation)
-				r.Get("/investigations/{id}/steps", srv.handleInvestigationSteps)
-			}
-
-			if srv.serverStore != nil && srv.metricStore != nil {
-				r.Get("/servers", srv.handleListServers)
-				r.Get("/servers/{id}", srv.handleGetServer)
-				r.Get("/servers/{id}/metrics", srv.handleQueryMetrics)
-			}
+			// Domain modules handle: errors, healthchecks, trends, analytics,
+			// error impact, journeys, traces, deploys, events, code entities,
+			// test gaps, mcp activity, investigations, servers.
+			// See internal/modules/ and cmd/opentrace/modules.go.
 		})
 
 		// Write API — require admin, 503 if onboarding needed
@@ -494,28 +415,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 				r.Post("/watches/alerts/{alertId}/acknowledge", srv.handleAcknowledgeWatchAlert)
 			}
 
-			// Error groups (write)
-			if srv.errorGroupStore != nil {
-				r.Post("/errors/{fingerprint}/resolve", srv.handleResolveErrorGroup)
-				r.Post("/errors/{fingerprint}/ignore", srv.handleIgnoreErrorGroup)
-			}
-
-			// Funnels (write)
-			if srv.journeyStore != nil {
-				r.Post("/journeys/funnels", srv.handleCreateFunnelAPI)
-				r.Delete("/journeys/funnels/{funnelID}", srv.handleDeleteFunnelAPI)
-			}
-
-			// Health checks (write)
-			if srv.healthCheckStore != nil {
-				r.Post("/healthchecks", srv.handleCreateHealthCheck)
-				r.Delete("/healthchecks/{id}", srv.handleDeleteHealthCheck)
-			}
-
-			if srv.serverStore != nil && srv.metricStore != nil {
-				r.Put("/servers/{id}", srv.handleUpdateServer)
-				r.Delete("/servers/{id}", srv.handleDeleteServer)
-			}
+			// Write routes for errors, funnels, healthchecks, servers
+			// are handled by domain modules.
 		})
 
 		// Settings API (admin only)
@@ -558,6 +459,16 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		// Dev-mode live-reload endpoint
 		if cfg != nil && cfg.DevMode {
 			r.Get("/dev/hash", srv.handleDevHash)
+		}
+
+		// Mount domain modules (isolated packages)
+		if srv.sharedDeps != nil {
+			r.Group(func(r chi.Router) {
+				r.Use(srv.requireAuthOrOnboardingAPI)
+				for _, m := range srv.modules {
+					m.Mount(r, srv.sharedDeps)
+				}
+			})
 		}
 	})
 

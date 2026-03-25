@@ -9,15 +9,25 @@ import (
 	"testing"
 
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/modules/servers"
+	"github.com/adham90/opentrace/internal/server"
 )
 
 func newTestServerWithMetrics() *Server {
+	reg := connector.NewRegistry()
 	return NewServerWithDeps(ServerDeps{
 		DSStore:     newMockStore(),
 		LogStore:    newMockLogStore(),
 		ServerStore: newMockServerStore(),
 		MetricStore: newMockMetricStore(),
-		Registry:    connector.NewRegistry(),
+		Registry:    reg,
+		SharedDeps: &server.Deps{
+			DSStore:     newMockStore(),
+			ServerStore: newMockServerStore(),
+			MetricStore: newMockMetricStore(),
+			Registry:    reg,
+		},
+		Modules: []server.Module{servers.Module},
 	})
 }
 

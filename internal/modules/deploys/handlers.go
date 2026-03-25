@@ -1,4 +1,4 @@
-package web
+package deploys
 
 import (
 	"encoding/json"
@@ -6,14 +6,17 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 )
 
-// handleDeployWebhook accepts deploy events from CI/CD pipelines.
-// POST /api/events/deploy
-func (s *Server) handleDeployWebhook(w http.ResponseWriter, r *http.Request) {
-	if s.deployStore == nil {
-		writeError(w, http.StatusServiceUnavailable, "deploy tracking not available")
+type handler struct {
+	store store.DeployStore
+}
+
+func (h *handler) webhook(w http.ResponseWriter, r *http.Request) {
+	if h.store == nil {
+		server.WriteError(w, http.StatusServiceUnavailable, "deploy tracking not available")
 		return
 	}
 
@@ -28,12 +31,12 @@ func (s *Server) handleDeployWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		server.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
 	if body.CommitHash == "" {
-		writeError(w, http.StatusBadRequest, "commit_hash is required")
+		server.WriteError(w, http.StatusBadRequest, "commit_hash is required")
 		return
 	}
 
@@ -53,13 +56,13 @@ func (s *Server) handleDeployWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	d, err := s.deployStore.Create(r.Context(), params)
+	d, err := h.store.Create(r.Context(), params)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to record deploy")
+		server.WriteError(w, http.StatusInternalServerError, "failed to record deploy")
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{
+	server.WriteJSON(w, http.StatusCreated, map[string]any{
 		"id":          d.ID,
 		"service":     d.Service,
 		"commit_hash": d.CommitHash,
@@ -68,11 +71,9 @@ func (s *Server) handleDeployWebhook(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleListDeploys returns recent deploys.
-// GET /api/deploys?service=...&limit=...
-func (s *Server) handleListDeploys(w http.ResponseWriter, r *http.Request) {
-	if s.deployStore == nil {
-		writeError(w, http.StatusServiceUnavailable, "deploy tracking not available")
+func (h *handler) list(w http.ResponseWriter, r *http.Request) {
+	if h.store == nil {
+		server.WriteError(w, http.StatusServiceUnavailable, "deploy tracking not available")
 		return
 	}
 
@@ -87,13 +88,13 @@ func (s *Server) handleListDeploys(w http.ResponseWriter, r *http.Request) {
 		limit = 100
 	}
 
-	deploys, err := s.deployStore.GetRecent(r.Context(), service, limit)
+	deploys, err := h.store.GetRecent(r.Context(), service, limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list deploys")
+		server.WriteError(w, http.StatusInternalServerError, "failed to list deploys")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	server.WriteJSON(w, http.StatusOK, map[string]any{
 		"count":   len(deploys),
 		"deploys": deploys,
 	})

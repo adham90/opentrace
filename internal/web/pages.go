@@ -1161,67 +1161,6 @@ func (s *Server) handleErrorDetailPage(w http.ResponseWriter, r *http.Request) {
 	tmpl.ExecuteTemplate(w, "layout", data)
 }
 
-func (s *Server) handleErrorHistogram(w http.ResponseWriter, r *http.Request) {
-	fp := chi.URLParam(r, "fingerprint")
-	if fp == "" {
-		writeError(w, http.StatusBadRequest, "fingerprint is required")
-		return
-	}
-	if s.db == nil {
-		writeJSON(w, http.StatusOK, []map[string]any{})
-		return
-	}
-
-	timeRange := r.URL.Query().Get("time_range")
-	if timeRange == "" {
-		timeRange = "7d"
-	}
-
-	var duration, interval time.Duration
-	switch timeRange {
-	case "15m":
-		duration, interval = 15*time.Minute, time.Minute
-	case "1h":
-		duration, interval = time.Hour, 5*time.Minute
-	case "6h":
-		duration, interval = 6*time.Hour, 15*time.Minute
-	case "24h":
-		duration, interval = 24*time.Hour, time.Hour
-	case "7d":
-		duration, interval = 7*24*time.Hour, 6*time.Hour
-	default:
-		duration, interval = 7*24*time.Hour, 6*time.Hour
-	}
-
-	now := time.Now()
-	since := now.Add(-duration)
-	type bucket struct {
-		Timestamp time.Time `json:"timestamp"`
-		Count     int       `json:"count"`
-	}
-	var buckets []bucket
-	for t := since; t.Before(now); t = t.Add(interval) {
-		end := t.Add(interval)
-		if end.After(now) {
-			end = now
-		}
-		var count int
-		err := s.db.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM logs WHERE error_fingerprint = ? AND timestamp >= ? AND timestamp < ?`,
-			fp, t.UTC().Format(time.RFC3339Nano), end.UTC().Format(time.RFC3339Nano),
-		).Scan(&count)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "histogram query failed")
-			return
-		}
-		buckets = append(buckets, bucket{Timestamp: t, Count: count})
-	}
-	if buckets == nil {
-		buckets = []bucket{}
-	}
-	writeJSON(w, http.StatusOK, buckets)
-}
-
 func (s *Server) handleWatchersPage(w http.ResponseWriter, r *http.Request) {
 	data := s.newPageData(r, "Watchers", "watchers")
 	if s.watchStore != nil {
