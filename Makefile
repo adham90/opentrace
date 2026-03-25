@@ -9,6 +9,7 @@ LDFLAGS  = -s -w \
 	-X github.com/adham90/opentrace/internal/version.Date=$(DATE)
 
 generate:
+	sqlc generate
 	templ generate
 
 css:
