@@ -381,7 +381,8 @@ func TestWatch_CatalogRegistration(t *testing.T) {
 		}
 	}
 
-	expectedTools := []string{"watch_status", "investigate", "watch", "dismiss_watch"}
+	// The consolidated "watches" tool replaces the old watch_status, investigate, watch, dismiss_watch.
+	expectedTools := []string{"watches"}
 	for _, tool := range expectedTools {
 		if !toolNames[tool] {
 			t.Errorf("catalog missing tool: %s", tool)
@@ -390,7 +391,7 @@ func TestWatch_CatalogRegistration(t *testing.T) {
 		}
 	}
 
-	// Verify watch tools are NOT in catalog when WatchStore is nil
+	// Verify watches tool is NOT in catalog when WatchStore is nil
 	emptyDeps := Deps{Registry: registry}
 	emptyCatalog := BuildCatalog(emptyDeps)
 	emptyToolNames := make(map[string]bool)
@@ -404,7 +405,7 @@ func TestWatch_CatalogRegistration(t *testing.T) {
 			t.Errorf("tool %s should NOT appear when WatchStore is nil", tool)
 		}
 	}
-	t.Log("Verified watch tools are absent when WatchStore is nil")
+	t.Log("Verified watches tool is absent when WatchStore is nil")
 }
 
 func callE2ETool(t *testing.T, handler func(context.Context, mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error), args map[string]any) string {

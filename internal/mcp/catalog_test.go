@@ -103,13 +103,12 @@ func TestBuildCatalog_WithDeps(t *testing.T) {
 		}
 	}
 
-	// Verify key tools are present.
+	// Verify consolidated tools are present.
 	expected := []string{
-		"list_connectors",
-		"db_query_stats", "db_table_stats", "db_activity", "db_locks",
-		"log_stats", "trace_lookup", "compare_periods",
-		"db_index_analysis", "connection_pool_stats",
-		"explain_query",
+		"connectors",
+		"database",
+		"logs",
+		"overview",
 	}
 	for _, name := range expected {
 		if !toolNames[name] {
@@ -132,19 +131,16 @@ func TestBuildCatalog_MinimalDeps(t *testing.T) {
 		}
 	}
 
-	// Tools that require LogStore should be absent.
-	if toolNames["log_stats"] {
-		t.Error("log_stats should not be in catalog without LogStore")
-	}
-	if toolNames["compare_periods"] {
-		t.Error("compare_periods should not be in catalog without LogStore")
+	// The logs tool requires LogStore, so it should be absent.
+	if toolNames["logs"] {
+		t.Error("logs should not be in catalog without LogStore")
 	}
 
 	// Tools that don't require optional deps should be present.
-	if !toolNames["list_connectors"] {
-		t.Error("list_connectors should always be in catalog")
+	if !toolNames["connectors"] {
+		t.Error("connectors should always be in catalog")
 	}
-	if !toolNames["db_query_stats"] {
-		t.Error("db_query_stats should always be in catalog")
+	if !toolNames["database"] {
+		t.Error("database should always be in catalog")
 	}
 }
