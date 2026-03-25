@@ -1,0 +1,132 @@
+package webviews
+
+import (
+	"fmt"
+	"github.com/adham90/opentrace/components/badge"
+	"github.com/adham90/opentrace/components/card"
+	"github.com/adham90/opentrace/components/table"
+	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/views"
+)
+
+templ HealthPage(data views.LayoutData, uptimeSummaries []store.UptimeSummary, healthChecks []store.HealthCheck) {
+	@views.Layout(data) {
+		<div class="space-y-6">
+			<h1 class="text-2xl font-bold tracking-tight">Health</h1>
+			if len(uptimeSummaries) > 0 {
+				<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+					for _, s := range uptimeSummaries {
+						@card.Card() {
+							@card.Content(card.ContentProps{Class: "p-4"}) {
+								<div class="flex items-center justify-between mb-2">
+									<span class="font-medium text-sm">{ s.Name }</span>
+									<span class={ "inline-flex items-center gap-1.5 text-xs font-medium" }>
+										<span class={ "inline-block w-2 h-2 rounded-full",
+											templ.KV("bg-green-500", s.CurrentStatus == "up"),
+											templ.KV("bg-red-500", s.CurrentStatus == "down"),
+											templ.KV("bg-yellow-500", s.CurrentStatus != "up" && s.CurrentStatus != "down"),
+										}></span>
+										{ s.CurrentStatus }
+									</span>
+								</div>
+								<div class="flex gap-4 text-xs text-muted-foreground">
+									<span>
+										uptime: <span class="font-semibold text-foreground">{ fmt.Sprintf("%.1f%%", s.UptimePct) }</span>
+									</span>
+									<span>
+										avg: <span class="font-semibold text-foreground">{ fmt.Sprintf("%.0fms", s.AvgResponseMs) }</span>
+									</span>
+									<span>
+										checks: <span class="font-semibold text-foreground">{ fmt.Sprintf("%d", s.TotalChecks) }</span>
+									</span>
+								</div>
+							}
+						}
+					}
+				</div>
+			}
+			if len(healthChecks) > 0 {
+				@card.Card() {
+					@card.Header() {
+						@card.Title() {
+							Health Checks
+						}
+					}
+					@card.Content(card.ContentProps{Class: "p-0"}) {
+						@table.Table() {
+							@table.Header() {
+								@table.Row() {
+									@table.Head() {
+										Name
+									}
+									@table.Head() {
+										URL
+									}
+									@table.Head() {
+										Method
+									}
+									@table.Head() {
+										Interval
+									}
+									@table.Head() {
+										Timeout
+									}
+									@table.Head() {
+										Expected
+									}
+									@table.Head() {
+										Enabled
+									}
+								}
+							}
+							@table.Body() {
+								for _, hc := range healthChecks {
+									@table.Row() {
+										@table.Cell(table.CellProps{Class: "font-medium"}) {
+											{ hc.Name }
+										}
+										@table.Cell(table.CellProps{Class: "text-primary max-w-[250px] truncate"}) {
+											{ hc.URL }
+										}
+										@table.Cell() {
+											{ hc.Method }
+										}
+										@table.Cell(table.CellProps{Class: "text-muted-foreground"}) {
+											{ fmtDuration(hc.IntervalSecs) }
+										}
+										@table.Cell(table.CellProps{Class: "text-muted-foreground"}) {
+											{ fmtDuration(hc.TimeoutSecs) }
+										}
+										@table.Cell() {
+											{ fmt.Sprintf("%d", hc.ExpectedStatus) }
+										}
+										@table.Cell() {
+											if hc.Enabled {
+												@badge.Badge(badge.Props{Variant: badge.VariantDefault}) {
+													enabled
+												}
+											} else {
+												@badge.Badge(badge.Props{Variant: badge.VariantSecondary}) {
+													disabled
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			} else {
+				@card.Card() {
+					@card.Content(card.ContentProps{Class: "py-12 text-center"}) {
+						<p class="text-lg font-medium text-muted-foreground">No health checks configured</p>
+						<p class="text-sm text-muted-foreground mt-1">Health checks can be created through the MCP server to monitor endpoints.</p>
+					}
+				}
+			}
+		</div>
+	}
+}
+
+// fmtDuration is defined in sessions_page.templ (same package)

@@ -1,0 +1,79 @@
+package webviews
+
+import (
+	"github.com/adham90/opentrace/components/alert"
+	"github.com/adham90/opentrace/components/button"
+	"github.com/adham90/opentrace/components/card"
+	"github.com/adham90/opentrace/components/form"
+	"github.com/adham90/opentrace/components/input"
+	"github.com/adham90/opentrace/components/label"
+	"github.com/adham90/opentrace/internal/views"
+)
+
+templ RegisterPage(data views.LayoutData, errorMsg string) {
+	@views.LayoutMinimal(data) {
+		@card.Card() {
+			@card.Header() {
+				@card.Title() {
+					Create Account
+				}
+				@card.Description() {
+					Register for a new OpenTrace account.
+				}
+			}
+			@card.Content() {
+				if errorMsg != "" {
+					@alert.Alert(alert.Props{Variant: alert.VariantDestructive, Class: "mb-4"}) {
+						@alert.Description() {
+							{ errorMsg }
+						}
+					}
+				}
+				<form method="POST" action="/register" class="space-y-4">
+					<input type="hidden" name="_csrf" value={ data.CSRFToken }/>
+					@form.Item() {
+						@label.Label(label.Props{For: "email"}) {
+							Email
+						}
+						@input.Input(input.Props{
+							ID:          "email",
+							Name:        "email",
+							Type:        input.TypeEmail,
+							Placeholder: "you@example.com",
+							Required:    true,
+							Attributes:  templ.Attributes{"autofocus": "true"},
+						})
+					}
+					@form.Item() {
+						@label.Label(label.Props{For: "display_name"}) {
+							Display Name
+						}
+						@input.Input(input.Props{
+							ID:          "display_name",
+							Name:        "display_name",
+							Type:        input.TypeText,
+							Placeholder: "optional",
+						})
+					}
+					@form.Item() {
+						@label.Label(label.Props{For: "password"}) {
+							Password
+						}
+						@input.Input(input.Props{
+							ID:          "password",
+							Name:        "password",
+							Type:        input.TypePassword,
+							Placeholder: "min 8 characters",
+							Required:    true,
+							Attributes:  templ.Attributes{"minlength": "8"},
+						})
+					}
+					@button.Button(button.Props{Type: button.TypeSubmit, FullWidth: true}) {
+						Create Account
+					}
+				</form>
+			}
+		}
+		@input.Script()
+	}
+}

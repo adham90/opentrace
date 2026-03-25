@@ -1,0 +1,166 @@
+package webviews
+
+import (
+	"github.com/adham90/opentrace/components/alert"
+	"github.com/adham90/opentrace/components/button"
+	"github.com/adham90/opentrace/components/card"
+	"github.com/adham90/opentrace/components/form"
+	"github.com/adham90/opentrace/components/input"
+	"github.com/adham90/opentrace/components/label"
+	"github.com/adham90/opentrace/internal/views"
+)
+
+templ OnboardingPage(data views.LayoutData, step int, errorMsg string, apiKey string, baseURL string) {
+	@views.LayoutMinimal(data) {
+		if step == 1 {
+			@onboardingStep1(data, errorMsg)
+		} else {
+			@onboardingStep2(apiKey, baseURL)
+		}
+		@input.Script()
+	}
+}
+
+templ onboardingStep1(data views.LayoutData, errorMsg string) {
+	@card.Card() {
+		@card.Header() {
+			@card.Title() {
+				Setup
+			}
+			@card.Description() {
+				Welcome to OpenTrace. Create your admin account to get started.
+			}
+		}
+		@card.Content() {
+			if errorMsg != "" {
+				@alert.Alert(alert.Props{Variant: alert.VariantDestructive, Class: "mb-4"}) {
+					@alert.Description() {
+						{ errorMsg }
+					}
+				}
+			}
+			<form method="POST" action="/onboarding" class="space-y-4">
+				<input type="hidden" name="_csrf" value={ data.CSRFToken }/>
+				@form.Item() {
+					@label.Label(label.Props{For: "email"}) {
+						Email
+					}
+					@input.Input(input.Props{
+						ID:          "email",
+						Name:        "email",
+						Type:        input.TypeEmail,
+						Placeholder: "you@example.com",
+						Required:    true,
+						Attributes:  templ.Attributes{"autofocus": "true"},
+					})
+				}
+				@form.Item() {
+					@label.Label(label.Props{For: "display_name"}) {
+						Display Name
+						<span class="text-muted-foreground ml-1">(optional)</span>
+					}
+					@input.Input(input.Props{
+						ID:          "display_name",
+						Name:        "display_name",
+						Type:        input.TypeText,
+						Placeholder: "Your Name",
+					})
+				}
+				@form.Item() {
+					@label.Label(label.Props{For: "password"}) {
+						Password
+						<span class="text-muted-foreground ml-1">(min 8 characters)</span>
+					}
+					@input.Input(input.Props{
+						ID:          "password",
+						Name:        "password",
+						Type:        input.TypePassword,
+						Placeholder: "choose a password",
+						Required:    true,
+						Attributes:  templ.Attributes{"minlength": "8"},
+					})
+				}
+				@button.Button(button.Props{Type: button.TypeSubmit, FullWidth: true}) {
+					Create Admin Account
+				}
+			</form>
+		}
+	}
+}
+
+templ onboardingStep2(apiKey string, baseURL string) {
+	<div class="w-full max-w-2xl mx-auto space-y-4">
+		@card.Card() {
+			@card.Header() {
+				@card.Title() {
+					Ready
+				}
+				@card.Description() {
+					Your admin account has been created. Here is your API key for agents and integrations.
+				}
+			}
+			@card.Content(card.ContentProps{Class: "space-y-4"}) {
+				<!-- API Key -->
+				<div>
+					<h4 class="text-sm font-semibold mb-1">API Key</h4>
+					<p class="text-sm text-muted-foreground mb-2">Use this key to authenticate agents sending logs and metrics.</p>
+					<div class="flex gap-2 items-center">
+						<code id="api-key-display" class="flex-1 p-2 bg-muted rounded-md text-sm break-all font-mono">{ apiKey }</code>
+						<button class="shrink-0 inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer" data-copy-target="api-key-display">Copy</button>
+					</div>
+				</div>
+				<!-- Agent Setup -->
+				<div>
+					<h4 class="text-sm font-semibold mb-1">Agent Setup</h4>
+					<p class="text-sm text-muted-foreground mb-2">Install the OpenTrace agent on your servers:</p>
+					<div class="flex gap-2 items-center">
+						<code id="agent-cmd" class="flex-1 p-2 bg-muted rounded-md text-xs break-all font-mono">
+							{ "curl -sSL " + baseURL + "/api/agent/install.sh | OPENTRACE_URL=" + baseURL + " OPENTRACE_API_KEY=" + apiKey + " bash" }
+						</code>
+						<button class="shrink-0 inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer" data-copy-target="agent-cmd">Copy</button>
+					</div>
+				</div>
+				<!-- MCP Config -->
+				<div>
+					<h4 class="text-sm font-semibold mb-1">MCP Config</h4>
+					<p class="text-sm text-muted-foreground mb-2">Add this to your Claude Desktop or MCP client config:</p>
+					<div class="flex gap-2 items-start">
+						<pre id="mcp-config" class="flex-1 p-2 bg-muted rounded-md text-xs font-mono overflow-x-auto">
+							{ `{
+  "mcpServers": {
+    "opentrace": {
+      "command": "opentrace",
+      "args": ["mcp"]
+    }
+  }
+}` }
+						</pre>
+						<button class="shrink-0 inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer" data-copy-target="mcp-config">Copy</button>
+					</div>
+				</div>
+			}
+			@card.Footer() {
+				@button.Button(button.Props{Href: "/", FullWidth: true}) {
+					Go to Logs
+				}
+			}
+		}
+	</div>
+	@copyScript()
+}
+
+templ copyScript() {
+	<script>
+		document.querySelectorAll('[data-copy-target]').forEach(function(btn) {
+			btn.addEventListener('click', function() {
+				var el = document.getElementById(btn.getAttribute('data-copy-target'));
+				var text = el.textContent || el.innerText;
+				navigator.clipboard.writeText(text.trim()).then(function(){
+					var orig = btn.textContent;
+					btn.textContent = 'Copied!';
+					setTimeout(function(){ btn.textContent = orig; }, 1500);
+				});
+			});
+		});
+	</script>
+}

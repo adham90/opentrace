@@ -1,0 +1,74 @@
+package webviews
+
+import (
+	"github.com/adham90/opentrace/components/badge"
+	"github.com/adham90/opentrace/components/card"
+	"github.com/adham90/opentrace/internal/views"
+)
+
+// ToolInfo represents a single MCP tool for display.
+type ToolInfo struct {
+	Name        string
+	Description string
+	Access      string
+	Requires    string
+}
+
+// ToolCategory groups related tools under a named section.
+type ToolCategory struct {
+	Name        string
+	Description string
+	Tools       []ToolInfo
+}
+
+templ ToolsPage(data views.LayoutData, categories []ToolCategory) {
+	@views.Layout(data) {
+		<div class="space-y-6">
+			<h1 class="text-2xl font-bold tracking-tight">Tools</h1>
+			if len(categories) > 0 {
+				for _, cat := range categories {
+					<div class="space-y-2">
+						<h3 class="text-lg font-semibold">{ cat.Name }</h3>
+						if cat.Description != "" {
+							<p class="text-sm text-muted-foreground">{ cat.Description }</p>
+						}
+						@card.Card() {
+							@card.Content(card.ContentProps{Class: "p-0 divide-y divide-border"}) {
+								for _, t := range cat.Tools {
+									<div class="px-4 py-3 hover:bg-muted/50 transition-colors">
+										<div class="flex items-center justify-between gap-3 flex-wrap">
+											<code class="text-sm font-mono text-primary">{ t.Name }</code>
+											<div class="flex gap-1.5">
+												if t.Access == "admin" {
+													@badge.Badge(badge.Props{Variant: badge.VariantDestructive, Class: "text-[10px]"}) {
+														{ t.Access }
+													}
+												} else {
+													@badge.Badge(badge.Props{Variant: badge.VariantSecondary, Class: "text-[10px]"}) {
+														{ t.Access }
+													}
+												}
+												if t.Requires != "" {
+													@badge.Badge(badge.Props{Variant: badge.VariantOutline, Class: "text-[10px]"}) {
+														{ t.Requires }
+													}
+												}
+											</div>
+										</div>
+										<p class="text-xs text-muted-foreground mt-1 leading-relaxed">{ t.Description }</p>
+									</div>
+								}
+							}
+						}
+					</div>
+				}
+			} else {
+				@card.Card() {
+					@card.Content(card.ContentProps{Class: "py-12 text-center"}) {
+						<p class="text-lg font-medium text-muted-foreground">No tools available</p>
+					}
+				}
+			}
+		</div>
+	}
+}

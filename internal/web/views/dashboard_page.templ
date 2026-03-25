@@ -1,0 +1,344 @@
+package webviews
+
+import (
+	"fmt"
+	"github.com/adham90/opentrace/components/card"
+	"github.com/adham90/opentrace/components/separator"
+	"github.com/adham90/opentrace/components/table"
+	"github.com/adham90/opentrace/internal/views"
+)
+
+// DashboardSystemStatus holds system-level stats for the dashboard.
+type DashboardSystemStatus struct {
+	ServicesUp     int
+	ServicesTotal  int
+	ErrorsPerHour  int
+	LogsPerHour    int
+	WatchersActive int
+	InvestOpen     int
+	OverallStatus  string // "ok", "warn", "critical"
+}
+
+// DashboardGlance holds quick glance stats.
+type DashboardGlance struct {
+	TotalLogs       int
+	ErrorGroups     int
+	WatcherTriggers int
+	Investigations  int
+	Uptime          float64
+}
+
+// DashboardLastSession is the most recent investigation session.
+type DashboardLastSession struct {
+	ID      string
+	Intent  string
+	Service string
+	Status  string
+	TimeAgo string
+}
+
+// DashboardAttentionItem is something that needs attention.
+type DashboardAttentionItem struct {
+	Severity string // "error", "warn", "info"
+	Type     string
+	Title    string
+	Detail   string
+	Time     string
+	Link     string
+}
+
+// DashboardSignal represents a service health signal.
+type DashboardSignal struct {
+	Name   string
+	Status string // "up", "down", "degraded"
+}
+
+// DashboardServer represents a registered server.
+type DashboardServer struct {
+	Name   string
+	Status string // "online", "offline"
+}
+
+// DashboardTimelineItem is an event in the recent timeline.
+type DashboardTimelineItem struct {
+	Status string // "ok", "error", "warn", "info"
+	Title  string
+	Detail string
+	Time   string
+	Link   string
+}
+
+// DashboardEndpoint is a slow or notable endpoint.
+type DashboardEndpoint struct {
+	Method string
+	Path   string
+	P95Ms  float64
+}
+
+// DashboardTraffic holds overall traffic stats.
+type DashboardTraffic struct {
+	TotalRequests int
+}
+
+// DashboardData holds all data for the dashboard page.
+type DashboardData struct {
+	SystemStatus *DashboardSystemStatus
+	Glance       *DashboardGlance
+	LastSession  *DashboardLastSession
+	Attention    []DashboardAttentionItem
+	QuietMinutes int
+	Signals      []DashboardSignal
+	Servers      []DashboardServer
+	Timeline     []DashboardTimelineItem
+	Endpoints    []DashboardEndpoint
+	Traffic      *DashboardTraffic
+}
+
+templ DashboardPage(data views.LayoutData, dash DashboardData) {
+	@views.Layout(data) {
+		<div class="space-y-6">
+			<h1 class="text-2xl font-bold tracking-tight">Dashboard</h1>
+			// System status + signals bar
+			if dash.SystemStatus != nil {
+				<div class="flex flex-wrap items-center justify-between gap-4">
+					<div class="flex flex-wrap items-center gap-4 text-sm text-muted-foreground font-mono">
+						<span>{ fmt.Sprintf("%d logs/h", dash.SystemStatus.LogsPerHour) }</span>
+						if dash.SystemStatus.ErrorsPerHour > 0 {
+							<span class="text-destructive">{ fmt.Sprintf("%d errors/h", dash.SystemStatus.ErrorsPerHour) }</span>
+						}
+						if dash.Glance != nil && dash.Glance.Uptime > 0 {
+							<span>{ fmt.Sprintf("%.1f%%", dash.Glance.Uptime) }</span>
+						}
+						if dash.Traffic != nil {
+							<span>{ fmt.Sprintf("%d reqs", dash.Traffic.TotalRequests) }</span>
+						}
+						if dash.Glance != nil && dash.Glance.ErrorGroups > 0 {
+							<span class="text-destructive">{ fmt.Sprintf("%d errors", dash.Glance.ErrorGroups) }</span>
+						}
+					</div>
+					<div class="flex flex-wrap items-center gap-3">
+						for _, sig := range dash.Signals {
+							@dashSignalDot(sig)
+						}
+						for _, srv := range dash.Servers {
+							@dashServerDot(srv)
+						}
+					</div>
+				</div>
+			}
+			// Quick stats cards
+			if dash.SystemStatus != nil {
+				<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+					@dashStatCard("Logs/hour", fmt.Sprintf("%d", dash.SystemStatus.LogsPerHour), "")
+					@dashStatCard("Errors/hour", fmt.Sprintf("%d", dash.SystemStatus.ErrorsPerHour), statusVariant(dash.SystemStatus.ErrorsPerHour > 0))
+					@dashStatCard("Active Watchers", fmt.Sprintf("%d", dash.SystemStatus.WatchersActive), "")
+					@dashStatCard("Open Investigations", fmt.Sprintf("%d", dash.SystemStatus.InvestOpen), "")
+				</div>
+			}
+			// Resume last session
+			if dash.LastSession != nil {
+				<a
+					href={ templ.SafeURL(fmt.Sprintf("/sessions/%s", dash.LastSession.ID)) }
+					class="block rounded-lg border p-4 hover:bg-muted/50 transition-colors no-underline"
+				>
+					<div class="flex items-center justify-between text-sm">
+						<span class="text-muted-foreground">
+							You were investigating
+							<span class="font-medium text-foreground">{ dash.LastSession.Intent }</span>
+							if dash.LastSession.Service != "" {
+								<span> -- { dash.LastSession.Service }</span>
+							}
+						</span>
+						<span class="text-xs text-muted-foreground font-mono">{ dash.LastSession.TimeAgo }</span>
+					</div>
+				</a>
+			}
+			// Attention items
+			if len(dash.Attention) > 0 {
+				@card.Card() {
+					@card.Header() {
+						@card.Title() {
+							Attention
+							<span class="text-destructive font-mono ml-1">{ fmt.Sprintf("%d", len(dash.Attention)) }</span>
+						}
+					}
+					@card.Content() {
+						<div class="space-y-2">
+							for _, item := range dash.Attention {
+								@dashAttentionRow(item)
+							}
+						</div>
+					}
+				}
+			} else if dash.QuietMinutes > 0 {
+				<p class="text-sm text-muted-foreground py-4">
+					{ fmt.Sprintf("All clear -- quiet for %dm", dash.QuietMinutes) }
+				</p>
+			}
+			@separator.Separator()
+			// Slow endpoints
+			if len(dash.Endpoints) > 0 {
+				@card.Card() {
+					@card.Header() {
+						@card.Title() {
+							Slow Endpoints
+						}
+					}
+					@card.Content(card.ContentProps{Class: "p-0"}) {
+						@table.Table() {
+							@table.Header() {
+								@table.Row() {
+									@table.Head() {
+										Method
+									}
+									@table.Head() {
+										Path
+									}
+									@table.Head(table.HeadProps{Class: "text-right"}) {
+										P95 (ms)
+									}
+								}
+							}
+							@table.Body() {
+								for _, ep := range dash.Endpoints {
+									@table.Row() {
+										@table.Cell(table.CellProps{Class: "font-mono text-xs text-muted-foreground"}) {
+											{ ep.Method }
+										}
+										@table.Cell() {
+											{ ep.Path }
+										}
+										@table.Cell(table.CellProps{Class: "text-right font-mono text-muted-foreground"}) {
+											{ fmt.Sprintf("%.1f", ep.P95Ms) }
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			// Recent timeline
+			if len(dash.Timeline) > 0 {
+				@card.Card() {
+					@card.Header() {
+						@card.Title() {
+							Recent Activity
+						}
+					}
+					@card.Content() {
+						<div class="space-y-2">
+							for _, item := range dash.Timeline {
+								@dashTimelineRow(item)
+							}
+						</div>
+					}
+				}
+			}
+			// Empty state
+			if len(dash.Attention) == 0 && len(dash.Timeline) == 0 && len(dash.Signals) == 0 && dash.QuietMinutes == 0 {
+				<div class="py-12 text-center">
+					<p class="text-muted-foreground">
+						No data yet.
+						<a href="/setup" class="text-foreground underline">Set up log ingestion</a>
+						to get started.
+					</p>
+				</div>
+			}
+		</div>
+	}
+}
+
+templ dashStatCard(label, value, variant string) {
+	@card.Card() {
+		@card.Content(card.ContentProps{Class: "p-4"}) {
+			<div class="text-xs text-muted-foreground uppercase tracking-wide">{ label }</div>
+			<div class={ "text-2xl font-bold font-mono mt-1", templ.KV("text-destructive", variant == "destructive") }>
+				{ value }
+			</div>
+		}
+	}
+}
+
+templ dashSignalDot(sig DashboardSignal) {
+	<span class="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+		<span class={ "inline-block w-1.5 h-1.5 rounded-full",
+			templ.KV("bg-green-500", sig.Status == "up"),
+			templ.KV("bg-red-500", sig.Status == "down"),
+			templ.KV("bg-yellow-500", sig.Status == "degraded"),
+		}></span>
+		{ sig.Name }
+	</span>
+}
+
+templ dashServerDot(srv DashboardServer) {
+	<span class="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+		<span class={ "inline-block w-1.5 h-1.5 rounded-full",
+			templ.KV("bg-green-500", srv.Status == "online"),
+			templ.KV("bg-red-500", srv.Status == "offline"),
+			templ.KV("bg-muted-foreground", srv.Status != "online" && srv.Status != "offline"),
+		}></span>
+		{ srv.Name }
+	</span>
+}
+
+templ dashAttentionRow(item DashboardAttentionItem) {
+	if item.Link != "" {
+		<a href={ templ.SafeURL(item.Link) } class="flex items-start gap-2 py-2 hover:bg-muted/50 rounded px-2 -mx-2 no-underline transition-colors">
+			@dashAttentionContent(item)
+		</a>
+	} else {
+		<div class="flex items-start gap-2 py-2">
+			@dashAttentionContent(item)
+		</div>
+	}
+}
+
+templ dashAttentionContent(item DashboardAttentionItem) {
+	<span class={ "mt-1.5 inline-block w-1.5 h-1.5 rounded-full shrink-0",
+		templ.KV("bg-red-500", item.Severity == "error"),
+		templ.KV("bg-yellow-500", item.Severity == "warn"),
+		templ.KV("bg-green-500", item.Severity == "info" || item.Severity == "ok"),
+	}></span>
+	<div class="flex-1 min-w-0">
+		<div class="text-sm font-medium">{ item.Title }</div>
+		if item.Detail != "" {
+			<div class="text-xs text-muted-foreground truncate mt-0.5">{ item.Detail }</div>
+		}
+	</div>
+	<span class="text-xs font-mono text-muted-foreground shrink-0">{ item.Time }</span>
+}
+
+templ dashTimelineRow(item DashboardTimelineItem) {
+	if item.Link != "" {
+		<a href={ templ.SafeURL(item.Link) } class="flex items-start gap-2 py-2 hover:bg-muted/50 rounded px-2 -mx-2 no-underline transition-colors">
+			@dashTimelineContent(item)
+		</a>
+	} else {
+		<div class="flex items-start gap-2 py-2">
+			@dashTimelineContent(item)
+		</div>
+	}
+}
+
+templ dashTimelineContent(item DashboardTimelineItem) {
+	<span class={ "mt-1.5 inline-block w-1.5 h-1.5 rounded-full shrink-0",
+		templ.KV("bg-red-500", item.Status == "error"),
+		templ.KV("bg-yellow-500", item.Status == "warn"),
+		templ.KV("bg-green-500", item.Status == "ok" || item.Status == "info"),
+	}></span>
+	<div class="flex-1 min-w-0">
+		<span class="text-sm font-medium">{ item.Title }</span>
+		if item.Detail != "" {
+			<span class="text-xs text-muted-foreground truncate block mt-0.5">{ item.Detail }</span>
+		}
+	</div>
+	<span class="text-xs font-mono text-muted-foreground shrink-0">{ item.Time }</span>
+}
+
+func statusVariant(isError bool) string {
+	if isError {
+		return "destructive"
+	}
+	return ""
+}
