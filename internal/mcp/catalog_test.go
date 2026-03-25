@@ -83,11 +83,9 @@ func TestToolCatalog_NilCategories(t *testing.T) {
 
 func TestBuildCatalog_WithDeps(t *testing.T) {
 	registry := connector.NewRegistry()
-	ls := &mockLogStore{}
 
 	cat := BuildCatalog(Deps{
 		Registry: registry,
-		LogStore: ls,
 	})
 
 	categories := cat.Categories()
@@ -107,7 +105,6 @@ func TestBuildCatalog_WithDeps(t *testing.T) {
 	expected := []string{
 		"connectors",
 		"database",
-		"logs",
 		"overview",
 	}
 	for _, name := range expected {
