@@ -6,26 +6,19 @@ import (
 	"encoding/hex"
 	"net/http"
 
+	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 )
 
-type contextKey int
-
-const (
-	ctxKeyUser contextKey = iota
-	ctxKeySession
-)
-
 // UserFromContext returns the authenticated user from the request context, or nil.
+// Delegates to server.UserFromContext so modules and web share the same context key.
 func UserFromContext(ctx context.Context) *store.User {
-	u, _ := ctx.Value(ctxKeyUser).(*store.User)
-	return u
+	return server.UserFromContext(ctx)
 }
 
 // SessionFromContext returns the session from the request context, or nil.
 func SessionFromContext(ctx context.Context) *store.Session {
-	s, _ := ctx.Value(ctxKeySession).(*store.Session)
-	return s
+	return server.SessionFromContext(ctx)
 }
 
 func generateSessionToken() (string, error) {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/adham90/opentrace/internal/config"
+	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 )
 
@@ -46,7 +47,7 @@ func settingsRequest(t *testing.T, srv *Server, method, path, body string) *http
 	}
 	// Inject admin user into context so RequireAdmin passes
 	admin := &store.User{ID: "admin1", Role: store.RoleAdmin, IsActive: true}
-	ctx := context.WithValue(req.Context(), ctxKeyUser, admin)
+	ctx := server.WithUser(req.Context(), admin)
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 	srv.Router.ServeHTTP(rr, req)

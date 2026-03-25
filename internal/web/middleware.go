@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 )
 
@@ -485,8 +486,8 @@ func (s *Server) SessionAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), ctxKeySession, sess)
-		ctx = context.WithValue(ctx, ctxKeyUser, user)
+		ctx := server.WithSession(r.Context(), sess)
+		ctx = server.WithUser(ctx, user)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

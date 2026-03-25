@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 )
 
@@ -155,7 +156,7 @@ func TestRequireAuth_WithUser(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
-	ctx := context.WithValue(req.Context(), ctxKeyUser, &store.User{
+	ctx := server.WithUser(req.Context(), &store.User{
 		ID:       "user-1",
 		Email:    "test@example.com",
 		Role:     store.RoleMember,
@@ -178,7 +179,7 @@ func TestRequireAdmin_NonAdmin(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/users", nil)
-	ctx := context.WithValue(req.Context(), ctxKeyUser, &store.User{
+	ctx := server.WithUser(req.Context(), &store.User{
 		ID:       "user-1",
 		Email:    "member@example.com",
 		Role:     store.RoleMember,
@@ -201,7 +202,7 @@ func TestRequireAdmin_WithAdmin(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/users", nil)
-	ctx := context.WithValue(req.Context(), ctxKeyUser, &store.User{
+	ctx := server.WithUser(req.Context(), &store.User{
 		ID:       "admin-1",
 		Email:    "admin@example.com",
 		Role:     store.RoleAdmin,

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
+	srvpkg "github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -62,7 +63,7 @@ func (s *Server) MCPTokenAuth(next http.Handler) http.Handler {
 		}
 
 		// Store user in context for downstream use.
-		rctx := context.WithValue(r.Context(), ctxKeyUser, user)
+		rctx := srvpkg.WithUser(r.Context(), user)
 		next.ServeHTTP(w, r.WithContext(rctx))
 	})
 }
@@ -105,8 +106,8 @@ func (s *Server) setupMCPSSE() *server.SSEServer {
 		server.WithKeepAliveInterval(30*time.Second),
 		server.WithSSEContextFunc(func(ctx context.Context, r *http.Request) context.Context {
 			// Propagate the authenticated user from the auth middleware.
-			if user := r.Context().Value(ctxKeyUser); user != nil {
-				return context.WithValue(ctx, ctxKeyUser, user)
+			if user := srvpkg.UserFromContext(r.Context()); user != nil {
+				return srvpkg.WithUser(ctx, user)
 			}
 			return ctx
 		}),
@@ -117,8 +118,5 @@ func (s *Server) setupMCPSSE() *server.SSEServer {
 
 // mcpUserFromContext returns the user set by MCPTokenAuth, for role checks.
 func mcpUserFromContext(ctx context.Context) *store.User {
-	if u, ok := ctx.Value(ctxKeyUser).(*store.User); ok {
-		return u
-	}
-	return nil
+	return srvpkg.UserFromContext(ctx)
 }

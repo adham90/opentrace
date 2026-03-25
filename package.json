@@ -1,0 +1,28 @@
+{
+  "name": "opentrace",
+  "version": "1.0.0",
+  "description": "<p align=\"center\">   <img src=\"docs/screenshots/opentrace-ui-walkthrough.gif\" alt=\"OpenTrace\" width=\"700\" /> </p>",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adham90/opentrace.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/adham90/opentrace/issues"
+  },
+  "homepage": "https://github.com/adham90/opentrace#readme",
+  "dependencies": {
+    "@tailwindcss/cli": "^4.2.2",
+    "tailwindcss": "^4.2.2"
+  }
+}

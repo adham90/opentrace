@@ -1,4 +1,4 @@
-.PHONY: build dev test vet clean
+.PHONY: build dev test vet clean generate css
 
 VERSION ?= dev
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
@@ -8,11 +8,18 @@ LDFLAGS  = -s -w \
 	-X github.com/adham90/opentrace/internal/version.Commit=$(COMMIT) \
 	-X github.com/adham90/opentrace/internal/version.Date=$(DATE)
 
-build:
+generate:
+	templ generate
+
+css:
+	npx @tailwindcss/cli -i ./assets/css/input.css -o ./assets/css/output.css --minify
+
+build: generate css
 	go build -ldflags "$(LDFLAGS)" -o opentrace ./cmd/opentrace
 
 dev:
-	air
+	templ generate --watch --proxy="http://localhost:8080" --open-browser=false --cmd="go run ./cmd/opentrace" &
+	npx @tailwindcss/cli -i ./assets/css/input.css -o ./assets/css/output.css --watch
 
 test:
 	go test -short -race ./...
@@ -23,3 +30,4 @@ vet:
 clean:
 	rm -f opentrace
 	rm -rf tmp
+	rm -f assets/css/output.css
