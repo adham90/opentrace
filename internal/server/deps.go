@@ -38,8 +38,12 @@ type Deps struct {
 	JourneyStore              store.JourneyStore
 	ErrorImpactStore          store.ErrorImpactStore
 	TraceStore                store.TraceStore
-	InvestigationSessionStore store.InvestigationSessionStore
-	CodeEntityStore           store.CodeEntityStore
+	InvestigationSessionStore    store.InvestigationSessionStore
+	ToolTransitionStore          store.ToolTransitionStore
+	WorkflowTemplateStore        store.WorkflowTemplateStore
+	QueryMemoryStore             store.QueryMemoryStore
+	RunbookEffectivenessStore    store.RunbookEffectivenessStore
+	CodeEntityStore              store.CodeEntityStore
 	DeployStore               store.DeployStore
 	EventStore                store.EventStore
 	TestCorrelationStore      store.TestCorrelationStore

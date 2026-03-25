@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -24,40 +23,6 @@ import (
 	"github.com/adham90/opentrace/internal/watcher"
 	"github.com/adham90/opentrace/internal/web"
 )
-
-// appDeps holds shared application dependencies initialized by initApp.
-type appDeps struct {
-	db               *sql.DB
-	dsStore          store.DataSourceStore
-	logStore         store.LogStore
-	serverStore      store.ServerStore
-	metricStore      store.MetricStore
-	userStore        store.UserStore
-	sessionStore     store.SessionStore
-	settingsStore    store.SettingsStore
-	mcpActivityStore store.MCPActivityStore
-	auditStore store.AuditStore
-	watchStore       store.WatchStore
-	errorGroupStore    store.ErrorGroupStore
-	healthCheckStore   store.HealthCheckStore
-	agentNoteStore     store.AgentNoteStore
-	trendStore         store.TrendStore
-	analyticsStore     store.AnalyticsStore
-	journeyStore       store.JourneyStore
-	errorImpactStore            store.ErrorImpactStore
-	traceStore                  store.TraceStore
-	investigationSessionStore    store.InvestigationSessionStore
-	toolTransitionStore          store.ToolTransitionStore
-	workflowTemplateStore        store.WorkflowTemplateStore
-	queryMemoryStore             store.QueryMemoryStore
-	runbookEffectivenessStore    store.RunbookEffectivenessStore
-	codeEntityStore              store.CodeEntityStore
-	deployStore                  store.DeployStore
-	eventStore                   store.EventStore
-	testCorrelationStore         store.TestCorrelationStore
-	registry           *connector.Registry
-	cfg              *config.Config
-}
 
 func main() {
 	var err error
@@ -112,7 +77,7 @@ func main() {
 
 // initApp performs shared initialization: config, SQLite database,
 // migrations, stores, and connector registry.
-func initApp(ctx context.Context) (*appDeps, error) {
+func initApp(ctx context.Context) (*server.Deps, error) {
 	config.LoadEnvFile(".env")
 
 	cfg, err := config.Load()
@@ -177,37 +142,37 @@ func initApp(ctx context.Context) (*appDeps, error) {
 	registry := connector.NewRegistry()
 	reconnectConnectors(ctx, dsStore, logStore, registry, cfg, settingsStore)
 
-	return &appDeps{
-		db:               db,
-		dsStore:          dsStore,
-		logStore:         logStore,
-		serverStore:      serverStore,
-		metricStore:      metricStore,
-		userStore:        userStore,
-		sessionStore:     sessionStore,
-		settingsStore:    settingsStore,
-		mcpActivityStore: mcpActivityStore,
-		auditStore:       auditStore,
-		watchStore:       watchStore,
-		errorGroupStore:    errorGroupStore,
-		healthCheckStore:   healthCheckStore,
-		agentNoteStore:     agentNoteStore,
-		trendStore:         trendStore,
-		analyticsStore:     analyticsStore,
-		journeyStore:       journeyStore,
-		errorImpactStore:   errorImpactStore,
-		traceStore:                  traceStore,
-		investigationSessionStore:    investigationSessionStore,
-		toolTransitionStore:          toolTransitionStore,
-		workflowTemplateStore:        workflowTemplateStore,
-		queryMemoryStore:             queryMemoryStore,
-		runbookEffectivenessStore:    runbookEffectivenessStore,
-		codeEntityStore:              codeEntityStore,
-		deployStore:                  deployStore,
-		eventStore:                   eventStore,
-		testCorrelationStore:         testCorrelationStore,
-		registry:                     registry,
-		cfg:                         cfg,
+	return &server.Deps{
+		DB:                        db,
+		Cfg:                       cfg,
+		DSStore:                   dsStore,
+		LogStore:                  logStore,
+		ServerStore:               serverStore,
+		MetricStore:               metricStore,
+		UserStore:                 userStore,
+		SessionStore:              sessionStore,
+		SettingsStore:             settingsStore,
+		MCPActivityStore:          mcpActivityStore,
+		AuditStore:                auditStore,
+		WatchStore:                watchStore,
+		ErrorGroupStore:           errorGroupStore,
+		HealthCheckStore:          healthCheckStore,
+		AgentNoteStore:            agentNoteStore,
+		TrendStore:                trendStore,
+		AnalyticsStore:            analyticsStore,
+		JourneyStore:              journeyStore,
+		ErrorImpactStore:          errorImpactStore,
+		TraceStore:                traceStore,
+		InvestigationSessionStore: investigationSessionStore,
+		ToolTransitionStore:       toolTransitionStore,
+		WorkflowTemplateStore:     workflowTemplateStore,
+		QueryMemoryStore:          queryMemoryStore,
+		RunbookEffectivenessStore: runbookEffectivenessStore,
+		CodeEntityStore:           codeEntityStore,
+		DeployStore:               deployStore,
+		EventStore:                eventStore,
+		TestCorrelationStore:      testCorrelationStore,
+		Registry:                  registry,
 	}, nil
 }
 
@@ -221,51 +186,51 @@ func runMCP() error {
 	if err != nil {
 		return err
 	}
-	defer deps.db.Close()
-	defer deps.registry.CloseAll()
+	defer deps.DB.Close()
+	defer deps.Registry.CloseAll()
 
-	watchMetrics := watcher.NewWatchMetrics(deps.logStore)
+	watchMetrics := watcher.NewWatchMetrics(deps.LogStore)
 
 	// Resolve MCP name: env override > DB > default
 	mcpName := os.Getenv("OPENTRACE_MCP_NAME")
 	if mcpName == "" {
-		if v, err := deps.settingsStore.GetMCPName(ctx); err == nil && v != "" {
+		if v, err := deps.SettingsStore.GetMCPName(ctx); err == nil && v != "" {
 			mcpName = v
 		}
 	}
 
 	return mcpserver.Serve(mcpserver.Deps{
 		Ctx:              ctx,
-		Registry:         deps.registry,
-		LogStore:         deps.logStore,
-		ServerStore:      deps.serverStore,
-		MetricStore:      deps.metricStore,
-		UserStore:        deps.userStore,
+		Registry:         deps.Registry,
+		LogStore:         deps.LogStore,
+		ServerStore:      deps.ServerStore,
+		MetricStore:      deps.MetricStore,
+		UserStore:        deps.UserStore,
 		MCPToken:         os.Getenv("OPENTRACE_MCP_TOKEN"),
 		ServerName:       mcpName,
-		DataSourceStore:  deps.dsStore,
-		SettingsStore:    deps.settingsStore,
-		Config:           deps.cfg,
-		MCPActivityStore: deps.mcpActivityStore,
-		AuditStore:       deps.auditStore,
-		WatchStore:       deps.watchStore,
+		DataSourceStore:  deps.DSStore,
+		SettingsStore:    deps.SettingsStore,
+		Config:           deps.Cfg,
+		MCPActivityStore: deps.MCPActivityStore,
+		AuditStore:       deps.AuditStore,
+		WatchStore:       deps.WatchStore,
 		WatchMetrics:     watchMetrics,
-		ErrorGroupStore:    deps.errorGroupStore,
-		HealthCheckStore:   deps.healthCheckStore,
-		AgentNoteStore:     deps.agentNoteStore,
-		TrendStore:         deps.trendStore,
-		AnalyticsStore:     deps.analyticsStore,
-		JourneyStore:       deps.journeyStore,
-		ErrorImpactStore:             deps.errorImpactStore,
-		InvestigationSessionStore:    deps.investigationSessionStore,
-		ToolTransitionStore:          deps.toolTransitionStore,
-		WorkflowTemplateStore:        deps.workflowTemplateStore,
-		QueryMemoryStore:             deps.queryMemoryStore,
-		RunbookEffectivenessStore:    deps.runbookEffectivenessStore,
-		CodeEntityStore:              deps.codeEntityStore,
-		DeployStore:                  deps.deployStore,
-		EventStore:                   deps.eventStore,
-		TestCorrelationStore:         deps.testCorrelationStore,
+		ErrorGroupStore:    deps.ErrorGroupStore,
+		HealthCheckStore:   deps.HealthCheckStore,
+		AgentNoteStore:     deps.AgentNoteStore,
+		TrendStore:         deps.TrendStore,
+		AnalyticsStore:     deps.AnalyticsStore,
+		JourneyStore:       deps.JourneyStore,
+		ErrorImpactStore:             deps.ErrorImpactStore,
+		InvestigationSessionStore:    deps.InvestigationSessionStore,
+		ToolTransitionStore:          deps.ToolTransitionStore,
+		WorkflowTemplateStore:        deps.WorkflowTemplateStore,
+		QueryMemoryStore:             deps.QueryMemoryStore,
+		RunbookEffectivenessStore:    deps.RunbookEffectivenessStore,
+		CodeEntityStore:              deps.CodeEntityStore,
+		DeployStore:                  deps.DeployStore,
+		EventStore:                   deps.EventStore,
+		TestCorrelationStore:         deps.TestCorrelationStore,
 	})
 }
 
@@ -303,119 +268,89 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer deps.db.Close()
+	defer deps.DB.Close()
 
 	// Agent-first watch components
-	watchMetrics := watcher.NewWatchMetrics(deps.logStore)
+	watchMetrics := watcher.NewWatchMetrics(deps.LogStore)
+	deps.WatchMetrics = watchMetrics
 
 	// Build MCP tool catalog for the /tools page (auto-detected from MCP registrations).
 	toolCatalog := mcpserver.BuildCatalog(mcpserver.Deps{
 		Ctx:             ctx,
-		Registry:        deps.registry,
-		LogStore:        deps.logStore,
-		ServerStore:     deps.serverStore,
-		MetricStore:     deps.metricStore,
-		DataSourceStore: deps.dsStore,
-		SettingsStore:   deps.settingsStore,
-		Config:          deps.cfg,
-		AuditStore:      deps.auditStore,
-		WatchStore:      deps.watchStore,
+		Registry:        deps.Registry,
+		LogStore:        deps.LogStore,
+		ServerStore:     deps.ServerStore,
+		MetricStore:     deps.MetricStore,
+		DataSourceStore: deps.DSStore,
+		SettingsStore:   deps.SettingsStore,
+		Config:          deps.Cfg,
+		AuditStore:      deps.AuditStore,
+		WatchStore:      deps.WatchStore,
 		WatchMetrics:    watchMetrics,
-		ErrorGroupStore:  deps.errorGroupStore,
-		HealthCheckStore: deps.healthCheckStore,
-		AgentNoteStore:  deps.agentNoteStore,
-		TrendStore:      deps.trendStore,
-		AnalyticsStore:  deps.analyticsStore,
-		JourneyStore:    deps.journeyStore,
-		ErrorImpactStore: deps.errorImpactStore,
-		CodeEntityStore:          deps.codeEntityStore,
-		DeployStore:              deps.deployStore,
-		EventStore:               deps.eventStore,
-		TestCorrelationStore:     deps.testCorrelationStore,
+		ErrorGroupStore:  deps.ErrorGroupStore,
+		HealthCheckStore: deps.HealthCheckStore,
+		AgentNoteStore:  deps.AgentNoteStore,
+		TrendStore:      deps.TrendStore,
+		AnalyticsStore:  deps.AnalyticsStore,
+		JourneyStore:    deps.JourneyStore,
+		ErrorImpactStore: deps.ErrorImpactStore,
+		CodeEntityStore:          deps.CodeEntityStore,
+		DeployStore:              deps.DeployStore,
+		EventStore:               deps.EventStore,
+		TestCorrelationStore:     deps.TestCorrelationStore,
 	})
 
 	// Agent-first watch evaluator + stream (reactive on log ingestion)
-	watchEvaluator := watcher.NewWatchEvaluator(watchMetrics, deps.watchStore)
-	watchEvidenceBuilder := watcher.NewWatchEvidenceBuilder(deps.logStore, watchMetrics)
-	watchStream := watcher.NewWatchStreamEvaluator(ctx, deps.watchStore, watchEvaluator, watchEvidenceBuilder)
+	watchEvaluator := watcher.NewWatchEvaluator(watchMetrics, deps.WatchStore)
+	watchEvidenceBuilder := watcher.NewWatchEvidenceBuilder(deps.LogStore, watchMetrics)
+	watchStream := watcher.NewWatchStreamEvaluator(ctx, deps.WatchStore, watchEvaluator, watchEvidenceBuilder)
 
 	// Create health check scheduler early so we can inject its reliability data into the web server.
-	hcSched := healthcheck.NewScheduler(deps.healthCheckStore, 0)
+	hcSched := healthcheck.NewScheduler(deps.HealthCheckStore, 0)
 
-	// Create job queue early so it can be injected into shared deps
-	jobQueue := jobs.NewQueue(deps.db)
-
-	// Build shared deps for domain modules
-	sharedDeps := &server.Deps{
-		DB:                        deps.db,
-		Cfg:                       deps.cfg,
-		DSStore:                   deps.dsStore,
-		LogStore:                  deps.logStore,
-		ServerStore:               deps.serverStore,
-		MetricStore:               deps.metricStore,
-		UserStore:                 deps.userStore,
-		SessionStore:              deps.sessionStore,
-		SettingsStore:             deps.settingsStore,
-		MCPActivityStore:          deps.mcpActivityStore,
-		AuditStore:                deps.auditStore,
-		WatchStore:                deps.watchStore,
-		ErrorGroupStore:           deps.errorGroupStore,
-		HealthCheckStore:          deps.healthCheckStore,
-		AgentNoteStore:            deps.agentNoteStore,
-		TrendStore:                deps.trendStore,
-		AnalyticsStore:            deps.analyticsStore,
-		JourneyStore:              deps.journeyStore,
-		ErrorImpactStore:          deps.errorImpactStore,
-		TraceStore:                deps.traceStore,
-		InvestigationSessionStore: deps.investigationSessionStore,
-		CodeEntityStore:           deps.codeEntityStore,
-		DeployStore:               deps.deployStore,
-		EventStore:                deps.eventStore,
-		TestCorrelationStore:      deps.testCorrelationStore,
-		Registry:                  deps.registry,
-		Queue:                     jobQueue,
-		WatchMetrics:              watchMetrics,
-	}
+	// Create job queue early so it can be injected into deps
+	jobQueue := jobs.NewQueue(deps.DB)
+	deps.Queue = jobQueue
 
 	// Create server
 	srv := web.NewServerWithDeps(web.ServerDeps{
 		Ctx:              ctx,
-		DB:               deps.db,
-		DSStore:          deps.dsStore,
-		LogStore:         deps.logStore,
-		ServerStore:      deps.serverStore,
-		MetricStore:      deps.metricStore,
-		UserStore:        deps.userStore,
-		SessionStore:     deps.sessionStore,
-		SettingsStore:    deps.settingsStore,
-		Registry:         deps.registry,
+		DB:               deps.DB,
+		DSStore:          deps.DSStore,
+		LogStore:         deps.LogStore,
+		ServerStore:      deps.ServerStore,
+		MetricStore:      deps.MetricStore,
+		UserStore:        deps.UserStore,
+		SessionStore:     deps.SessionStore,
+		SettingsStore:    deps.SettingsStore,
+		Registry:         deps.Registry,
 		ToolCatalog:      toolCatalog,
-		Cfg:              deps.cfg,
-		MCPActivityStore: deps.mcpActivityStore,
-		AuditStore:       deps.auditStore,
+		Cfg:              deps.Cfg,
+		MCPActivityStore: deps.MCPActivityStore,
+		AuditStore:       deps.AuditStore,
 		WatchStreamEvaluator: watchStream,
-		WatchStore:           deps.watchStore,
+		WatchStore:           deps.WatchStore,
 		WatchMetrics:         watchMetrics,
-		ErrorGroupStore:      deps.errorGroupStore,
-		HealthCheckStore:     deps.healthCheckStore,
-		AgentNoteStore:       deps.agentNoteStore,
-		TrendStore:           deps.trendStore,
-		AnalyticsStore:       deps.analyticsStore,
-		JourneyStore:         deps.journeyStore,
-		ErrorImpactStore:     deps.errorImpactStore,
-		TraceStore:                deps.traceStore,
-		InvestigationSessionStore: deps.investigationSessionStore,
-		CodeEntityStore:           deps.codeEntityStore,
-		DeployStore:               deps.deployStore,
-		EventStore:                deps.eventStore,
-		TestCorrelationStore:      deps.testCorrelationStore,
+		ErrorGroupStore:      deps.ErrorGroupStore,
+		HealthCheckStore:     deps.HealthCheckStore,
+		AgentNoteStore:       deps.AgentNoteStore,
+		TrendStore:           deps.TrendStore,
+		AnalyticsStore:       deps.AnalyticsStore,
+		JourneyStore:         deps.JourneyStore,
+		ErrorImpactStore:     deps.ErrorImpactStore,
+		TraceStore:                deps.TraceStore,
+		InvestigationSessionStore: deps.InvestigationSessionStore,
+		CodeEntityStore:           deps.CodeEntityStore,
+		DeployStore:               deps.DeployStore,
+		EventStore:                deps.EventStore,
+		TestCorrelationStore:      deps.TestCorrelationStore,
 		ReliabilityProvider:       hcSched,
-		SharedDeps:                sharedDeps,
+		SharedDeps:                deps,
 		Modules:                   modules,
 	})
 
 	httpServer := &http.Server{
-		Addr:         deps.cfg.ListenAddr,
+		Addr:         deps.Cfg.ListenAddr,
 		Handler:      srv.Router,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 60 * time.Second, // higher for SSE endpoints
@@ -427,10 +362,10 @@ func run() error {
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
 
 	// Start agent-first watch scheduler
-	watchSessionMgr := watcher.NewWatchSessionManager(deps.watchStore, watchMetrics)
+	watchSessionMgr := watcher.NewWatchSessionManager(deps.WatchStore, watchMetrics)
 	watchSched := watcher.NewWatchScheduler(watcher.WatchSchedulerOpts{
-		WatchStore:      deps.watchStore,
-		LogStore:        deps.logStore,
+		WatchStore:      deps.WatchStore,
+		LogStore:        deps.LogStore,
 		Evaluator:       watchEvaluator,
 		EvidenceBuilder: watchEvidenceBuilder,
 		SessionManager:  watchSessionMgr,
@@ -458,24 +393,24 @@ func run() error {
 	jobScheduler.Start(ctx)
 
 	// Validate TLS certificate and key files exist if configured
-	if deps.cfg.TLSCert != "" && deps.cfg.TLSKey != "" {
-		if _, err := os.Stat(deps.cfg.TLSCert); err != nil {
+	if deps.Cfg.TLSCert != "" && deps.Cfg.TLSKey != "" {
+		if _, err := os.Stat(deps.Cfg.TLSCert); err != nil {
 			return fmt.Errorf("TLS certificate file: %w", err)
 		}
-		if _, err := os.Stat(deps.cfg.TLSKey); err != nil {
+		if _, err := os.Stat(deps.Cfg.TLSKey); err != nil {
 			return fmt.Errorf("TLS key file: %w", err)
 		}
 	}
 
 	go func() {
-		if deps.cfg.TLSCert != "" && deps.cfg.TLSKey != "" {
-			slog.Info("listening (HTTPS)", "addr", deps.cfg.ListenAddr)
-			if err := httpServer.ListenAndServeTLS(deps.cfg.TLSCert, deps.cfg.TLSKey); err != nil && err != http.ErrServerClosed {
+		if deps.Cfg.TLSCert != "" && deps.Cfg.TLSKey != "" {
+			slog.Info("listening (HTTPS)", "addr", deps.Cfg.ListenAddr)
+			if err := httpServer.ListenAndServeTLS(deps.Cfg.TLSCert, deps.Cfg.TLSKey); err != nil && err != http.ErrServerClosed {
 				slog.Error("listen error", "error", err)
 				os.Exit(1)
 			}
 		} else {
-			slog.Info("listening", "addr", deps.cfg.ListenAddr)
+			slog.Info("listening", "addr", deps.Cfg.ListenAddr)
 			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				slog.Error("listen error", "error", err)
 				os.Exit(1)
@@ -493,7 +428,7 @@ func run() error {
 	jobScheduler.Stop()
 	slog.Info("background jobs stopped")
 
-	deps.registry.CloseAll()
+	deps.Registry.CloseAll()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
