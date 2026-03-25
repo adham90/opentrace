@@ -24,7 +24,7 @@ vendor/
 
 # Node (Tailwind CSS build)
 node_modules/
-assets/css/output.css
+# assets/css/output.css is tracked (needed for //go:embed in production builds)
 
 # Templ generated files
 *_templ.go

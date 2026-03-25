@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	assetsFS "github.com/adham90/opentrace/assets"
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
@@ -267,15 +268,23 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		})
 	}
 
-	// Static files
+	// Static files (legacy /static/ route)
 	if cfg != nil && cfg.DevMode {
-		// Dev mode: serve from disk for live editing (no cache)
 		router.Handle("/static/*", http.StripPrefix("/static/",
 			http.FileServer(http.Dir("internal/web/static"))))
 	} else {
 		staticSub, _ := fs.Sub(staticFS, "static")
 		router.Handle("/static/*", http.StripPrefix("/static/",
 			StaticCacheHeaders(http.FileServer(http.FS(staticSub)))))
+	}
+
+	// Assets (templ + Tailwind CSS + JS)
+	if cfg != nil && cfg.DevMode {
+		router.Handle("/assets/*", http.StripPrefix("/assets/",
+			http.FileServer(http.Dir("assets"))))
+	} else {
+		router.Handle("/assets/*", http.StripPrefix("/assets/",
+			StaticCacheHeaders(http.FileServer(http.FS(assetsFS.Files)))))
 	}
 
 	// Always-open auth routes (login/register rate-limited)

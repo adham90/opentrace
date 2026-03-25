@@ -2,16 +2,14 @@ package web
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"net/http"
 
+	"github.com/adham90/opentrace/internal/auth"
 	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 )
 
 // UserFromContext returns the authenticated user from the request context, or nil.
-// Delegates to server.UserFromContext so modules and web share the same context key.
 func UserFromContext(ctx context.Context) *store.User {
 	return server.UserFromContext(ctx)
 }
@@ -21,29 +19,12 @@ func SessionFromContext(ctx context.Context) *store.Session {
 	return server.SessionFromContext(ctx)
 }
 
-func generateSessionToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
-}
-
-func generateMCPToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return "mcp_" + hex.EncodeToString(b), nil
-}
-
-func generateAPIKey() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return "ot_" + hex.EncodeToString(b), nil
-}
+// Delegate token generation to the auth package.
+var (
+	generateSessionToken = auth.GenerateSessionToken
+	generateMCPToken     = auth.GenerateMCPToken
+	generateAPIKey       = auth.GenerateAPIKey
+)
 
 const sessionCookieName = "opentrace_session"
 
