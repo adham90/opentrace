@@ -12,11 +12,12 @@ import (
 
 type analyticsStore struct {
 	db *sql.DB
+	q  *Queries
 }
 
 // NewAnalyticsStore creates an AnalyticsStore backed by SQLite.
 func NewAnalyticsStore(db *sql.DB) store.AnalyticsStore {
-	return &analyticsStore{db: db}
+	return &analyticsStore{db: db, q: New(db)}
 }
 
 // AggregateEndpointStats reads request_summaries and populates endpoint_stats.
@@ -408,9 +409,5 @@ func (s *analyticsStore) TrafficHeatmap(ctx context.Context, service string) ([]
 // Prune removes old endpoint stats.
 func (s *analyticsStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
-	res, err := s.db.ExecContext(ctx, `DELETE FROM endpoint_stats WHERE period_start < ?`, cutoff)
-	if err != nil {
-		return 0, fmt.Errorf("pruning endpoint stats: %w", err)
-	}
-	return res.RowsAffected()
+	return s.q.PruneEndpointStats(ctx, cutoff)
 }

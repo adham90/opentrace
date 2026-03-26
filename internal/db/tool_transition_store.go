@@ -11,28 +11,28 @@ import (
 
 type toolTransitionStore struct {
 	db *sql.DB
+	q  *Queries
 }
 
 // NewToolTransitionStore creates a new ToolTransitionStore backed by SQLite.
 func NewToolTransitionStore(db *sql.DB) store.ToolTransitionStore {
-	return &toolTransitionStore{db: db}
+	return &toolTransitionStore{db: db, q: New(db)}
 }
 
 func (s *toolTransitionStore) Increment(ctx context.Context, fromTool, toTool, intent string) error {
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO tool_transitions (from_tool, to_tool, intent, total_count, last_seen_at)
-		 VALUES (?, ?, ?, 1, datetime('now'))
-		 ON CONFLICT(from_tool, to_tool, intent) DO UPDATE SET
-		   total_count = total_count + 1,
-		   last_seen_at = datetime('now')`,
-		fromTool, toTool, intent,
-	)
+	err := s.q.IncrementToolTransition(ctx, IncrementToolTransitionParams{
+		FromTool: fromTool,
+		ToTool:   toTool,
+		Intent:   intent,
+	})
 	if err != nil {
 		return fmt.Errorf("incrementing tool transition: %w", err)
 	}
 	return nil
 }
 
+// IncrementWithOutcome uses hand-written SQL because the sqlc-generated query
+// has unexpanded sqlc.arg() references in the ON CONFLICT clause.
 func (s *toolTransitionStore) IncrementWithOutcome(ctx context.Context, fromTool, toTool, intent, outcome string) error {
 	var resolvedInc, abandonedInc int
 	switch outcome {
@@ -59,6 +59,8 @@ func (s *toolTransitionStore) IncrementWithOutcome(ctx context.Context, fromTool
 	return nil
 }
 
+// GetTransitions uses hand-written SQL because the query has dynamic filter parameters
+// that don't have a sqlc-generated equivalent.
 func (s *toolTransitionStore) GetTransitions(ctx context.Context, params store.GetTransitionsParams) ([]store.ToolTransition, error) {
 	minSupport := params.MinSupport
 	if minSupport <= 0 {
@@ -93,12 +95,13 @@ func (s *toolTransitionStore) GetTransitions(ctx context.Context, params store.G
 		if err := rows.Scan(&t.FromTool, &t.ToTool, &t.Intent, &t.TotalCount, &t.ResolvedCount, &t.AbandonedCount, &t.AvgDurationMs, &lastSeenAt); err != nil {
 			return nil, fmt.Errorf("scanning tool transition: %w", err)
 		}
-		t.LastSeenAt, _ = time.Parse(time.RFC3339, lastSeenAt)
+		t.LastSeenAt = parseTime(lastSeenAt)
 		result = append(result, t)
 	}
 	return result, rows.Err()
 }
 
+// GetDeadEnds uses hand-written SQL because this query doesn't have a sqlc-generated equivalent.
 func (s *toolTransitionStore) GetDeadEnds(ctx context.Context, intent string) ([]store.ToolTransition, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT from_tool, to_tool, intent, total_count, resolved_count, abandoned_count, avg_duration_ms, last_seen_at
@@ -122,7 +125,7 @@ func (s *toolTransitionStore) GetDeadEnds(ctx context.Context, intent string) ([
 		if err := rows.Scan(&t.FromTool, &t.ToTool, &t.Intent, &t.TotalCount, &t.ResolvedCount, &t.AbandonedCount, &t.AvgDurationMs, &lastSeenAt); err != nil {
 			return nil, fmt.Errorf("scanning dead end transition: %w", err)
 		}
-		t.LastSeenAt, _ = time.Parse(time.RFC3339, lastSeenAt)
+		t.LastSeenAt = parseTime(lastSeenAt)
 		result = append(result, t)
 	}
 	return result, rows.Err()
@@ -130,11 +133,9 @@ func (s *toolTransitionStore) GetDeadEnds(ctx context.Context, intent string) ([
 
 func (s *toolTransitionStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
-	result, err := s.db.ExecContext(ctx,
-		`DELETE FROM tool_transitions WHERE last_seen_at < ?`, cutoff,
-	)
+	n, err := s.q.PruneToolTransitions(ctx, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("pruning tool transitions: %w", err)
 	}
-	return result.RowsAffected()
+	return n, nil
 }

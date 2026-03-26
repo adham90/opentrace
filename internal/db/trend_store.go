@@ -14,11 +14,12 @@ import (
 
 type trendStore struct {
 	db *sql.DB
+	q  *Queries
 }
 
 // NewTrendStore creates a TrendStore backed by SQLite.
 func NewTrendStore(db *sql.DB) store.TrendStore {
-	return &trendStore{db: db}
+	return &trendStore{db: db, q: New(db)}
 }
 
 // AggregateBuckets reads raw logs + request_summaries and populates metric_buckets
@@ -356,41 +357,24 @@ func (s *trendStore) QueryTrends(ctx context.Context, params store.TrendQueryPar
 
 // ListDeployMarkers returns deploy markers for a service since a given time.
 func (s *trendStore) ListDeployMarkers(ctx context.Context, service string, since time.Time) ([]store.DeployMarker, error) {
-	var conditions []string
-	var args []any
-
-	conditions = append(conditions, "first_seen_at >= ?")
-	args = append(args, since.Format(time.RFC3339))
+	sinceStr := since.Format(time.RFC3339)
 
 	if service != "" {
-		conditions = append(conditions, "service = ?")
-		args = append(args, service)
+		rows, err := s.q.ListDeployMarkersByServiceSince(ctx, ListDeployMarkersByServiceSinceParams{
+			Since:   sinceStr,
+			Service: service,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("querying deploy markers: %w", err)
+		}
+		return deployMarkersToStore(rows), nil
 	}
 
-	query := `SELECT id, service, environment, commit_hash, first_seen_at, request_count
-		FROM deploy_markers`
-	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
-	}
-	query += " ORDER BY first_seen_at ASC"
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.q.ListDeployMarkersSince(ctx, sinceStr)
 	if err != nil {
 		return nil, fmt.Errorf("querying deploy markers: %w", err)
 	}
-	defer rows.Close()
-
-	var results []store.DeployMarker
-	for rows.Next() {
-		var d store.DeployMarker
-		var firstSeenStr string
-		if err := rows.Scan(&d.ID, &d.Service, &d.Environment, &d.CommitHash, &firstSeenStr, &d.RequestCount); err != nil {
-			return nil, fmt.Errorf("scanning deploy marker: %w", err)
-		}
-		d.FirstSeenAt, _ = time.Parse(time.RFC3339, firstSeenStr)
-		results = append(results, d)
-	}
-	return results, rows.Err()
+	return deployMarkersToStore(rows), nil
 }
 
 // Prune removes old metric buckets and deploy markers.
@@ -398,18 +382,16 @@ func (s *trendStore) Prune(ctx context.Context, olderThan time.Duration) (int64,
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
 	var total int64
 
-	res, err := s.db.ExecContext(ctx, `DELETE FROM metric_buckets WHERE bucket_start < ?`, cutoff)
+	n, err := s.q.PruneTrendBuckets(ctx, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("pruning metric buckets: %w", err)
 	}
-	n, _ := res.RowsAffected()
 	total += n
 
-	res, err = s.db.ExecContext(ctx, `DELETE FROM deploy_markers WHERE first_seen_at < ?`, cutoff)
+	n, err = s.q.PruneDeployMarkers(ctx, cutoff)
 	if err != nil {
 		return total, fmt.Errorf("pruning deploy markers: %w", err)
 	}
-	n, _ = res.RowsAffected()
 	total += n
 
 	return total, nil

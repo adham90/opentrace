@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,13 +12,16 @@ import (
 
 type runbookEffectivenessStore struct {
 	db *sql.DB
+	q  *Queries
 }
 
 // NewRunbookEffectivenessStore creates a new RunbookEffectivenessStore backed by SQLite.
 func NewRunbookEffectivenessStore(db *sql.DB) store.RunbookEffectivenessStore {
-	return &runbookEffectivenessStore{db: db}
+	return &runbookEffectivenessStore{db: db, q: New(db)}
 }
 
+// RecordExecution uses hand-written SQL because the sqlc-generated query
+// has unexpanded sqlc.arg() references in the ON CONFLICT clause.
 func (s *runbookEffectivenessStore) RecordExecution(ctx context.Context, runbookName string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.ExecContext(ctx,
@@ -35,30 +39,23 @@ func (s *runbookEffectivenessStore) RecordExecution(ctx context.Context, runbook
 }
 
 func (s *runbookEffectivenessStore) UpdateOutcome(ctx context.Context, params store.UpdateRunbookEffectivenessParams) error {
-	// Use separate queries per outcome to avoid dynamic column interpolation.
 	switch params.Outcome {
 	case "resolved":
-		_, err := s.db.ExecContext(ctx,
-			`UPDATE runbook_effectiveness SET
-			    resolved_sessions = resolved_sessions + 1,
-			    avg_steps_after = (avg_steps_after * resolved_sessions + ?) / (resolved_sessions + 1),
-			    avg_session_duration_seconds = (avg_session_duration_seconds * resolved_sessions + ?) / (resolved_sessions + 1)
-			 WHERE runbook_name = ?`,
-			params.StepsAfter, params.DurationSec, params.RunbookName,
-		)
+		err := s.q.UpdateRunbookOutcomeResolved(ctx, UpdateRunbookOutcomeResolvedParams{
+			StepsAfter:  int64(params.StepsAfter),
+			DurationSec: int64(params.DurationSec),
+			RunbookName: params.RunbookName,
+		})
 		if err != nil {
 			return fmt.Errorf("updating runbook outcome: %w", err)
 		}
 		return nil
 	case "abandoned":
-		_, err := s.db.ExecContext(ctx,
-			`UPDATE runbook_effectiveness SET
-			    abandoned_sessions = abandoned_sessions + 1,
-			    avg_steps_after = (avg_steps_after * abandoned_sessions + ?) / (abandoned_sessions + 1),
-			    avg_session_duration_seconds = (avg_session_duration_seconds * abandoned_sessions + ?) / (abandoned_sessions + 1)
-			 WHERE runbook_name = ?`,
-			params.StepsAfter, params.DurationSec, params.RunbookName,
-		)
+		err := s.q.UpdateRunbookOutcomeAbandoned(ctx, UpdateRunbookOutcomeAbandonedParams{
+			StepsAfter:  int64(params.StepsAfter),
+			DurationSec: int64(params.DurationSec),
+			RunbookName: params.RunbookName,
+		})
 		if err != nil {
 			return fmt.Errorf("updating runbook outcome: %w", err)
 		}
@@ -67,57 +64,24 @@ func (s *runbookEffectivenessStore) UpdateOutcome(ctx context.Context, params st
 		return nil // ignore unknown outcomes
 	}
 }
-func (s *runbookEffectivenessStore) GetMostEffective(ctx context.Context) (*store.RunbookEffectiveness, error) {
-	var re store.RunbookEffectiveness
-	var lastExec string
 
-	err := s.db.QueryRowContext(ctx,
-		`SELECT runbook_name, total_executions, resolved_sessions, abandoned_sessions,
-		        avg_steps_after, avg_session_duration_seconds, last_executed_at
-		 FROM runbook_effectiveness
-		 WHERE total_executions >= 3 AND resolved_sessions > abandoned_sessions
-		 ORDER BY CAST(resolved_sessions AS REAL) / total_executions DESC
-		 LIMIT 1`,
-	).Scan(
-		&re.RunbookName, &re.TotalExecutions, &re.ResolvedSessions, &re.AbandonedSessions,
-		&re.AvgStepsAfter, &re.AvgSessionDurationSeconds, &lastExec,
-	)
-	if err == sql.ErrNoRows {
+func (s *runbookEffectivenessStore) GetMostEffective(ctx context.Context) (*store.RunbookEffectiveness, error) {
+	row, err := s.q.GetMostEffectiveRunbook(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting most effective runbook: %w", err)
 	}
 
-	re.LastExecutedAt, _ = time.Parse(time.RFC3339, lastExec)
-	return &re, nil
+	result := toStoreRunbookEffectiveness(row)
+	return &result, nil
 }
 
 func (s *runbookEffectivenessStore) List(ctx context.Context) ([]store.RunbookEffectiveness, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT runbook_name, total_executions, resolved_sessions, abandoned_sessions,
-		        avg_steps_after, avg_session_duration_seconds, last_executed_at
-		 FROM runbook_effectiveness
-		 ORDER BY total_executions DESC
-		 LIMIT 100`,
-	)
+	rows, err := s.q.ListRunbookEffectiveness(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing runbook effectiveness: %w", err)
 	}
-	defer rows.Close()
-
-	var result []store.RunbookEffectiveness
-	for rows.Next() {
-		var re store.RunbookEffectiveness
-		var lastExec string
-		if err := rows.Scan(
-			&re.RunbookName, &re.TotalExecutions, &re.ResolvedSessions, &re.AbandonedSessions,
-			&re.AvgStepsAfter, &re.AvgSessionDurationSeconds, &lastExec,
-		); err != nil {
-			return nil, fmt.Errorf("scanning runbook effectiveness: %w", err)
-		}
-		re.LastExecutedAt, _ = time.Parse(time.RFC3339, lastExec)
-		result = append(result, re)
-	}
-	return result, rows.Err()
+	return toStoreRunbookEffectivenessList(rows), nil
 }

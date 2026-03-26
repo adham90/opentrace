@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
@@ -13,11 +12,12 @@ import (
 
 type deployStore struct {
 	db *sql.DB
+	q  *Queries
 }
 
 // NewDeployStore creates a new SQLite-backed DeployStore.
 func NewDeployStore(db *sql.DB) store.DeployStore {
-	return &deployStore{db: db}
+	return &deployStore{db: db, q: New(db)}
 }
 
 func (s *deployStore) Create(ctx context.Context, params store.CreateDeployParams) (*store.Deploy, error) {
@@ -40,43 +40,47 @@ func (s *deployStore) Create(ctx context.Context, params store.CreateDeployParam
 		src = store.DeploySourceWebhook
 	}
 
-	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO deploys (service, environment, commit_hash, branch, author,
-		                      files_changed_json, deploy_source, deployed_at, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		params.Service, params.Environment, params.CommitHash, params.Branch, params.Author,
-		string(filesJSON), string(src), deployedAtStr, now,
-	)
+	row, err := s.q.CreateDeploy(ctx, CreateDeployParams{
+		Service:          params.Service,
+		Environment:      params.Environment,
+		CommitHash:       params.CommitHash,
+		Branch:           params.Branch,
+		Author:           params.Author,
+		FilesChangedJson: string(filesJSON),
+		DeploySource:     string(src),
+		DeployedAt:       deployedAtStr,
+		CreatedAt:        now,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("creating deploy: %w", err)
 	}
 
-	id, _ := res.LastInsertId()
-	return s.GetByID(ctx, id)
+	d := toStoreDeploy(row)
+	return &d, nil
 }
 
 func (s *deployStore) GetByID(ctx context.Context, id int64) (*store.Deploy, error) {
-	row := s.db.QueryRowContext(ctx,
-		`SELECT id, service, environment, commit_hash, branch, author,
-		        files_changed_json, deploy_source,
-		        pre_error_rate, post_error_rate, pre_avg_duration_ms, post_avg_duration_ms,
-		        impact_measured_at, linked_investigation_ids_json, status,
-		        deployed_at, created_at
-		 FROM deploys WHERE id = ?`, id,
-	)
-	return scanDeploy(row)
+	row, err := s.q.GetDeployByID(ctx, id)
+	if err == sql.ErrNoRows {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying deploy: %w", err)
+	}
+	d := toStoreDeploy(row)
+	return &d, nil
 }
 
 func (s *deployStore) GetByCommit(ctx context.Context, commitHash string) (*store.Deploy, error) {
-	row := s.db.QueryRowContext(ctx,
-		`SELECT id, service, environment, commit_hash, branch, author,
-		        files_changed_json, deploy_source,
-		        pre_error_rate, post_error_rate, pre_avg_duration_ms, post_avg_duration_ms,
-		        impact_measured_at, linked_investigation_ids_json, status,
-		        deployed_at, created_at
-		 FROM deploys WHERE commit_hash = ? ORDER BY deployed_at DESC LIMIT 1`, commitHash,
-	)
-	return scanDeploy(row)
+	row, err := s.q.GetDeployByCommit(ctx, commitHash)
+	if err == sql.ErrNoRows {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying deploy by commit: %w", err)
+	}
+	d := toStoreDeploy(row)
+	return &d, nil
 }
 
 func (s *deployStore) GetRecent(ctx context.Context, service string, limit int) ([]store.Deploy, error) {
@@ -84,35 +88,22 @@ func (s *deployStore) GetRecent(ctx context.Context, service string, limit int) 
 		limit = 10
 	}
 
-	var rows *sql.Rows
-	var err error
 	if service != "" {
-		rows, err = s.db.QueryContext(ctx,
-			`SELECT id, service, environment, commit_hash, branch, author,
-			        files_changed_json, deploy_source,
-			        pre_error_rate, post_error_rate, pre_avg_duration_ms, post_avg_duration_ms,
-			        impact_measured_at, linked_investigation_ids_json, status,
-			        deployed_at, created_at
-			 FROM deploys WHERE service = ?
-			 ORDER BY deployed_at DESC LIMIT ?`, service, limit,
-		)
-	} else {
-		rows, err = s.db.QueryContext(ctx,
-			`SELECT id, service, environment, commit_hash, branch, author,
-			        files_changed_json, deploy_source,
-			        pre_error_rate, post_error_rate, pre_avg_duration_ms, post_avg_duration_ms,
-			        impact_measured_at, linked_investigation_ids_json, status,
-			        deployed_at, created_at
-			 FROM deploys
-			 ORDER BY deployed_at DESC LIMIT ?`, limit,
-		)
+		rows, err := s.q.ListRecentDeploysByService(ctx, ListRecentDeploysByServiceParams{
+			Service:    service,
+			MaxResults: int64(limit),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("querying recent deploys: %w", err)
+		}
+		return toStoreDeploys(rows), nil
 	}
+
+	rows, err := s.q.ListRecentDeploys(ctx, int64(limit))
 	if err != nil {
 		return nil, fmt.Errorf("querying recent deploys: %w", err)
 	}
-	defer rows.Close()
-
-	return scanDeploys(rows)
+	return toStoreDeploys(rows), nil
 }
 
 func (s *deployStore) MeasureImpact(ctx context.Context, id int64, impact store.DeployImpact) error {
@@ -122,24 +113,19 @@ func (s *deployStore) MeasureImpact(ctx context.Context, id int64, impact store.
 		status = store.DeployStatusIncident
 	}
 
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE deploys SET
-		   pre_error_rate = ?, post_error_rate = ?,
-		   pre_avg_duration_ms = ?, post_avg_duration_ms = ?,
-		   impact_measured_at = ?, status = ?
-		 WHERE id = ?`,
-		impact.PreErrorRate, impact.PostErrorRate,
-		impact.PreAvgDurationMs, impact.PostAvgDurationMs,
-		now, string(status), id,
-	)
-	if err != nil {
-		return fmt.Errorf("measuring deploy impact: %w", err)
-	}
-	return nil
+	return s.q.MeasureDeployImpact(ctx, MeasureDeployImpactParams{
+		PreErrorRate:      nullFloat64Val(impact.PreErrorRate),
+		PostErrorRate:     nullFloat64Val(impact.PostErrorRate),
+		PreAvgDurationMs:  nullFloat64Val(impact.PreAvgDurationMs),
+		PostAvgDurationMs: nullFloat64Val(impact.PostAvgDurationMs),
+		ImpactMeasuredAt:  nullString(now),
+		Status:            string(status),
+		ID:                id,
+	})
 }
 
+// LinkInvestigation uses a transaction for the read-modify-write to prevent concurrent data loss.
 func (s *deployStore) LinkInvestigation(ctx context.Context, id int64, sessionID string) error {
-	// Use a transaction for the read-modify-write to prevent concurrent data loss.
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("linking investigation to deploy: %w", err)
@@ -183,132 +169,14 @@ func (s *deployStore) LinkInvestigation(ctx context.Context, id int64, sessionID
 
 func (s *deployStore) GetPendingMeasurement(ctx context.Context, olderThan time.Duration) ([]store.Deploy, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, service, environment, commit_hash, branch, author,
-		        files_changed_json, deploy_source,
-		        pre_error_rate, post_error_rate, pre_avg_duration_ms, post_avg_duration_ms,
-		        impact_measured_at, linked_investigation_ids_json, status,
-		        deployed_at, created_at
-		 FROM deploys
-		 WHERE status = 'pending' AND deployed_at < ?
-		 ORDER BY deployed_at ASC`, cutoff,
-	)
+	rows, err := s.q.ListPendingMeasurement(ctx, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("querying pending deploys: %w", err)
 	}
-	defer rows.Close()
-
-	return scanDeploys(rows)
+	return toStoreDeploys(rows), nil
 }
 
 func (s *deployStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
-	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM deploys WHERE deployed_at < ?`, cutoff,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("pruning deploys: %w", err)
-	}
-	return res.RowsAffected()
-}
-
-func scanDeploy(row *sql.Row) (*store.Deploy, error) {
-	var d store.Deploy
-	var filesJSON, linkedJSON string
-	var preErr, postErr, preDur, postDur sql.NullFloat64
-	var impactAt sql.NullString
-	var deployedStr, createdStr string
-
-	err := row.Scan(
-		&d.ID, &d.Service, &d.Environment, &d.CommitHash, &d.Branch, &d.Author,
-		&filesJSON, &d.DeploySource,
-		&preErr, &postErr, &preDur, &postDur,
-		&impactAt, &linkedJSON, &d.Status,
-		&deployedStr, &createdStr,
-	)
-	if err == sql.ErrNoRows {
-		return nil, store.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("scanning deploy: %w", err)
-	}
-
-	if err := json.Unmarshal([]byte(filesJSON), &d.FilesChanged); err != nil {
-		slog.Warn("deploy: malformed files_changed_json", "id", d.ID, "error", err)
-	}
-	if err := json.Unmarshal([]byte(linkedJSON), &d.LinkedInvestigationIDs); err != nil {
-		slog.Warn("deploy: malformed linked_investigation_ids_json", "id", d.ID, "error", err)
-	}
-	if preErr.Valid {
-		d.PreErrorRate = &preErr.Float64
-	}
-	if postErr.Valid {
-		d.PostErrorRate = &postErr.Float64
-	}
-	if preDur.Valid {
-		d.PreAvgDurationMs = &preDur.Float64
-	}
-	if postDur.Valid {
-		d.PostAvgDurationMs = &postDur.Float64
-	}
-	if impactAt.Valid {
-		if t, err := time.Parse(time.RFC3339, impactAt.String); err == nil {
-			d.ImpactMeasuredAt = &t
-		}
-	}
-	d.DeployedAt, _ = time.Parse(time.RFC3339, deployedStr)
-	d.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
-
-	return &d, nil
-}
-
-func scanDeploys(rows *sql.Rows) ([]store.Deploy, error) {
-	var result []store.Deploy
-	for rows.Next() {
-		var d store.Deploy
-		var filesJSON, linkedJSON string
-		var preErr, postErr, preDur, postDur sql.NullFloat64
-		var impactAt sql.NullString
-		var deployedStr, createdStr string
-
-		err := rows.Scan(
-			&d.ID, &d.Service, &d.Environment, &d.CommitHash, &d.Branch, &d.Author,
-			&filesJSON, &d.DeploySource,
-			&preErr, &postErr, &preDur, &postDur,
-			&impactAt, &linkedJSON, &d.Status,
-			&deployedStr, &createdStr,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("scanning deploy: %w", err)
-		}
-
-		if err := json.Unmarshal([]byte(filesJSON), &d.FilesChanged); err != nil {
-			slog.Warn("deploy: malformed files_changed_json", "id", d.ID, "error", err)
-		}
-		if err := json.Unmarshal([]byte(linkedJSON), &d.LinkedInvestigationIDs); err != nil {
-			slog.Warn("deploy: malformed linked_investigation_ids_json", "id", d.ID, "error", err)
-		}
-		if preErr.Valid {
-			d.PreErrorRate = &preErr.Float64
-		}
-		if postErr.Valid {
-			d.PostErrorRate = &postErr.Float64
-		}
-		if preDur.Valid {
-			d.PreAvgDurationMs = &preDur.Float64
-		}
-		if postDur.Valid {
-			d.PostAvgDurationMs = &postDur.Float64
-		}
-		if impactAt.Valid {
-			if t, err := time.Parse(time.RFC3339, impactAt.String); err == nil {
-				d.ImpactMeasuredAt = &t
-			}
-		}
-		d.DeployedAt, _ = time.Parse(time.RFC3339, deployedStr)
-		d.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
-
-		result = append(result, d)
-	}
-	return result, rows.Err()
+	return s.q.PruneDeploys(ctx, cutoff)
 }

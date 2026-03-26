@@ -5,19 +5,20 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
+	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 type userStore struct {
 	db *sql.DB
+	q  *Queries
 }
 
 func NewUserStore(db *sql.DB) store.UserStore {
-	return &userStore{db: db}
+	return &userStore{db: db, q: New(db)}
 }
 
 func (s *userStore) Create(ctx context.Context, params store.CreateUserParams) (*store.User, error) {
@@ -30,16 +31,21 @@ func (s *userStore) Create(ctx context.Context, params store.CreateUserParams) (
 		role = store.RoleMember
 	}
 
-	var mcpToken *string
+	var mcpToken sql.NullString
 	if params.MCPToken != nil {
-		mcpToken = params.MCPToken
+		mcpToken = sql.NullString{String: *params.MCPToken, Valid: true}
 	}
 
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO users (id, email, password_hash, display_name, role, mcp_token, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, params.Email, params.PasswordHash, params.DisplayName, string(role), mcpToken, nowStr, nowStr,
-	)
+	err := s.q.CreateUser(ctx, CreateUserParams{
+		ID:           id,
+		Email:        params.Email,
+		PasswordHash: params.PasswordHash,
+		DisplayName:  params.DisplayName,
+		Role:         string(role),
+		McpToken:     mcpToken,
+		CreatedAt:    nowStr,
+		UpdatedAt:    nowStr,
+	})
 	if err != nil {
 		if isUniqueConstraintError(err, "users.email") {
 			return nil, store.ErrEmailTaken
@@ -53,7 +59,7 @@ func (s *userStore) Create(ctx context.Context, params store.CreateUserParams) (
 		PasswordHash: params.PasswordHash,
 		DisplayName:  params.DisplayName,
 		Role:         role,
-		MCPToken:     mcpToken,
+		MCPToken:     params.MCPToken,
 		IsActive:     true,
 		CreatedAt:    now,
 		UpdatedAt:    now,
@@ -61,48 +67,48 @@ func (s *userStore) Create(ctx context.Context, params store.CreateUserParams) (
 }
 
 func (s *userStore) GetByID(ctx context.Context, id string) (*store.User, error) {
-	return s.scanUser(s.db.QueryRowContext(ctx,
-		`SELECT id, email, password_hash, display_name, role, mcp_enabled, mcp_token, is_active, created_at, updated_at
-		 FROM users WHERE id = ?`, id,
-	))
+	row, err := s.q.GetUserByID(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("scanning user: %w", err)
+	}
+	return userToStore(row), nil
 }
 
 func (s *userStore) GetByEmail(ctx context.Context, email string) (*store.User, error) {
-	return s.scanUser(s.db.QueryRowContext(ctx,
-		`SELECT id, email, password_hash, display_name, role, mcp_enabled, mcp_token, is_active, created_at, updated_at
-		 FROM users WHERE email = ?`, email,
-	))
+	row, err := s.q.GetUserByEmail(ctx, email)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("scanning user: %w", err)
+	}
+	return userToStore(row), nil
 }
 
 func (s *userStore) GetByMCPToken(ctx context.Context, token string) (*store.User, error) {
-	return s.scanUser(s.db.QueryRowContext(ctx,
-		`SELECT id, email, password_hash, display_name, role, mcp_enabled, mcp_token, is_active, created_at, updated_at
-		 FROM users WHERE mcp_token = ? AND mcp_enabled = 1 AND is_active = 1`, token,
-	))
+	row, err := s.q.GetUserByMCPToken(ctx, sql.NullString{String: token, Valid: true})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("scanning user: %w", err)
+	}
+	return userToStore(row), nil
 }
 
 func (s *userStore) List(ctx context.Context) ([]store.User, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, email, password_hash, display_name, role, mcp_enabled, mcp_token, is_active, created_at, updated_at
-		 FROM users ORDER BY created_at ASC LIMIT 1000`,
-	)
+	rows, err := s.q.ListUsers(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing users: %w", err)
 	}
-	defer rows.Close()
-
-	var users []store.User
-	for rows.Next() {
-		u, err := s.scanUserRow(rows)
-		if err != nil {
-			return nil, err
-		}
-		users = append(users, *u)
+	result := usersToStore(rows)
+	if result == nil {
+		result = []store.User{}
 	}
-	if users == nil {
-		users = []store.User{}
-	}
-	return users, rows.Err()
+	return result, nil
 }
 
 func (s *userStore) Update(ctx context.Context, id string, params store.UpdateUserParams) (*store.User, error) {
@@ -118,37 +124,29 @@ func (s *userStore) Update(ctx context.Context, id string, params store.UpdateUs
 		}
 	}
 
-	sets := []string{"updated_at = ?"}
-	args := []any{time.Now().UTC().Format(time.RFC3339)}
+	// Use squirrel for dynamic UPDATE
+	qb := psql.Update("users").Set("updated_at", time.Now().UTC().Format(time.RFC3339))
 
 	if params.DisplayName != nil {
-		sets = append(sets, "display_name = ?")
-		args = append(args, *params.DisplayName)
+		qb = qb.Set("display_name", *params.DisplayName)
 	}
 	if params.Role != nil {
-		sets = append(sets, "role = ?")
-		args = append(args, string(*params.Role))
+		qb = qb.Set("role", string(*params.Role))
 	}
 	if params.MCPEnabled != nil {
-		v := 0
-		if *params.MCPEnabled {
-			v = 1
-		}
-		sets = append(sets, "mcp_enabled = ?")
-		args = append(args, v)
+		qb = qb.Set("mcp_enabled", boolToInt64(*params.MCPEnabled))
 	}
 	if params.IsActive != nil {
-		v := 0
-		if *params.IsActive {
-			v = 1
-		}
-		sets = append(sets, "is_active = ?")
-		args = append(args, v)
+		qb = qb.Set("is_active", boolToInt64(*params.IsActive))
 	}
 
-	args = append(args, id)
-	// sets contains only hardcoded column names from the switch cases above — safe for interpolation.
-	query := fmt.Sprintf("UPDATE users SET %s WHERE id = ?", strings.Join(sets, ", "))
+	qb = qb.Where(sq.Eq{"id": id})
+
+	query, args, err := qb.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("building update query: %w", err)
+	}
+
 	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("updating user: %w", err)
@@ -165,16 +163,13 @@ func (s *userStore) Update(ctx context.Context, id string, params store.UpdateUs
 
 func (s *userStore) UpdatePassword(ctx context.Context, id string, passwordHash string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	result, err := s.db.ExecContext(ctx,
-		`UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`,
-		passwordHash, now, id,
-	)
+	n, err := s.q.UpdatePassword(ctx, UpdatePasswordParams{
+		PasswordHash: passwordHash,
+		UpdatedAt:    now,
+		ID:           id,
+	})
 	if err != nil {
 		return fmt.Errorf("updating password: %w", err)
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("checking rows affected: %w", err)
 	}
 	if n == 0 {
 		return store.ErrNotFound
@@ -184,16 +179,13 @@ func (s *userStore) UpdatePassword(ctx context.Context, id string, passwordHash 
 
 func (s *userStore) UpdateMCPToken(ctx context.Context, id string, token string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	result, err := s.db.ExecContext(ctx,
-		`UPDATE users SET mcp_token = ?, updated_at = ? WHERE id = ?`,
-		token, now, id,
-	)
+	n, err := s.q.UpdateMCPToken(ctx, UpdateMCPTokenParams{
+		McpToken:  sql.NullString{String: token, Valid: true},
+		UpdatedAt: now,
+		ID:        id,
+	})
 	if err != nil {
 		return fmt.Errorf("updating mcp token: %w", err)
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("checking rows affected: %w", err)
 	}
 	if n == 0 {
 		return store.ErrNotFound
@@ -206,13 +198,9 @@ func (s *userStore) Delete(ctx context.Context, id string) error {
 		return err
 	}
 
-	result, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+	n, err := s.q.DeleteUser(ctx, id)
 	if err != nil {
 		return fmt.Errorf("deleting user: %w", err)
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("checking rows affected: %w", err)
 	}
 	if n == 0 {
 		return store.ErrNotFound
@@ -221,12 +209,11 @@ func (s *userStore) Delete(ctx context.Context, id string) error {
 }
 
 func (s *userStore) Count(ctx context.Context) (int, error) {
-	var count int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
+	n, err := s.q.CountUsers(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("counting users: %w", err)
 	}
-	return count, nil
+	return int(n), nil
 }
 
 // checkLastAdmin returns ErrLastAdmin if the given user is the only active admin.
@@ -238,10 +225,7 @@ func (s *userStore) checkLastAdmin(ctx context.Context, userID string) error {
 	if user.Role != store.RoleAdmin {
 		return nil
 	}
-	var count int
-	err = s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1 AND id != ?`, userID,
-	).Scan(&count)
+	count, err := s.q.CountActiveAdminsExcluding(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("checking admin count: %w", err)
 	}
@@ -249,55 +233,4 @@ func (s *userStore) checkLastAdmin(ctx context.Context, userID string) error {
 		return store.ErrLastAdmin
 	}
 	return nil
-}
-
-func (s *userStore) scanUser(row *sql.Row) (*store.User, error) {
-	u := &store.User{}
-	var createdAt, updatedAt string
-	var mcpEnabledInt, isActiveInt int
-	var mcpToken sql.NullString
-
-	err := row.Scan(
-		&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.Role,
-		&mcpEnabledInt, &mcpToken, &isActiveInt, &createdAt, &updatedAt,
-	)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, store.ErrNotFound
-		}
-		return nil, fmt.Errorf("scanning user: %w", err)
-	}
-
-	u.MCPEnabled = mcpEnabledInt != 0
-	u.IsActive = isActiveInt != 0
-	if mcpToken.Valid {
-		u.MCPToken = &mcpToken.String
-	}
-	u.CreatedAt = parseTime(createdAt)
-	u.UpdatedAt = parseTime(updatedAt)
-	return u, nil
-}
-
-func (s *userStore) scanUserRow(rows *sql.Rows) (*store.User, error) {
-	u := &store.User{}
-	var createdAt, updatedAt string
-	var mcpEnabledInt, isActiveInt int
-	var mcpToken sql.NullString
-
-	err := rows.Scan(
-		&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.Role,
-		&mcpEnabledInt, &mcpToken, &isActiveInt, &createdAt, &updatedAt,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("scanning user row: %w", err)
-	}
-
-	u.MCPEnabled = mcpEnabledInt != 0
-	u.IsActive = isActiveInt != 0
-	if mcpToken.Valid {
-		u.MCPToken = &mcpToken.String
-	}
-	u.CreatedAt = parseTime(createdAt)
-	u.UpdatedAt = parseTime(updatedAt)
-	return u, nil
 }

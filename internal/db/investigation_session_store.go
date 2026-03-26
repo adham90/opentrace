@@ -31,11 +31,12 @@ const investigationSessionColumns = `id, user_id, user_email, user_role,
 
 type investigationSessionStore struct {
 	db *sql.DB
+	q  *Queries
 }
 
 // NewInvestigationSessionStore creates a new InvestigationSessionStore backed by SQLite.
 func NewInvestigationSessionStore(db *sql.DB) store.InvestigationSessionStore {
-	return &investigationSessionStore{db: db}
+	return &investigationSessionStore{db: db, q: New(db)}
 }
 
 func (s *investigationSessionStore) Create(ctx context.Context, params store.CreateInvestigationSessionParams) (*store.InvestigationSession, error) {
@@ -46,16 +47,19 @@ func (s *investigationSessionStore) Create(ctx context.Context, params store.Cre
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO investigation_sessions
-		 (id, user_id, user_email, user_role, client_name, client_version,
-		  workspace, transport, connection_id, status, started_at, last_activity_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
-		id, params.UserID, params.UserEmail, params.UserRole,
-		params.ClientName, params.ClientVersion,
-		params.Workspace, params.Transport, connID,
-		now, now,
-	)
+	err := s.q.CreateInvestigationSession(ctx, CreateInvestigationSessionParams{
+		ID:             id,
+		UserID:         params.UserID,
+		UserEmail:      params.UserEmail,
+		UserRole:       params.UserRole,
+		ClientName:     params.ClientName,
+		ClientVersion:  params.ClientVersion,
+		Workspace:      params.Workspace,
+		Transport:      params.Transport,
+		ConnectionID:   connID,
+		StartedAt:      now,
+		LastActivityAt: now,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("creating investigation session: %w", err)
 	}
@@ -83,11 +87,8 @@ func (s *investigationSessionStore) Close(ctx context.Context, id string) error 
 	now := time.Now().UTC()
 	nowStr := now.Format(time.RFC3339)
 
-	// Calculate duration from started_at.
-	var startedAtStr string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT started_at FROM investigation_sessions WHERE id = ?`, id,
-	).Scan(&startedAtStr)
+	// Calculate duration from started_at using sqlc.
+	startedAtStr, err := s.q.GetInvestigationSessionStartedAt(ctx, id)
 	if err == sql.ErrNoRows {
 		return store.ErrNotFound
 	}
@@ -98,13 +99,12 @@ func (s *investigationSessionStore) Close(ctx context.Context, id string) error 
 	startedAt, _ := time.Parse(time.RFC3339, startedAtStr)
 	duration := int(now.Sub(startedAt).Seconds())
 
-	_, err = s.db.ExecContext(ctx,
-		`UPDATE investigation_sessions
-		 SET ended_at = ?, duration_seconds = ?, last_activity_at = ?,
-		     status = CASE WHEN status = 'open' THEN 'unresolved' ELSE status END
-		 WHERE id = ?`,
-		nowStr, duration, nowStr, id,
-	)
+	err = s.q.CloseInvestigationSession(ctx, CloseInvestigationSessionParams{
+		EndedAt:         sql.NullString{String: nowStr, Valid: true},
+		DurationSeconds: int64(duration),
+		LastActivityAt:  nowStr,
+		ID:              id,
+	})
 	if err != nil {
 		return fmt.Errorf("closing investigation session: %w", err)
 	}
@@ -390,39 +390,33 @@ func (s *investigationSessionStore) List(ctx context.Context, params store.ListI
 func (s *investigationSessionStore) Stats(ctx context.Context) (*store.InvestigationSessionStats, error) {
 	stats := &store.InvestigationSessionStats{}
 
-	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM investigation_sessions`,
-	).Scan(&stats.TotalSessions)
+	total, err := s.q.GetInvestigationSessionStatsTotalSessions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("counting sessions: %w", err)
 	}
+	stats.TotalSessions = int(total)
 
-	err = s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM investigation_sessions WHERE status = 'open'`,
-	).Scan(&stats.OpenSessions)
+	open, err := s.q.GetInvestigationSessionStatsOpenSessions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("counting open sessions: %w", err)
 	}
+	stats.OpenSessions = int(open)
 
-	err = s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM investigation_sessions WHERE status = 'resolved'`,
-	).Scan(&stats.ResolvedSessions)
+	resolved, err := s.q.GetInvestigationSessionStatsResolvedSessions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("counting resolved sessions: %w", err)
 	}
+	stats.ResolvedSessions = int(resolved)
 
-	var avgSteps, avgDuration sql.NullFloat64
-	err = s.db.QueryRowContext(ctx,
-		`SELECT AVG(total_steps), AVG(duration_seconds) FROM investigation_sessions WHERE status != 'open'`,
-	).Scan(&avgSteps, &avgDuration)
+	avgs, err := s.q.GetInvestigationSessionStatsAverages(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("computing session averages: %w", err)
 	}
-	if avgSteps.Valid {
-		stats.AvgSteps = avgSteps.Float64
+	if avgs.AvgSteps.Valid {
+		stats.AvgSteps = avgs.AvgSteps.Float64
 	}
-	if avgDuration.Valid {
-		stats.AvgDurationSecs = avgDuration.Float64
+	if avgs.AvgDuration.Valid {
+		stats.AvgDurationSecs = avgs.AvgDuration.Float64
 	}
 
 	return stats, nil
@@ -452,7 +446,7 @@ func (s *investigationSessionStore) Prune(ctx context.Context, olderThan time.Du
 func (s *investigationSessionStore) RecordStep(ctx context.Context, sessionID string, toolName string, isError bool) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	errIncr := 0
+	errIncr := int64(0)
 	if isError {
 		errIncr = 1
 	}
@@ -465,10 +459,9 @@ func (s *investigationSessionStore) RecordStep(ctx context.Context, sessionID st
 	}
 	defer tx.Rollback()
 
-	var seqJSON string
-	err = tx.QueryRowContext(ctx,
-		`SELECT tool_sequence FROM investigation_sessions WHERE id = ?`, sessionID,
-	).Scan(&seqJSON)
+	qtx := s.q.WithTx(tx)
+
+	seqJSON, err := qtx.GetInvestigationSessionToolSequence(ctx, sessionID)
 	if err == sql.ErrNoRows {
 		return store.ErrNotFound
 	}
@@ -484,16 +477,13 @@ func (s *investigationSessionStore) RecordStep(ctx context.Context, sessionID st
 	newSeqJSON, _ := json.Marshal(seq)
 	fingerprint := strings.Join(seq, "|")
 
-	_, err = tx.ExecContext(ctx,
-		`UPDATE investigation_sessions
-		 SET total_steps = total_steps + 1,
-		     total_errors = total_errors + ?,
-		     tool_sequence = ?,
-		     tool_fingerprint = ?,
-		     last_activity_at = ?
-		 WHERE id = ?`,
-		errIncr, string(newSeqJSON), fingerprint, now, sessionID,
-	)
+	err = qtx.RecordInvestigationStep(ctx, RecordInvestigationStepParams{
+		ErrorIncrement:  errIncr,
+		ToolSequence:    string(newSeqJSON),
+		ToolFingerprint: fingerprint,
+		LastActivityAt:  now,
+		ID:              sessionID,
+	})
 	if err != nil {
 		return fmt.Errorf("recording step: %w", err)
 	}

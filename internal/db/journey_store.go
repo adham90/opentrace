@@ -14,11 +14,12 @@ import (
 
 type journeyStore struct {
 	db *sql.DB
+	q  *Queries
 }
 
 // NewJourneyStore creates a JourneyStore backed by SQLite.
 func NewJourneyStore(db *sql.DB) store.JourneyStore {
-	return &journeyStore{db: db}
+	return &journeyStore{db: db, q: New(db)}
 }
 
 // BuildSessions scans logs with session_id and builds/updates user_sessions.
@@ -148,29 +149,14 @@ func (s *journeyStore) BuildSessions(ctx context.Context, since time.Time) error
 
 // GetSession returns a single user session by session_id.
 func (s *journeyStore) GetSession(ctx context.Context, sessionID string) (*store.UserSession, error) {
-	var us store.UserSession
-	var startStr, endStr, createdStr string
-	var hasError int
-	err := s.db.QueryRowContext(ctx, `
-		SELECT id, session_id, user_id, service, environment,
-		       started_at, ended_at, request_count, error_count, total_duration_ms,
-		       entry_path, exit_path, exit_status, has_error, created_at
-		FROM user_sessions
-		WHERE session_id = ?
-	`, sessionID).Scan(&us.ID, &us.SessionID, &us.UserID, &us.Service, &us.Environment,
-		&startStr, &endStr, &us.RequestCount, &us.ErrorCount, &us.TotalDurationMs,
-		&us.EntryPath, &us.ExitPath, &us.ExitStatus, &hasError, &createdStr)
+	row, err := s.q.GetSession(ctx, sessionID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting session: %w", err)
 	}
-	us.StartedAt, _ = time.Parse(time.RFC3339, startStr)
-	us.EndedAt, _ = time.Parse(time.RFC3339, endStr)
-	us.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
-	us.HasError = hasError == 1
-	return &us, nil
+	return journeySessionToStore(row), nil
 }
 
 // ListSessions returns user sessions matching the given filters.
@@ -251,24 +237,11 @@ func (s *journeyStore) ListSessions(ctx context.Context, params store.SessionLis
 
 // GetSessionRequests returns the chronological request steps for a session.
 func (s *journeyStore) GetSessionRequests(ctx context.Context, sessionID string) ([]store.RequestStep, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT l.timestamp, COALESCE(rs.controller, ''), COALESCE(rs.action, ''),
-		       COALESCE(rs.path, ''), COALESCE(rs.method, ''), COALESCE(rs.status, 0),
-		       COALESCE(rs.duration_ms, 0), COALESCE(rs.sql_count, 0),
-		       CASE WHEN rs.status >= 500 THEN 1 ELSE 0 END as has_error,
-		       COALESCE(l.exception_class, ''),
-		       COALESCE(l.request_id, ''), l.id
-		FROM logs l
-		JOIN request_summaries rs ON rs.log_id = l.id
-		WHERE l.session_id = ?
-		ORDER BY l.timestamp ASC
-	`, sessionID)
+	rows, err := s.q.GetSessionRequests(ctx, sql.NullString{String: sessionID, Valid: sessionID != ""})
 	if err != nil {
 		return nil, fmt.Errorf("getting session requests: %w", err)
 	}
-	defer rows.Close()
-
-	return scanRequestSteps(rows)
+	return journeyRequestStepsToStore(rows), nil
 }
 
 // GetUserJourney returns request steps for a user across all sessions.
@@ -476,6 +449,8 @@ func (s *journeyStore) CreateFunnel(ctx context.Context, funnel store.Funnel) (*
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+
+	// sqlc CreateFunnel doesn't return the ID, so we use hand-written for LastInsertId
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO funnels (name, service, steps, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?)
@@ -492,48 +467,23 @@ func (s *journeyStore) CreateFunnel(ctx context.Context, funnel store.Funnel) (*
 
 // GetFunnel returns a funnel by ID.
 func (s *journeyStore) GetFunnel(ctx context.Context, id int64) (*store.Funnel, error) {
-	var f store.Funnel
-	var stepsJSON, createdStr, updatedStr string
-	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, service, steps, created_at, updated_at
-		FROM funnels WHERE id = ?
-	`, id).Scan(&f.ID, &f.Name, &f.Service, &stepsJSON, &createdStr, &updatedStr)
+	row, err := s.q.GetFunnel(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting funnel: %w", err)
 	}
-	json.Unmarshal([]byte(stepsJSON), &f.Steps)
-	f.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
-	f.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
-	return &f, nil
+	return journeyFunnelToStore(row), nil
 }
 
 // ListFunnels returns all funnel definitions.
 func (s *journeyStore) ListFunnels(ctx context.Context) ([]store.Funnel, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, service, steps, created_at, updated_at
-		FROM funnels ORDER BY created_at DESC
-	`)
+	rows, err := s.q.ListFunnels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing funnels: %w", err)
 	}
-	defer rows.Close()
-
-	var results []store.Funnel
-	for rows.Next() {
-		var f store.Funnel
-		var stepsJSON, createdStr, updatedStr string
-		if err := rows.Scan(&f.ID, &f.Name, &f.Service, &stepsJSON, &createdStr, &updatedStr); err != nil {
-			return nil, fmt.Errorf("scanning funnel: %w", err)
-		}
-		json.Unmarshal([]byte(stepsJSON), &f.Steps)
-		f.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
-		f.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
-		results = append(results, f)
-	}
-	return results, rows.Err()
+	return journeyFunnelsToStore(rows), nil
 }
 
 // AnalyzeFunnel analyzes conversion through a funnel's steps.
@@ -636,11 +586,10 @@ func (s *journeyStore) AnalyzeFunnel(ctx context.Context, funnelID int64, since 
 
 // DeleteFunnel removes a funnel definition.
 func (s *journeyStore) DeleteFunnel(ctx context.Context, id int64) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM funnels WHERE id = ?`, id)
+	n, err := s.q.DeleteFunnel(ctx, id)
 	if err != nil {
 		return fmt.Errorf("deleting funnel: %w", err)
 	}
-	n, _ := res.RowsAffected()
 	if n == 0 {
 		return store.ErrNotFound
 	}
@@ -649,98 +598,28 @@ func (s *journeyStore) DeleteFunnel(ctx context.Context, id int64) error {
 
 // GetRequestTimeline parses the timeline JSON for a single request.
 func (s *journeyStore) GetRequestTimeline(ctx context.Context, logID int64) (*store.RequestTimeline, error) {
-	var rt store.RequestTimeline
-	var tsStr string
-	var timeline, path sql.NullString
-	err := s.db.QueryRowContext(ctx, `
-		SELECT l.id, COALESCE(l.request_id, ''), COALESCE(rs.controller, ''),
-		       COALESCE(rs.action, ''), COALESCE(rs.path, ''),
-		       COALESCE(rs.status, 0), COALESCE(rs.duration_ms, 0),
-		       l.timestamp, rs.timeline
-		FROM logs l
-		JOIN request_summaries rs ON rs.log_id = l.id
-		WHERE l.id = ?
-	`, logID).Scan(&rt.LogID, &rt.RequestID, &rt.Controller, &rt.Action, &path,
-		&rt.Status, &rt.DurationMs, &tsStr, &timeline)
+	row, err := s.q.GetRequestTimeline(ctx, logID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting request timeline: %w", err)
 	}
-	rt.StartedAt, _ = time.Parse(time.RFC3339Nano, tsStr)
-	if path.Valid {
-		rt.Path = path.String
-	}
-
-	// Parse timeline JSON
-	if timeline.Valid && timeline.String != "" {
-		rt.Events = parseTimelineJSON(timeline.String)
-	}
-
-	// Find bottleneck
-	if len(rt.Events) > 0 {
-		var slowest *store.TimelineEvent
-		for i := range rt.Events {
-			if slowest == nil || rt.Events[i].DurationMs > slowest.DurationMs {
-				slowest = &rt.Events[i]
-			}
-		}
-		if slowest != nil {
-			rt.Bottleneck = slowest
-		}
-	}
-
-	return &rt, nil
+	return journeyRequestTimelineFromRow(row), nil
 }
 
 // GetSessionTimeline returns timelines for all requests in a session.
 func (s *journeyStore) GetSessionTimeline(ctx context.Context, sessionID string) ([]store.RequestTimeline, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT l.id, COALESCE(l.request_id, ''), COALESCE(rs.controller, ''),
-		       COALESCE(rs.action, ''), COALESCE(rs.path, ''),
-		       COALESCE(rs.status, 0), COALESCE(rs.duration_ms, 0),
-		       l.timestamp, rs.timeline
-		FROM logs l
-		JOIN request_summaries rs ON rs.log_id = l.id
-		WHERE l.session_id = ?
-		ORDER BY l.timestamp ASC
-	`, sessionID)
+	rows, err := s.q.GetSessionTimeline(ctx, sql.NullString{String: sessionID, Valid: sessionID != ""})
 	if err != nil {
 		return nil, fmt.Errorf("getting session timeline: %w", err)
 	}
-	defer rows.Close()
 
-	var results []store.RequestTimeline
-	for rows.Next() {
-		var rt store.RequestTimeline
-		var tsStr string
-		var timeline, path sql.NullString
-		if err := rows.Scan(&rt.LogID, &rt.RequestID, &rt.Controller, &rt.Action, &path,
-			&rt.Status, &rt.DurationMs, &tsStr, &timeline); err != nil {
-			return nil, fmt.Errorf("scanning session timeline: %w", err)
-		}
-		rt.StartedAt, _ = time.Parse(time.RFC3339Nano, tsStr)
-		if path.Valid {
-			rt.Path = path.String
-		}
-		if timeline.Valid && timeline.String != "" {
-			rt.Events = parseTimelineJSON(timeline.String)
-		}
-		if len(rt.Events) > 0 {
-			var slowest *store.TimelineEvent
-			for i := range rt.Events {
-				if slowest == nil || rt.Events[i].DurationMs > slowest.DurationMs {
-					slowest = &rt.Events[i]
-				}
-			}
-			if slowest != nil {
-				rt.Bottleneck = slowest
-			}
-		}
-		results = append(results, rt)
+	results := make([]store.RequestTimeline, len(rows))
+	for i, row := range rows {
+		results[i] = journeySessionTimelineFromRow(row)
 	}
-	return results, rows.Err()
+	return results, nil
 }
 
 // parseTimelineJSON parses the timeline JSON from request_summaries.

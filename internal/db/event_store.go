@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -14,11 +13,12 @@ import (
 
 type eventStore struct {
 	db *sql.DB
+	q  *Queries
 }
 
 // NewEventStore creates a new EventStore backed by SQLite.
 func NewEventStore(db *sql.DB) store.EventStore {
-	return &eventStore{db: db}
+	return &eventStore{db: db, q: New(db)}
 }
 
 func (s *eventStore) Create(ctx context.Context, params store.CreateEventParams) (*store.Event, error) {
@@ -33,29 +33,39 @@ func (s *eventStore) Create(ctx context.Context, params store.CreateEventParams)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	result, err := s.db.ExecContext(ctx,
-		`INSERT INTO events (event_type, source, service, title, description, metadata_json, external_id, external_url, author, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		string(params.EventType), params.Source, params.Service,
-		params.Title, params.Description, metadataJSON,
-		params.ExternalID, params.ExternalURL, params.Author, now,
-	)
+	row, err := s.q.CreateEvent(ctx, CreateEventParams{
+		EventType:    string(params.EventType),
+		Source:       params.Source,
+		Service:      params.Service,
+		Title:        params.Title,
+		Description:  params.Description,
+		MetadataJson: metadataJSON,
+		ExternalID:   params.ExternalID,
+		ExternalUrl:  params.ExternalURL,
+		Author:       params.Author,
+		CreatedAt:    now,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("creating event: %w", err)
 	}
 
-	id, _ := result.LastInsertId()
-	return s.GetByID(ctx, id)
+	e := toStoreEvent(row)
+	return &e, nil
 }
 
 func (s *eventStore) GetByID(ctx context.Context, id int64) (*store.Event, error) {
-	row := s.db.QueryRowContext(ctx,
-		`SELECT id, event_type, source, service, title, description, metadata_json, external_id, external_url, author, created_at
-		 FROM events WHERE id = ?`, id)
-
-	return scanEvent(row)
+	row, err := s.q.GetEventByID(ctx, id)
+	if err == sql.ErrNoRows {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying event: %w", err)
+	}
+	e := toStoreEvent(row)
+	return &e, nil
 }
 
+// List uses dynamic WHERE clauses — kept hand-written.
 func (s *eventStore) List(ctx context.Context, params store.ListEventParams) ([]store.Event, error) {
 	var where []string
 	var args []any
@@ -109,57 +119,34 @@ func (s *eventStore) List(ctx context.Context, params store.ListEventParams) ([]
 }
 
 func (s *eventStore) GetByExternalID(ctx context.Context, eventType store.EventType, externalID string) (*store.Event, error) {
-	row := s.db.QueryRowContext(ctx,
-		`SELECT id, event_type, source, service, title, description, metadata_json, external_id, external_url, author, created_at
-		 FROM events WHERE event_type = ? AND external_id = ?`,
-		string(eventType), externalID)
-
-	e, err := scanEvent(row)
+	row, err := s.q.GetEventByExternalID(ctx, GetEventByExternalIDParams{
+		EventType:  string(eventType),
+		ExternalID: externalID,
+	})
 	if err == sql.ErrNoRows {
 		return nil, store.ErrNotFound
 	}
-	return e, err
+	if err != nil {
+		return nil, fmt.Errorf("querying event by external ID: %w", err)
+	}
+	e := toStoreEvent(row)
+	return &e, nil
 }
 
 func (s *eventStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
 	var totalDeleted int64
 	for {
-		result, err := s.db.ExecContext(ctx,
-			`DELETE FROM events WHERE rowid IN (SELECT rowid FROM events WHERE created_at < ? LIMIT 1000)`,
-			cutoff)
+		n, err := s.q.PruneEvents(ctx, cutoff)
 		if err != nil {
 			return totalDeleted, fmt.Errorf("pruning events: %w", err)
 		}
-		n, _ := result.RowsAffected()
 		totalDeleted += n
 		if n < 1000 {
 			break
 		}
 	}
 	return totalDeleted, nil
-}
-
-func scanEvent(row *sql.Row) (*store.Event, error) {
-	var e store.Event
-	var metadataJSON, createdAt string
-
-	err := row.Scan(
-		&e.ID, &e.EventType, &e.Source, &e.Service,
-		&e.Title, &e.Description, &metadataJSON,
-		&e.ExternalID, &e.ExternalURL, &e.Author, &createdAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	if metadataJSON != "" && metadataJSON != "{}" {
-		if err := json.Unmarshal([]byte(metadataJSON), &e.Metadata); err != nil {
-			slog.Warn("event: malformed metadata_json", "id", e.ID, "error", err)
-		}
-	}
-	e.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	return &e, nil
 }
 
 func scanEventRow(rows *sql.Rows) (*store.Event, error) {
@@ -176,9 +163,7 @@ func scanEventRow(rows *sql.Rows) (*store.Event, error) {
 	}
 
 	if metadataJSON != "" && metadataJSON != "{}" {
-		if err := json.Unmarshal([]byte(metadataJSON), &e.Metadata); err != nil {
-			slog.Warn("event: malformed metadata_json", "id", e.ID, "error", err)
-		}
+		_ = json.Unmarshal([]byte(metadataJSON), &e.Metadata)
 	}
 	e.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	return &e, nil

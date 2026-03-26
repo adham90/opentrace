@@ -13,11 +13,12 @@ import (
 // settingsStore implements SettingsStore using database/sql (SQLite).
 type settingsStore struct {
 	db *sql.DB
+	q  *Queries
 }
 
 // NewSettingsStore creates a new SettingsStore backed by SQLite.
 func NewSettingsStore(db *sql.DB) store.SettingsStore {
-	return &settingsStore{db: db}
+	return &settingsStore{db: db, q: New(db)}
 }
 
 const retentionKey = "retention"
@@ -30,10 +31,7 @@ const mcpNameKey = "mcp_name"
 const samplingRulesKey = "sampling_rules"
 
 func (s *settingsStore) GetRetention(ctx context.Context) (*store.RetentionSettings, error) {
-	var raw string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT value FROM app_config WHERE key = ?`, retentionKey,
-	).Scan(&raw)
+	raw, err := s.q.GetSetting(ctx, retentionKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return &store.RetentionSettings{RetentionDays: 30}, nil
 	}
@@ -53,11 +51,10 @@ func (s *settingsStore) SetRetention(ctx context.Context, settings store.Retenti
 	if err != nil {
 		return fmt.Errorf("marshaling retention setting: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO app_config (key, value) VALUES (?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-		retentionKey, string(raw),
-	)
+	err = s.q.UpsertSetting(ctx, UpsertSettingParams{
+		Key:   retentionKey,
+		Value: string(raw),
+	})
 	if err != nil {
 		return fmt.Errorf("upserting retention setting: %w", err)
 	}
@@ -65,10 +62,7 @@ func (s *settingsStore) SetRetention(ctx context.Context, settings store.Retenti
 }
 
 func (s *settingsStore) GetAPIKey(ctx context.Context) (string, error) {
-	var val string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT value FROM app_config WHERE key = ?`, apiKeyKey,
-	).Scan(&val)
+	val, err := s.q.GetSetting(ctx, apiKeyKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -79,11 +73,10 @@ func (s *settingsStore) GetAPIKey(ctx context.Context) (string, error) {
 }
 
 func (s *settingsStore) SetAPIKey(ctx context.Context, key string) error {
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO app_config (key, value) VALUES (?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-		apiKeyKey, key,
-	)
+	err := s.q.UpsertSetting(ctx, UpsertSettingParams{
+		Key:   apiKeyKey,
+		Value: key,
+	})
 	if err != nil {
 		return fmt.Errorf("upserting api key: %w", err)
 	}
@@ -91,10 +84,7 @@ func (s *settingsStore) SetAPIKey(ctx context.Context, key string) error {
 }
 
 func (s *settingsStore) GetAutoUpdate(ctx context.Context) (bool, error) {
-	var val string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT value FROM app_config WHERE key = ?`, autoUpdateKey,
-	).Scan(&val)
+	val, err := s.q.GetSetting(ctx, autoUpdateKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -109,11 +99,10 @@ func (s *settingsStore) SetAutoUpdate(ctx context.Context, enabled bool) error {
 	if enabled {
 		val = "1"
 	}
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO app_config (key, value) VALUES (?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-		autoUpdateKey, val,
-	)
+	err := s.q.UpsertSetting(ctx, UpsertSettingParams{
+		Key:   autoUpdateKey,
+		Value: val,
+	})
 	if err != nil {
 		return fmt.Errorf("upserting auto_update: %w", err)
 	}
@@ -121,10 +110,7 @@ func (s *settingsStore) SetAutoUpdate(ctx context.Context, enabled bool) error {
 }
 
 func (s *settingsStore) GetCORSOrigins(ctx context.Context) (string, error) {
-	var val string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT value FROM app_config WHERE key = ?`, corsOriginsKey,
-	).Scan(&val)
+	val, err := s.q.GetSetting(ctx, corsOriginsKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -135,11 +121,10 @@ func (s *settingsStore) GetCORSOrigins(ctx context.Context) (string, error) {
 }
 
 func (s *settingsStore) SetCORSOrigins(ctx context.Context, origins string) error {
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO app_config (key, value) VALUES (?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-		corsOriginsKey, origins,
-	)
+	err := s.q.UpsertSetting(ctx, UpsertSettingParams{
+		Key:   corsOriginsKey,
+		Value: origins,
+	})
 	if err != nil {
 		return fmt.Errorf("upserting cors_origins: %w", err)
 	}
@@ -163,10 +148,7 @@ func (s *settingsStore) SetStatementTimeout(ctx context.Context, val int) error 
 }
 
 func (s *settingsStore) GetMCPName(ctx context.Context) (string, error) {
-	var val string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT value FROM app_config WHERE key = ?`, mcpNameKey,
-	).Scan(&val)
+	val, err := s.q.GetSetting(ctx, mcpNameKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -177,11 +159,10 @@ func (s *settingsStore) GetMCPName(ctx context.Context) (string, error) {
 }
 
 func (s *settingsStore) SetMCPName(ctx context.Context, name string) error {
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO app_config (key, value) VALUES (?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-		mcpNameKey, name,
-	)
+	err := s.q.UpsertSetting(ctx, UpsertSettingParams{
+		Key:   mcpNameKey,
+		Value: name,
+	})
 	if err != nil {
 		return fmt.Errorf("upserting mcp_name: %w", err)
 	}
@@ -190,10 +171,7 @@ func (s *settingsStore) SetMCPName(ctx context.Context, name string) error {
 
 // getIntSetting reads an integer from app_config, returning defaultVal if missing.
 func (s *settingsStore) getIntSetting(ctx context.Context, key string, defaultVal int) (int, error) {
-	var val string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT value FROM app_config WHERE key = ?`, key,
-	).Scan(&val)
+	val, err := s.q.GetSetting(ctx, key)
 	if errors.Is(err, sql.ErrNoRows) {
 		return defaultVal, nil
 	}
@@ -209,11 +187,10 @@ func (s *settingsStore) getIntSetting(ctx context.Context, key string, defaultVa
 
 // setIntSetting writes an integer to app_config.
 func (s *settingsStore) setIntSetting(ctx context.Context, key string, val int) error {
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO app_config (key, value) VALUES (?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-		key, fmt.Sprintf("%d", val),
-	)
+	err := s.q.UpsertSetting(ctx, UpsertSettingParams{
+		Key:   key,
+		Value: fmt.Sprintf("%d", val),
+	})
 	if err != nil {
 		return fmt.Errorf("upserting %s: %w", key, err)
 	}
@@ -221,10 +198,7 @@ func (s *settingsStore) setIntSetting(ctx context.Context, key string, val int) 
 }
 
 func (s *settingsStore) GetSamplingRules(ctx context.Context) ([]store.SamplingRule, error) {
-	var raw string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT value FROM app_config WHERE key = ?`, samplingRulesKey,
-	).Scan(&raw)
+	raw, err := s.q.GetSetting(ctx, samplingRulesKey)
 	if errors.Is(err, sql.ErrNoRows) || raw == "" {
 		return nil, nil // no sampling configured
 	}
@@ -243,14 +217,12 @@ func (s *settingsStore) SetSamplingRules(ctx context.Context, rules []store.Samp
 	if err != nil {
 		return fmt.Errorf("marshaling sampling_rules: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO app_config (key, value) VALUES (?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-		samplingRulesKey, string(raw),
-	)
+	err = s.q.UpsertSetting(ctx, UpsertSettingParams{
+		Key:   samplingRulesKey,
+		Value: string(raw),
+	})
 	if err != nil {
 		return fmt.Errorf("upserting sampling_rules: %w", err)
 	}
 	return nil
 }
-

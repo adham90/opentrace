@@ -11,11 +11,12 @@ import (
 
 type mcpActivityStore struct {
 	db *sql.DB
+	q  *Queries
 }
 
 // NewMCPActivityStore creates a new MCPActivityStore backed by SQLite.
 func NewMCPActivityStore(db *sql.DB) store.MCPActivityStore {
-	return &mcpActivityStore{db: db}
+	return &mcpActivityStore{db: db, q: New(db)}
 }
 
 func (s *mcpActivityStore) Log(ctx context.Context, params store.LogMCPActivityParams) error {
@@ -24,35 +25,32 @@ func (s *mcpActivityStore) Log(ctx context.Context, params store.LogMCPActivityP
 		eventType = "tool_call"
 	}
 
-	var isError int
-	if params.IsError {
-		isError = 1
-	}
-	var wasSuggested int
-	if params.WasSuggested {
-		wasSuggested = 1
-	}
-
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO mcp_activity (session_id, user_id, tool_name, arguments, result_preview, is_error, duration_ms, event_type, investigation_session_id, step_index, was_suggested, suggestion_rank, followed_by)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		params.SessionID, params.UserID, params.ToolName,
-		params.Arguments, params.ResultPreview,
-		isError, params.DurationMs, eventType,
-		params.InvestigationSessionID, params.StepIndex,
-		wasSuggested, params.SuggestionRank, "",
-	)
+	err := s.q.InsertMCPActivity(ctx, InsertMCPActivityParams{
+		SessionID:              params.SessionID,
+		UserID:                 nullString(params.UserID),
+		ToolName:               params.ToolName,
+		Arguments:              nullString(params.Arguments),
+		ResultPreview:          nullString(params.ResultPreview),
+		IsError:                boolToInt64(params.IsError),
+		DurationMs:             nullInt64(params.DurationMs),
+		EventType:              eventType,
+		InvestigationSessionID: params.InvestigationSessionID,
+		StepIndex:              int64(params.StepIndex),
+		WasSuggested:           boolToInt64(params.WasSuggested),
+		SuggestionRank:         int64(params.SuggestionRank),
+		FollowedBy:             "",
+	})
 	if err != nil {
 		return fmt.Errorf("logging mcp activity: %w", err)
 	}
 
 	// Update the previous step's followed_by in the same (sequential) write.
-	// This avoids the race between async INSERT and sync UPDATE.
 	if params.PreviousStepIndex > 0 && params.InvestigationSessionID != "" {
-		_, _ = s.db.ExecContext(ctx,
-			`UPDATE mcp_activity SET followed_by = ? WHERE investigation_session_id = ? AND step_index = ?`,
-			params.ToolName, params.InvestigationSessionID, params.PreviousStepIndex,
-		)
+		_ = s.q.UpdateFollowedBy(ctx, UpdateFollowedByParams{
+			FollowedBy:             params.ToolName,
+			InvestigationSessionID: params.InvestigationSessionID,
+			StepIndex:              int64(params.PreviousStepIndex),
+		})
 	}
 
 	return nil
@@ -65,44 +63,37 @@ func (s *mcpActivityStore) Stats(ctx context.Context) (*store.MCPActivityStats, 
 	fiveMinAgo := time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339)
 
 	// Active sessions: sessions with activity in the last 5 minutes
-	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(DISTINCT session_id) FROM mcp_activity WHERE created_at > ?`,
-		fiveMinAgo,
-	).Scan(&stats.ActiveSessions)
+	activeSessions, err := s.q.GetMCPActiveSessionCount(ctx, fiveMinAgo)
 	if err != nil {
 		return nil, fmt.Errorf("counting active sessions: %w", err)
 	}
+	stats.ActiveSessions = int(activeSessions)
 
 	// Calls in last hour
-	err = s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM mcp_activity WHERE event_type = 'tool_call' AND created_at > ?`,
-		oneHourAgo,
-	).Scan(&stats.CallsLastHour)
+	callsLastHour, err := s.q.GetMCPCallCountSince(ctx, oneHourAgo)
 	if err != nil {
 		return nil, fmt.Errorf("counting calls: %w", err)
 	}
+	stats.CallsLastHour = int(callsLastHour)
 
 	// Errors in last hour
-	err = s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM mcp_activity WHERE event_type = 'tool_call' AND is_error = 1 AND created_at > ?`,
-		oneHourAgo,
-	).Scan(&stats.ErrorsLastHour)
+	errorsLastHour, err := s.q.GetMCPErrorCountSince(ctx, oneHourAgo)
 	if err != nil {
 		return nil, fmt.Errorf("counting errors: %w", err)
 	}
+	stats.ErrorsLastHour = int(errorsLastHour)
 
 	// Last activity time
-	var lastAt sql.NullString
-	err = s.db.QueryRowContext(ctx,
-		`SELECT MAX(created_at) FROM mcp_activity`,
-	).Scan(&lastAt)
+	lastAtRaw, err := s.q.GetMCPLastActivityTime(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("querying last activity: %w", err)
 	}
-	if lastAt.Valid {
-		t, _ := time.Parse(time.RFC3339, lastAt.String)
-		if !t.IsZero() {
-			stats.LastActivity = &t
+	if lastAtRaw != nil {
+		if s, ok := lastAtRaw.(string); ok && s != "" {
+			t, _ := time.Parse(time.RFC3339, s)
+			if !t.IsZero() {
+				stats.LastActivity = &t
+			}
 		}
 	}
 
@@ -114,98 +105,29 @@ func (s *mcpActivityStore) Recent(ctx context.Context, limit int) ([]store.MCPAc
 		limit = 20
 	}
 
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, session_id, COALESCE(user_id, ''), tool_name, COALESCE(arguments, ''),
-		        COALESCE(result_preview, ''), is_error, duration_ms, event_type, created_at
-		 FROM mcp_activity
-		 ORDER BY created_at DESC
-		 LIMIT ?`,
-		limit,
-	)
+	rows, err := s.q.ListRecentMCPActivity(ctx, int64(limit))
 	if err != nil {
 		return nil, fmt.Errorf("listing mcp activity: %w", err)
 	}
-	defer rows.Close()
-
-	var result []store.MCPActivityEvent
-	for rows.Next() {
-		var e store.MCPActivityEvent
-		var isError int
-		var durationMs sql.NullInt64
-		var createdAt string
-
-		if err := rows.Scan(
-			&e.ID, &e.SessionID, &e.UserID, &e.ToolName,
-			&e.Arguments, &e.ResultPreview,
-			&isError, &durationMs, &e.EventType, &createdAt,
-		); err != nil {
-			return nil, fmt.Errorf("scanning mcp activity: %w", err)
-		}
-
-		e.IsError = isError != 0
-		if durationMs.Valid {
-			e.DurationMs = &durationMs.Int64
-		}
-		e.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-
-		result = append(result, e)
-	}
-
-	return result, rows.Err()
+	return toStoreMCPActivityEvents(rows), nil
 }
 
 func (s *mcpActivityStore) ListByInvestigationSession(ctx context.Context, sessionID string) ([]store.MCPActivityEvent, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, session_id, COALESCE(user_id, ''), tool_name, COALESCE(arguments, ''),
-		        COALESCE(result_preview, ''), is_error, duration_ms, event_type, created_at
-		 FROM mcp_activity
-		 WHERE investigation_session_id = ?
-		 ORDER BY step_index ASC, created_at ASC`,
-		sessionID,
-	)
+	rows, err := s.q.ListMCPActivityByInvestigationSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("listing mcp activity by investigation session: %w", err)
 	}
-	defer rows.Close()
-
-	var result []store.MCPActivityEvent
-	for rows.Next() {
-		var e store.MCPActivityEvent
-		var isError int
-		var durationMs sql.NullInt64
-		var createdAt string
-
-		if err := rows.Scan(
-			&e.ID, &e.SessionID, &e.UserID, &e.ToolName,
-			&e.Arguments, &e.ResultPreview,
-			&isError, &durationMs, &e.EventType, &createdAt,
-		); err != nil {
-			return nil, fmt.Errorf("scanning mcp activity: %w", err)
-		}
-
-		e.IsError = isError != 0
-		if durationMs.Valid {
-			e.DurationMs = &durationMs.Int64
-		}
-		e.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-
-		result = append(result, e)
-	}
-
-	return result, rows.Err()
+	return toStoreMCPActivityEventsFromInvRows(rows), nil
 }
 
 func (s *mcpActivityStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
 	var totalDeleted int64
 	for {
-		result, err := s.db.ExecContext(ctx,
-			`DELETE FROM mcp_activity WHERE rowid IN (SELECT rowid FROM mcp_activity WHERE created_at < ? LIMIT 1000)`, cutoff,
-		)
+		n, err := s.q.PruneMCPActivity(ctx, cutoff)
 		if err != nil {
 			return totalDeleted, fmt.Errorf("pruning mcp activity: %w", err)
 		}
-		n, _ := result.RowsAffected()
 		totalDeleted += n
 		if n < 1000 {
 			break
@@ -215,27 +137,18 @@ func (s *mcpActivityStore) Prune(ctx context.Context, olderThan time.Duration) (
 }
 
 func (s *mcpActivityStore) SetSuggestionTracking(ctx context.Context, invSessionID string, stepIndex int, wasSuggested bool, rank int) error {
-	var suggested int
-	if wasSuggested {
-		suggested = 1
-	}
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE mcp_activity SET was_suggested = ?, suggestion_rank = ? WHERE investigation_session_id = ? AND step_index = ?`,
-		suggested, rank, invSessionID, stepIndex,
-	)
-	if err != nil {
-		return fmt.Errorf("setting suggestion tracking: %w", err)
-	}
-	return nil
+	return s.q.SetSuggestionTracking(ctx, SetSuggestionTrackingParams{
+		WasSuggested:           boolToInt64(wasSuggested),
+		SuggestionRank:         int64(rank),
+		InvestigationSessionID: invSessionID,
+		StepIndex:              int64(stepIndex),
+	})
 }
 
 func (s *mcpActivityStore) UpdateFollowedBy(ctx context.Context, invSessionID string, stepIndex int, followedBy string) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE mcp_activity SET followed_by = ? WHERE investigation_session_id = ? AND step_index = ?`,
-		followedBy, invSessionID, stepIndex,
-	)
-	if err != nil {
-		return fmt.Errorf("updating followed_by: %w", err)
-	}
-	return nil
+	return s.q.UpdateFollowedBy(ctx, UpdateFollowedByParams{
+		FollowedBy:             followedBy,
+		InvestigationSessionID: invSessionID,
+		StepIndex:              int64(stepIndex),
+	})
 }

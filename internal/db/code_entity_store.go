@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -14,15 +13,17 @@ import (
 
 type codeEntityStore struct {
 	db *sql.DB
+	q  *Queries
 }
 
 // NewCodeEntityStore creates a new SQLite-backed CodeEntityStore.
 func NewCodeEntityStore(db *sql.DB) store.CodeEntityStore {
-	return &codeEntityStore{db: db}
+	return &codeEntityStore{db: db, q: New(db)}
 }
 
 func (s *codeEntityStore) Upsert(ctx context.Context, params store.UpsertCodeEntityParams) (*store.CodeEntity, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
+	// Hand-written: sqlc-generated query has unresolved sqlc.arg() directives.
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO code_entities (entity_type, entity_name, service, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?)
@@ -32,20 +33,23 @@ func (s *codeEntityStore) Upsert(ctx context.Context, params store.UpsertCodeEnt
 	if err != nil {
 		return nil, fmt.Errorf("upserting code entity: %w", err)
 	}
-
 	return s.GetByName(ctx, params.EntityType, params.EntityName, params.Service)
 }
 
 func (s *codeEntityStore) GetByName(ctx context.Context, entityType store.CodeEntityType, entityName, service string) (*store.CodeEntity, error) {
-	row := s.db.QueryRowContext(ctx,
-		`SELECT id, entity_type, entity_name, service, risk_score, error_count,
-		        investigation_count, avg_duration_ms, last_error_at, last_investigation_at,
-		        metadata_json, created_at, updated_at
-		 FROM code_entities
-		 WHERE entity_type = ? AND entity_name = ? AND service = ?`,
-		string(entityType), entityName, service,
-	)
-	return scanCodeEntity(row)
+	row, err := s.q.GetCodeEntityByName(ctx, GetCodeEntityByNameParams{
+		EntityType: string(entityType),
+		EntityName: entityName,
+		Service:    service,
+	})
+	if err == sql.ErrNoRows {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying code entity: %w", err)
+	}
+	e := toStoreCodeEntity(row)
+	return &e, nil
 }
 
 func (s *codeEntityStore) TopByRisk(ctx context.Context, service string, limit int) ([]store.CodeEntity, error) {
@@ -53,38 +57,25 @@ func (s *codeEntityStore) TopByRisk(ctx context.Context, service string, limit i
 		limit = 10
 	}
 
-	var rows *sql.Rows
-	var err error
 	if service != "" {
-		rows, err = s.db.QueryContext(ctx,
-			`SELECT id, entity_type, entity_name, service, risk_score, error_count,
-			        investigation_count, avg_duration_ms, last_error_at, last_investigation_at,
-			        metadata_json, created_at, updated_at
-			 FROM code_entities
-			 WHERE service = ?
-			 ORDER BY risk_score DESC
-			 LIMIT ?`,
-			service, limit,
-		)
-	} else {
-		rows, err = s.db.QueryContext(ctx,
-			`SELECT id, entity_type, entity_name, service, risk_score, error_count,
-			        investigation_count, avg_duration_ms, last_error_at, last_investigation_at,
-			        metadata_json, created_at, updated_at
-			 FROM code_entities
-			 ORDER BY risk_score DESC
-			 LIMIT ?`,
-			limit,
-		)
+		rows, err := s.q.ListTopCodeEntitiesByRiskForService(ctx, ListTopCodeEntitiesByRiskForServiceParams{
+			Service:    service,
+			MaxResults: int64(limit),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("querying top by risk: %w", err)
+		}
+		return toStoreCodeEntities(rows), nil
 	}
+
+	rows, err := s.q.ListTopCodeEntitiesByRisk(ctx, int64(limit))
 	if err != nil {
 		return nil, fmt.Errorf("querying top by risk: %w", err)
 	}
-	defer rows.Close()
-
-	return scanCodeEntities(rows)
+	return toStoreCodeEntities(rows), nil
 }
 
+// BatchGetRisk uses a dynamic IN clause — kept hand-written.
 func (s *codeEntityStore) BatchGetRisk(ctx context.Context, entityType store.CodeEntityType, names []string, service string) ([]store.CodeEntity, error) {
 	if len(names) == 0 {
 		return nil, nil
@@ -114,9 +105,10 @@ func (s *codeEntityStore) BatchGetRisk(ctx context.Context, entityType store.Cod
 	}
 	defer rows.Close()
 
-	return scanCodeEntities(rows)
+	return scanCodeEntitiesRows(rows)
 }
 
+// IncrementError is hand-written: sqlc-generated query has unresolved sqlc.arg() directives.
 func (s *codeEntityStore) IncrementError(ctx context.Context, entityType store.CodeEntityType, entityName, service string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.ExecContext(ctx,
@@ -134,6 +126,7 @@ func (s *codeEntityStore) IncrementError(ctx context.Context, entityType store.C
 	return nil
 }
 
+// IncrementInvestigation is hand-written: sqlc-generated query has unresolved sqlc.arg() directives.
 func (s *codeEntityStore) IncrementInvestigation(ctx context.Context, entityType store.CodeEntityType, entityName, service string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.ExecContext(ctx,
@@ -152,98 +145,17 @@ func (s *codeEntityStore) IncrementInvestigation(ctx context.Context, entityType
 }
 
 func (s *codeEntityStore) BatchRecomputeRisk(ctx context.Context) error {
-	// Risk formula: 0.4 * normalized_error + 0.3 * normalized_investigation + 0.2 * recency + 0.1 * frequency
-	// recency = 1.0 if last_error_at within 24h, decays over 7 days
-	// We use a simplified SQL-only computation.
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE code_entities SET
-		   risk_score = (
-		     0.4 * MIN(error_count / 10.0, 1.0) +
-		     0.3 * MIN(investigation_count / 5.0, 1.0) +
-		     0.2 * CASE
-		       WHEN last_error_at IS NULL THEN 0.0
-		       WHEN (julianday(?) - julianday(last_error_at)) < 1.0 THEN 1.0
-		       WHEN (julianday(?) - julianday(last_error_at)) < 7.0 THEN
-		         1.0 - ((julianday(?) - julianday(last_error_at)) / 7.0)
-		       ELSE 0.0
-		     END +
-		     0.1 * CASE
-		       WHEN last_investigation_at IS NULL THEN 0.0
-		       WHEN (julianday(?) - julianday(last_investigation_at)) < 7.0 THEN 1.0
-		       ELSE 0.0
-		     END
-		   ),
-		   updated_at = ?
-		 WHERE error_count > 0 OR investigation_count > 0`,
-		now, now, now, now, now,
-	)
-	if err != nil {
-		return fmt.Errorf("recomputing risk scores: %w", err)
-	}
-	return nil
+	return s.q.BatchRecomputeCodeEntityRisk(ctx, now)
 }
 
 func (s *codeEntityStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
-	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM code_entities
-		 WHERE error_count = 0 AND investigation_count = 0 AND updated_at < ?`,
-		cutoff,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("pruning code entities: %w", err)
-	}
-	return res.RowsAffected()
+	return s.q.PruneCodeEntities(ctx, cutoff)
 }
 
-// scanCodeEntity scans a single code entity from a row.
-func scanCodeEntity(row *sql.Row) (*store.CodeEntity, error) {
-	var e store.CodeEntity
-	var avgDur sql.NullFloat64
-	var lastErr, lastInv sql.NullString
-	var metaJSON string
-	var createdStr, updatedStr string
-
-	err := row.Scan(
-		&e.ID, &e.EntityType, &e.EntityName, &e.Service,
-		&e.RiskScore, &e.ErrorCount, &e.InvestigationCount,
-		&avgDur, &lastErr, &lastInv,
-		&metaJSON, &createdStr, &updatedStr,
-	)
-	if err == sql.ErrNoRows {
-		return nil, store.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("scanning code entity: %w", err)
-	}
-
-	if avgDur.Valid {
-		e.AvgDurationMs = &avgDur.Float64
-	}
-	if lastErr.Valid {
-		if t, err := time.Parse(time.RFC3339, lastErr.String); err == nil {
-			e.LastErrorAt = &t
-		}
-	}
-	if lastInv.Valid {
-		if t, err := time.Parse(time.RFC3339, lastInv.String); err == nil {
-			e.LastInvestigationAt = &t
-		}
-	}
-	if metaJSON != "" && metaJSON != "{}" {
-		if err := json.Unmarshal([]byte(metaJSON), &e.Metadata); err != nil {
-			slog.Warn("code_entity: malformed metadata_json", "entity", e.EntityName, "error", err)
-		}
-	}
-	e.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
-	e.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
-
-	return &e, nil
-}
-
-// scanCodeEntities scans multiple code entities from rows.
-func scanCodeEntities(rows *sql.Rows) ([]store.CodeEntity, error) {
+// scanCodeEntitiesRows scans multiple code entities from rows (used by hand-written BatchGetRisk).
+func scanCodeEntitiesRows(rows *sql.Rows) ([]store.CodeEntity, error) {
 	var result []store.CodeEntity
 	for rows.Next() {
 		var e store.CodeEntity

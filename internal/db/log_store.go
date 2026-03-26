@@ -17,11 +17,12 @@ import (
 // logStore implements LogStore using database/sql (SQLite).
 type logStore struct {
 	db *sql.DB
+	q  *Queries
 }
 
 // NewLogStore creates a new LogStore backed by SQLite.
 func NewLogStore(db *sql.DB) store.LogStore {
-	return &logStore{db: db}
+	return &logStore{db: db, q: New(db)}
 }
 
 // BatchInsert inserts log entries in a single transaction using prepared
@@ -612,78 +613,19 @@ func (s *logStore) MetadataKeys(ctx context.Context, params store.LogCountParams
 }
 
 func (s *logStore) GetByID(ctx context.Context, id int64) (*store.LogEntry, error) {
-	row := s.db.QueryRowContext(ctx,
-		`SELECT id, timestamp, level, service, environment, commit_hash,
-			trace_id, span_id, parent_span_id, request_id,
-			user_id, session_id,
-			message, event_type, exception_class, error_fingerprint,
-			source_file, source_line, metadata
-		FROM logs WHERE id = ?`, id)
-
-	var entry store.LogEntry
-	var tsStr string
-	var metaJSON sql.NullString
-	var environment, commitHash, spanID, parentSpanID, requestID sql.NullString
-	var userID, sessionID sql.NullString
-	var eventType, exceptionClass, errorFingerprint, sourceFile sql.NullString
-	var sourceLine sql.NullInt64
-	if err := row.Scan(&entry.ID, &tsStr, &entry.Level, &entry.Service, &environment, &commitHash,
-		&entry.TraceID, &spanID, &parentSpanID, &requestID,
-		&userID, &sessionID,
-		&entry.Message, &eventType, &exceptionClass, &errorFingerprint,
-		&sourceFile, &sourceLine, &metaJSON); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, store.ErrNotFound
-		}
+	row, err := s.q.GetLogByID(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
 		return nil, fmt.Errorf("getting log by id: %w", err)
 	}
-	entry.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
-	if environment.Valid {
-		entry.Environment = environment.String
-	}
-	if commitHash.Valid {
-		entry.CommitHash = commitHash.String
-	}
-	if spanID.Valid {
-		entry.SpanID = spanID.String
-	}
-	if parentSpanID.Valid {
-		entry.ParentSpanID = parentSpanID.String
-	}
-	if requestID.Valid {
-		entry.RequestID = requestID.String
-	}
-	if userID.Valid {
-		entry.UserID = userID.String
-	}
-	if sessionID.Valid {
-		entry.SessionID = sessionID.String
-	}
-	if eventType.Valid {
-		entry.EventType = eventType.String
-	}
-	if exceptionClass.Valid {
-		entry.ExceptionClass = exceptionClass.String
-	}
-	if errorFingerprint.Valid {
-		entry.ErrorFingerprint = errorFingerprint.String
-	}
-	if sourceFile.Valid {
-		entry.SourceFile = sourceFile.String
-	}
-	if sourceLine.Valid {
-		entry.SourceLine = int(sourceLine.Int64)
-	}
-	if metaJSON.Valid && metaJSON.String != "" {
-		if err := json.Unmarshal([]byte(metaJSON.String), &entry.Metadata); err != nil {
-			slog.Warn("invalid metadata JSON in log entry", "entry_id", entry.ID, "error", err)
-		}
-	}
+	entry := logRowToStore(row)
 
 	// Load associated request summary if present
 	var rs store.RequestSummary
 	var nPlusOne int
-	err := s.db.QueryRowContext(ctx,
+	err = s.db.QueryRowContext(ctx,
 		`SELECT id, log_id, controller, action, method, path, status,
 			duration_ms, db_time_ms, view_time_ms,
 			sql_count, sql_total_ms, sql_slowest_ms, sql_slowest_name, n_plus_one,
@@ -708,7 +650,7 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*store.LogEntry, erro
 	}
 	// sql.ErrNoRows is fine — most logs won't have a request summary
 
-	return &entry, nil
+	return entry, nil
 }
 
 func (s *logStore) SearchRequestSummaries(ctx context.Context, params store.RequestSummarySearchParams) ([]store.RequestSummaryResult, error) {
@@ -843,37 +785,24 @@ func (s *logStore) Prune(ctx context.Context, olderThan time.Duration) (int64, e
 }
 
 func (s *logStore) RecordBatch(ctx context.Context, batchID string, logCount int) error {
-	_, err := s.db.ExecContext(ctx,
-		`INSERT OR IGNORE INTO ingest_batches (batch_id, log_count) VALUES (?, ?)`,
-		batchID, logCount,
-	)
-	return err
+	return s.q.RecordBatch(ctx, RecordBatchParams{
+		BatchID:  batchID,
+		LogCount: int64(logCount),
+	})
 }
 
 func (s *logStore) GetBatch(ctx context.Context, batchID string) (*store.BatchRecord, error) {
-	var rec store.BatchRecord
-	var tsStr string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT batch_id, log_count, received_at FROM ingest_batches WHERE batch_id = ?`,
-		batchID,
-	).Scan(&rec.BatchID, &rec.LogCount, &tsStr)
+	row, err := s.q.GetBatch(ctx, batchID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	rec.ReceivedAt, _ = time.Parse(time.RFC3339Nano, tsStr)
-	return &rec, nil
+	return batchRowToStore(row), nil
 }
 
 func (s *logStore) PruneBatches(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339Nano)
-	result, err := s.db.ExecContext(ctx,
-		`DELETE FROM ingest_batches WHERE received_at < ?`, cutoff,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("pruning batches: %w", err)
-	}
-	return result.RowsAffected()
+	return s.q.PruneBatches(ctx, cutoff)
 }

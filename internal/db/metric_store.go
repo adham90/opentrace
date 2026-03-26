@@ -16,13 +16,15 @@ import (
 // metricStore implements MetricStore using database/sql (SQLite).
 type metricStore struct {
 	db *sql.DB
+	q  *Queries
 }
 
 // NewMetricStore creates a new MetricStore backed by SQLite.
 func NewMetricStore(db *sql.DB) store.MetricStore {
-	return &metricStore{db: db}
+	return &metricStore{db: db, q: New(db)}
 }
 
+// BatchInsert uses a multi-row insert in a transaction — kept hand-written.
 func (s *metricStore) BatchInsert(ctx context.Context, serverID uuid.UUID, ts time.Time, samples []store.MetricSample) (int, error) {
 	if len(samples) == 0 {
 		return 0, nil
@@ -70,6 +72,7 @@ func (s *metricStore) BatchInsert(ctx context.Context, serverID uuid.UUID, ts ti
 	return len(samples), nil
 }
 
+// Query uses dynamic WHERE clauses — kept hand-written.
 func (s *metricStore) Query(ctx context.Context, params store.MetricQuery) ([]store.MetricPoint, error) {
 	var conditions []string
 	var args []any
@@ -114,38 +117,21 @@ func (s *metricStore) Query(ctx context.Context, params store.MetricQuery) ([]st
 }
 
 func (s *metricStore) LatestByServer(ctx context.Context, serverID uuid.UUID) ([]store.MetricPoint, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT m.id, m.server_id, m.timestamp, m.metric_name, m.metric_value, m.unit, m.labels
-		 FROM metrics m
-		 INNER JOIN (
-		   SELECT metric_name, MAX(timestamp) AS max_ts
-		   FROM metrics
-		   WHERE server_id = ?
-		   GROUP BY metric_name
-		 ) latest ON m.metric_name = latest.metric_name AND m.timestamp = latest.max_ts
-		 WHERE m.server_id = ?
-		 ORDER BY m.metric_name`,
-		serverID.String(), serverID.String(),
-	)
+	rows, err := s.q.GetLatestMetricsByServer(ctx, serverID.String())
 	if err != nil {
 		return nil, fmt.Errorf("querying latest metrics: %w", err)
 	}
-	defer rows.Close()
-
-	return scanMetricRows(rows)
+	return toStoreMetricPoints(rows), nil
 }
 
 func (s *metricStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
 	var totalDeleted int64
 	for {
-		result, err := s.db.ExecContext(ctx,
-			`DELETE FROM metrics WHERE rowid IN (SELECT rowid FROM metrics WHERE created_at < ? LIMIT 1000)`, cutoff,
-		)
+		n, err := s.q.PruneMetrics(ctx, cutoff)
 		if err != nil {
 			return totalDeleted, fmt.Errorf("pruning metrics: %w", err)
 		}
-		n, _ := result.RowsAffected()
 		totalDeleted += n
 		if n < 1000 {
 			break

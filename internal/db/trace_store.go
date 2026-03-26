@@ -13,15 +13,16 @@ import (
 
 type traceStore struct {
 	db *sql.DB
+	q  *Queries
 }
 
 // NewTraceStore creates a new TraceStore backed by SQLite.
 func NewTraceStore(db *sql.DB) store.TraceStore {
-	return &traceStore{db: db}
+	return &traceStore{db: db, q: New(db)}
 }
 
-// UpsertTraceStatus updates the trace_status row for the given trace.
-// Called on each log ingestion for entries with a non-empty trace_id.
+// UpsertTraceStatus uses a transaction with read-modify-write for services list merging.
+// Kept hand-written because of complex logic.
 func (s *traceStore) UpsertTraceStatus(ctx context.Context, traceID string, entry store.LogEntry) error {
 	if traceID == "" {
 		return nil
@@ -95,13 +96,11 @@ func (s *traceStore) UpsertTraceStatus(ctx context.Context, traceID string, entr
 	// Update existing trace
 	newSpanCount := existing.spanCount + 1
 
-	// Update root span if this is the root
 	rootSpanID := existing.rootSpanID
 	if isRoot && rootSpanID == "" {
 		rootSpanID = entry.SpanID
 	}
 
-	// Update services list
 	var servicesList []string
 	if err := json.Unmarshal([]byte(existing.services), &servicesList); err != nil {
 		servicesList = []string{}
@@ -111,20 +110,15 @@ func (s *traceStore) UpsertTraceStatus(ctx context.Context, traceID string, entr
 	}
 	servicesJSON, _ := json.Marshal(servicesList)
 
-	// Update has_errors
 	hasErrors := existing.hasErrors
 	if isError {
 		hasErrors = 1
 	}
 
-	// Calculate duration: distance between earliest and latest timestamps
-	// We track first_seen_at as the earliest log timestamp and compute
-	// duration against the current entry's timestamp.
 	earliestTS := existing.firstSeenAt
 	if ts < earliestTS {
 		earliestTS = ts
 	}
-	// Parse timestamps to compute duration
 	earliestTime, _ := time.Parse(time.RFC3339, earliestTS)
 	entryTime := entry.Timestamp.UTC()
 	latestTime, _ := time.Parse(time.RFC3339, existing.latestTS)
@@ -158,36 +152,14 @@ func (s *traceStore) UpsertTraceStatus(ctx context.Context, traceID string, entr
 
 // GetTraceStatus returns the current status of a trace.
 func (s *traceStore) GetTraceStatus(ctx context.Context, traceID string) (*store.TraceStatus, error) {
-	var ts store.TraceStatus
-	var rootSpanID sql.NullString
-	var servicesJSON string
-	var firstSeenAt, lastUpdatedAt string
-	var hasErrors int
-
-	err := s.db.QueryRowContext(ctx,
-		`SELECT trace_id, span_count, root_span_id, services,
-		        first_seen_at, last_updated_at, duration_ms, status, has_errors
-		 FROM trace_status WHERE trace_id = ?`, traceID,
-	).Scan(&ts.TraceID, &ts.SpanCount, &rootSpanID, &servicesJSON,
-		&firstSeenAt, &lastUpdatedAt, &ts.DurationMs, &ts.Status, &hasErrors)
-
+	row, err := s.q.GetTraceStatusByID(ctx, traceID)
 	if err == sql.ErrNoRows {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("query trace_status: %w", err)
 	}
-
-	if rootSpanID.Valid {
-		ts.RootSpanID = rootSpanID.String
-	}
-	if err := json.Unmarshal([]byte(servicesJSON), &ts.Services); err != nil {
-		ts.Services = []string{}
-	}
-	ts.FirstSeenAt, _ = time.Parse(time.RFC3339, firstSeenAt)
-	ts.LastUpdatedAt, _ = time.Parse(time.RFC3339, lastUpdatedAt)
-	ts.HasErrors = hasErrors == 1
-
+	ts := toStoreTraceStatus(row)
 	return &ts, nil
 }
 
@@ -198,67 +170,30 @@ func (s *traceStore) ListRecentTraces(ctx context.Context, limit, offset int) ([
 	}
 
 	// Get total count
-	var total int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM trace_status`).Scan(&total); err != nil {
+	total, err := s.q.CountTraceStatuses(ctx)
+	if err != nil {
 		return nil, 0, fmt.Errorf("count trace_status: %w", err)
 	}
 
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT trace_id, span_count, root_span_id, services,
-		        first_seen_at, last_updated_at, duration_ms, status, has_errors
-		 FROM trace_status
-		 ORDER BY last_updated_at DESC
-		 LIMIT ? OFFSET ?`, limit, offset,
-	)
+	rows, err := s.q.ListRecentTraces(ctx, ListRecentTracesParams{
+		ResultsOffset: int64(offset),
+		MaxResults:    int64(limit),
+	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("query trace_status: %w", err)
 	}
-	defer rows.Close()
 
-	var results []store.TraceStatus
-	for rows.Next() {
-		var ts store.TraceStatus
-		var rootSpanID sql.NullString
-		var servicesJSON string
-		var firstSeenAt, lastUpdatedAt string
-		var hasErrors int
-
-		if err := rows.Scan(&ts.TraceID, &ts.SpanCount, &rootSpanID, &servicesJSON,
-			&firstSeenAt, &lastUpdatedAt, &ts.DurationMs, &ts.Status, &hasErrors); err != nil {
-			return nil, 0, fmt.Errorf("scan trace_status: %w", err)
-		}
-
-		if rootSpanID.Valid {
-			ts.RootSpanID = rootSpanID.String
-		}
-		if err := json.Unmarshal([]byte(servicesJSON), &ts.Services); err != nil {
-			ts.Services = []string{}
-		}
-		ts.FirstSeenAt, _ = time.Parse(time.RFC3339, firstSeenAt)
-		ts.LastUpdatedAt, _ = time.Parse(time.RFC3339, lastUpdatedAt)
-		ts.HasErrors = hasErrors == 1
-
-		results = append(results, ts)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("iterate trace_status: %w", err)
-	}
-
-	return results, total, nil
+	return toStoreTraceStatuses(rows), int(total), nil
 }
 
 // MarkStaleTraces marks partial traces as 'timeout' if their last_updated_at
 // is older than the given threshold.
 func (s *traceStore) MarkStaleTraces(ctx context.Context, olderThan time.Duration) (int, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
-	result, err := s.db.ExecContext(ctx,
-		`UPDATE trace_status SET status = 'timeout'
-		 WHERE status = 'partial' AND last_updated_at < ?`, cutoff,
-	)
+	n, err := s.q.MarkStaleTraces(ctx, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("mark stale traces: %w", err)
 	}
-	n, _ := result.RowsAffected()
 	return int(n), nil
 }
 
