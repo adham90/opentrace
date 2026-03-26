@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"testing"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/sqlite"
 )
 
 // setupTestDB opens an in-memory SQLite database with migrations applied.
@@ -12,12 +12,12 @@ import (
 func setupTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 
-	db, err := store.OpenSQLite(":memory:")
+	db, err := sqlite.OpenSQLite(":memory:")
 	if err != nil {
 		t.Fatalf("opening in-memory SQLite: %v", err)
 	}
 
-	if err := store.RunSQLiteMigrations(db); err != nil {
+	if err := sqlite.RunSQLiteMigrations(db); err != nil {
 		db.Close()
 		t.Fatalf("running migrations: %v", err)
 	}

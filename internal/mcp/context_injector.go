@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // ContextInjector enriches tool responses with investigation memory.

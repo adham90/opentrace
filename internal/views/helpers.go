@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/adham90/opentrace/internal/server"
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/server"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // LayoutData holds the common data needed by the base layout.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // WatchEvalResult holds the result of evaluating a single watch.

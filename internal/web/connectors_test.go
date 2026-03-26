@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/domains/connectors"
-	"github.com/adham90/opentrace/internal/server"
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/server"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 func setupTestServer() (*Server, *mockDataSourceStore) {

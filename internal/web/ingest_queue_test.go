@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/adham90/opentrace/internal/ingest"
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // countingLogStore wraps mockLogStore and counts BatchInsert calls.

@@ -26,8 +26,8 @@ import (
 	"github.com/adham90/opentrace/internal/ingest"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	mcpgoserver "github.com/mark3labs/mcp-go/server"
-	"github.com/adham90/opentrace/internal/server"
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/server"
+	"github.com/adham90/opentrace/pkg/store"
 	"github.com/adham90/opentrace/internal/version"
 	"github.com/adham90/opentrace/internal/watcher"
 )

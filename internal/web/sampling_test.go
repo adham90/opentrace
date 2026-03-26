@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/adham90/opentrace/internal/ingest"
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 func TestApplySamplingRules_NoRules(t *testing.T) {

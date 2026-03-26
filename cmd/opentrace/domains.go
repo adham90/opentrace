@@ -23,7 +23,7 @@ import (
 	"github.com/adham90/opentrace/internal/domains/traces"
 	"github.com/adham90/opentrace/internal/domains/trends"
 	"github.com/adham90/opentrace/internal/domains/watches"
-	"github.com/adham90/opentrace/internal/server"
+	"github.com/adham90/opentrace/pkg/server"
 )
 
 var modules = []server.Module{

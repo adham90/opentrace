@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/adham90/opentrace/internal/httpclient"
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // maxBodyReadBytes limits how much of the response body we read for body matching (1 MB).

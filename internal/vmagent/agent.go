@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // Agent is the main VM metrics agent that collects and pushes metrics.

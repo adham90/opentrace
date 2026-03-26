@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/adham90/opentrace/internal/metrics"
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // WatchSchedulerOpts configures the watch scheduler.

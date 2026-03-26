@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // defaultWorkflowTemplates returns curated workflow templates for cold start.

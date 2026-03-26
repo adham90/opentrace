@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // makeWatchDue sets a watch's next_check_at to the past so GetDueWatches returns it.

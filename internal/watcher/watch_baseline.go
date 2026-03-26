@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // CaptureBaseline takes a snapshot of current metrics for a watch.

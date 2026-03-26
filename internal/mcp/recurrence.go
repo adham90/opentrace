@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // RecurrenceDetector detects and links recurring investigations.

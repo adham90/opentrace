@@ -13,8 +13,8 @@ import (
 
 	authmod "github.com/adham90/opentrace/internal/domains/auth"
 	"github.com/adham90/opentrace/internal/domains/onboarding"
-	"github.com/adham90/opentrace/internal/server"
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/server"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // newTestServer creates a Server with all mock stores wired up, suitable for

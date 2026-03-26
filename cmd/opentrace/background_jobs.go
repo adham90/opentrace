@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/adham90/opentrace/internal/jobs"
-	"github.com/adham90/opentrace/internal/server"
+	"github.com/adham90/opentrace/pkg/server"
 	"golang.org/x/sync/errgroup"
 )
 

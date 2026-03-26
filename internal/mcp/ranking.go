@@ -7,7 +7,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // RankingService replaces static tool suggestions with data-driven rankings.

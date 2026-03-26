@@ -3,7 +3,7 @@ package errorimpact
 import (
 	"github.com/go-chi/chi/v5"
 
-	"github.com/adham90/opentrace/internal/server"
+	"github.com/adham90/opentrace/pkg/server"
 )
 
 // Module describes the error impact domain.

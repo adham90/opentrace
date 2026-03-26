@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // mockSessionStoreForContext extends the recurrence_test mock with FindSimilar support.

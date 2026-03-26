@@ -10,7 +10,7 @@ import (
 
 	"github.com/adham90/opentrace/internal/mcp/tools"
 	"github.com/adham90/opentrace/internal/metrics"
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // rankingServiceAdapter returns a tools.SuggestionRanker that bridges

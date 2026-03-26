@@ -1,6 +1,6 @@
 package mcp
 
-import "github.com/adham90/opentrace/internal/store"
+import "github.com/adham90/opentrace/pkg/store"
 
 // OutcomeSignal represents an individual signal contributing to outcome inference.
 type OutcomeSignal struct {

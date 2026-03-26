@@ -18,8 +18,8 @@ import (
 	"github.com/adham90/opentrace/internal/connector"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/metrics"
-	"github.com/adham90/opentrace/internal/server"
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/server"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 const (

@@ -9,7 +9,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/internal/sqlite"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 func runSeed() error {
@@ -31,7 +32,7 @@ func runSeed() error {
 		{Hostname: "worker-01.staging", IPAddress: "10.1.1.10", OS: "linux", Arch: "amd64", AgentVersion: "0.3.1", Labels: map[string]string{"env": "staging", "role": "worker"}},
 	}
 
-	serverStore := store.NewServerStore(deps.DB)
+	serverStore := sqlite.NewServerStore(deps.DB)
 	var serverIDs []uuid.UUID
 	for _, p := range servers {
 		s, err := serverStore.Register(ctx, p)
@@ -43,7 +44,7 @@ func runSeed() error {
 	}
 
 	// --- Metrics for each server ---
-	metricStore := store.NewMetricStore(deps.DB)
+	metricStore := sqlite.NewMetricStore(deps.DB)
 	for i, sid := range serverIDs {
 		for m := 0; m < 30; m++ {
 			ts := time.Now().Add(-time.Duration(30-m) * 2 * time.Minute)
@@ -182,7 +183,7 @@ func runSeed() error {
 		logEntries = append(logEntries, entry)
 	}
 
-	logStore := store.NewLogStore(deps.DB)
+	logStore := sqlite.NewLogStore(deps.DB)
 	n, err := logStore.BatchInsert(ctx, logEntries)
 	if err != nil {
 		return fmt.Errorf("inserting logs: %w", err)
@@ -190,7 +191,7 @@ func runSeed() error {
 	slog.Info("seeded logs", "count", n)
 
 	// --- Error Groups (from error log entries) ---
-	errorGroupStore := store.NewErrorGroupStore(deps.DB)
+	errorGroupStore := sqlite.NewErrorGroupStore(deps.DB)
 	errorGroupCount := 0
 	for _, entry := range logEntries {
 		if entry.ErrorFingerprint != "" {
@@ -204,7 +205,7 @@ func runSeed() error {
 	slog.Info("seeded error groups", "upserted", errorGroupCount)
 
 	// --- Watches (new agent-first system) ---
-	watchStore := store.NewWatchStore(deps.DB)
+	watchStore := sqlite.NewWatchStore(deps.DB)
 
 	watchDefs := []store.CreateWatchParams{
 		{
@@ -452,7 +453,7 @@ func runSeed() error {
 	slog.Info("seeded watch alerts")
 
 	// --- Data Sources (connectors) ---
-	dsStore := store.NewDataSourceStore(deps.DB)
+	dsStore := sqlite.NewDataSourceStore(deps.DB)
 	dsDefs := []store.CreateDataSourceParams{
 		{Type: store.ConnectorLogs, Name: "Production Logs", Config: map[string]any{}},
 		{Type: store.ConnectorLogs, Name: "Staging Logs", Config: map[string]any{}},

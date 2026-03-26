@@ -10,8 +10,8 @@ import (
 
 	authmod "github.com/adham90/opentrace/internal/domains/auth"
 	"github.com/adham90/opentrace/internal/domains/onboarding"
-	"github.com/adham90/opentrace/internal/server"
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/server"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 func newOnboardingTestServer(t *testing.T) *Server {

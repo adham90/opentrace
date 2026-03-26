@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"github.com/adham90/opentrace/internal/auth"
-	"github.com/adham90/opentrace/internal/server"
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/server"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // UserFromContext returns the authenticated user from the request context, or nil.

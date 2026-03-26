@@ -3,7 +3,7 @@ package mcp
 import (
 	"testing"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 func TestInferOutcome_QuickQuery(t *testing.T) {

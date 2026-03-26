@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // WatchMetrics computes metric values from existing LogStore methods.

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 func TestChecker_Up(t *testing.T) {

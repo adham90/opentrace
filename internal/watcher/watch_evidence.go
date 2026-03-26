@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // WatchEvidenceBuilder collects evidence when a watch alert fires.

@@ -13,7 +13,7 @@ import (
 
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // ConnectorsDeps holds the stores needed by the connectors tool.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // ---------------------------------------------------------------------------

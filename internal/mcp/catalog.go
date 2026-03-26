@@ -1,6 +1,6 @@
 package mcp
 
-import "github.com/adham90/opentrace/internal/server"
+import "github.com/adham90/opentrace/pkg/server"
 
 // CatalogEntry describes a single MCP tool for the web tools page.
 type CatalogEntry struct {

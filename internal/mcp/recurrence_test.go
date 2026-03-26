@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // mockInvestigationSessionStore is a minimal mock for testing RecurrenceDetector.

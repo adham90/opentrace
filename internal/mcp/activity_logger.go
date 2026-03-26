@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // ActivityLogger provides bounded async logging for MCP tool calls.

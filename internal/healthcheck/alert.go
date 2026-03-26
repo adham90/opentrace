@@ -12,7 +12,7 @@ import (
 
 	"github.com/adham90/opentrace/internal/httpclient"
 	"github.com/adham90/opentrace/internal/retry"
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // HealthCheckAlertNotifier sends notifications for health check status changes.

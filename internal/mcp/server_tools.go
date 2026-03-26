@@ -8,7 +8,7 @@ import (
 
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/mcp/tools"
-	"github.com/adham90/opentrace/internal/store"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // addReadOnlyTools registers read-only tools available to all users.
