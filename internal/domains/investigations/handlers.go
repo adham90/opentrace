@@ -132,11 +132,12 @@ func (h *handler) layoutData(r *http.Request, title, nav string) views.LayoutDat
 	user := server.UserFromContext(r.Context())
 	isAdmin := user != nil && user.Role == store.RoleAdmin
 	return views.LayoutData{
-		Title:   title,
-		Nav:     nav,
-		User:    user,
-		IsAdmin: isAdmin,
-		DevMode: h.cfg != nil && h.cfg.DevMode,
+		Title:     title,
+		Nav:       nav,
+		User:      user,
+		IsAdmin:   isAdmin,
+		CSRFToken: server.CSRFToken(r.Context()),
+		DevMode:   h.cfg != nil && h.cfg.DevMode,
 	}
 }
 

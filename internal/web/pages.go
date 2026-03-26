@@ -4,8 +4,9 @@ import (
 	"embed"
 	"net/http"
 
-	"github.com/adham90/opentrace/pkg/store"
 	"github.com/adham90/opentrace/internal/views"
+	"github.com/adham90/opentrace/pkg/server"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 //go:embed static/*
@@ -20,11 +21,12 @@ func (s *Server) layoutData(r *http.Request, title, nav string) views.LayoutData
 	user := UserFromContext(r.Context())
 	isAdmin := user != nil && user.Role == store.RoleAdmin
 	return views.LayoutData{
-		Title:   title,
-		Nav:     nav,
-		User:    user,
-		IsAdmin: isAdmin,
-		DevMode: s.isDevMode(),
+		Title:     title,
+		Nav:       nav,
+		User:      user,
+		IsAdmin:   isAdmin,
+		CSRFToken: server.CSRFToken(r.Context()),
+		DevMode:   s.isDevMode(),
 	}
 }
 

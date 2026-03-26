@@ -26,10 +26,11 @@ func LayoutDataFromContext(ctx context.Context, title, nav string) LayoutData {
 	user := server.UserFromContext(ctx)
 	isAdmin := user != nil && user.Role == store.RoleAdmin
 	return LayoutData{
-		Title:   title,
-		Nav:     nav,
-		User:    user,
-		IsAdmin: isAdmin,
+		Title:     title,
+		Nav:       nav,
+		User:      user,
+		IsAdmin:   isAdmin,
+		CSRFToken: server.CSRFToken(ctx),
 	}
 }
 

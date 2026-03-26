@@ -35,11 +35,12 @@ func (h *handler) page(w http.ResponseWriter, r *http.Request) {
 	isAdmin := user != nil && user.Role == store.RoleAdmin
 	devMode := h.cfg != nil && h.cfg.DevMode
 	layout := views.LayoutData{
-		Title:   "Dashboard",
-		Nav:     "dashboard",
-		User:    user,
-		IsAdmin: isAdmin,
-		DevMode: devMode,
+		Title:     "Dashboard",
+		Nav:       "dashboard",
+		User:      user,
+		IsAdmin:   isAdmin,
+		CSRFToken: server.CSRFToken(r.Context()),
+		DevMode:   devMode,
 	}
 
 	dash := webviews.DashboardData{
