@@ -242,9 +242,11 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Use(wrapCompressSkipMCP(middleware.Compress(5))) // gzip compression, bypassed for /mcp/ SSE
 	router.Use(MaxBodySize(maxRequestBodyBytes)) // 10 MB global body limit
 	router.Use(srv.SessionAuth)        // skips /static/ and /healthz paths internally
+	router.Use(srv.ProxyAuth)          // trusted proxy headers (cloud managed mode)
 	router.Use(CSRFProtect)            // double-submit cookie CSRF protection
 
 	router.Get("/healthz", srv.handleHealthCheck)
+	router.Get("/readyz", srv.handleReadiness)
 	router.Get("/api/version", srv.handleVersion)
 	router.Get("/api/version/check", srv.handleVersionCheck)
 	router.Get("/api/version/banner", srv.handleVersionBanner)
@@ -356,6 +358,9 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 			srv.sharedDeps.APIKeyAuth = srv.DynamicAPIKeyAuth
 			srv.sharedDeps.APIRateLimiter = apiLimiter.Middleware
 		}
+
+		// Admin usage stats for billing (cloud managed mode)
+		r.With(srv.requireAdminOrOnboarding).Get("/admin/usage", srv.handleUsage)
 
 		// Read/Write API routes for logs, connectors, tools, errors,
 		// healthchecks, trends, analytics, error impact, journeys, traces,
@@ -508,6 +513,18 @@ func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusServiceUnavailable
 	}
 	writeJSON(w, status, checks)
+}
+
+func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
+	if s.db == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "reason": "no database"})
+		return
+	}
+	if err := s.db.PingContext(r.Context()); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "reason": "database unreachable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/adham90/opentrace/internal/auth"
 	"github.com/adham90/opentrace/internal/config"
+	"github.com/adham90/opentrace/internal/managed"
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
 	"github.com/adham90/opentrace/internal/views"
@@ -40,6 +41,12 @@ func (h *handler) layoutData(r *http.Request, title, nav string) views.LayoutDat
 }
 
 func (h *handler) handleOnboardingPage(w http.ResponseWriter, r *http.Request) {
+	// In managed mode, the platform handles setup — skip onboarding.
+	if managed.Enabled() {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+
 	if h.userStore != nil {
 		count, err := h.userStore.Count(r.Context())
 		if err == nil && count > 0 {
