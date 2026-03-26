@@ -9,23 +9,23 @@ import (
 	"time"
 
 	"github.com/adham90/opentrace/internal/connector"
-	"github.com/adham90/opentrace/internal/sqlite"
+	dbstore "github.com/adham90/opentrace/internal/db"
 	"github.com/adham90/opentrace/internal/web"
 )
 
 func TestAppStartup(t *testing.T) {
-	db, err := sqlite.OpenSQLite(":memory:")
+	db, err := dbstore.OpenSQLite(":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	defer db.Close()
 
-	if err := sqlite.RunSQLiteMigrations(db); err != nil {
+	if err := dbstore.RunSQLiteMigrations(db); err != nil {
 		t.Fatalf("migrations: %v", err)
 	}
 
-	dsStore := sqlite.NewDataSourceStore(db)
-	logStore := sqlite.NewLogStore(db)
+	dsStore := dbstore.NewDataSourceStore(db)
+	logStore := dbstore.NewLogStore(db)
 	registry := connector.NewRegistry()
 	srv := web.NewServer(dsStore, logStore, registry, nil)
 

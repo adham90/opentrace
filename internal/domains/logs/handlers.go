@@ -12,7 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/adham90/opentrace/internal/config"
-	"github.com/adham90/opentrace/internal/sqlite"
+	dbstore "github.com/adham90/opentrace/internal/db"
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
 	"github.com/adham90/opentrace/internal/views"
@@ -421,7 +421,7 @@ func (h *handler) listServices(w http.ResponseWriter, r *http.Request) {
 		server.WriteJSON(w, http.StatusOK, []string{})
 		return
 	}
-	services, err := sqlite.ListServices(r.Context(), h.db)
+	services, err := dbstore.ListServices(r.Context(), h.db)
 	if err != nil {
 		server.WriteError(w, http.StatusInternalServerError, "failed to list services")
 		return
@@ -437,7 +437,7 @@ func (h *handler) listEventTypes(w http.ResponseWriter, r *http.Request) {
 		server.WriteJSON(w, http.StatusOK, []string{})
 		return
 	}
-	types, err := sqlite.ListEventTypes(r.Context(), h.db)
+	types, err := dbstore.ListEventTypes(r.Context(), h.db)
 	if err != nil {
 		server.WriteError(w, http.StatusInternalServerError, "failed to list event types")
 		return

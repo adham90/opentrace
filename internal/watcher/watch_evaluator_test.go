@@ -5,24 +5,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adham90/opentrace/internal/sqlite"
+	dbstore "github.com/adham90/opentrace/internal/db"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 func setupWatchTestDB(t *testing.T) (store.WatchStore, store.LogStore) {
 	t.Helper()
-	db, err := sqlite.OpenSQLite(":memory:")
+	db, err := dbstore.OpenSQLite(":memory:")
 	if err != nil {
 		t.Fatalf("opening in-memory SQLite: %v", err)
 	}
-	if err := sqlite.RunSQLiteMigrations(db); err != nil {
+	if err := dbstore.RunSQLiteMigrations(db); err != nil {
 		db.Close()
 		t.Fatalf("running migrations: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
 
-	watchStore := sqlite.NewWatchStore(db)
-	logStore := sqlite.NewLogStore(db)
+	watchStore := dbstore.NewWatchStore(db)
+	logStore := dbstore.NewLogStore(db)
 	return watchStore, logStore
 }
 

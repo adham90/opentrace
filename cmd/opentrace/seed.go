@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/adham90/opentrace/internal/sqlite"
+	dbstore "github.com/adham90/opentrace/internal/db"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -32,7 +32,7 @@ func runSeed() error {
 		{Hostname: "worker-01.staging", IPAddress: "10.1.1.10", OS: "linux", Arch: "amd64", AgentVersion: "0.3.1", Labels: map[string]string{"env": "staging", "role": "worker"}},
 	}
 
-	serverStore := sqlite.NewServerStore(deps.DB)
+	serverStore := dbstore.NewServerStore(deps.DB)
 	var serverIDs []uuid.UUID
 	for _, p := range servers {
 		s, err := serverStore.Register(ctx, p)
@@ -44,7 +44,7 @@ func runSeed() error {
 	}
 
 	// --- Metrics for each server ---
-	metricStore := sqlite.NewMetricStore(deps.DB)
+	metricStore := dbstore.NewMetricStore(deps.DB)
 	for i, sid := range serverIDs {
 		for m := 0; m < 30; m++ {
 			ts := time.Now().Add(-time.Duration(30-m) * 2 * time.Minute)
@@ -183,7 +183,7 @@ func runSeed() error {
 		logEntries = append(logEntries, entry)
 	}
 
-	logStore := sqlite.NewLogStore(deps.DB)
+	logStore := dbstore.NewLogStore(deps.DB)
 	n, err := logStore.BatchInsert(ctx, logEntries)
 	if err != nil {
 		return fmt.Errorf("inserting logs: %w", err)
@@ -191,7 +191,7 @@ func runSeed() error {
 	slog.Info("seeded logs", "count", n)
 
 	// --- Error Groups (from error log entries) ---
-	errorGroupStore := sqlite.NewErrorGroupStore(deps.DB)
+	errorGroupStore := dbstore.NewErrorGroupStore(deps.DB)
 	errorGroupCount := 0
 	for _, entry := range logEntries {
 		if entry.ErrorFingerprint != "" {
@@ -205,7 +205,7 @@ func runSeed() error {
 	slog.Info("seeded error groups", "upserted", errorGroupCount)
 
 	// --- Watches (new agent-first system) ---
-	watchStore := sqlite.NewWatchStore(deps.DB)
+	watchStore := dbstore.NewWatchStore(deps.DB)
 
 	watchDefs := []store.CreateWatchParams{
 		{
@@ -453,7 +453,7 @@ func runSeed() error {
 	slog.Info("seeded watch alerts")
 
 	// --- Data Sources (connectors) ---
-	dsStore := sqlite.NewDataSourceStore(deps.DB)
+	dsStore := dbstore.NewDataSourceStore(deps.DB)
 	dsDefs := []store.CreateDataSourceParams{
 		{Type: store.ConnectorLogs, Name: "Production Logs", Config: map[string]any{}},
 		{Type: store.ConnectorLogs, Name: "Staging Logs", Config: map[string]any{}},

@@ -16,7 +16,7 @@ import (
 	"github.com/adham90/opentrace/internal/healthcheck"
 	"github.com/adham90/opentrace/internal/jobs"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
-	"github.com/adham90/opentrace/internal/sqlite"
+	dbstore "github.com/adham90/opentrace/internal/db"
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
 	"github.com/adham90/opentrace/internal/version"
@@ -92,13 +92,13 @@ func initApp(ctx context.Context) (*server.Deps, error) {
 	}
 
 	// Open SQLite database
-	db, err := sqlite.OpenSQLite(cfg.DatabasePath())
+	db, err := dbstore.OpenSQLite(cfg.DatabasePath())
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
 
 	// Run migrations
-	if err := sqlite.RunSQLiteMigrations(db); err != nil {
+	if err := dbstore.RunSQLiteMigrations(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
@@ -111,7 +111,7 @@ func initApp(ctx context.Context) (*server.Deps, error) {
 	slog.Info("database ready")
 
 	// Initialize all stores from a single constructor
-	stores := sqlite.NewStores(db)
+	stores := dbstore.NewStores(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
