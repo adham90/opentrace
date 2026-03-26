@@ -10,6 +10,17 @@ import (
 	"database/sql"
 )
 
+const countActiveAdminsExcluding = `-- name: CountActiveAdminsExcluding :one
+SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1 AND id != ?1
+`
+
+func (q *Queries) CountActiveAdminsExcluding(ctx context.Context, excludeID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActiveAdminsExcluding, excludeID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUsers = `-- name: CountUsers :one
 SELECT COUNT(*) FROM users
 `
@@ -21,17 +32,54 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 	return count, err
 }
 
-const deleteUser = `-- name: DeleteUser :exec
-DELETE FROM users WHERE id = ?
+const createUser = `-- name: CreateUser :exec
+
+INSERT INTO users (id, email, password_hash, display_name, role, mcp_token, created_at, updated_at)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
 `
 
-func (q *Queries) DeleteUser(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, deleteUser, id)
+type CreateUserParams struct {
+	ID           string         `json:"id"`
+	Email        string         `json:"email"`
+	PasswordHash string         `json:"password_hash"`
+	DisplayName  string         `json:"display_name"`
+	Role         string         `json:"role"`
+	McpToken     sql.NullString `json:"mcp_token"`
+	CreatedAt    string         `json:"created_at"`
+	UpdatedAt    string         `json:"updated_at"`
+}
+
+// Users: authentication and authorization.
+// Queries for the users table.
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
+	_, err := q.db.ExecContext(ctx, createUser,
+		arg.ID,
+		arg.Email,
+		arg.PasswordHash,
+		arg.DisplayName,
+		arg.Role,
+		arg.McpToken,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
 	return err
 }
 
+const deleteUser = `-- name: DeleteUser :execrows
+DELETE FROM users WHERE id = ?1
+`
+
+func (q *Queries) DeleteUser(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteUser, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, role, mcp_enabled, mcp_token, is_active, created_at, updated_at FROM users WHERE email = ?
+SELECT id, email, password_hash, display_name, role, mcp_enabled, mcp_token, is_active, created_at, updated_at
+FROM users WHERE email = ?1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -53,7 +101,8 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, display_name, role, mcp_enabled, mcp_token, is_active, created_at, updated_at FROM users WHERE id = ?
+SELECT id, email, password_hash, display_name, role, mcp_enabled, mcp_token, is_active, created_at, updated_at
+FROM users WHERE id = ?1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
@@ -75,7 +124,8 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 }
 
 const getUserByMCPToken = `-- name: GetUserByMCPToken :one
-SELECT id, email, password_hash, display_name, role, mcp_enabled, mcp_token, is_active, created_at, updated_at FROM users WHERE mcp_token = ? AND mcp_enabled = 1 AND is_active = 1
+SELECT id, email, password_hash, display_name, role, mcp_enabled, mcp_token, is_active, created_at, updated_at
+FROM users WHERE mcp_token = ?1 AND mcp_enabled = 1 AND is_active = 1
 `
 
 func (q *Queries) GetUserByMCPToken(ctx context.Context, mcpToken sql.NullString) (User, error) {
@@ -97,7 +147,8 @@ func (q *Queries) GetUserByMCPToken(ctx context.Context, mcpToken sql.NullString
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, password_hash, display_name, role, mcp_enabled, mcp_token, is_active, created_at, updated_at FROM users ORDER BY created_at ASC
+SELECT id, email, password_hash, display_name, role, mcp_enabled, mcp_token, is_active, created_at, updated_at
+FROM users ORDER BY created_at ASC LIMIT 1000
 `
 
 func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
@@ -134,30 +185,38 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
-const updateMCPToken = `-- name: UpdateMCPToken :exec
-UPDATE users SET mcp_token = ?, updated_at = datetime('now') WHERE id = ?
+const updateMCPToken = `-- name: UpdateMCPToken :execrows
+UPDATE users SET mcp_token = ?1, updated_at = ?2 WHERE id = ?3
 `
 
 type UpdateMCPTokenParams struct {
-	McpToken sql.NullString `json:"mcp_token"`
-	ID       string         `json:"id"`
+	McpToken  sql.NullString `json:"mcp_token"`
+	UpdatedAt string         `json:"updated_at"`
+	ID        string         `json:"id"`
 }
 
-func (q *Queries) UpdateMCPToken(ctx context.Context, arg UpdateMCPTokenParams) error {
-	_, err := q.db.ExecContext(ctx, updateMCPToken, arg.McpToken, arg.ID)
-	return err
+func (q *Queries) UpdateMCPToken(ctx context.Context, arg UpdateMCPTokenParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateMCPToken, arg.McpToken, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
-const updatePassword = `-- name: UpdatePassword :exec
-UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?
+const updatePassword = `-- name: UpdatePassword :execrows
+UPDATE users SET password_hash = ?1, updated_at = ?2 WHERE id = ?3
 `
 
 type UpdatePasswordParams struct {
 	PasswordHash string `json:"password_hash"`
+	UpdatedAt    string `json:"updated_at"`
 	ID           string `json:"id"`
 }
 
-func (q *Queries) UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error {
-	_, err := q.db.ExecContext(ctx, updatePassword, arg.PasswordHash, arg.ID)
-	return err
+func (q *Queries) UpdatePassword(ctx context.Context, arg UpdatePasswordParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updatePassword, arg.PasswordHash, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

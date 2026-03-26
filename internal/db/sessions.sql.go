@@ -7,12 +7,12 @@ package db
 
 import (
 	"context"
-	"database/sql"
 )
 
 const createSession = `-- name: CreateSession :one
+
 INSERT INTO sessions (id, user_id, token, expires_at, created_at)
-VALUES (?, ?, ?, ?, datetime('now'))
+VALUES (?1, ?2, ?3, ?4, ?5)
 RETURNING id, user_id, token, expires_at, created_at
 `
 
@@ -21,14 +21,18 @@ type CreateSessionParams struct {
 	UserID    string `json:"user_id"`
 	Token     string `json:"token"`
 	ExpiresAt string `json:"expires_at"`
+	CreatedAt string `json:"created_at"`
 }
 
+// Sessions: authentication session management.
+// Queries for the sessions table.
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
 	row := q.db.QueryRowContext(ctx, createSession,
 		arg.ID,
 		arg.UserID,
 		arg.Token,
 		arg.ExpiresAt,
+		arg.CreatedAt,
 	)
 	var i Session
 	err := row.Scan(
@@ -42,7 +46,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 }
 
 const deleteAllSessionsForUser = `-- name: DeleteAllSessionsForUser :exec
-DELETE FROM sessions WHERE user_id = ?
+DELETE FROM sessions WHERE user_id = ?1
 `
 
 func (q *Queries) DeleteAllSessionsForUser(ctx context.Context, userID string) error {
@@ -50,16 +54,20 @@ func (q *Queries) DeleteAllSessionsForUser(ctx context.Context, userID string) e
 	return err
 }
 
-const deleteExpiredSessions = `-- name: DeleteExpiredSessions :execresult
-DELETE FROM sessions WHERE expires_at <= datetime('now')
+const deleteExpiredSessions = `-- name: DeleteExpiredSessions :execrows
+DELETE FROM sessions WHERE expires_at <= ?1
 `
 
-func (q *Queries) DeleteExpiredSessions(ctx context.Context) (sql.Result, error) {
-	return q.db.ExecContext(ctx, deleteExpiredSessions)
+func (q *Queries) DeleteExpiredSessions(ctx context.Context, now string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteExpiredSessions, now)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteSession = `-- name: DeleteSession :exec
-DELETE FROM sessions WHERE id = ?
+DELETE FROM sessions WHERE id = ?1
 `
 
 func (q *Queries) DeleteSession(ctx context.Context, id string) error {
@@ -68,7 +76,7 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) error {
 }
 
 const deleteSessionsByToken = `-- name: DeleteSessionsByToken :exec
-DELETE FROM sessions WHERE token = ?
+DELETE FROM sessions WHERE token = ?1
 `
 
 func (q *Queries) DeleteSessionsByToken(ctx context.Context, token string) error {
@@ -77,11 +85,17 @@ func (q *Queries) DeleteSessionsByToken(ctx context.Context, token string) error
 }
 
 const getSessionByToken = `-- name: GetSessionByToken :one
-SELECT id, user_id, token, expires_at, created_at FROM sessions WHERE token = ? AND expires_at > datetime('now')
+SELECT id, user_id, token, expires_at, created_at
+FROM sessions WHERE token = ?1 AND expires_at > ?2
 `
 
-func (q *Queries) GetSessionByToken(ctx context.Context, token string) (Session, error) {
-	row := q.db.QueryRowContext(ctx, getSessionByToken, token)
+type GetSessionByTokenParams struct {
+	Token string `json:"token"`
+	Now   string `json:"now"`
+}
+
+func (q *Queries) GetSessionByToken(ctx context.Context, arg GetSessionByTokenParams) (Session, error) {
+	row := q.db.QueryRowContext(ctx, getSessionByToken, arg.Token, arg.Now)
 	var i Session
 	err := row.Scan(
 		&i.ID,

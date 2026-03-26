@@ -1,23 +1,39 @@
+-- Users: authentication and authorization.
+-- Queries for the users table.
+
+-- name: CreateUser :exec
+INSERT INTO users (id, email, password_hash, display_name, role, mcp_token, created_at, updated_at)
+VALUES (sqlc.arg(id), sqlc.arg(email), sqlc.arg(password_hash), sqlc.arg(display_name), sqlc.arg(role), sqlc.arg(mcp_token), sqlc.arg(created_at), sqlc.arg(updated_at));
+
 -- name: GetUserByID :one
-SELECT * FROM users WHERE id = ?;
+SELECT id, email, password_hash, display_name, role, mcp_enabled, mcp_token, is_active, created_at, updated_at
+FROM users WHERE id = sqlc.arg(id);
 
 -- name: GetUserByEmail :one
-SELECT * FROM users WHERE email = ?;
+SELECT id, email, password_hash, display_name, role, mcp_enabled, mcp_token, is_active, created_at, updated_at
+FROM users WHERE email = sqlc.arg(email);
 
 -- name: GetUserByMCPToken :one
-SELECT * FROM users WHERE mcp_token = ? AND mcp_enabled = 1 AND is_active = 1;
+SELECT id, email, password_hash, display_name, role, mcp_enabled, mcp_token, is_active, created_at, updated_at
+FROM users WHERE mcp_token = sqlc.arg(mcp_token) AND mcp_enabled = 1 AND is_active = 1;
 
 -- name: ListUsers :many
-SELECT * FROM users ORDER BY created_at ASC;
+SELECT id, email, password_hash, display_name, role, mcp_enabled, mcp_token, is_active, created_at, updated_at
+FROM users ORDER BY created_at ASC LIMIT 1000;
 
 -- name: CountUsers :one
 SELECT COUNT(*) FROM users;
 
--- name: DeleteUser :exec
-DELETE FROM users WHERE id = ?;
+-- name: CountActiveAdminsExcluding :one
+SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1 AND id != sqlc.arg(exclude_id);
 
--- name: UpdatePassword :exec
-UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?;
+-- name: DeleteUser :execrows
+DELETE FROM users WHERE id = sqlc.arg(id);
 
--- name: UpdateMCPToken :exec
-UPDATE users SET mcp_token = ?, updated_at = datetime('now') WHERE id = ?;
+-- name: UpdatePassword :execrows
+UPDATE users SET password_hash = sqlc.arg(password_hash), updated_at = sqlc.arg(updated_at) WHERE id = sqlc.arg(id);
+
+-- name: UpdateMCPToken :execrows
+UPDATE users SET mcp_token = sqlc.arg(mcp_token), updated_at = sqlc.arg(updated_at) WHERE id = sqlc.arg(id);
+
+-- DYNAMIC: use squirrel for Update (optional display_name/role/mcp_enabled/is_active fields)
