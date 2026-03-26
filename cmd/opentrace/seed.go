@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 
-	dbstore "github.com/adham90/opentrace/internal/db"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -32,7 +31,7 @@ func runSeed() error {
 		{Hostname: "worker-01.staging", IPAddress: "10.1.1.10", OS: "linux", Arch: "amd64", AgentVersion: "0.3.1", Labels: map[string]string{"env": "staging", "role": "worker"}},
 	}
 
-	serverStore := dbstore.NewServerStore(deps.DB)
+	serverStore := deps.ServerStore
 	var serverIDs []uuid.UUID
 	for _, p := range servers {
 		s, err := serverStore.Register(ctx, p)
@@ -44,7 +43,7 @@ func runSeed() error {
 	}
 
 	// --- Metrics for each server ---
-	metricStore := dbstore.NewMetricStore(deps.DB)
+	metricStore := deps.MetricStore
 	for i, sid := range serverIDs {
 		for m := 0; m < 30; m++ {
 			ts := time.Now().Add(-time.Duration(30-m) * 2 * time.Minute)
@@ -183,7 +182,7 @@ func runSeed() error {
 		logEntries = append(logEntries, entry)
 	}
 
-	logStore := dbstore.NewLogStore(deps.DB)
+	logStore := deps.LogStore
 	n, err := logStore.BatchInsert(ctx, logEntries)
 	if err != nil {
 		return fmt.Errorf("inserting logs: %w", err)
@@ -191,7 +190,7 @@ func runSeed() error {
 	slog.Info("seeded logs", "count", n)
 
 	// --- Error Groups (from error log entries) ---
-	errorGroupStore := dbstore.NewErrorGroupStore(deps.DB)
+	errorGroupStore := deps.ErrorGroupStore
 	errorGroupCount := 0
 	for _, entry := range logEntries {
 		if entry.ErrorFingerprint != "" {
@@ -205,7 +204,7 @@ func runSeed() error {
 	slog.Info("seeded error groups", "upserted", errorGroupCount)
 
 	// --- Watches (new agent-first system) ---
-	watchStore := dbstore.NewWatchStore(deps.DB)
+	watchStore := deps.WatchStore
 
 	watchDefs := []store.CreateWatchParams{
 		{
@@ -453,7 +452,7 @@ func runSeed() error {
 	slog.Info("seeded watch alerts")
 
 	// --- Data Sources (connectors) ---
-	dsStore := dbstore.NewDataSourceStore(deps.DB)
+	dsStore := deps.DSStore
 	dsDefs := []store.CreateDataSourceParams{
 		{Type: store.ConnectorLogs, Name: "Production Logs", Config: map[string]any{}},
 		{Type: store.ConnectorLogs, Name: "Staging Logs", Config: map[string]any{}},

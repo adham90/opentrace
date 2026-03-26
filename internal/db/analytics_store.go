@@ -7,17 +7,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uptrace/bun"
+
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 type analyticsStore struct {
-	db *sql.DB
-	q  *Queries
+	db *bun.DB
 }
 
 // NewAnalyticsStore creates an AnalyticsStore backed by SQLite.
-func NewAnalyticsStore(db *sql.DB) store.AnalyticsStore {
-	return &analyticsStore{db: db, q: New(db)}
+func NewAnalyticsStore(db *bun.DB) store.AnalyticsStore {
+	return &analyticsStore{db: db}
 }
 
 // AggregateEndpointStats reads request_summaries and populates endpoint_stats.
@@ -65,15 +66,15 @@ func (s *analyticsStore) AggregateEndpointStats(ctx context.Context, period stri
 			return fmt.Errorf("querying endpoint stats: %w", err)
 		}
 
-		type row struct {
+		type aggRow struct {
 			service, method, controller, action, path string
 			requestCount, errorCount, clientErrorCount int
 			avgDur, maxDur, avgSQL                     float64
 			s2xx, s3xx, s4xx, s5xx                     int
 		}
-		var aggRows []row
+		var aggRows []aggRow
 		for rows.Next() {
-			var r row
+			var r aggRow
 			if err := rows.Scan(&r.service, &r.method, &r.controller, &r.action, &r.path,
 				&r.requestCount, &r.errorCount, &r.clientErrorCount,
 				&r.avgDur, &r.maxDur, &r.avgSQL,
@@ -85,9 +86,7 @@ func (s *analyticsStore) AggregateEndpointStats(ctx context.Context, period stri
 		}
 		rows.Close()
 
-		// Compute p95 per endpoint
 		for _, r := range aggRows {
-			// Get p95 for this specific endpoint
 			var p95 float64
 			p95Row := s.db.QueryRowContext(ctx, `
 				SELECT rs.duration_ms
@@ -101,10 +100,10 @@ func (s *analyticsStore) AggregateEndpointStats(ctx context.Context, period stri
 				LIMIT 1 OFFSET CAST(? * 0.95 AS INTEGER)
 			`, start, end, r.service, r.controller, r.action, r.requestCount)
 			if err := p95Row.Scan(&p95); err != nil {
-				p95 = r.avgDur // fallback
+				p95 = r.avgDur
 			}
 
-			_, err := s.db.ExecContext(ctx, `
+			_, err := s.db.NewRaw(`
 				INSERT INTO endpoint_stats (
 					period, period_start, service, method, controller, action, path_pattern,
 					request_count, error_count, client_error_count,
@@ -126,7 +125,8 @@ func (s *analyticsStore) AggregateEndpointStats(ctx context.Context, period stri
 			`, period, periodStart, r.service, r.method, r.controller, r.action, r.path,
 				r.requestCount, r.errorCount, r.clientErrorCount,
 				r.avgDur, p95, r.maxDur, r.avgSQL,
-				r.s2xx, r.s3xx, r.s4xx, r.s5xx)
+				r.s2xx, r.s3xx, r.s4xx, r.s5xx,
+			).Exec(ctx)
 			if err != nil {
 				return fmt.Errorf("upserting endpoint stat: %w", err)
 			}
@@ -156,7 +156,6 @@ func (s *analyticsStore) UpdateTrafficHeatmap(ctx context.Context, since time.Ti
 		return fmt.Errorf("querying heatmap data: %w", err)
 	}
 
-	// Collect all rows first to avoid holding connection during upserts
 	type heatmapRow struct {
 		service string
 		dow     int
@@ -177,7 +176,7 @@ func (s *analyticsStore) UpdateTrafficHeatmap(ctx context.Context, since time.Ti
 	rows.Close()
 
 	for _, h := range heatmapRows {
-		_, err := s.db.ExecContext(ctx, `
+		_, err := s.db.NewRaw(`
 			INSERT INTO traffic_heatmap (service, day_of_week, hour_of_day, request_count, error_count, avg_duration_ms, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(service, day_of_week, hour_of_day) DO UPDATE SET
@@ -185,7 +184,8 @@ func (s *analyticsStore) UpdateTrafficHeatmap(ctx context.Context, since time.Ti
 				error_count = excluded.error_count,
 				avg_duration_ms = excluded.avg_duration_ms,
 				updated_at = excluded.updated_at
-		`, h.service, h.dow, h.hod, h.cnt, h.errs, h.avgDur, time.Now().UTC().Format(time.RFC3339))
+		`, h.service, h.dow, h.hod, h.cnt, h.errs, h.avgDur, time.Now().UTC().Format(time.RFC3339),
+		).Exec(ctx)
 		if err != nil {
 			return fmt.Errorf("upserting heatmap cell: %w", err)
 		}
@@ -218,7 +218,6 @@ func (s *analyticsStore) TopEndpoints(ctx context.Context, params store.TopEndpo
 		limit = 20
 	}
 
-	// Aggregate across periods to get overall stats per endpoint
 	query := `
 		SELECT service, method, controller, action, path_pattern,
 		       SUM(request_count) as total_requests,
@@ -296,7 +295,6 @@ func (s *analyticsStore) TrafficSummary(ctx context.Context, params store.Analyt
 		MethodBreakdown: make(map[string]int),
 	}
 
-	// Overall counts
 	row := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) as total,
 		       COUNT(DISTINCT rs.controller || '#' || rs.action) as endpoints,
@@ -318,7 +316,6 @@ func (s *analyticsStore) TrafficSummary(ctx context.Context, params store.Analyt
 		summary.ErrorRate = float64(errors) / float64(totalReqs)
 	}
 
-	// P95 overall
 	p95Row := s.db.QueryRowContext(ctx, `
 		SELECT rs.duration_ms
 		FROM request_summaries rs
@@ -329,7 +326,6 @@ func (s *analyticsStore) TrafficSummary(ctx context.Context, params store.Analyt
 	`, append(args, totalReqs)...)
 	_ = p95Row.Scan(&summary.P95DurationMs)
 
-	// Status breakdown
 	statusRows, err := s.db.QueryContext(ctx, `
 		SELECT CASE
 			WHEN rs.status >= 200 AND rs.status < 300 THEN '2xx'
@@ -355,7 +351,6 @@ func (s *analyticsStore) TrafficSummary(ctx context.Context, params store.Analyt
 		statusRows.Close()
 	}
 
-	// Method breakdown
 	methodRows, err := s.db.QueryContext(ctx, `
 		SELECT COALESCE(rs.method, 'UNKNOWN') as method, COUNT(*) as cnt
 		FROM request_summaries rs
@@ -409,5 +404,10 @@ func (s *analyticsStore) TrafficHeatmap(ctx context.Context, service string) ([]
 // Prune removes old endpoint stats.
 func (s *analyticsStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
-	return s.q.PruneEndpointStats(ctx, cutoff)
+	res, err := s.db.NewRaw(`DELETE FROM endpoint_stats WHERE period_start < ?`, cutoff).Exec(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }

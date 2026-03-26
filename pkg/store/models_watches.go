@@ -1,6 +1,10 @@
 package store
 
-import "time"
+import (
+	"time"
+
+	"github.com/uptrace/bun"
+)
 
 // WatchMetric identifies what the watch measures.
 type WatchMetric string
@@ -50,30 +54,31 @@ const (
 
 // Watch represents a simplified metric threshold monitor.
 type Watch struct {
-	ID                  string         `json:"id"`
-	Metric              WatchMetric    `json:"metric"`
-	Operator            WatchOperator  `json:"operator"`
-	Threshold           float64        `json:"threshold"`
-	Service             string         `json:"service,omitempty"`
-	Endpoint            string         `json:"endpoint,omitempty"`
-	Environment         string         `json:"environment,omitempty"`
-	CommitHash          string         `json:"commit_hash,omitempty"`
-	Duration            string         `json:"duration"`
-	Urgency             WatchUrgency   `json:"urgency"`
-	CheckInterval       string         `json:"check_interval"`
-	BaselineWindow      string         `json:"baseline_window"`
-	MinConsecutive      int            `json:"min_consecutive"`
-	Status              WatchStatus    `json:"status"`
-	BaselineJSON        *WatchBaseline `json:"baseline,omitempty"`
-	ConsecutiveBreaches int            `json:"consecutive_breaches"`
-	CurrentValue        *float64       `json:"current_value,omitempty"`
-	ExpiresAt           *time.Time     `json:"expires_at,omitempty"`
-	CreatedBy           string         `json:"created_by,omitempty"`
-	SessionID           string         `json:"session_id,omitempty"`
-	LastCheckedAt       *time.Time     `json:"last_checked_at,omitempty"`
-	NextCheckAt         *time.Time     `json:"next_check_at,omitempty"`
-	CreatedAt           time.Time      `json:"created_at"`
-	UpdatedAt           time.Time      `json:"updated_at"`
+	bun.BaseModel       `bun:"table:watches" json:"-"`
+	ID                  string         `bun:"id,pk" json:"id"`
+	Metric              WatchMetric    `bun:"metric" json:"metric"`
+	Operator            WatchOperator  `bun:"operator" json:"operator"`
+	Threshold           float64        `bun:"threshold" json:"threshold"`
+	Service             string         `bun:"service" json:"service,omitempty"`
+	Endpoint            string         `bun:"endpoint" json:"endpoint,omitempty"`
+	Environment         string         `bun:"environment" json:"environment,omitempty"`
+	CommitHash          string         `bun:"commit_hash" json:"commit_hash,omitempty"`
+	Duration            string         `bun:"duration" json:"duration"`
+	Urgency             WatchUrgency   `bun:"urgency" json:"urgency"`
+	CheckInterval       string         `bun:"check_interval" json:"check_interval"`
+	BaselineWindow      string         `bun:"baseline_window" json:"baseline_window"`
+	MinConsecutive      int            `bun:"min_consecutive" json:"min_consecutive"`
+	Status              WatchStatus    `bun:"status" json:"status"`
+	BaselineJSON        *WatchBaseline `bun:"baseline_json" json:"baseline,omitempty"`
+	ConsecutiveBreaches int            `bun:"consecutive_breaches" json:"consecutive_breaches"`
+	CurrentValue        *float64       `bun:"current_value" json:"current_value,omitempty"`
+	ExpiresAt           *time.Time     `bun:"expires_at" json:"expires_at,omitempty"`
+	CreatedBy           string         `bun:"created_by" json:"created_by,omitempty"`
+	SessionID           string         `bun:"session_id" json:"session_id,omitempty"`
+	LastCheckedAt       *time.Time     `bun:"last_checked_at" json:"last_checked_at,omitempty"`
+	NextCheckAt         *time.Time     `bun:"next_check_at" json:"next_check_at,omitempty"`
+	CreatedAt           time.Time      `bun:"created_at" json:"created_at"`
+	UpdatedAt           time.Time      `bun:"updated_at" json:"updated_at"`
 }
 
 // CreateWatchParams defines the input for creating a watch.
@@ -105,31 +110,33 @@ type ListWatchParams struct {
 
 // WatchRun represents a single evaluation of a watch.
 type WatchRun struct {
-	ID           string     `json:"id"`
-	WatchID      string     `json:"watch_id"`
-	Status       string     `json:"status"`
-	MetricValue  *float64   `json:"metric_value,omitempty"`
-	Breached     bool       `json:"breached"`
-	Summary      string     `json:"summary,omitempty"`
-	ErrorMessage string     `json:"error_message,omitempty"`
-	StartedAt    time.Time  `json:"started_at"`
-	FinishedAt   *time.Time `json:"finished_at,omitempty"`
+	bun.BaseModel `bun:"table:watch_runs" json:"-"`
+	ID            string     `bun:"id,pk" json:"id"`
+	WatchID       string     `bun:"watch_id" json:"watch_id"`
+	Status        string     `bun:"status" json:"status"`
+	MetricValue   *float64   `bun:"metric_value" json:"metric_value,omitempty"`
+	Breached      bool       `bun:"breached" json:"breached"`
+	Summary       string     `bun:"summary" json:"summary,omitempty"`
+	ErrorMessage  string     `bun:"error_message" json:"error_message,omitempty"`
+	StartedAt     time.Time  `bun:"started_at" json:"started_at"`
+	FinishedAt    *time.Time `bun:"finished_at" json:"finished_at,omitempty"`
 }
 
 // WatchAlert represents an alert generated by a watch breach.
 type WatchAlert struct {
-	ID             string               `json:"id"`
-	WatchID        string               `json:"watch_id"`
-	RunID          string               `json:"run_id,omitempty"`
-	Urgency        WatchUrgency         `json:"urgency"`
-	Summary        string               `json:"summary"`
-	TriggerMetric  string               `json:"trigger_metric"`
-	TriggerValue   float64              `json:"trigger_value"`
-	ThresholdValue float64              `json:"threshold_value"`
-	EvidenceJSON   *WatchEvidenceBundle `json:"evidence,omitempty"`
-	Status         string               `json:"status"`
-	DismissReason  string               `json:"dismiss_reason,omitempty"`
-	CreatedAt      time.Time            `json:"created_at"`
+	bun.BaseModel  `bun:"table:watch_alerts" json:"-"`
+	ID             string               `bun:"id,pk" json:"id"`
+	WatchID        string               `bun:"watch_id" json:"watch_id"`
+	RunID          string               `bun:"run_id" json:"run_id,omitempty"`
+	Urgency        WatchUrgency         `bun:"urgency" json:"urgency"`
+	Summary        string               `bun:"summary" json:"summary"`
+	TriggerMetric  string               `bun:"trigger_metric" json:"trigger_metric"`
+	TriggerValue   float64              `bun:"trigger_value" json:"trigger_value"`
+	ThresholdValue float64              `bun:"threshold_value" json:"threshold_value"`
+	EvidenceJSON   *WatchEvidenceBundle `bun:"evidence_json" json:"evidence,omitempty"`
+	Status         string               `bun:"status" json:"status"`
+	DismissReason  string               `bun:"dismiss_reason" json:"dismiss_reason,omitempty"`
+	CreatedAt      time.Time            `bun:"created_at" json:"created_at"`
 }
 
 // CreateWatchAlertParams defines the input for creating a watch alert.

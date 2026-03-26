@@ -9,18 +9,19 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
+
 	"github.com/adham90/opentrace/pkg/store"
 )
 
-// dataSourceStore implements DataSourceStore using database/sql (SQLite).
+// dataSourceStore implements DataSourceStore using bun (SQLite).
 type dataSourceStore struct {
-	db *sql.DB
-	q  *Queries
+	db *bun.DB
 }
 
 // NewDataSourceStore creates a new DataSourceStore backed by SQLite.
-func NewDataSourceStore(db *sql.DB) store.DataSourceStore {
-	return &dataSourceStore{db: db, q: New(db)}
+func NewDataSourceStore(db *bun.DB) store.DataSourceStore {
+	return &dataSourceStore{db: db}
 }
 
 func (s *dataSourceStore) Create(ctx context.Context, params store.CreateDataSourceParams) (*store.DataSource, error) {
@@ -33,14 +34,12 @@ func (s *dataSourceStore) Create(ctx context.Context, params store.CreateDataSou
 	now := time.Now().UTC()
 	nowStr := now.Format(time.RFC3339)
 
-	err = s.q.CreateDataSource(ctx, CreateDataSourceParams{
-		ID:        id.String(),
-		Type:      string(params.Type),
-		Name:      params.Name,
-		Config:    string(configJSON),
-		CreatedAt: nowStr,
-		UpdatedAt: nowStr,
-	})
+	_, err = s.db.NewRaw(
+		`INSERT INTO data_sources (id, type, name, config, status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id.String(), string(params.Type), params.Name, string(configJSON),
+		string(store.StatusDisconnected), nowStr, nowStr,
+	).Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("inserting data source: %w", err)
 	}
@@ -57,53 +56,32 @@ func (s *dataSourceStore) Create(ctx context.Context, params store.CreateDataSou
 }
 
 func (s *dataSourceStore) GetByID(ctx context.Context, id uuid.UUID) (*store.DataSource, error) {
-	row, err := s.q.GetDataSourceByID(ctx, id.String())
+	ds := new(store.DataSource)
+	err := s.db.NewSelect().Model(ds).Where("id = ?", id.String()).Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, store.ErrNotFound
 		}
 		return nil, fmt.Errorf("querying data source: %w", err)
 	}
-	ds, err := toStoreDataSourceFromRow(row)
-	if err != nil {
-		return nil, err
-	}
-	return &ds, nil
+	return ds, nil
 }
 
 func (s *dataSourceStore) List(ctx context.Context, params store.ListDataSourceParams) ([]store.DataSource, error) {
+	sources := make([]store.DataSource, 0)
+	q := s.db.NewSelect().Model(&sources)
 	if params.Type != "" {
-		rows, err := s.q.ListDataSourcesByType(ctx, string(params.Type))
-		if err != nil {
-			return nil, fmt.Errorf("querying data sources: %w", err)
-		}
-		result := make([]store.DataSource, 0, len(rows))
-		for _, r := range rows {
-			ds, err := toStoreDataSourceFromTypeRow(r)
-			if err != nil {
-				return nil, err
-			}
-			result = append(result, ds)
-		}
-		return result, nil
+		q = q.Where("type = ?", string(params.Type))
 	}
-
-	rows, err := s.q.ListAllDataSources(ctx)
+	q = q.OrderExpr("name ASC")
+	err := q.Scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("querying data sources: %w", err)
 	}
-	result := make([]store.DataSource, 0, len(rows))
-	for _, r := range rows {
-		ds, err := toStoreDataSourceFromListRow(r)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, ds)
-	}
-	return result, nil
+	return sources, nil
 }
 
-// Update uses dynamic SET clause — kept hand-written.
+// Update uses COALESCE for dynamic SET clause.
 func (s *dataSourceStore) Update(ctx context.Context, id uuid.UUID, params store.UpdateDataSourceParams) (*store.DataSource, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -137,7 +115,7 @@ func (s *dataSourceStore) Update(ctx context.Context, id uuid.UUID, params store
 		statusStr = &disconnected
 	}
 
-	result, err := s.db.ExecContext(ctx,
+	result, err := s.db.NewRaw(
 		`UPDATE data_sources
 		 SET name = COALESCE(?, name),
 		     config = COALESCE(?, config),
@@ -147,7 +125,7 @@ func (s *dataSourceStore) Update(ctx context.Context, id uuid.UUID, params store
 		     updated_at = ?
 		 WHERE id = ?`,
 		nameStr, configStr, statusStr, statusMsg, testedAt, now, id.String(),
-	)
+	).Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("updating data source: %w", err)
 	}
@@ -160,10 +138,13 @@ func (s *dataSourceStore) Update(ctx context.Context, id uuid.UUID, params store
 }
 
 func (s *dataSourceStore) Delete(ctx context.Context, id uuid.UUID) error {
-	n, err := s.q.DeleteDataSource(ctx, id.String())
+	res, err := s.db.NewDelete().Model((*store.DataSource)(nil)).
+		Where("id = ?", id.String()).
+		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("deleting data source: %w", err)
 	}
+	n, _ := res.RowsAffected()
 	if n == 0 {
 		return store.ErrNotFound
 	}

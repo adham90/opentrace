@@ -4,24 +4,24 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
-	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
+
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 type watchStore struct {
-	db *sql.DB
-	q  *Queries
+	db *bun.DB
 }
 
 // NewWatchStore creates a new WatchStore backed by SQLite.
-func NewWatchStore(db *sql.DB) store.WatchStore {
-	return &watchStore{db: db, q: New(db)}
+func NewWatchStore(db *bun.DB) store.WatchStore {
+	return &watchStore{db: db}
 }
 
 func (s *watchStore) Create(ctx context.Context, params store.CreateWatchParams) (*store.Watch, error) {
@@ -76,28 +76,17 @@ func (s *watchStore) Create(ctx context.Context, params store.CreateWatchParams)
 		nextCheckAt = nullString(now.Add(ci).Format(time.RFC3339))
 	}
 
-	err = s.q.CreateWatch(ctx, CreateWatchParams{
-		ID:             id,
-		Metric:         string(params.Metric),
-		Operator:       string(params.Operator),
-		Threshold:      params.Threshold,
-		Service:        params.Service,
-		Endpoint:       params.Endpoint,
-		Environment:    params.Environment,
-		CommitHash:     params.CommitHash,
-		Duration:       duration,
-		Urgency:        string(urgency),
-		CheckInterval:  checkInterval,
-		BaselineWindow: baselineWindow,
-		MinConsecutive: int64(minConsecutive),
-		Status:         string(store.WatchStatusActive),
-		ExpiresAt:      expiresAt,
-		CreatedBy:      params.CreatedBy,
-		SessionID:      params.SessionID,
-		NextCheckAt:    nextCheckAt,
-		CreatedAt:      nowStr,
-		UpdatedAt:      nowStr,
-	})
+	_, err = s.db.NewRaw(`
+		INSERT INTO watches (id, metric, operator, threshold, service, endpoint, environment,
+			commit_hash, duration, urgency, check_interval, baseline_window, min_consecutive,
+			status, expires_at, created_by, session_id, next_check_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, string(params.Metric), string(params.Operator), params.Threshold,
+		params.Service, params.Endpoint, params.Environment, params.CommitHash,
+		duration, string(urgency), checkInterval, baselineWindow, minConsecutive,
+		string(store.WatchStatusActive), expiresAt, params.CreatedBy, params.SessionID,
+		nextCheckAt, nowStr, nowStr,
+	).Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("inserting watch: %w", err)
 	}
@@ -106,46 +95,56 @@ func (s *watchStore) Create(ctx context.Context, params store.CreateWatchParams)
 }
 
 func (s *watchStore) GetByID(ctx context.Context, id string) (*store.Watch, error) {
-	row, err := s.q.GetWatch(ctx, id)
-	if errors.Is(err, sql.ErrNoRows) {
+	w, err := s.scanSingleWatch(ctx, `
+		SELECT id, metric, operator, threshold, service, endpoint, environment, commit_hash,
+			duration, urgency, check_interval, baseline_window, min_consecutive, status,
+			baseline_json, consecutive_breaches, current_value, expires_at, created_by,
+			session_id, last_checked_at, next_check_at, created_at, updated_at
+		FROM watches WHERE id = ?`, id)
+	if err == sql.ErrNoRows {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying watch: %w", err)
 	}
-	return watchToStore(row), nil
+	return w, nil
 }
 
 func (s *watchStore) List(ctx context.Context, params store.ListWatchParams) ([]store.Watch, error) {
-	qb := psql.Select(
-		"id", "metric", "operator", "threshold", "service", "endpoint", "environment", "commit_hash",
-		"duration", "urgency", "check_interval", "baseline_window", "min_consecutive", "status",
-		"baseline_json", "consecutive_breaches", "current_value", "expires_at", "created_by",
-		"session_id", "last_checked_at", "next_check_at", "created_at", "updated_at").
-		From("watches")
+	var conditions []string
+	var args []any
 
 	if params.Status != "" {
-		qb = qb.Where(sq.Eq{"status": string(params.Status)})
+		conditions = append(conditions, "status = ?")
+		args = append(args, string(params.Status))
 	}
 	if params.Service != "" {
-		qb = qb.Where(sq.Eq{"service": params.Service})
+		conditions = append(conditions, "service = ?")
+		args = append(args, params.Service)
 	}
 	if params.SessionID != "" {
-		qb = qb.Where(sq.Eq{"session_id": params.SessionID})
+		conditions = append(conditions, "session_id = ?")
+		args = append(args, params.SessionID)
 	}
 
-	qb = qb.OrderBy("created_at DESC")
+	query := `SELECT id, metric, operator, threshold, service, endpoint, environment, commit_hash,
+		duration, urgency, check_interval, baseline_window, min_consecutive, status,
+		baseline_json, consecutive_breaches, current_value, expires_at, created_by,
+		session_id, last_checked_at, next_check_at, created_at, updated_at
+		FROM watches`
+
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += " ORDER BY created_at DESC"
 
 	if params.Limit > 0 {
-		qb = qb.Limit(uint64(params.Limit))
+		query += " LIMIT ?"
+		args = append(args, params.Limit)
 		if params.Offset > 0 {
-			qb = qb.Offset(uint64(params.Offset))
+			query += " OFFSET ?"
+			args = append(args, params.Offset)
 		}
-	}
-
-	query, args, err := qb.ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("building list query: %w", err)
 	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -167,14 +166,14 @@ func (s *watchStore) List(ctx context.Context, params store.ListWatchParams) ([]
 
 func (s *watchStore) UpdateStatus(ctx context.Context, id string, status store.WatchStatus) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	n, err := s.q.UpdateWatchStatus(ctx, UpdateWatchStatusParams{
-		Status:    string(status),
-		UpdatedAt: now,
-		ID:        id,
-	})
+	res, err := s.db.NewRaw(`
+		UPDATE watches SET status = ?, updated_at = ? WHERE id = ?`,
+		string(status), now, id,
+	).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("updating watch status: %w", err)
 	}
+	n, _ := res.RowsAffected()
 	if n == 0 {
 		return store.ErrNotFound
 	}
@@ -183,17 +182,21 @@ func (s *watchStore) UpdateStatus(ctx context.Context, id string, status store.W
 
 func (s *watchStore) UpdateAfterCheck(ctx context.Context, id string, value float64, breaches int, nextCheck time.Time) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	n, err := s.q.UpdateWatchAfterCheck(ctx, UpdateWatchAfterCheckParams{
-		CurrentValue:        sql.NullFloat64{Float64: value, Valid: true},
-		ConsecutiveBreaches: int64(breaches),
-		LastCheckedAt:       sql.NullString{String: now, Valid: true},
-		NextCheckAt:         sql.NullString{String: nextCheck.Format(time.RFC3339), Valid: true},
-		UpdatedAt:           now,
-		ID:                  id,
-	})
+	res, err := s.db.NewRaw(`
+		UPDATE watches SET
+			current_value = ?,
+			consecutive_breaches = ?,
+			last_checked_at = ?,
+			next_check_at = ?,
+			updated_at = ?
+		WHERE id = ?`,
+		sql.NullFloat64{Float64: value, Valid: true},
+		breaches, now, nextCheck.Format(time.RFC3339), now, id,
+	).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("updating watch after check: %w", err)
 	}
+	n, _ := res.RowsAffected()
 	if n == 0 {
 		return store.ErrNotFound
 	}
@@ -211,14 +214,14 @@ func (s *watchStore) UpdateBaseline(ctx context.Context, id string, baseline *st
 		baselineStr = sql.NullString{String: string(b), Valid: true}
 	}
 
-	n, err := s.q.UpdateWatchBaseline(ctx, UpdateWatchBaselineParams{
-		BaselineJson: baselineStr,
-		UpdatedAt:    now,
-		ID:           id,
-	})
+	res, err := s.db.NewRaw(`
+		UPDATE watches SET baseline_json = ?, updated_at = ? WHERE id = ?`,
+		baselineStr, now, id,
+	).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("updating watch baseline: %w", err)
 	}
+	n, _ := res.RowsAffected()
 	if n == 0 {
 		return store.ErrNotFound
 	}
@@ -226,10 +229,11 @@ func (s *watchStore) UpdateBaseline(ctx context.Context, id string, baseline *st
 }
 
 func (s *watchStore) Delete(ctx context.Context, id string) error {
-	n, err := s.q.DeleteWatch(ctx, id)
+	res, err := s.db.NewRaw(`DELETE FROM watches WHERE id = ?`, id).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("deleting watch: %w", err)
 	}
+	n, _ := res.RowsAffected()
 	if n == 0 {
 		return store.ErrNotFound
 	}
@@ -238,19 +242,41 @@ func (s *watchStore) Delete(ctx context.Context, id string) error {
 
 func (s *watchStore) GetDueWatches(ctx context.Context) ([]store.Watch, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	rows, err := s.q.GetDueWatches(ctx, sql.NullString{String: now, Valid: true})
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, metric, operator, threshold, service, endpoint, environment, commit_hash,
+			duration, urgency, check_interval, baseline_window, min_consecutive, status,
+			baseline_json, consecutive_breaches, current_value, expires_at, created_by,
+			session_id, last_checked_at, next_check_at, created_at, updated_at
+		FROM watches
+		WHERE status = 'active' AND (next_check_at IS NULL OR next_check_at <= ?)`, now)
 	if err != nil {
 		return nil, fmt.Errorf("querying due watches: %w", err)
 	}
-	return watchesToStore(rows), nil
+	defer rows.Close()
+
+	var result []store.Watch
+	for rows.Next() {
+		w, err := scanWatch(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *w)
+	}
+	return result, rows.Err()
 }
 
 func (s *watchStore) ExpireWatches(ctx context.Context) (int, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	n, err := s.q.ExpireWatches(ctx, now)
+	res, err := s.db.NewRaw(`
+		UPDATE watches SET status = 'expired', updated_at = ?
+		WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at <= ?`,
+		now, now,
+	).Exec(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("expiring watches: %w", err)
 	}
+	n, _ := res.RowsAffected()
 	return int(n), nil
 }
 
@@ -260,11 +286,10 @@ func (s *watchStore) CreateRun(ctx context.Context, watchID string) (*store.Watc
 	id := uuid.New().String()
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	err := s.q.CreateWatchRun(ctx, CreateWatchRunParams{
-		ID:        id,
-		WatchID:   watchID,
-		StartedAt: now,
-	})
+	_, err := s.db.NewRaw(`
+		INSERT INTO watch_runs (id, watch_id, started_at)
+		VALUES (?, ?, ?)`, id, watchID, now,
+	).Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("inserting watch run: %w", err)
 	}
@@ -279,16 +304,23 @@ func (s *watchStore) CreateRun(ctx context.Context, watchID string) (*store.Watc
 
 func (s *watchStore) CompleteRun(ctx context.Context, id string, value float64, breached bool, summary string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	n, err := s.q.CompleteWatchRun(ctx, CompleteWatchRunParams{
-		MetricValue: sql.NullFloat64{Float64: value, Valid: true},
-		Breached:    boolToInt64(breached),
-		Summary:     sql.NullString{String: summary, Valid: summary != ""},
-		FinishedAt:  sql.NullString{String: now, Valid: true},
-		ID:          id,
-	})
+	res, err := s.db.NewRaw(`
+		UPDATE watch_runs SET
+			status = 'completed',
+			metric_value = ?,
+			breached = ?,
+			summary = ?,
+			finished_at = ?
+		WHERE id = ?`,
+		sql.NullFloat64{Float64: value, Valid: true},
+		boolToInt64(breached),
+		sql.NullString{String: summary, Valid: summary != ""},
+		now, id,
+	).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("completing watch run: %w", err)
 	}
+	n, _ := res.RowsAffected()
 	if n == 0 {
 		return store.ErrNotFound
 	}
@@ -297,14 +329,19 @@ func (s *watchStore) CompleteRun(ctx context.Context, id string, value float64, 
 
 func (s *watchStore) FailRun(ctx context.Context, id string, errMsg string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	n, err := s.q.FailWatchRun(ctx, FailWatchRunParams{
-		ErrorMessage: sql.NullString{String: errMsg, Valid: errMsg != ""},
-		FinishedAt:   sql.NullString{String: now, Valid: true},
-		ID:           id,
-	})
+	res, err := s.db.NewRaw(`
+		UPDATE watch_runs SET
+			status = 'failed',
+			error_message = ?,
+			finished_at = ?
+		WHERE id = ?`,
+		sql.NullString{String: errMsg, Valid: errMsg != ""},
+		now, id,
+	).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("failing watch run: %w", err)
 	}
+	n, _ := res.RowsAffected()
 	if n == 0 {
 		return store.ErrNotFound
 	}
@@ -315,14 +352,56 @@ func (s *watchStore) ListRuns(ctx context.Context, watchID string, limit int) ([
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := s.q.ListWatchRuns(ctx, ListWatchRunsParams{
-		WatchID:  watchID,
-		RowLimit: int64(limit),
-	})
+
+	type row struct {
+		ID           string          `bun:"id"`
+		WatchID      string          `bun:"watch_id"`
+		Status       string          `bun:"status"`
+		MetricValue  sql.NullFloat64 `bun:"metric_value"`
+		Breached     int64           `bun:"breached"`
+		Summary      sql.NullString  `bun:"summary"`
+		ErrorMessage sql.NullString  `bun:"error_message"`
+		StartedAt    string          `bun:"started_at"`
+		FinishedAt   sql.NullString  `bun:"finished_at"`
+	}
+
+	var rows []row
+	err := s.db.NewRaw(`
+		SELECT id, watch_id, status, metric_value, breached, summary,
+			error_message, started_at, finished_at
+		FROM watch_runs
+		WHERE watch_id = ?
+		ORDER BY started_at DESC
+		LIMIT ?`, watchID, limit,
+	).Scan(ctx, &rows)
 	if err != nil {
 		return nil, fmt.Errorf("querying watch runs: %w", err)
 	}
-	return watchRunsToStore(rows), nil
+
+	result := make([]store.WatchRun, len(rows))
+	for i, r := range rows {
+		result[i] = store.WatchRun{
+			ID:        r.ID,
+			WatchID:   r.WatchID,
+			Status:    r.Status,
+			Breached:  r.Breached == 1,
+			StartedAt: parseTime(r.StartedAt),
+		}
+		if r.MetricValue.Valid {
+			result[i].MetricValue = &r.MetricValue.Float64
+		}
+		if r.Summary.Valid {
+			result[i].Summary = r.Summary.String
+		}
+		if r.ErrorMessage.Valid {
+			result[i].ErrorMessage = r.ErrorMessage.String
+		}
+		if r.FinishedAt.Valid {
+			t := parseTime(r.FinishedAt.String)
+			result[i].FinishedAt = &t
+		}
+	}
+	return result, nil
 }
 
 // --- Alert CRUD ---
@@ -340,18 +419,14 @@ func (s *watchStore) CreateAlert(ctx context.Context, params store.CreateWatchAl
 		evidenceStr = sql.NullString{String: string(b), Valid: true}
 	}
 
-	err := s.q.CreateWatchAlert(ctx, CreateWatchAlertParams{
-		ID:             id,
-		WatchID:        params.WatchID,
-		RunID:          nullString(params.RunID),
-		Urgency:        string(params.Urgency),
-		Summary:        params.Summary,
-		TriggerMetric:  params.TriggerMetric,
-		TriggerValue:   params.TriggerValue,
-		ThresholdValue: params.ThresholdValue,
-		EvidenceJson:   evidenceStr,
-		CreatedAt:      now,
-	})
+	_, err := s.db.NewRaw(`
+		INSERT INTO watch_alerts (id, watch_id, run_id, urgency, summary,
+			trigger_metric, trigger_value, threshold_value, evidence_json, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, params.WatchID, nullString(params.RunID), string(params.Urgency),
+		params.Summary, params.TriggerMetric, params.TriggerValue,
+		params.ThresholdValue, evidenceStr, now,
+	).Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("inserting watch alert: %w", err)
 	}
@@ -360,14 +435,17 @@ func (s *watchStore) CreateAlert(ctx context.Context, params store.CreateWatchAl
 }
 
 func (s *watchStore) GetAlert(ctx context.Context, id string) (*store.WatchAlert, error) {
-	row, err := s.q.GetWatchAlert(ctx, id)
-	if errors.Is(err, sql.ErrNoRows) {
+	a, err := s.scanSingleAlert(ctx, `
+		SELECT id, watch_id, run_id, urgency, summary, trigger_metric, trigger_value,
+			threshold_value, evidence_json, status, dismiss_reason, created_at
+		FROM watch_alerts WHERE id = ?`, id)
+	if err == sql.ErrNoRows {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying watch alert: %w", err)
 	}
-	return watchAlertToStore(row), nil
+	return a, nil
 }
 
 func (s *watchStore) ListAlerts(ctx context.Context, watchID string, status string, limit int) ([]store.WatchAlert, error) {
@@ -375,23 +453,27 @@ func (s *watchStore) ListAlerts(ctx context.Context, watchID string, status stri
 		limit = 20
 	}
 
-	qb := psql.Select(
-		"id", "watch_id", "run_id", "urgency", "summary", "trigger_metric", "trigger_value",
-		"threshold_value", "evidence_json", "status", "dismiss_reason", "created_at").
-		From("watch_alerts")
+	var conditions []string
+	var args []any
 
 	if watchID != "" {
-		qb = qb.Where(sq.Eq{"watch_id": watchID})
+		conditions = append(conditions, "watch_id = ?")
+		args = append(args, watchID)
 	}
 	if status != "" {
-		qb = qb.Where(sq.Eq{"status": status})
+		conditions = append(conditions, "status = ?")
+		args = append(args, status)
 	}
-	qb = qb.OrderBy("created_at DESC").Limit(uint64(limit))
 
-	query, args, err := qb.ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("building list alerts query: %w", err)
+	query := `SELECT id, watch_id, run_id, urgency, summary, trigger_metric, trigger_value,
+		threshold_value, evidence_json, status, dismiss_reason, created_at
+		FROM watch_alerts`
+
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
+	query += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, limit)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -411,13 +493,14 @@ func (s *watchStore) ListAlerts(ctx context.Context, watchID string, status stri
 }
 
 func (s *watchStore) DismissAlert(ctx context.Context, id string, reason string) error {
-	n, err := s.q.DismissWatchAlert(ctx, DismissWatchAlertParams{
-		DismissReason: sql.NullString{String: reason, Valid: reason != ""},
-		ID:            id,
-	})
+	res, err := s.db.NewRaw(`
+		UPDATE watch_alerts SET status = 'dismissed', dismiss_reason = ? WHERE id = ?`,
+		sql.NullString{String: reason, Valid: reason != ""}, id,
+	).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("dismissing watch alert: %w", err)
 	}
+	n, _ := res.RowsAffected()
 	if n == 0 {
 		return store.ErrNotFound
 	}
@@ -425,10 +508,13 @@ func (s *watchStore) DismissAlert(ctx context.Context, id string, reason string)
 }
 
 func (s *watchStore) AcknowledgeAlert(ctx context.Context, id string) error {
-	n, err := s.q.AcknowledgeWatchAlert(ctx, id)
+	res, err := s.db.NewRaw(`
+		UPDATE watch_alerts SET status = 'acknowledged' WHERE id = ?`, id,
+	).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("acknowledging watch alert: %w", err)
 	}
+	n, _ := res.RowsAffected()
 	if n == 0 {
 		return store.ErrNotFound
 	}
@@ -436,14 +522,15 @@ func (s *watchStore) AcknowledgeAlert(ctx context.Context, id string) error {
 }
 
 func (s *watchStore) CountPendingAlerts(ctx context.Context) (int, error) {
-	n, err := s.q.CountPendingAlerts(ctx)
+	var n int
+	err := s.db.NewRaw(`SELECT COUNT(*) FROM watch_alerts WHERE status = 'pending'`).Scan(ctx, &n)
 	if err != nil {
 		return 0, fmt.Errorf("counting pending watch alerts: %w", err)
 	}
-	return int(n), nil
+	return n, nil
 }
 
-// scanWatch and scanWatchAlert kept for squirrel dynamic queries
+// scanWatch and scanWatchAlert kept for dynamic queries
 func scanWatch(sc interface{ Scan(...any) error }) (*store.Watch, error) {
 	w := &store.Watch{}
 	var baselineStr sql.NullString
@@ -520,4 +607,16 @@ func scanWatchAlert(sc interface{ Scan(...any) error }) (*store.WatchAlert, erro
 	}
 	a.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	return a, nil
+}
+
+// scanSingleWatch scans a single watch from a raw query.
+func (s *watchStore) scanSingleWatch(ctx context.Context, query string, args ...any) (*store.Watch, error) {
+	row := s.db.QueryRowContext(ctx, query, args...)
+	return scanWatch(row)
+}
+
+// scanSingleAlert scans a single alert from a raw query.
+func (s *watchStore) scanSingleAlert(ctx context.Context, query string, args ...any) (*store.WatchAlert, error) {
+	row := s.db.QueryRowContext(ctx, query, args...)
+	return scanWatchAlert(row)
 }

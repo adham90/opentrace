@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
 )
 
 // ServerStatus represents the health status of a monitored server.
@@ -17,18 +18,19 @@ const (
 
 // Server represents a monitored VM or host.
 type Server struct {
-	ID           uuid.UUID         `json:"id"`
-	Hostname     string            `json:"hostname"`
-	DisplayName  string            `json:"display_name,omitempty"`
-	IPAddress    string            `json:"ip_address,omitempty"`
-	OS           string            `json:"os,omitempty"`
-	Arch         string            `json:"arch,omitempty"`
-	AgentVersion string            `json:"agent_version,omitempty"`
-	Labels       map[string]string `json:"labels,omitempty"`
-	Status       ServerStatus      `json:"status"`
-	LastSeenAt   *time.Time        `json:"last_seen_at,omitempty"`
-	CreatedAt    time.Time         `json:"created_at"`
-	UpdatedAt    time.Time         `json:"updated_at"`
+	bun.BaseModel `bun:"table:servers" json:"-"`
+	ID            uuid.UUID         `bun:"id,pk" json:"id"`
+	Hostname      string            `bun:"hostname" json:"hostname"`
+	DisplayName   string            `bun:"display_name" json:"display_name,omitempty"`
+	IPAddress     string            `bun:"ip_address" json:"ip_address,omitempty"`
+	OS            string            `bun:"os" json:"os,omitempty"`
+	Arch          string            `bun:"arch" json:"arch,omitempty"`
+	AgentVersion  string            `bun:"agent_version" json:"agent_version,omitempty"`
+	Labels        map[string]string `bun:"labels" json:"labels,omitempty"`
+	Status        ServerStatus      `bun:"status" json:"status"`
+	LastSeenAt    *time.Time        `bun:"last_seen_at" json:"last_seen_at,omitempty"`
+	CreatedAt     time.Time         `bun:"created_at" json:"created_at"`
+	UpdatedAt     time.Time         `bun:"updated_at" json:"updated_at"`
 }
 
 // UpdateServerParams defines the input for updating a server's user-facing fields.
@@ -48,13 +50,14 @@ type RegisterServerParams struct {
 
 // MetricPoint represents a single metric data point returned by queries.
 type MetricPoint struct {
-	ID          int64             `json:"id"`
-	ServerID    uuid.UUID         `json:"server_id"`
-	Timestamp   time.Time         `json:"timestamp"`
-	MetricName  string            `json:"metric_name"`
-	MetricValue float64           `json:"metric_value"`
-	Unit        string            `json:"unit,omitempty"`
-	Labels      map[string]string `json:"labels,omitempty"`
+	bun.BaseModel `bun:"table:metrics" json:"-"`
+	ID            int64             `bun:"id,pk,autoincrement" json:"id"`
+	ServerID      uuid.UUID         `bun:"server_id" json:"server_id"`
+	Timestamp     time.Time         `bun:"timestamp" json:"timestamp"`
+	MetricName    string            `bun:"metric_name" json:"metric_name"`
+	MetricValue   float64           `bun:"metric_value" json:"metric_value"`
+	Unit          string            `bun:"unit" json:"unit,omitempty"`
+	Labels        map[string]string `bun:"labels" json:"labels,omitempty"`
 }
 
 // MetricSample is a single metric in an ingestion batch (no server_id or timestamp — those come from the batch context).

@@ -1,12 +1,13 @@
 package db
 
 import (
-	"database/sql"
 	"testing"
+
+	"github.com/uptrace/bun"
 )
 
 // setupTestDB opens an in-memory SQLite database with migrations applied.
-func setupTestDB(t *testing.T) *sql.DB {
+func setupTestDB(t *testing.T) *bun.DB {
 	t.Helper()
 
 	db, err := OpenSQLite(":memory:")

@@ -5,87 +5,76 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
+
+	"github.com/uptrace/bun"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 type eventStore struct {
-	db *sql.DB
-	q  *Queries
+	db *bun.DB
 }
 
 // NewEventStore creates a new EventStore backed by SQLite.
-func NewEventStore(db *sql.DB) store.EventStore {
-	return &eventStore{db: db, q: New(db)}
+func NewEventStore(db *bun.DB) store.EventStore {
+	return &eventStore{db: db}
 }
 
 func (s *eventStore) Create(ctx context.Context, params store.CreateEventParams) (*store.Event, error) {
-	metadataJSON := "{}"
-	if params.Metadata != nil {
-		b, err := json.Marshal(params.Metadata)
-		if err != nil {
-			return nil, fmt.Errorf("marshaling event metadata: %w", err)
-		}
-		metadataJSON = string(b)
+	now := time.Now().UTC()
+
+	e := store.Event{
+		EventType:   params.EventType,
+		Source:      params.Source,
+		Service:     params.Service,
+		Title:       params.Title,
+		Description: params.Description,
+		Metadata:    params.Metadata,
+		ExternalID:  params.ExternalID,
+		ExternalURL: params.ExternalURL,
+		Author:      params.Author,
+		CreatedAt:   now,
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	// Ensure metadata has a default for storage
+	if e.Metadata == nil {
+		e.Metadata = map[string]any{}
+	}
 
-	row, err := s.q.CreateEvent(ctx, CreateEventParams{
-		EventType:    string(params.EventType),
-		Source:       params.Source,
-		Service:      params.Service,
-		Title:        params.Title,
-		Description:  params.Description,
-		MetadataJson: metadataJSON,
-		ExternalID:   params.ExternalID,
-		ExternalUrl:  params.ExternalURL,
-		Author:       params.Author,
-		CreatedAt:    now,
-	})
+	_, err := s.db.NewInsert().Model(&e).Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("creating event: %w", err)
 	}
 
-	e := toStoreEvent(row)
 	return &e, nil
 }
 
 func (s *eventStore) GetByID(ctx context.Context, id int64) (*store.Event, error) {
-	row, err := s.q.GetEventByID(ctx, id)
+	e := new(store.Event)
+	err := s.db.NewSelect().Model(e).Where("id = ?", id).Scan(ctx)
 	if err == sql.ErrNoRows {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying event: %w", err)
 	}
-	e := toStoreEvent(row)
-	return &e, nil
+	return e, nil
 }
 
-// List uses dynamic WHERE clauses — kept hand-written.
+// List uses dynamic WHERE clauses built with bun's query builder.
 func (s *eventStore) List(ctx context.Context, params store.ListEventParams) ([]store.Event, error) {
-	var where []string
-	var args []any
+	var events []store.Event
+	q := s.db.NewSelect().Model(&events)
 
 	if params.EventType != "" {
-		where = append(where, "event_type = ?")
-		args = append(args, string(params.EventType))
+		q = q.Where("event_type = ?", string(params.EventType))
 	}
 	if params.Service != "" {
-		where = append(where, "service = ?")
-		args = append(args, params.Service)
+		q = q.Where("service = ?", params.Service)
 	}
 	if !params.Since.IsZero() {
-		where = append(where, "created_at >= ?")
-		args = append(args, params.Since.Format(time.RFC3339))
-	}
-
-	whereClause := ""
-	if len(where) > 0 {
-		whereClause = "WHERE " + strings.Join(where, " AND ")
+		q = q.Where("created_at >= ?", params.Since.Format(time.RFC3339))
 	}
 
 	limit := params.Limit
@@ -95,52 +84,42 @@ func (s *eventStore) List(ctx context.Context, params store.ListEventParams) ([]
 	if limit > 200 {
 		limit = 200
 	}
+	q = q.OrderExpr("created_at DESC").Limit(limit)
 
-	query := fmt.Sprintf(
-		`SELECT id, event_type, source, service, title, description, metadata_json, external_id, external_url, author, created_at
-		 FROM events %s ORDER BY created_at DESC LIMIT ?`, whereClause)
-	args = append(args, limit)
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	err := q.Scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing events: %w", err)
 	}
-	defer rows.Close()
-
-	var events []store.Event
-	for rows.Next() {
-		e, err := scanEventRow(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scanning event: %w", err)
-		}
-		events = append(events, *e)
-	}
-	return events, rows.Err()
+	return events, nil
 }
 
 func (s *eventStore) GetByExternalID(ctx context.Context, eventType store.EventType, externalID string) (*store.Event, error) {
-	row, err := s.q.GetEventByExternalID(ctx, GetEventByExternalIDParams{
-		EventType:  string(eventType),
-		ExternalID: externalID,
-	})
+	e := new(store.Event)
+	err := s.db.NewSelect().Model(e).
+		Where("event_type = ?", string(eventType)).
+		Where("external_id = ?", externalID).
+		Scan(ctx)
 	if err == sql.ErrNoRows {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying event by external ID: %w", err)
 	}
-	e := toStoreEvent(row)
-	return &e, nil
+	return e, nil
 }
 
 func (s *eventStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
 	var totalDeleted int64
 	for {
-		n, err := s.q.PruneEvents(ctx, cutoff)
+		res, err := s.db.NewRaw(
+			"DELETE FROM events WHERE rowid IN (SELECT e.rowid FROM events e WHERE e.created_at < ? LIMIT 1000)",
+			cutoff,
+		).Exec(ctx)
 		if err != nil {
 			return totalDeleted, fmt.Errorf("pruning events: %w", err)
 		}
+		n, _ := res.RowsAffected()
 		totalDeleted += n
 		if n < 1000 {
 			break
@@ -149,22 +128,14 @@ func (s *eventStore) Prune(ctx context.Context, olderThan time.Duration) (int64,
 	return totalDeleted, nil
 }
 
-func scanEventRow(rows *sql.Rows) (*store.Event, error) {
-	var e store.Event
-	var metadataJSON, createdAt string
-
-	err := rows.Scan(
-		&e.ID, &e.EventType, &e.Source, &e.Service,
-		&e.Title, &e.Description, &metadataJSON,
-		&e.ExternalID, &e.ExternalURL, &e.Author, &createdAt,
-	)
+// marshalMetadataJSON is a helper for JSON metadata fields (unused after bun handles it via model tags).
+func marshalMetadataJSON(m map[string]any) string {
+	if m == nil {
+		return "{}"
+	}
+	b, err := json.Marshal(m)
 	if err != nil {
-		return nil, err
+		return "{}"
 	}
-
-	if metadataJSON != "" && metadataJSON != "{}" {
-		_ = json.Unmarshal([]byte(metadataJSON), &e.Metadata)
-	}
-	e.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	return &e, nil
+	return string(b)
 }

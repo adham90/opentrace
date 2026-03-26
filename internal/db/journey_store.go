@@ -4,31 +4,28 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/uptrace/bun"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 type journeyStore struct {
-	db *sql.DB
-	q  *Queries
+	db *bun.DB
 }
 
 // NewJourneyStore creates a JourneyStore backed by SQLite.
-func NewJourneyStore(db *sql.DB) store.JourneyStore {
-	return &journeyStore{db: db, q: New(db)}
+func NewJourneyStore(db *bun.DB) store.JourneyStore {
+	return &journeyStore{db: db}
 }
 
 // BuildSessions scans logs with session_id and builds/updates user_sessions.
-// Uses a single query with subqueries to fetch aggregates + entry/exit paths,
-// eliminating the N+1 query pattern (previously 2N+1 queries for N sessions).
 func (s *journeyStore) BuildSessions(ctx context.Context, since time.Time) error {
 	sinceStr := since.Format(time.RFC3339)
 
-	// Single query: aggregates + entry/exit paths via correlated subqueries
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			agg.session_id,
@@ -84,23 +81,16 @@ func (s *journeyStore) BuildSessions(ctx context.Context, since time.Time) error
 	if err != nil {
 		return fmt.Errorf("querying sessions: %w", err)
 	}
+
 	type sessionRow struct {
-		sessionID       string
-		userID          string
-		service         string
-		env             string
-		startedAt       string
-		endedAt         string
-		requestCount    int
-		errorCount      int
-		totalDurationMs float64
-		entryPath       string
-		exitPath        string
-		exitStatus      int
+		sessionID, userID, service, env       string
+		startedAt, endedAt                    string
+		requestCount, errorCount              int
+		totalDurationMs                       float64
+		entryPath, exitPath                   string
+		exitStatus                            int
 	}
 
-	// Collect all rows first, then close — required because MaxOpenConns(1)
-	// means we can't hold a query result set open while executing writes.
 	var sessions []sessionRow
 	for rows.Next() {
 		var r sessionRow
@@ -120,7 +110,7 @@ func (s *journeyStore) BuildSessions(ctx context.Context, since time.Time) error
 			hasError = 1
 		}
 
-		_, err = s.db.ExecContext(ctx, `
+		_, err = s.db.NewRaw(`
 			INSERT INTO user_sessions (session_id, user_id, service, environment,
 				started_at, ended_at, request_count, error_count, total_duration_ms,
 				entry_path, exit_path, exit_status, has_error)
@@ -138,7 +128,8 @@ func (s *journeyStore) BuildSessions(ctx context.Context, since time.Time) error
 				has_error = excluded.has_error
 		`, r.sessionID, r.userID, r.service, r.env,
 			r.startedAt, r.endedAt, r.requestCount, r.errorCount, r.totalDurationMs,
-			r.entryPath, r.exitPath, r.exitStatus, hasError)
+			r.entryPath, r.exitPath, r.exitStatus, hasError,
+		).Exec(ctx)
 		if err != nil {
 			return fmt.Errorf("upserting session: %w", err)
 		}
@@ -147,19 +138,53 @@ func (s *journeyStore) BuildSessions(ctx context.Context, since time.Time) error
 	return nil
 }
 
-// GetSession returns a single user session by session_id.
 func (s *journeyStore) GetSession(ctx context.Context, sessionID string) (*store.UserSession, error) {
-	row, err := s.q.GetSession(ctx, sessionID)
-	if errors.Is(err, sql.ErrNoRows) {
+	type row struct {
+		ID              int64   `bun:"id"`
+		SessionID       string  `bun:"session_id"`
+		UserID          string  `bun:"user_id"`
+		Service         string  `bun:"service"`
+		Environment     string  `bun:"environment"`
+		StartedAt       string  `bun:"started_at"`
+		EndedAt         string  `bun:"ended_at"`
+		RequestCount    int     `bun:"request_count"`
+		ErrorCount      int     `bun:"error_count"`
+		TotalDurationMs float64 `bun:"total_duration_ms"`
+		EntryPath       string  `bun:"entry_path"`
+		ExitPath        string  `bun:"exit_path"`
+		ExitStatus      int     `bun:"exit_status"`
+		HasError        int     `bun:"has_error"`
+		CreatedAt       string  `bun:"created_at"`
+	}
+	var r row
+	err := s.db.NewRaw(`
+		SELECT id, session_id, user_id, service, environment,
+			started_at, ended_at, request_count, error_count, total_duration_ms,
+			entry_path, exit_path, exit_status, has_error, created_at
+		FROM user_sessions WHERE session_id = ?`, sessionID,
+	).Scan(ctx,
+		&r.ID, &r.SessionID, &r.UserID, &r.Service, &r.Environment,
+		&r.StartedAt, &r.EndedAt, &r.RequestCount, &r.ErrorCount, &r.TotalDurationMs,
+		&r.EntryPath, &r.ExitPath, &r.ExitStatus, &r.HasError, &r.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting session: %w", err)
 	}
-	return journeySessionToStore(row), nil
+	return &store.UserSession{
+		ID: r.ID, SessionID: r.SessionID, UserID: r.UserID,
+		Service: r.Service, Environment: r.Environment,
+		StartedAt: parseTime(r.StartedAt), EndedAt: parseTime(r.EndedAt),
+		RequestCount: r.RequestCount, ErrorCount: r.ErrorCount,
+		TotalDurationMs: r.TotalDurationMs,
+		EntryPath: r.EntryPath, ExitPath: r.ExitPath,
+		ExitStatus: r.ExitStatus, HasError: r.HasError == 1,
+		CreatedAt: parseTime(r.CreatedAt),
+	}, nil
 }
 
-// ListSessions returns user sessions matching the given filters.
 func (s *journeyStore) ListSessions(ctx context.Context, params store.SessionListParams) ([]store.UserSession, error) {
 	var conditions []string
 	var args []any
@@ -235,16 +260,26 @@ func (s *journeyStore) ListSessions(ctx context.Context, params store.SessionLis
 	return results, rows.Err()
 }
 
-// GetSessionRequests returns the chronological request steps for a session.
 func (s *journeyStore) GetSessionRequests(ctx context.Context, sessionID string) ([]store.RequestStep, error) {
-	rows, err := s.q.GetSessionRequests(ctx, sql.NullString{String: sessionID, Valid: sessionID != ""})
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT l.timestamp, COALESCE(rs.controller, ''), COALESCE(rs.action, ''),
+		       COALESCE(rs.path, ''), COALESCE(rs.method, ''), COALESCE(rs.status, 0),
+		       COALESCE(rs.duration_ms, 0), COALESCE(rs.sql_count, 0),
+		       CASE WHEN rs.status >= 500 THEN 1 ELSE 0 END as has_error,
+		       COALESCE(l.exception_class, ''),
+		       COALESCE(l.request_id, ''), l.id
+		FROM logs l
+		JOIN request_summaries rs ON rs.log_id = l.id
+		WHERE l.session_id = ?
+		ORDER BY l.timestamp ASC`,
+		sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("getting session requests: %w", err)
 	}
-	return journeyRequestStepsToStore(rows), nil
+	defer rows.Close()
+	return scanRequestSteps(rows)
 }
 
-// GetUserJourney returns request steps for a user across all sessions.
 func (s *journeyStore) GetUserJourney(ctx context.Context, userID string, since time.Time, limit int) ([]store.RequestStep, error) {
 	if limit <= 0 {
 		limit = 100
@@ -289,7 +324,6 @@ func scanRequestSteps(rows *sql.Rows) ([]store.RequestStep, error) {
 	return results, rows.Err()
 }
 
-// CommonPaths finds the most frequent navigation paths across sessions.
 func (s *journeyStore) CommonPaths(ctx context.Context, params store.PathAnalysisParams) ([]store.PathFrequency, error) {
 	if params.PathLength <= 0 {
 		params.PathLength = 5
@@ -300,7 +334,6 @@ func (s *journeyStore) CommonPaths(ctx context.Context, params store.PathAnalysi
 
 	sinceStr := params.Since.Format(time.RFC3339)
 
-	// Get all session IDs matching filters
 	var sessionConds []string
 	var sessionArgs []any
 	sessionConds = append(sessionConds, "l.session_id != ''")
@@ -332,7 +365,6 @@ func (s *journeyStore) CommonPaths(ctx context.Context, params store.PathAnalysi
 	}
 	defer rows.Close()
 
-	// Build paths per session
 	type reqInfo struct {
 		endpoint string
 		status   int
@@ -349,7 +381,6 @@ func (s *journeyStore) CommonPaths(ctx context.Context, params store.PathAnalysi
 		sessionPaths[sid] = append(sessionPaths[sid], reqInfo{ep, status, dur})
 	}
 
-	// Extract sub-paths up to pathLength and count frequencies
 	type pathKey string
 	type pathInfo struct {
 		steps    []string
@@ -361,7 +392,6 @@ func (s *journeyStore) CommonPaths(ctx context.Context, params store.PathAnalysi
 
 	for _, reqs := range sessionPaths {
 		if params.StartingFrom != "" {
-			// Find start index
 			startIdx := -1
 			for i, r := range reqs {
 				if r.endpoint == params.StartingFrom {
@@ -375,7 +405,6 @@ func (s *journeyStore) CommonPaths(ctx context.Context, params store.PathAnalysi
 			reqs = reqs[startIdx:]
 		}
 
-		// Extract the path (up to pathLength steps)
 		n := params.PathLength
 		if n > len(reqs) {
 			n = len(reqs)
@@ -394,7 +423,7 @@ func (s *journeyStore) CommonPaths(ctx context.Context, params store.PathAnalysi
 			}
 		}
 
-		key := pathKey(strings.Join(steps, " → "))
+		key := pathKey(strings.Join(steps, " -> "))
 		if p, ok := pathCounts[key]; ok {
 			p.count++
 			p.totalDur += dur
@@ -407,15 +436,11 @@ func (s *journeyStore) CommonPaths(ctx context.Context, params store.PathAnalysi
 				ec = 1
 			}
 			pathCounts[key] = &pathInfo{
-				steps:    steps,
-				count:    1,
-				totalDur: dur,
-				errCount: ec,
+				steps: steps, count: 1, totalDur: dur, errCount: ec,
 			}
 		}
 	}
 
-	// Filter by min occurrences and build result
 	var results []store.PathFrequency
 	for _, p := range pathCounts {
 		if p.count < params.MinOccurrences {
@@ -429,7 +454,6 @@ func (s *journeyStore) CommonPaths(ctx context.Context, params store.PathAnalysi
 		})
 	}
 
-	// Sort by count descending
 	for i := 0; i < len(results); i++ {
 		for j := i + 1; j < len(results); j++ {
 			if results[j].Count > results[i].Count {
@@ -441,7 +465,6 @@ func (s *journeyStore) CommonPaths(ctx context.Context, params store.PathAnalysi
 	return results, nil
 }
 
-// CreateFunnel creates a new funnel definition.
 func (s *journeyStore) CreateFunnel(ctx context.Context, funnel store.Funnel) (*store.Funnel, error) {
 	stepsJSON, err := json.Marshal(funnel.Steps)
 	if err != nil {
@@ -450,11 +473,10 @@ func (s *journeyStore) CreateFunnel(ctx context.Context, funnel store.Funnel) (*
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// sqlc CreateFunnel doesn't return the ID, so we use hand-written for LastInsertId
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.NewRaw(`
 		INSERT INTO funnels (name, service, steps, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?)
-	`, funnel.Name, funnel.Service, string(stepsJSON), now, now)
+	`, funnel.Name, funnel.Service, string(stepsJSON), now, now).Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("creating funnel: %w", err)
 	}
@@ -465,28 +487,51 @@ func (s *journeyStore) CreateFunnel(ctx context.Context, funnel store.Funnel) (*
 	return &funnel, nil
 }
 
-// GetFunnel returns a funnel by ID.
 func (s *journeyStore) GetFunnel(ctx context.Context, id int64) (*store.Funnel, error) {
-	row, err := s.q.GetFunnel(ctx, id)
-	if errors.Is(err, sql.ErrNoRows) {
+	var name, service, stepsJSON, createdAt, updatedAt string
+	var funnelID int64
+	err := s.db.NewRaw(`
+		SELECT id, name, service, steps, created_at, updated_at FROM funnels WHERE id = ?`, id,
+	).Scan(ctx, &funnelID, &name, &service, &stepsJSON, &createdAt, &updatedAt)
+	if err == sql.ErrNoRows {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting funnel: %w", err)
 	}
-	return journeyFunnelToStore(row), nil
+	f := &store.Funnel{
+		ID: funnelID, Name: name, Service: service,
+		CreatedAt: parseTime(createdAt), UpdatedAt: parseTime(updatedAt),
+	}
+	json.Unmarshal([]byte(stepsJSON), &f.Steps)
+	return f, nil
 }
 
-// ListFunnels returns all funnel definitions.
 func (s *journeyStore) ListFunnels(ctx context.Context) ([]store.Funnel, error) {
-	rows, err := s.q.ListFunnels(ctx)
+	type row struct {
+		ID        int64  `bun:"id"`
+		Name      string `bun:"name"`
+		Service   string `bun:"service"`
+		Steps     string `bun:"steps"`
+		CreatedAt string `bun:"created_at"`
+		UpdatedAt string `bun:"updated_at"`
+	}
+	var rows []row
+	err := s.db.NewRaw(`SELECT id, name, service, steps, created_at, updated_at FROM funnels ORDER BY created_at DESC`).Scan(ctx, &rows)
 	if err != nil {
 		return nil, fmt.Errorf("listing funnels: %w", err)
 	}
-	return journeyFunnelsToStore(rows), nil
+	result := make([]store.Funnel, len(rows))
+	for i, r := range rows {
+		result[i] = store.Funnel{
+			ID: r.ID, Name: r.Name, Service: r.Service,
+			CreatedAt: parseTime(r.CreatedAt), UpdatedAt: parseTime(r.UpdatedAt),
+		}
+		json.Unmarshal([]byte(r.Steps), &result[i].Steps)
+	}
+	return result, nil
 }
 
-// AnalyzeFunnel analyzes conversion through a funnel's steps.
 func (s *journeyStore) AnalyzeFunnel(ctx context.Context, funnelID int64, since time.Time) (*store.FunnelResult, error) {
 	funnel, err := s.GetFunnel(ctx, funnelID)
 	if err != nil {
@@ -498,7 +543,6 @@ func (s *journeyStore) AnalyzeFunnel(ctx context.Context, funnelID int64, since 
 
 	sinceStr := since.Format(time.RFC3339)
 
-	// For each session, check which steps they completed in order
 	var serviceCond string
 	var serviceArgs []any
 	if funnel.Service != "" {
@@ -521,7 +565,6 @@ func (s *journeyStore) AnalyzeFunnel(ctx context.Context, funnelID int64, since 
 	}
 	defer rows.Close()
 
-	// Group actions by session
 	sessionActions := make(map[string][]string)
 	for rows.Next() {
 		var sid, ctrl, action string
@@ -531,7 +574,6 @@ func (s *journeyStore) AnalyzeFunnel(ctx context.Context, funnelID int64, since 
 		sessionActions[sid] = append(sessionActions[sid], ctrl+"#"+action)
 	}
 
-	// Count how many sessions reached each step
 	stepCounts := make([]int, len(funnel.Steps))
 	for _, actions := range sessionActions {
 		stepIdx := 0
@@ -564,10 +606,7 @@ func (s *journeyStore) AnalyzeFunnel(ctx context.Context, funnelID int64, since 
 			label = step.Controller + "#" + step.Action
 		}
 		steps = append(steps, store.FunnelStepResult{
-			Label:   label,
-			Count:   stepCounts[i],
-			Pct:     round2(pct),
-			DropOff: dropOff,
+			Label: label, Count: stepCounts[i], Pct: round2(pct), DropOff: dropOff,
 		})
 	}
 
@@ -577,61 +616,96 @@ func (s *journeyStore) AnalyzeFunnel(ctx context.Context, funnelID int64, since 
 	}
 
 	return &store.FunnelResult{
-		FunnelName:        funnel.Name,
-		TotalEntered:      totalEntered,
-		Steps:             steps,
-		OverallConversion: round2(overallConversion),
+		FunnelName: funnel.Name, TotalEntered: totalEntered,
+		Steps: steps, OverallConversion: round2(overallConversion),
 	}, nil
 }
 
-// DeleteFunnel removes a funnel definition.
 func (s *journeyStore) DeleteFunnel(ctx context.Context, id int64) error {
-	n, err := s.q.DeleteFunnel(ctx, id)
+	res, err := s.db.NewRaw(`DELETE FROM funnels WHERE id = ?`, id).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("deleting funnel: %w", err)
 	}
+	n, _ := res.RowsAffected()
 	if n == 0 {
 		return store.ErrNotFound
 	}
 	return nil
 }
 
-// GetRequestTimeline parses the timeline JSON for a single request.
 func (s *journeyStore) GetRequestTimeline(ctx context.Context, logID int64) (*store.RequestTimeline, error) {
-	row, err := s.q.GetRequestTimeline(ctx, logID)
-	if errors.Is(err, sql.ErrNoRows) {
+	var controller, action, path, timeline string
+	var durationMs float64
+	var rsLogID int64
+	err := s.db.NewRaw(`
+		SELECT log_id, COALESCE(controller, ''), COALESCE(action, ''),
+			COALESCE(path, ''), COALESCE(duration_ms, 0), COALESCE(timeline, '')
+		FROM request_summaries WHERE log_id = ?`, logID,
+	).Scan(ctx, &rsLogID, &controller, &action, &path, &durationMs, &timeline)
+	if err == sql.ErrNoRows {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting request timeline: %w", err)
 	}
-	return journeyRequestTimelineFromRow(row), nil
+	rt := &store.RequestTimeline{
+		LogID: rsLogID, Controller: controller, Action: action,
+		Path: path, DurationMs: durationMs,
+	}
+	if timeline != "" {
+		rt.Events = parseTimelineJSON(timeline)
+		rt.Bottleneck = findBottleneck(rt.Events)
+	}
+	return rt, nil
 }
 
-// GetSessionTimeline returns timelines for all requests in a session.
 func (s *journeyStore) GetSessionTimeline(ctx context.Context, sessionID string) ([]store.RequestTimeline, error) {
-	rows, err := s.q.GetSessionTimeline(ctx, sql.NullString{String: sessionID, Valid: sessionID != ""})
+	type row struct {
+		LogID      int64   `bun:"log_id"`
+		Controller string  `bun:"controller"`
+		Action     string  `bun:"action"`
+		Path       string  `bun:"path"`
+		DurationMs float64 `bun:"duration_ms"`
+		Timeline   string  `bun:"timeline"`
+		Timestamp  string  `bun:"timestamp"`
+	}
+	var rows []row
+	err := s.db.NewRaw(`
+		SELECT rs.log_id, COALESCE(rs.controller, '') as controller,
+			COALESCE(rs.action, '') as action, COALESCE(rs.path, '') as path,
+			COALESCE(rs.duration_ms, 0) as duration_ms, COALESCE(rs.timeline, '') as timeline,
+			l.timestamp
+		FROM request_summaries rs
+		JOIN logs l ON l.id = rs.log_id
+		WHERE l.session_id = ?
+		ORDER BY l.timestamp ASC`, sessionID,
+	).Scan(ctx, &rows)
 	if err != nil {
 		return nil, fmt.Errorf("getting session timeline: %w", err)
 	}
 
 	results := make([]store.RequestTimeline, len(rows))
-	for i, row := range rows {
-		results[i] = journeySessionTimelineFromRow(row)
+	for i, r := range rows {
+		results[i] = store.RequestTimeline{
+			LogID: r.LogID, Controller: r.Controller, Action: r.Action,
+			Path: r.Path, DurationMs: r.DurationMs,
+			StartedAt: parseTime(r.Timestamp),
+		}
+		if r.Timeline != "" {
+			results[i].Events = parseTimelineJSON(r.Timeline)
+			results[i].Bottleneck = findBottleneck(results[i].Events)
+		}
 	}
 	return results, nil
 }
 
 // parseTimelineJSON parses the timeline JSON from request_summaries.
-// Supports both array format and object-with-events format.
 func parseTimelineJSON(raw string) []store.TimelineEvent {
-	// Try as direct array first
 	var events []store.TimelineEvent
 	if err := json.Unmarshal([]byte(raw), &events); err == nil {
 		return events
 	}
 
-	// Try as object with "events" key
 	var obj struct {
 		Events []store.TimelineEvent `json:"events"`
 	}
@@ -639,13 +713,10 @@ func parseTimelineJSON(raw string) []store.TimelineEvent {
 		return obj.Events
 	}
 
-	// Try as generic JSON array and map fields
 	var generic []map[string]any
 	if err := json.Unmarshal([]byte(raw), &generic); err == nil {
 		for _, item := range generic {
-			ev := store.TimelineEvent{
-				Details: make(map[string]any),
-			}
+			ev := store.TimelineEvent{Details: make(map[string]any)}
 			if v, ok := item["type"].(string); ok {
 				ev.Type = v
 			}
@@ -658,7 +729,6 @@ func parseTimelineJSON(raw string) []store.TimelineEvent {
 			if v, ok := item["duration_ms"].(float64); ok {
 				ev.DurationMs = v
 			}
-			// Copy remaining fields to details
 			for k, v := range item {
 				if k != "type" && k != "name" && k != "start_ms" && k != "duration_ms" {
 					ev.Details[k] = v
@@ -673,6 +743,21 @@ func parseTimelineJSON(raw string) []store.TimelineEvent {
 	}
 
 	return nil
+}
+
+// findBottleneck returns a pointer to the slowest event, or nil if empty.
+func findBottleneck(events []store.TimelineEvent) *store.TimelineEvent {
+	if len(events) == 0 {
+		return nil
+	}
+	max := 0
+	for i := 1; i < len(events); i++ {
+		if events[i].DurationMs > events[max].DurationMs {
+			max = i
+		}
+	}
+	e := events[max]
+	return &e
 }
 
 // round2 rounds to 2 decimal places.

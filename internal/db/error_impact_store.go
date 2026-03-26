@@ -6,20 +6,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
-	sq "github.com/Masterminds/squirrel"
+	"github.com/uptrace/bun"
+
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 type errorImpactStore struct {
-	db *sql.DB
-	q  *Queries
+	db *bun.DB
 }
 
 // NewErrorImpactStore creates an ErrorImpactStore backed by SQLite.
-func NewErrorImpactStore(db *sql.DB) store.ErrorImpactStore {
-	return &errorImpactStore{db: db, q: New(db)}
+func NewErrorImpactStore(db *bun.DB) store.ErrorImpactStore {
+	return &errorImpactStore{db: db}
 }
 
 // TrackImpact records or updates the impact of an error on a specific user.
@@ -31,34 +32,44 @@ func (s *errorImpactStore) TrackImpact(ctx context.Context, fingerprint string, 
 	ctxJSON, _ := json.Marshal(contextData)
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	return s.q.TrackErrorImpact(ctx, TrackErrorImpactParams{
-		ErrorFingerprint: fingerprint,
-		UserID:           userID,
-		Service:          service,
-		FirstSeenAt:      now,
-		LastSeenAt:       now,
-		LastContext:       string(ctxJSON),
-		LastLogID:        logID,
-	})
+	_, err := s.db.NewRaw(`
+		INSERT INTO error_impacts (error_fingerprint, user_id, service, first_seen_at, last_seen_at,
+			last_context, last_log_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(error_fingerprint, user_id) DO UPDATE SET
+			occurrence_count = occurrence_count + 1,
+			last_seen_at = excluded.last_seen_at,
+			last_context = excluded.last_context,
+			last_log_id = excluded.last_log_id`,
+		fingerprint, userID, service, now, now, string(ctxJSON), logID,
+	).Exec(ctx)
+	return err
 }
 
 // GetImpact returns a summary of the user impact for an error fingerprint.
 func (s *errorImpactStore) GetImpact(ctx context.Context, fingerprint string) (*store.ErrorImpact, error) {
-	row, err := s.q.GetErrorImpact(ctx, fingerprint)
+	var uniqueUsers int
+	var totalOccurrences sql.NullFloat64
+
+	err := s.db.NewRaw(`
+		SELECT COUNT(*) AS unique_users, SUM(occurrence_count) AS total_occurrences
+		FROM error_impacts WHERE error_fingerprint = ?`, fingerprint,
+	).Scan(ctx, &uniqueUsers, &totalOccurrences)
 	if err != nil {
 		return nil, fmt.Errorf("getting impact: %w", err)
 	}
 
 	ei := &store.ErrorImpact{
 		Fingerprint: fingerprint,
-		UniqueUsers: int(row.UniqueUsers),
+		UniqueUsers: uniqueUsers,
 	}
-	if row.TotalOccurrences.Valid {
-		ei.TotalOccurrences = int(row.TotalOccurrences.Float64)
+	if totalOccurrences.Valid {
+		ei.TotalOccurrences = int(totalOccurrences.Float64)
 	}
 
 	// Get the impact score from error_groups
-	score, err := s.q.GetErrorImpactScore(ctx, fingerprint)
+	var score float64
+	err = s.db.NewRaw(`SELECT impact_score FROM error_groups WHERE fingerprint = ?`, fingerprint).Scan(ctx, &score)
 	if err == nil {
 		ei.ImpactScore = score
 	}
@@ -77,58 +88,87 @@ func (s *errorImpactStore) GetAffectedUsers(ctx context.Context, fingerprint str
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := s.q.ListAffectedUsers(ctx, ListAffectedUsersParams{
-		Fingerprint: fingerprint,
-		RowLimit:    int64(limit),
-	})
+
+	type row struct {
+		UserID          string `bun:"user_id"`
+		OccurrenceCount int    `bun:"occurrence_count"`
+		FirstSeenAt     string `bun:"first_seen_at"`
+		LastSeenAt      string `bun:"last_seen_at"`
+		LastContext      string `bun:"last_context"`
+	}
+
+	var rows []row
+	err := s.db.NewRaw(`
+		SELECT user_id, occurrence_count, first_seen_at, last_seen_at, last_context
+		FROM error_impacts
+		WHERE error_fingerprint = ?
+		ORDER BY occurrence_count DESC
+		LIMIT ?`, fingerprint, limit,
+	).Scan(ctx, &rows)
 	if err != nil {
 		return nil, fmt.Errorf("getting affected users: %w", err)
 	}
-	return affectedUsersToStore(rows), nil
+
+	users := make([]store.AffectedUser, len(rows))
+	for i, r := range rows {
+		users[i] = store.AffectedUser{
+			UserID:          r.UserID,
+			OccurrenceCount: r.OccurrenceCount,
+			FirstSeenAt:     parseTime(r.FirstSeenAt),
+			LastSeenAt:      parseTime(r.LastSeenAt),
+		}
+		if r.LastContext != "" && r.LastContext != "{}" {
+			json.Unmarshal([]byte(r.LastContext), &users[i].LastContext)
+		}
+	}
+	return users, nil
 }
 
 // GetUserErrors returns all errors affecting a specific user.
 func (s *errorImpactStore) GetUserErrors(ctx context.Context, userID string, since time.Time) ([]store.ErrorSummary, error) {
 	sinceStr := since.Format(time.RFC3339)
 
-	qb := psql.Select(
-		"ei.error_fingerprint",
-		"COALESCE(eg.exception_class, '')",
-		"COALESCE(eg.message, '')",
-		"ei.occurrence_count",
-		"ei.first_seen_at",
-		"ei.last_seen_at",
-		"COALESCE(eg.status, 'unresolved')").
-		From("error_impacts ei").
-		LeftJoin("error_groups eg ON eg.fingerprint = ei.error_fingerprint").
-		Where(sq.Eq{"ei.user_id": userID}).
-		Where("ei.last_seen_at >= ?", sinceStr).
-		OrderBy("ei.last_seen_at DESC")
-
-	query, args, err := qb.ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("building user errors query: %w", err)
+	type row struct {
+		Fingerprint     string `bun:"error_fingerprint"`
+		ExceptionClass  string `bun:"exception_class"`
+		Message         string `bun:"message"`
+		OccurrenceCount int    `bun:"occurrence_count"`
+		FirstSeenAt     string `bun:"first_seen_at"`
+		LastSeenAt      string `bun:"last_seen_at"`
+		Status          string `bun:"status"`
 	}
 
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	var rows []row
+	err := s.db.NewRaw(`
+		SELECT ei.error_fingerprint,
+			COALESCE(eg.exception_class, '') AS exception_class,
+			COALESCE(eg.message, '') AS message,
+			ei.occurrence_count,
+			ei.first_seen_at,
+			ei.last_seen_at,
+			COALESCE(eg.status, 'unresolved') AS status
+		FROM error_impacts ei
+		LEFT JOIN error_groups eg ON eg.fingerprint = ei.error_fingerprint
+		WHERE ei.user_id = ? AND ei.last_seen_at >= ?
+		ORDER BY ei.last_seen_at DESC`, userID, sinceStr,
+	).Scan(ctx, &rows)
 	if err != nil {
 		return nil, fmt.Errorf("getting user errors: %w", err)
 	}
-	defer rows.Close()
 
-	var results []store.ErrorSummary
-	for rows.Next() {
-		var es store.ErrorSummary
-		var firstStr, lastStr string
-		if err := rows.Scan(&es.Fingerprint, &es.ExceptionClass, &es.Message,
-			&es.OccurrenceCount, &firstStr, &lastStr, &es.Status); err != nil {
-			return nil, fmt.Errorf("scanning user error: %w", err)
+	results := make([]store.ErrorSummary, len(rows))
+	for i, r := range rows {
+		results[i] = store.ErrorSummary{
+			Fingerprint:     r.Fingerprint,
+			ExceptionClass:  r.ExceptionClass,
+			Message:         r.Message,
+			OccurrenceCount: r.OccurrenceCount,
+			FirstSeenAt:     parseTime(r.FirstSeenAt),
+			LastSeenAt:      parseTime(r.LastSeenAt),
+			Status:          store.ErrorGroupStatus(r.Status),
 		}
-		es.FirstSeenAt, _ = time.Parse(time.RFC3339, firstStr)
-		es.LastSeenAt, _ = time.Parse(time.RFC3339, lastStr)
-		results = append(results, es)
 	}
-	return results, rows.Err()
+	return results, nil
 }
 
 // ComputeImpactScores recalculates impact scores for all error groups.
@@ -136,8 +176,23 @@ func (s *errorImpactStore) GetUserErrors(ctx context.Context, userID string, sin
 func (s *errorImpactStore) ComputeImpactScores(ctx context.Context) error {
 	now := time.Now().UTC()
 
-	// Collect impact data per fingerprint using sqlc
-	impactRows, err := s.q.AggregateImpactData(ctx)
+	// Collect impact data per fingerprint
+	type impactRow struct {
+		ErrorFingerprint string          `bun:"error_fingerprint"`
+		UniqueUsers      int             `bun:"unique_users"`
+		TotalOccurrences sql.NullFloat64 `bun:"total_occurrences"`
+		LastSeen         string          `bun:"last_seen"`
+	}
+
+	var impactRows []impactRow
+	err := s.db.NewRaw(`
+		SELECT error_fingerprint,
+			COUNT(*) AS unique_users,
+			SUM(occurrence_count) AS total_occurrences,
+			MAX(last_seen_at) AS last_seen
+		FROM error_impacts
+		GROUP BY error_fingerprint`,
+	).Scan(ctx, &impactRows)
 	if err != nil {
 		return fmt.Errorf("querying impact data: %w", err)
 	}
@@ -152,20 +207,16 @@ func (s *errorImpactStore) ComputeImpactScores(ctx context.Context) error {
 	for _, row := range impactRows {
 		d := impactData{
 			fingerprint: row.ErrorFingerprint,
-			uniqueUsers: int(row.UniqueUsers),
+			uniqueUsers: row.UniqueUsers,
 		}
 		if row.TotalOccurrences.Valid {
 			d.totalOccurrences = int(row.TotalOccurrences.Float64)
 		}
-		if ls, ok := row.LastSeen.(string); ok {
-			d.lastSeen, _ = time.Parse(time.RFC3339, ls)
-		} else if ls, ok := row.LastSeen.([]byte); ok {
-			d.lastSeen, _ = time.Parse(time.RFC3339, string(ls))
-		}
+		d.lastSeen, _ = time.Parse(time.RFC3339, row.LastSeen)
 		impacts = append(impacts, d)
 	}
 
-	// Update each error group using sqlc
+	// Update each error group
 	for _, d := range impacts {
 		recencyWeight := computeRecencyWeight(now, d.lastSeen)
 		score := float64(d.uniqueUsers) * math.Log2(float64(d.totalOccurrences+1)) * recencyWeight
@@ -174,12 +225,11 @@ func (s *errorImpactStore) ComputeImpactScores(ctx context.Context) error {
 		traits, _ := s.FindCommonTraits(ctx, d.fingerprint)
 		traitsJSON, _ := json.Marshal(traits)
 
-		err := s.q.UpdateErrorGroupImpact(ctx, UpdateErrorGroupImpactParams{
-			UniqueUsers:   int64(d.uniqueUsers),
-			ImpactScore:   round2(score),
-			CommonContext: string(traitsJSON),
-			Fingerprint:   d.fingerprint,
-		})
+		_, err := s.db.NewRaw(`
+			UPDATE error_groups SET unique_users = ?, impact_score = ?, common_context = ?
+			WHERE fingerprint = ?`,
+			d.uniqueUsers, round2(score), string(traitsJSON), d.fingerprint,
+		).Exec(ctx)
 		if err != nil {
 			return fmt.Errorf("updating impact score for %s: %w", d.fingerprint, err)
 		}
@@ -190,22 +240,20 @@ func (s *errorImpactStore) ComputeImpactScores(ctx context.Context) error {
 
 // TopByImpact returns error groups ranked by impact.
 func (s *errorImpactStore) TopByImpact(ctx context.Context, params store.ImpactQueryParams) ([]store.ErrorGroupWithImpact, error) {
-	qb := psql.Select(
-		"eg.fingerprint", "eg.service", "eg.environment",
-		"eg.exception_class", "eg.message", "eg.source_file", "eg.source_line",
-		"eg.status", "eg.first_seen_at", "eg.last_seen_at",
-		"eg.occurrence_count", "eg.last_log_id", "eg.reopened_count",
-		"eg.unique_users", "eg.impact_score", "COALESCE(eg.common_context, '{}')").
-		From("error_groups eg")
+	var conditions []string
+	var args []any
 
 	if params.Status != "" {
-		qb = qb.Where(sq.Eq{"eg.status": string(params.Status)})
+		conditions = append(conditions, "eg.status = ?")
+		args = append(args, string(params.Status))
 	}
 	if params.Service != "" {
-		qb = qb.Where(sq.Eq{"eg.service": params.Service})
+		conditions = append(conditions, "eg.service = ?")
+		args = append(args, params.Service)
 	}
 	if !params.Since.IsZero() {
-		qb = qb.Where("eg.last_seen_at >= ?", params.Since.Format(time.RFC3339))
+		conditions = append(conditions, "eg.last_seen_at >= ?")
+		args = append(args, params.Since.Format(time.RFC3339))
 	}
 
 	sortCol := "eg.impact_score"
@@ -217,18 +265,24 @@ func (s *errorImpactStore) TopByImpact(ctx context.Context, params store.ImpactQ
 	case "last_seen":
 		sortCol = "eg.last_seen_at"
 	}
-	qb = qb.OrderBy(sortCol + " DESC")
 
 	limit := params.Limit
 	if limit <= 0 {
 		limit = 20
 	}
-	qb = qb.Limit(uint64(limit))
 
-	query, args, err := qb.ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("building top by impact query: %w", err)
+	query := `SELECT eg.fingerprint, eg.service, eg.environment,
+		eg.exception_class, eg.message, eg.source_file, eg.source_line,
+		eg.status, eg.first_seen_at, eg.last_seen_at,
+		eg.occurrence_count, eg.last_log_id, eg.reopened_count,
+		eg.unique_users, eg.impact_score, COALESCE(eg.common_context, '{}')
+		FROM error_groups eg`
+
+	if len(conditions) > 0 {
+		query += " WHERE " + joinConditions(conditions)
 	}
+	query += " ORDER BY " + sortCol + " DESC LIMIT ?"
+	args = append(args, limit)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -277,23 +331,20 @@ func (s *errorImpactStore) TopByImpact(ctx context.Context, params store.ImpactQ
 // FindCommonTraits analyzes the context data across all affected users to find
 // common patterns (e.g., "87% Safari", "92% iOS").
 func (s *errorImpactStore) FindCommonTraits(ctx context.Context, fingerprint string) (map[string]any, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	var contexts []string
+	err := s.db.NewRaw(`
 		SELECT last_context FROM error_impacts
-		WHERE error_fingerprint = ? AND last_context != '{}'
-	`, fingerprint)
+		WHERE error_fingerprint = ? AND last_context != '{}'`,
+		fingerprint,
+	).Scan(ctx, &contexts)
 	if err != nil {
 		return nil, fmt.Errorf("querying contexts: %w", err)
 	}
-	defer rows.Close()
 
 	// Count occurrences of each key-value pair
-	keyCounts := make(map[string]map[string]int) // key → value → count
+	keyCounts := make(map[string]map[string]int) // key -> value -> count
 	total := 0
-	for rows.Next() {
-		var ctxJSON string
-		if err := rows.Scan(&ctxJSON); err != nil {
-			continue
-		}
+	for _, ctxJSON := range contexts {
 		var ctxMap map[string]any
 		if json.Unmarshal([]byte(ctxJSON), &ctxMap) != nil {
 			continue
@@ -346,3 +397,6 @@ func computeRecencyWeight(now, lastSeen time.Time) float64 {
 	}
 }
 
+func joinConditions(conditions []string) string {
+	return strings.Join(conditions, " AND ")
+}

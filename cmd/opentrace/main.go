@@ -92,33 +92,33 @@ func initApp(ctx context.Context) (*server.Deps, error) {
 	}
 
 	// Open SQLite database
-	db, err := dbstore.OpenSQLite(cfg.DatabasePath())
+	bunDB, err := dbstore.OpenSQLite(cfg.DatabasePath())
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
 
 	// Run migrations
-	if err := dbstore.RunSQLiteMigrations(db); err != nil {
-		db.Close()
+	if err := dbstore.RunSQLiteMigrations(bunDB); err != nil {
+		bunDB.Close()
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 
 	// Verify database is responsive before proceeding
-	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+	if err := bunDB.DB.PingContext(ctx); err != nil {
+		bunDB.Close()
 		return nil, fmt.Errorf("database health check failed: %w", err)
 	}
 	slog.Info("database ready")
 
 	// Initialize all stores from a single constructor
-	stores := dbstore.NewStores(db)
+	stores := dbstore.NewStores(bunDB)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
 	reconnectConnectors(ctx, stores.DSStore, stores.LogStore, registry, cfg, stores.SettingsStore)
 
 	return &server.Deps{
-		DB:       db,
+		DB:       bunDB.DB, // underlying *sql.DB for backward compat
 		Cfg:      cfg,
 		Stores:   stores,
 		Registry: registry,

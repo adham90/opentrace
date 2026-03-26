@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/adham90/opentrace/migrations"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/sqlitedialect"
 	_ "modernc.org/sqlite"
 )
 
@@ -22,16 +24,19 @@ const (
 )
 
 // OpenSQLite opens a SQLite database with recommended settings.
-func OpenSQLite(path string) (*sql.DB, error) {
+// Returns a *bun.DB wrapping the underlying *sql.DB. Use db.DB to access the raw *sql.DB.
+func OpenSQLite(path string) (*bun.DB, error) {
 	dsn := fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=%d&_foreign_keys=on", path, sqliteBusyTimeoutMs)
-	db, err := sql.Open("sqlite", dsn)
+	sqldb, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite: %w", err)
 	}
-	db.SetMaxOpenConns(1) // SQLite handles one writer at a time
+	sqldb.SetMaxOpenConns(1) // SQLite handles one writer at a time
+
+	db := bun.NewDB(sqldb, sqlitedialect.New())
 
 	// Performance PRAGMAs — safe with WAL mode
-	if err := applySQLitePragmas(db); err != nil {
+	if err := applySQLitePragmas(db.DB); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("applying pragmas: %w", err)
 	}
@@ -58,9 +63,11 @@ func applySQLitePragmas(db *sql.DB) error {
 
 // RunSQLiteMigrations applies all pending SQLite migrations using a simple
 // schema_version tracking table.
-func RunSQLiteMigrations(db *sql.DB) error {
+func RunSQLiteMigrations(db *bun.DB) error {
+	sqldb := db.DB // underlying *sql.DB for migration execution
+
 	// Create version tracking table
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_version (
+	if _, err := sqldb.Exec(`CREATE TABLE IF NOT EXISTS schema_version (
 		version INTEGER PRIMARY KEY,
 		applied_at TEXT NOT NULL DEFAULT (datetime('now'))
 	)`); err != nil {
@@ -69,7 +76,7 @@ func RunSQLiteMigrations(db *sql.DB) error {
 
 	// Get current version
 	var currentVersion int
-	err := db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&currentVersion)
+	err := sqldb.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&currentVersion)
 	if err != nil {
 		return fmt.Errorf("reading schema version: %w", err)
 	}
@@ -107,7 +114,7 @@ func RunSQLiteMigrations(db *sql.DB) error {
 		}
 
 		start := time.Now()
-		if err := applyMigration(db, name, string(content), version); err != nil {
+		if err := applyMigration(sqldb, name, string(content), version); err != nil {
 			return err
 		}
 		slog.Info("migration applied", "name", name, "version", version, "elapsed_ms", time.Since(start).Milliseconds())

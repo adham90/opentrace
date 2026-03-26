@@ -7,36 +7,39 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/uptrace/bun"
+
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 type queryMemoryStore struct {
-	db *sql.DB
-	q  *Queries
+	db *bun.DB
 }
 
 // NewQueryMemoryStore creates a new QueryMemoryStore backed by SQLite.
-func NewQueryMemoryStore(db *sql.DB) store.QueryMemoryStore {
-	return &queryMemoryStore{db: db, q: New(db)}
+func NewQueryMemoryStore(db *bun.DB) store.QueryMemoryStore {
+	return &queryMemoryStore{db: db}
 }
 
 func (s *queryMemoryStore) Get(ctx context.Context, fingerprint string) (*store.QueryMemory, error) {
-	row, err := s.q.GetQueryMemory(ctx, fingerprint)
+	var qm store.QueryMemory
+	err := s.db.NewSelect().Model(&qm).
+		Where("fingerprint = ?", fingerprint).
+		Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting query memory: %w", err)
 	}
-	return toStoreQueryMemory(row), nil
+	return &qm, nil
 }
 
-// Upsert uses hand-written SQL because the sqlc-generated query has unexpanded
-// sqlc.arg() references in the ON CONFLICT clause.
+// Upsert uses raw SQL because the ON CONFLICT clause has conditional SET logic.
 func (s *queryMemoryStore) Upsert(ctx context.Context, params store.UpsertQueryMemoryParams) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.db.NewRaw(
 		`INSERT INTO query_memory (fingerprint, last_investigation_session_id, investigation_count,
 		                           last_root_cause, last_fix, avg_duration_before_ms,
 		                           first_seen_at, last_seen_at)
@@ -55,7 +58,7 @@ func (s *queryMemoryStore) Upsert(ctx context.Context, params store.UpsertQueryM
 		params.RootCause, params.RootCause,
 		params.Fix, params.Fix,
 		now,
-	)
+	).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("upserting query memory: %w", err)
 	}
@@ -64,9 +67,12 @@ func (s *queryMemoryStore) Upsert(ctx context.Context, params store.UpsertQueryM
 
 func (s *queryMemoryStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
-	n, err := s.q.PruneQueryMemory(ctx, cutoff)
+	res, err := s.db.NewDelete().Model((*store.QueryMemory)(nil)).
+		Where("last_seen_at < ?", cutoff).
+		Exec(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("pruning query memory: %w", err)
 	}
+	n, _ := res.RowsAffected()
 	return n, nil
 }

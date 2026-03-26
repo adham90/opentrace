@@ -3,21 +3,21 @@ package db
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
+
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 type healthCheckStore struct {
-	db *sql.DB
-	q  *Queries
+	db *bun.DB
 }
 
 // NewHealthCheckStore creates a new HealthCheckStore backed by SQLite.
-func NewHealthCheckStore(db *sql.DB) store.HealthCheckStore {
-	return &healthCheckStore{db: db, q: New(db)}
+func NewHealthCheckStore(db *bun.DB) store.HealthCheckStore {
+	return &healthCheckStore{db: db}
 }
 
 func (s *healthCheckStore) Create(ctx context.Context, params store.CreateHealthCheckParams) (*store.HealthCheck, error) {
@@ -45,18 +45,13 @@ func (s *healthCheckStore) Create(ctx context.Context, params store.CreateHealth
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	err := s.q.CreateHealthcheck(ctx, CreateHealthcheckParams{
-		ID:             id,
-		Name:           params.Name,
-		Url:            params.URL,
-		Method:         method,
-		IntervalSecs:   int64(interval),
-		TimeoutSecs:    int64(timeout),
-		ExpectedStatus: int64(expected),
-		ExpectedBody:   params.ExpectedBody,
-		Retries:        int64(retries),
-		CreatedAt:      now,
-	})
+	_, err := s.db.NewRaw(`
+		INSERT INTO healthchecks (id, name, url, method, interval_secs, timeout_secs,
+			expected_status, expected_body, retries, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, params.Name, params.URL, method, interval, timeout,
+		expected, params.ExpectedBody, retries, now,
+	).Exec(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -65,14 +60,45 @@ func (s *healthCheckStore) Create(ctx context.Context, params store.CreateHealth
 }
 
 func (s *healthCheckStore) Get(ctx context.Context, id string) (*store.HealthCheck, error) {
-	row, err := s.q.GetHealthcheck(ctx, id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, store.ErrNotFound
+	var hc struct {
+		ID             string `bun:"id"`
+		Name           string `bun:"name"`
+		URL            string `bun:"url"`
+		Method         string `bun:"method"`
+		IntervalSecs   int    `bun:"interval_secs"`
+		TimeoutSecs    int    `bun:"timeout_secs"`
+		ExpectedStatus int    `bun:"expected_status"`
+		ExpectedBody   string `bun:"expected_body"`
+		Retries        int    `bun:"retries"`
+		Enabled        int    `bun:"enabled"`
+		CreatedAt      string `bun:"created_at"`
 	}
+
+	err := s.db.NewRaw(`
+		SELECT id, name, url, method, interval_secs, timeout_secs,
+			expected_status, expected_body, retries, enabled, created_at
+		FROM healthchecks WHERE id = ?`, id,
+	).Scan(ctx, &hc)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, store.ErrNotFound
+		}
 		return nil, err
 	}
-	return healthcheckRowToStore(row), nil
+
+	return &store.HealthCheck{
+		ID:             hc.ID,
+		Name:           hc.Name,
+		URL:            hc.URL,
+		Method:         hc.Method,
+		IntervalSecs:   hc.IntervalSecs,
+		TimeoutSecs:    hc.TimeoutSecs,
+		ExpectedStatus: hc.ExpectedStatus,
+		ExpectedBody:   hc.ExpectedBody,
+		Retries:        hc.Retries,
+		Enabled:        hc.Enabled == 1,
+		CreatedAt:      parseTime(hc.CreatedAt),
+	}, nil
 }
 
 func (s *healthCheckStore) List(ctx context.Context, params store.ListHealthCheckParams) ([]store.HealthCheck, error) {
@@ -85,26 +111,57 @@ func (s *healthCheckStore) List(ctx context.Context, params store.ListHealthChec
 		offset = 0
 	}
 
-	rows, err := s.q.ListHealthchecks(ctx, ListHealthchecksParams{
-		RowOffset: int64(offset),
-		RowLimit:  int64(limit),
-	})
+	type row struct {
+		ID             string `bun:"id"`
+		Name           string `bun:"name"`
+		URL            string `bun:"url"`
+		Method         string `bun:"method"`
+		IntervalSecs   int    `bun:"interval_secs"`
+		TimeoutSecs    int    `bun:"timeout_secs"`
+		ExpectedStatus int    `bun:"expected_status"`
+		ExpectedBody   string `bun:"expected_body"`
+		Retries        int    `bun:"retries"`
+		Enabled        int    `bun:"enabled"`
+		CreatedAt      string `bun:"created_at"`
+	}
+
+	var rows []row
+	err := s.db.NewRaw(`
+		SELECT id, name, url, method, interval_secs, timeout_secs,
+			expected_status, expected_body, retries, enabled, created_at
+		FROM healthchecks
+		ORDER BY created_at DESC
+		LIMIT ? OFFSET ?`, limit, offset,
+	).Scan(ctx, &rows)
 	if err != nil {
 		return nil, err
 	}
 
 	checks := make([]store.HealthCheck, len(rows))
-	for i, row := range rows {
-		checks[i] = healthcheckListRowToStore(row)
+	for i, r := range rows {
+		checks[i] = store.HealthCheck{
+			ID:             r.ID,
+			Name:           r.Name,
+			URL:            r.URL,
+			Method:         r.Method,
+			IntervalSecs:   r.IntervalSecs,
+			TimeoutSecs:    r.TimeoutSecs,
+			ExpectedStatus: r.ExpectedStatus,
+			ExpectedBody:   r.ExpectedBody,
+			Retries:        r.Retries,
+			Enabled:        r.Enabled == 1,
+			CreatedAt:      parseTime(r.CreatedAt),
+		}
 	}
 	return checks, nil
 }
 
 func (s *healthCheckStore) Delete(ctx context.Context, id string) error {
-	n, err := s.q.DeleteHealthcheck(ctx, id)
+	res, err := s.db.NewRaw(`DELETE FROM healthchecks WHERE id = ?`, id).Exec(ctx)
 	if err != nil {
 		return err
 	}
+	n, _ := res.RowsAffected()
 	if n == 0 {
 		return store.ErrNotFound
 	}
@@ -112,17 +169,15 @@ func (s *healthCheckStore) Delete(ctx context.Context, id string) error {
 }
 
 func (s *healthCheckStore) SetEnabled(ctx context.Context, id string, enabled bool) error {
-	v := int64(0)
+	v := 0
 	if enabled {
 		v = 1
 	}
-	n, err := s.q.SetHealthcheckEnabled(ctx, SetHealthcheckEnabledParams{
-		Enabled: v,
-		ID:      id,
-	})
+	res, err := s.db.NewRaw(`UPDATE healthchecks SET enabled = ? WHERE id = ?`, v, id).Exec(ctx)
 	if err != nil {
 		return err
 	}
+	n, _ := res.RowsAffected()
 	if n == 0 {
 		return store.ErrNotFound
 	}
@@ -144,65 +199,103 @@ func (s *healthCheckStore) RecordResult(ctx context.Context, result store.Health
 		responseMs = sql.NullInt64{Int64: int64(*result.ResponseMs), Valid: true}
 	}
 
-	return s.q.InsertHealthcheckResult(ctx, InsertHealthcheckResultParams{
-		HealthcheckID: result.HealthCheckID,
-		Status:        string(result.Status),
-		StatusCode:    statusCode,
-		ResponseMs:    responseMs,
-		Error:         result.Error,
-		CheckedAt:     checkedAt.Format(time.RFC3339),
-	})
+	_, err := s.db.NewRaw(`
+		INSERT INTO healthcheck_results (healthcheck_id, status, status_code, response_ms, error, checked_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		result.HealthCheckID, string(result.Status), statusCode, responseMs,
+		result.Error, checkedAt.Format(time.RFC3339),
+	).Exec(ctx)
+	return err
 }
 
 func (s *healthCheckStore) LatestResults(ctx context.Context, healthcheckID string, limit int) ([]store.HealthCheckResult, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := s.q.ListLatestHealthcheckResults(ctx, ListLatestHealthcheckResultsParams{
-		HealthcheckID: healthcheckID,
-		RowLimit:      int64(limit),
-	})
+
+	type row struct {
+		HealthcheckID string        `bun:"healthcheck_id"`
+		Status        string        `bun:"status"`
+		StatusCode    sql.NullInt64 `bun:"status_code"`
+		ResponseMs    sql.NullInt64 `bun:"response_ms"`
+		Error         string        `bun:"error"`
+		CheckedAt     string        `bun:"checked_at"`
+	}
+
+	var rows []row
+	err := s.db.NewRaw(`
+		SELECT healthcheck_id, status, status_code, response_ms, error, checked_at
+		FROM healthcheck_results
+		WHERE healthcheck_id = ?
+		ORDER BY checked_at DESC
+		LIMIT ?`, healthcheckID, limit,
+	).Scan(ctx, &rows)
 	if err != nil {
 		return nil, err
 	}
-	return healthcheckResultsToStore(rows), nil
+
+	results := make([]store.HealthCheckResult, len(rows))
+	for i, r := range rows {
+		results[i] = store.HealthCheckResult{
+			HealthCheckID: r.HealthcheckID,
+			Status:        store.HealthCheckStatus(r.Status),
+			Error:         r.Error,
+			CheckedAt:     parseTime(r.CheckedAt),
+		}
+		if r.StatusCode.Valid {
+			v := int(r.StatusCode.Int64)
+			results[i].StatusCode = &v
+		}
+		if r.ResponseMs.Valid {
+			v := int(r.ResponseMs.Int64)
+			results[i].ResponseMs = &v
+		}
+	}
+	return results, nil
 }
 
 func (s *healthCheckStore) UptimeSummaries(ctx context.Context, since time.Time) ([]store.UptimeSummary, error) {
-	rows, err := s.q.UptimeSummaries(ctx, since.Format(time.RFC3339))
+	type row struct {
+		ID            string         `bun:"id"`
+		Name          string         `bun:"name"`
+		URL           string         `bun:"url"`
+		CurrentStatus string         `bun:"current_status"`
+		TotalChecks   int            `bun:"total_checks"`
+		DownChecks    sql.NullInt64  `bun:"down_checks"`
+		AvgResponseMs sql.NullFloat64 `bun:"avg_response_ms"`
+	}
+
+	var rows []row
+	err := s.db.NewRaw(`
+		SELECT h.id, h.name, h.url,
+			COALESCE((SELECT r.status FROM healthcheck_results r
+				WHERE r.healthcheck_id = h.id ORDER BY r.checked_at DESC LIMIT 1), 'unknown') AS current_status,
+			COUNT(hr.rowid) AS total_checks,
+			SUM(CASE WHEN hr.status = 'down' THEN 1 ELSE 0 END) AS down_checks,
+			AVG(hr.response_ms) AS avg_response_ms
+		FROM healthchecks h
+		LEFT JOIN healthcheck_results hr ON hr.healthcheck_id = h.id AND hr.checked_at >= ?
+		GROUP BY h.id`, since.Format(time.RFC3339),
+	).Scan(ctx, &rows)
 	if err != nil {
 		return nil, err
 	}
 
 	var summaries []store.UptimeSummary
-	for _, row := range rows {
-		var us store.UptimeSummary
-		us.HealthCheckID = row.ID
-		us.Name = row.Name
-		us.URL = row.Url
-
-		// CurrentStatus comes as interface{} from sqlc
-		if cs, ok := row.CurrentStatus.(string); ok {
-			us.CurrentStatus = cs
-		} else if cs, ok := row.CurrentStatus.([]byte); ok {
-			us.CurrentStatus = string(cs)
-		} else {
-			us.CurrentStatus = "unknown"
+	for _, r := range rows {
+		us := store.UptimeSummary{
+			HealthCheckID: r.ID,
+			Name:          r.Name,
+			URL:           r.URL,
+			CurrentStatus: r.CurrentStatus,
+			TotalChecks:   r.TotalChecks,
 		}
-
-		us.TotalChecks = int(row.TotalChecks)
-		if row.DownChecks.Valid {
-			us.DownChecks = int(row.DownChecks.Float64)
+		if r.DownChecks.Valid {
+			us.DownChecks = int(r.DownChecks.Int64)
 		}
-
-		// AvgResponseMs comes as interface{} from sqlc
-		switch v := row.AvgResponseMs.(type) {
-		case float64:
-			us.AvgResponseMs = v
-		case int64:
-			us.AvgResponseMs = float64(v)
+		if r.AvgResponseMs.Valid {
+			us.AvgResponseMs = r.AvgResponseMs.Float64
 		}
-
 		if us.TotalChecks > 0 {
 			us.UptimePct = float64(us.TotalChecks-us.DownChecks) / float64(us.TotalChecks) * 100.0
 		}
@@ -213,5 +306,10 @@ func (s *healthCheckStore) UptimeSummaries(ctx context.Context, since time.Time)
 
 func (s *healthCheckStore) PruneResults(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
-	return s.q.PruneHealthcheckResults(ctx, cutoff)
+	res, err := s.db.NewRaw(`DELETE FROM healthcheck_results WHERE checked_at < ?`, cutoff).Exec(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }

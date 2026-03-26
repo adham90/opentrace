@@ -4,36 +4,29 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/uptrace/bun"
+
 	"github.com/adham90/opentrace/pkg/store"
 )
 
-// logStore implements LogStore using database/sql (SQLite).
+// logStore implements LogStore using bun (SQLite).
 type logStore struct {
-	db *sql.DB
-	q  *Queries
+	db *bun.DB
 }
 
 // NewLogStore creates a new LogStore backed by SQLite.
-func NewLogStore(db *sql.DB) store.LogStore {
-	return &logStore{db: db, q: New(db)}
+func NewLogStore(db *bun.DB) store.LogStore {
+	return &logStore{db: db}
 }
 
 // BatchInsert inserts log entries in a single transaction using prepared
-// statements. This is already optimized:
-//   - Single BEGIN/COMMIT wrapping the entire batch (one fsync)
-//   - Prepared statement reused across all inserts within the transaction
-//   - Summary statement prepared lazily (only if any entry has a request_summary)
-//
-// No further optimization needed for the insert path itself. The IngestQueue
-// in internal/web/ingest_queue.go handles batching at the HTTP layer to reduce
-// write contention on SQLite's single-writer lock.
+// statements.
 func (s *logStore) BatchInsert(ctx context.Context, entries []store.LogEntry) (int, error) {
 	if len(entries) == 0 {
 		return 0, nil
@@ -57,14 +50,11 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []store.LogEntry) (i
 	}
 	defer stmt.Close()
 
-	// Prepare summary statement lazily (only if any entry has a request_summary)
 	var summaryStmt *sql.Stmt
 
 	for _, e := range entries {
-		// Extract promoted fields from metadata as fallback
 		promoteFromMetadata(&e)
 
-		// Use pre-marshaled metadata if available; otherwise marshal now
 		metaStr := e.MetadataJSON
 		if metaStr == "" {
 			meta, err := json.Marshal(e.Metadata)
@@ -135,9 +125,6 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []store.LogEntry) (i
 	return len(entries), nil
 }
 
-// promoteFromMetadata extracts promoted fields from the metadata map when
-// the corresponding top-level field is empty. This provides backward
-// compatibility with older gem versions that send everything in metadata.
 func promoteFromMetadata(e *store.LogEntry) {
 	if e.Metadata == nil {
 		return
@@ -183,8 +170,6 @@ func promoteFromMetadata(e *store.LogEntry) {
 	}
 }
 
-// parseBacktraceLine extracts file path and line number from a Ruby backtrace line.
-// Format: "app/controllers/users_controller.rb:42:in `show'"
 func parseBacktraceLine(line string) (string, int) {
 	parts := strings.SplitN(line, ":", 3)
 	if len(parts) < 2 {
@@ -208,7 +193,6 @@ func (s *logStore) Search(ctx context.Context, params store.LogSearchParams) ([]
 		conditions = append(conditions, "logs_fts MATCH ?")
 		args = append(args, params.Query)
 	}
-	// Multi-value inclusion helper: "a,b" → col COLLATE NOCASE IN (?,?)
 	multiIn := func(col, value string) {
 		vals := strings.Split(value, ",")
 		if len(vals) == 1 {
@@ -263,7 +247,6 @@ func (s *logStore) Search(ctx context.Context, params store.LogSearchParams) ([]
 		multiIn("l.source_file", params.SourceFile)
 	}
 
-	// Negation/exclusion filters: col NOT IN (?,?) or col != ?
 	excludeColMap := map[string]string{
 		"service": "l.service", "level": "l.level", "environment": "l.environment",
 		"event_type": "l.event_type", "exception_class": "l.exception_class",
@@ -309,15 +292,11 @@ func (s *logStore) Search(ctx context.Context, params store.LogSearchParams) ([]
 
 	var query string
 	if useFTS {
-		query = `SELECT ` + selectCols + `
-		         FROM logs l JOIN logs_fts ON l.id = logs_fts.rowid`
+		query = `SELECT ` + selectCols + ` FROM logs l JOIN logs_fts ON l.id = logs_fts.rowid`
 	} else {
-		query = `SELECT ` + selectCols + `
-		         FROM logs l`
+		query = `SELECT ` + selectCols + ` FROM logs l`
 	}
 
-	// Metadata key-value filters using json_extract.
-	// Operators: "~value" → LIKE %value%, "*" → IS NOT NULL, plain → exact match.
 	for k, v := range params.MetadataFilter {
 		path := "$." + k
 		if v == "*" {
@@ -362,68 +341,77 @@ func (s *logStore) Search(ctx context.Context, params store.LogSearchParams) ([]
 
 	result := make([]store.LogEntry, 0, limit)
 	for rows.Next() {
-		var entry store.LogEntry
-		var tsStr string
-		var metaJSON sql.NullString
-		var environment, commitHash, spanID, parentSpanID, requestID sql.NullString
-		var userID, sessionID sql.NullString
-		var eventType, exceptionClass, errorFingerprint, sourceFile sql.NullString
-		var sourceLine sql.NullInt64
-		if err := rows.Scan(
-			&entry.ID, &tsStr, &entry.Level, &entry.Service, &environment, &commitHash,
-			&entry.TraceID, &spanID, &parentSpanID, &requestID,
-			&userID, &sessionID,
-			&entry.Message, &eventType, &exceptionClass, &errorFingerprint,
-			&sourceFile, &sourceLine, &metaJSON,
-		); err != nil {
+		entry, err := scanLogRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning log entry: %w", err)
 		}
-		entry.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
-		if environment.Valid {
-			entry.Environment = environment.String
-		}
-		if commitHash.Valid {
-			entry.CommitHash = commitHash.String
-		}
-		if spanID.Valid {
-			entry.SpanID = spanID.String
-		}
-		if parentSpanID.Valid {
-			entry.ParentSpanID = parentSpanID.String
-		}
-		if requestID.Valid {
-			entry.RequestID = requestID.String
-		}
-		if userID.Valid {
-			entry.UserID = userID.String
-		}
-		if sessionID.Valid {
-			entry.SessionID = sessionID.String
-		}
-		if eventType.Valid {
-			entry.EventType = eventType.String
-		}
-		if exceptionClass.Valid {
-			entry.ExceptionClass = exceptionClass.String
-		}
-		if errorFingerprint.Valid {
-			entry.ErrorFingerprint = errorFingerprint.String
-		}
-		if sourceFile.Valid {
-			entry.SourceFile = sourceFile.String
-		}
-		if sourceLine.Valid {
-			entry.SourceLine = int(sourceLine.Int64)
-		}
-		if metaJSON.Valid && metaJSON.String != "" {
-			if err := json.Unmarshal([]byte(metaJSON.String), &entry.Metadata); err != nil {
-				slog.Warn("invalid metadata JSON in log entry", "entry_id", entry.ID, "error", err)
-			}
-		}
-		result = append(result, entry)
+		result = append(result, *entry)
 	}
 
 	return result, rows.Err()
+}
+
+// scanLogRow scans a single log row from *sql.Rows.
+func scanLogRow(rows *sql.Rows) (*store.LogEntry, error) {
+	var entry store.LogEntry
+	var tsStr string
+	var metaJSON sql.NullString
+	var environment, commitHash, spanID, parentSpanID, requestID sql.NullString
+	var userID, sessionID sql.NullString
+	var eventType, exceptionClass, errorFingerprint, sourceFile sql.NullString
+	var sourceLine sql.NullInt64
+	if err := rows.Scan(
+		&entry.ID, &tsStr, &entry.Level, &entry.Service, &environment, &commitHash,
+		&entry.TraceID, &spanID, &parentSpanID, &requestID,
+		&userID, &sessionID,
+		&entry.Message, &eventType, &exceptionClass, &errorFingerprint,
+		&sourceFile, &sourceLine, &metaJSON,
+	); err != nil {
+		return nil, err
+	}
+	entry.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
+	if environment.Valid {
+		entry.Environment = environment.String
+	}
+	if commitHash.Valid {
+		entry.CommitHash = commitHash.String
+	}
+	if spanID.Valid {
+		entry.SpanID = spanID.String
+	}
+	if parentSpanID.Valid {
+		entry.ParentSpanID = parentSpanID.String
+	}
+	if requestID.Valid {
+		entry.RequestID = requestID.String
+	}
+	if userID.Valid {
+		entry.UserID = userID.String
+	}
+	if sessionID.Valid {
+		entry.SessionID = sessionID.String
+	}
+	if eventType.Valid {
+		entry.EventType = eventType.String
+	}
+	if exceptionClass.Valid {
+		entry.ExceptionClass = exceptionClass.String
+	}
+	if errorFingerprint.Valid {
+		entry.ErrorFingerprint = errorFingerprint.String
+	}
+	if sourceFile.Valid {
+		entry.SourceFile = sourceFile.String
+	}
+	if sourceLine.Valid {
+		entry.SourceLine = int(sourceLine.Int64)
+	}
+	if metaJSON.Valid && metaJSON.String != "" {
+		if err := json.Unmarshal([]byte(metaJSON.String), &entry.Metadata); err != nil {
+			slog.Warn("invalid metadata JSON in log entry", "entry_id", entry.ID, "error", err)
+		}
+	}
+	return &entry, nil
 }
 
 func (s *logStore) CountByLevel(ctx context.Context, params store.LogCountParams) (map[string]int, error) {
@@ -531,7 +519,6 @@ func (s *logStore) CountByService(ctx context.Context, params store.LogCountPara
 }
 
 func (s *logStore) DistinctValues(ctx context.Context, field string, params store.LogCountParams) ([]string, error) {
-	// Whitelist allowed field names to prevent SQL injection.
 	var col string
 	switch field {
 	case "service":
@@ -556,8 +543,6 @@ func (s *logStore) DistinctValues(ctx context.Context, field string, params stor
 		return nil, fmt.Errorf("unsupported field %q", field)
 	}
 
-	// Safe: col is whitelist-validated by the switch above; it can only be a
-	// hardcoded column name literal, never user-supplied input.
 	query := fmt.Sprintf(`SELECT DISTINCT %s FROM logs WHERE %s != '' AND timestamp >= ? AND timestamp < ?`, col, col)
 	args := []any{params.Since.UTC().Format(time.RFC3339Nano), params.Until.UTC().Format(time.RFC3339Nano)}
 
@@ -613,14 +598,76 @@ func (s *logStore) MetadataKeys(ctx context.Context, params store.LogCountParams
 }
 
 func (s *logStore) GetByID(ctx context.Context, id int64) (*store.LogEntry, error) {
-	row, err := s.q.GetLogByID(ctx, id)
-	if errors.Is(err, sql.ErrNoRows) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, timestamp, level, service, environment, commit_hash,
+			trace_id, span_id, parent_span_id, request_id,
+			user_id, session_id,
+			message, event_type, exception_class, error_fingerprint,
+			source_file, source_line, metadata
+		FROM logs WHERE id = ?`, id)
+
+	var entry store.LogEntry
+	var tsStr string
+	var metaJSON sql.NullString
+	var environment, commitHash, spanID, parentSpanID, requestID sql.NullString
+	var userID, sessionID sql.NullString
+	var eventType, exceptionClass, errorFingerprint, sourceFile sql.NullString
+	var sourceLine sql.NullInt64
+
+	err := row.Scan(
+		&entry.ID, &tsStr, &entry.Level, &entry.Service, &environment, &commitHash,
+		&entry.TraceID, &spanID, &parentSpanID, &requestID,
+		&userID, &sessionID,
+		&entry.Message, &eventType, &exceptionClass, &errorFingerprint,
+		&sourceFile, &sourceLine, &metaJSON,
+	)
+	if err == sql.ErrNoRows {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting log by id: %w", err)
 	}
-	entry := logRowToStore(row)
+
+	entry.Timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
+	if environment.Valid {
+		entry.Environment = environment.String
+	}
+	if commitHash.Valid {
+		entry.CommitHash = commitHash.String
+	}
+	if spanID.Valid {
+		entry.SpanID = spanID.String
+	}
+	if parentSpanID.Valid {
+		entry.ParentSpanID = parentSpanID.String
+	}
+	if requestID.Valid {
+		entry.RequestID = requestID.String
+	}
+	if userID.Valid {
+		entry.UserID = userID.String
+	}
+	if sessionID.Valid {
+		entry.SessionID = sessionID.String
+	}
+	if eventType.Valid {
+		entry.EventType = eventType.String
+	}
+	if exceptionClass.Valid {
+		entry.ExceptionClass = exceptionClass.String
+	}
+	if errorFingerprint.Valid {
+		entry.ErrorFingerprint = errorFingerprint.String
+	}
+	if sourceFile.Valid {
+		entry.SourceFile = sourceFile.String
+	}
+	if sourceLine.Valid {
+		entry.SourceLine = int(sourceLine.Int64)
+	}
+	if metaJSON.Valid && metaJSON.String != "" {
+		json.Unmarshal([]byte(metaJSON.String), &entry.Metadata)
+	}
 
 	// Load associated request summary if present
 	var rs store.RequestSummary
@@ -648,9 +695,8 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*store.LogEntry, erro
 		rs.NPlusOne = nPlusOne == 1
 		entry.RequestSummary = &rs
 	}
-	// sql.ErrNoRows is fine — most logs won't have a request summary
 
-	return entry, nil
+	return &entry, nil
 }
 
 func (s *logStore) SearchRequestSummaries(ctx context.Context, params store.RequestSummarySearchParams) ([]store.RequestSummaryResult, error) {
@@ -706,7 +752,6 @@ func (s *logStore) SearchRequestSummaries(ctx context.Context, params store.Requ
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	// Sort by (whitelist allowed columns).
 	sortCol := "rs.duration_ms"
 	switch params.SortBy {
 	case "sql_count":
@@ -769,13 +814,13 @@ func (s *logStore) Prune(ctx context.Context, olderThan time.Duration) (int64, e
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339Nano)
 	var totalDeleted int64
 	for {
-		result, err := s.db.ExecContext(ctx,
+		res, err := s.db.NewRaw(
 			`DELETE FROM logs WHERE rowid IN (SELECT rowid FROM logs WHERE timestamp < ? LIMIT 1000)`, cutoff,
-		)
+		).Exec(ctx)
 		if err != nil {
 			return totalDeleted, fmt.Errorf("pruning logs: %w", err)
 		}
-		n, _ := result.RowsAffected()
+		n, _ := res.RowsAffected()
 		totalDeleted += n
 		if n < 1000 {
 			break
@@ -785,24 +830,39 @@ func (s *logStore) Prune(ctx context.Context, olderThan time.Duration) (int64, e
 }
 
 func (s *logStore) RecordBatch(ctx context.Context, batchID string, logCount int) error {
-	return s.q.RecordBatch(ctx, RecordBatchParams{
-		BatchID:  batchID,
-		LogCount: int64(logCount),
-	})
+	_, err := s.db.NewRaw(`
+		INSERT INTO ingest_batches (batch_id, log_count) VALUES (?, ?)`,
+		batchID, logCount,
+	).Exec(ctx)
+	return err
 }
 
 func (s *logStore) GetBatch(ctx context.Context, batchID string) (*store.BatchRecord, error) {
-	row, err := s.q.GetBatch(ctx, batchID)
-	if errors.Is(err, sql.ErrNoRows) {
+	var batchIDResult string
+	var logCount int
+	var receivedAt string
+	err := s.db.NewRaw(`
+		SELECT batch_id, log_count, received_at FROM ingest_batches WHERE batch_id = ?`, batchID,
+	).Scan(ctx, &batchIDResult, &logCount, &receivedAt)
+	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return batchRowToStore(row), nil
+	return &store.BatchRecord{
+		BatchID:    batchIDResult,
+		LogCount:   logCount,
+		ReceivedAt: parseTime(receivedAt),
+	}, nil
 }
 
 func (s *logStore) PruneBatches(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339Nano)
-	return s.q.PruneBatches(ctx, cutoff)
+	res, err := s.db.NewRaw(`DELETE FROM ingest_batches WHERE received_at < ?`, cutoff).Exec(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }

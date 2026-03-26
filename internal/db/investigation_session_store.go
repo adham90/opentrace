@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
+
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -30,13 +32,12 @@ const investigationSessionColumns = `id, user_id, user_email, user_role,
 		files_modified, files_read, linked_deploy_id`
 
 type investigationSessionStore struct {
-	db *sql.DB
-	q  *Queries
+	db *bun.DB
 }
 
 // NewInvestigationSessionStore creates a new InvestigationSessionStore backed by SQLite.
-func NewInvestigationSessionStore(db *sql.DB) store.InvestigationSessionStore {
-	return &investigationSessionStore{db: db, q: New(db)}
+func NewInvestigationSessionStore(db *bun.DB) store.InvestigationSessionStore {
+	return &investigationSessionStore{db: db}
 }
 
 func (s *investigationSessionStore) Create(ctx context.Context, params store.CreateInvestigationSessionParams) (*store.InvestigationSession, error) {
@@ -47,19 +48,15 @@ func (s *investigationSessionStore) Create(ctx context.Context, params store.Cre
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	err := s.q.CreateInvestigationSession(ctx, CreateInvestigationSessionParams{
-		ID:             id,
-		UserID:         params.UserID,
-		UserEmail:      params.UserEmail,
-		UserRole:       params.UserRole,
-		ClientName:     params.ClientName,
-		ClientVersion:  params.ClientVersion,
-		Workspace:      params.Workspace,
-		Transport:      params.Transport,
-		ConnectionID:   connID,
-		StartedAt:      now,
-		LastActivityAt: now,
-	})
+	_, err := s.db.NewRaw(`
+		INSERT INTO investigation_sessions (id, user_id, user_email, user_role,
+			client_name, client_version, workspace, transport, connection_id,
+			started_at, last_activity_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, params.UserID, params.UserEmail, params.UserRole,
+		params.ClientName, params.ClientVersion, params.Workspace,
+		params.Transport, connID, now, now,
+	).Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("creating investigation session: %w", err)
 	}
@@ -87,8 +84,9 @@ func (s *investigationSessionStore) Close(ctx context.Context, id string) error 
 	now := time.Now().UTC()
 	nowStr := now.Format(time.RFC3339)
 
-	// Calculate duration from started_at using sqlc.
-	startedAtStr, err := s.q.GetInvestigationSessionStartedAt(ctx, id)
+	// Get started_at to calculate duration
+	var startedAtStr string
+	err := s.db.NewRaw(`SELECT started_at FROM investigation_sessions WHERE id = ?`, id).Scan(ctx, &startedAtStr)
 	if err == sql.ErrNoRows {
 		return store.ErrNotFound
 	}
@@ -99,12 +97,12 @@ func (s *investigationSessionStore) Close(ctx context.Context, id string) error 
 	startedAt, _ := time.Parse(time.RFC3339, startedAtStr)
 	duration := int(now.Sub(startedAt).Seconds())
 
-	err = s.q.CloseInvestigationSession(ctx, CloseInvestigationSessionParams{
-		EndedAt:         sql.NullString{String: nowStr, Valid: true},
-		DurationSeconds: int64(duration),
-		LastActivityAt:  nowStr,
-		ID:              id,
-	})
+	_, err = s.db.NewRaw(`
+		UPDATE investigation_sessions
+		SET status = 'unresolved', ended_at = ?, duration_seconds = ?, last_activity_at = ?
+		WHERE id = ?`,
+		nowStr, duration, nowStr, id,
+	).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("closing investigation session: %w", err)
 	}
@@ -198,8 +196,6 @@ func (s *investigationSessionStore) Update(ctx context.Context, id string, param
 		sets = append(sets, "triggered_by_healthcheck_id = ?")
 		args = append(args, *params.TriggeredByHealthcheckID)
 	}
-
-	// Stage 4: Additional subsystem links
 	if params.RunbooksExecuted != nil {
 		j, _ := json.Marshal(params.RunbooksExecuted)
 		sets = append(sets, "runbooks_executed = ?")
@@ -261,7 +257,7 @@ func (s *investigationSessionStore) Update(ctx context.Context, id string, param
 		args = append(args, *params.FixDurabilitySeconds)
 	}
 
-	// Stage 6: Development session tracking
+	// Development session tracking
 	if params.FilesModified != nil {
 		j, _ := json.Marshal(params.FilesModified)
 		sets = append(sets, "files_modified = ?")
@@ -288,7 +284,7 @@ func (s *investigationSessionStore) Update(ctx context.Context, id string, param
 	args = append(args, id)
 	query := fmt.Sprintf("UPDATE investigation_sessions SET %s WHERE id = ?", strings.Join(sets, ", "))
 
-	result, err := s.db.ExecContext(ctx, query, args...)
+	result, err := s.db.NewRaw(query, args...).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("updating investigation session: %w", err)
 	}
@@ -390,33 +386,34 @@ func (s *investigationSessionStore) List(ctx context.Context, params store.ListI
 func (s *investigationSessionStore) Stats(ctx context.Context) (*store.InvestigationSessionStats, error) {
 	stats := &store.InvestigationSessionStats{}
 
-	total, err := s.q.GetInvestigationSessionStatsTotalSessions(ctx)
-	if err != nil {
+	var total, open, resolved int
+	if err := s.db.NewRaw(`SELECT COUNT(*) FROM investigation_sessions`).Scan(ctx, &total); err != nil {
 		return nil, fmt.Errorf("counting sessions: %w", err)
 	}
-	stats.TotalSessions = int(total)
+	stats.TotalSessions = total
 
-	open, err := s.q.GetInvestigationSessionStatsOpenSessions(ctx)
-	if err != nil {
+	if err := s.db.NewRaw(`SELECT COUNT(*) FROM investigation_sessions WHERE status = 'open'`).Scan(ctx, &open); err != nil {
 		return nil, fmt.Errorf("counting open sessions: %w", err)
 	}
-	stats.OpenSessions = int(open)
+	stats.OpenSessions = open
 
-	resolved, err := s.q.GetInvestigationSessionStatsResolvedSessions(ctx)
-	if err != nil {
+	if err := s.db.NewRaw(`SELECT COUNT(*) FROM investigation_sessions WHERE status = 'resolved'`).Scan(ctx, &resolved); err != nil {
 		return nil, fmt.Errorf("counting resolved sessions: %w", err)
 	}
-	stats.ResolvedSessions = int(resolved)
+	stats.ResolvedSessions = resolved
 
-	avgs, err := s.q.GetInvestigationSessionStatsAverages(ctx)
-	if err != nil {
+	var avgSteps, avgDuration sql.NullFloat64
+	if err := s.db.NewRaw(`
+		SELECT AVG(total_steps), AVG(duration_seconds)
+		FROM investigation_sessions WHERE status IN ('closed', 'resolved')`,
+	).Scan(ctx, &avgSteps, &avgDuration); err != nil {
 		return nil, fmt.Errorf("computing session averages: %w", err)
 	}
-	if avgs.AvgSteps.Valid {
-		stats.AvgSteps = avgs.AvgSteps.Float64
+	if avgSteps.Valid {
+		stats.AvgSteps = avgSteps.Float64
 	}
-	if avgs.AvgDuration.Valid {
-		stats.AvgDurationSecs = avgs.AvgDuration.Float64
+	if avgDuration.Valid {
+		stats.AvgDurationSecs = avgDuration.Float64
 	}
 
 	return stats, nil
@@ -426,11 +423,11 @@ func (s *investigationSessionStore) Prune(ctx context.Context, olderThan time.Du
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
 	var totalDeleted int64
 	for {
-		result, err := s.db.ExecContext(ctx,
+		result, err := s.db.NewRaw(
 			`DELETE FROM investigation_sessions
 			 WHERE rowid IN (SELECT rowid FROM investigation_sessions WHERE ended_at IS NOT NULL AND ended_at < ? LIMIT 1000)`,
 			cutoff,
-		)
+		).Exec(ctx)
 		if err != nil {
 			return totalDeleted, fmt.Errorf("pruning investigation sessions: %w", err)
 		}
@@ -446,53 +443,47 @@ func (s *investigationSessionStore) Prune(ctx context.Context, olderThan time.Du
 func (s *investigationSessionStore) RecordStep(ctx context.Context, sessionID string, toolName string, isError bool) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	errIncr := int64(0)
+	errIncr := 0
 	if isError {
 		errIncr = 1
 	}
 
-	// Atomically increment step count and append to tool_sequence.
-	// Read current tool_sequence, append, write back.
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("recording step: %w", err)
-	}
-	defer tx.Rollback()
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		var seqJSON string
+		err := tx.NewRaw(`SELECT COALESCE(tool_sequence, '[]') FROM investigation_sessions WHERE id = ?`, sessionID).Scan(ctx, &seqJSON)
+		if err == sql.ErrNoRows {
+			return store.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("recording step: %w", err)
+		}
 
-	qtx := s.q.WithTx(tx)
+		var seq []string
+		if seqJSON != "" && seqJSON != "[]" {
+			json.Unmarshal([]byte(seqJSON), &seq)
+		}
+		seq = append(seq, toolName)
+		newSeqJSON, _ := json.Marshal(seq)
+		fingerprint := strings.Join(seq, "|")
 
-	seqJSON, err := qtx.GetInvestigationSessionToolSequence(ctx, sessionID)
-	if err == sql.ErrNoRows {
-		return store.ErrNotFound
-	}
-	if err != nil {
-		return fmt.Errorf("recording step: %w", err)
-	}
+		_, err = tx.NewRaw(`
+			UPDATE investigation_sessions SET
+				total_steps = total_steps + 1,
+				total_errors = total_errors + ?,
+				tool_sequence = ?,
+				tool_fingerprint = ?,
+				last_activity_at = ?
+			WHERE id = ?`,
+			errIncr, string(newSeqJSON), fingerprint, now, sessionID,
+		).Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("recording step: %w", err)
+		}
 
-	var seq []string
-	if seqJSON != "" && seqJSON != "[]" {
-		json.Unmarshal([]byte(seqJSON), &seq)
-	}
-	seq = append(seq, toolName)
-	newSeqJSON, _ := json.Marshal(seq)
-	fingerprint := strings.Join(seq, "|")
-
-	err = qtx.RecordInvestigationStep(ctx, RecordInvestigationStepParams{
-		ErrorIncrement:  errIncr,
-		ToolSequence:    string(newSeqJSON),
-		ToolFingerprint: fingerprint,
-		LastActivityAt:  now,
-		ID:              sessionID,
+		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("recording step: %w", err)
-	}
-
-	return tx.Commit()
 }
 
-// FindByCreatedWatcher finds the most recent session that created the given watcher.
-// Returns nil, nil if no matching session is found.
 func (s *investigationSessionStore) FindByCreatedWatcher(ctx context.Context, watcherID string) (*store.InvestigationSession, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT `+investigationSessionColumns+`
@@ -511,8 +502,6 @@ func (s *investigationSessionStore) FindByCreatedWatcher(ctx context.Context, wa
 	return sess, nil
 }
 
-// FindByResolvedError finds the most recent session that resolved the given error fingerprint.
-// Returns nil, nil if no matching session is found.
 func (s *investigationSessionStore) FindByResolvedError(ctx context.Context, fingerprint string) (*store.InvestigationSession, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT `+investigationSessionColumns+`
@@ -531,8 +520,6 @@ func (s *investigationSessionStore) FindByResolvedError(ctx context.Context, fin
 	return sess, nil
 }
 
-// FindByCreatedHealthcheck finds the most recent session that created the given health check.
-// Returns nil, nil if no matching session is found.
 func (s *investigationSessionStore) FindByCreatedHealthcheck(ctx context.Context, healthcheckID string) (*store.InvestigationSession, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT `+investigationSessionColumns+`
@@ -549,6 +536,80 @@ func (s *investigationSessionStore) FindByCreatedHealthcheck(ctx context.Context
 		return nil, fmt.Errorf("finding session by created healthcheck: %w", err)
 	}
 	return sess, nil
+}
+
+// nthPipe returns the index of the nth '|' in s, or -1 if not found.
+func nthPipe(s string, n int) int {
+	count := 0
+	for i, c := range s {
+		if c == '|' {
+			count++
+			if count == n {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func (s *investigationSessionStore) FindSimilar(ctx context.Context, params store.FindSimilarParams) ([]store.InvestigationSession, error) {
+	maxResults := params.MaxResults
+	if maxResults <= 0 {
+		maxResults = 3
+	}
+	minSteps := params.MinSteps
+	if minSteps <= 0 {
+		minSteps = 1
+	}
+
+	where := "WHERE id != ?"
+	args := []any{params.ExcludeSessionID}
+
+	if params.Service != "" {
+		where += " AND primary_service = ?"
+		args = append(args, params.Service)
+	}
+	if params.Intent != "" {
+		where += " AND intent = ?"
+		args = append(args, params.Intent)
+	}
+	if params.OnlyResolved {
+		where += " AND status = 'resolved'"
+	}
+	where += " AND total_steps >= ?"
+	args = append(args, minSteps)
+
+	if params.ToolFingerprint != "" {
+		prefix := params.ToolFingerprint
+		if idx := nthPipe(prefix, 3); idx > 0 {
+			prefix = prefix[:idx]
+		}
+		where += " AND tool_fingerprint LIKE ?"
+		args = append(args, prefix+"%")
+	}
+
+	args = append(args, maxResults)
+
+	query := fmt.Sprintf(
+		`SELECT %s FROM investigation_sessions %s ORDER BY started_at DESC LIMIT ?`,
+		investigationSessionColumns, where,
+	)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("finding similar sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var result []store.InvestigationSession
+	for rows.Next() {
+		sess, err := scanSessionRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *sess)
+	}
+	return result, rows.Err()
 }
 
 // scanSession scans a single row into an InvestigationSession.
@@ -587,153 +648,16 @@ func scanSession(row *sql.Row) (*store.InvestigationSession, error) {
 		return nil, err
 	}
 
-	if dsID.Valid {
-		v := int(dsID.Int64)
-		sess.PrimaryDatasourceID = &v
-	}
-
-	// JSON array columns
-	unmarshalStringSlice := func(raw string) []string {
-		var s []string
-		if raw != "" && raw != "[]" {
-			if err := json.Unmarshal([]byte(raw), &s); err != nil {
-				slog.Warn("investigation_session: malformed JSON array", "error", err)
-			}
-		}
-		if s == nil {
-			return []string{}
-		}
-		return s
-	}
-
-	sess.ToolSequence = unmarshalStringSlice(seqJSON)
-	sess.CreatedWatcherIDs = unmarshalStringSlice(createdWatcherJSON)
-	sess.ResolvedErrorGroupIDs = unmarshalStringSlice(resolvedErrorJSON)
-	sess.InvestigatedErrorFingerprints = unmarshalStringSlice(investigatedErrorJSON)
-	sess.CreatedHealthcheckIDs = unmarshalStringSlice(createdHCJSON)
-	sess.CreatedNoteIDs = unmarshalStringSlice(createdNoteJSON)
-	sess.AutoNoteIDs = unmarshalStringSlice(autoNoteJSON)
-	sess.RunbooksExecuted = unmarshalStringSlice(runbooksJSON)
-	sess.ExplainedQueries = unmarshalStringSlice(explainedJSON)
-	sess.KilledQueries = unmarshalStringSlice(killedJSON)
-	sess.TraceIDs = unmarshalStringSlice(traceIDsJSON)
-	sess.FilesModified = unmarshalStringSlice(filesModifiedJSON)
-	sess.FilesRead = unmarshalStringSlice(filesReadJSON)
-
-	// JSON map columns
-	json.Unmarshal([]byte(preSnapshotJSON), &sess.PreInvestigationSnapshot)
-	json.Unmarshal([]byte(postSnapshotJSON), &sess.PostInvestigationSnapshot)
-
-	// Nullable TEXT columns
-	if triggeredByAlert.Valid {
-		sess.TriggeredByAlertID = &triggeredByAlert.String
-	}
-	if triggeredByWatcher.Valid {
-		sess.TriggeredByWatcherID = &triggeredByWatcher.String
-	}
-	if triggeredByHC.Valid {
-		sess.TriggeredByHealthcheckID = &triggeredByHC.String
-	}
-	if linkedDeployID.Valid {
-		sess.LinkedDeployID = &linkedDeployID.Int64
-	}
-
-	sess.StartedAt, _ = time.Parse(time.RFC3339, startedAt)
-	sess.LastActivityAt, _ = time.Parse(time.RFC3339, lastActivityAt)
-	if endedAt.Valid {
-		t, _ := time.Parse(time.RFC3339, endedAt.String)
-		if !t.IsZero() {
-			sess.EndedAt = &t
-		}
-	}
-	if recurrenceGroup.Valid {
-		sess.RecurrenceGroup = &recurrenceGroup.String
-	}
-	if previousSessionID.Valid {
-		sess.PreviousSessionID = &previousSessionID.String
-	}
-	if fixDurability.Valid {
-		v := int(fixDurability.Int64)
-		sess.FixDurabilitySeconds = &v
-	}
+	populateSession(&sess, dsID, seqJSON, startedAt, lastActivityAt, endedAt,
+		createdWatcherJSON, resolvedErrorJSON, investigatedErrorJSON, createdHCJSON,
+		triggeredByAlert, triggeredByWatcher, triggeredByHC,
+		createdNoteJSON, autoNoteJSON,
+		runbooksJSON, explainedJSON, killedJSON, traceIDsJSON,
+		preSnapshotJSON, postSnapshotJSON,
+		recurrenceGroup, previousSessionID, fixDurability,
+		filesModifiedJSON, filesReadJSON, linkedDeployID)
 
 	return &sess, nil
-}
-
-// nthPipe returns the index of the nth '|' in s, or -1 if not found.
-func nthPipe(s string, n int) int {
-	count := 0
-	for i, c := range s {
-		if c == '|' {
-			count++
-			if count == n {
-				return i
-			}
-		}
-	}
-	return -1
-}
-
-func (s *investigationSessionStore) FindSimilar(ctx context.Context, params store.FindSimilarParams) ([]store.InvestigationSession, error) {
-	maxResults := params.MaxResults
-	if maxResults <= 0 {
-		maxResults = 3
-	}
-	minSteps := params.MinSteps
-	if minSteps <= 0 {
-		minSteps = 1
-	}
-
-	// Build dynamic WHERE clause
-	where := "WHERE id != ?"
-	args := []any{params.ExcludeSessionID}
-
-	if params.Service != "" {
-		where += " AND primary_service = ?"
-		args = append(args, params.Service)
-	}
-	if params.Intent != "" {
-		where += " AND intent = ?"
-		args = append(args, params.Intent)
-	}
-	if params.OnlyResolved {
-		where += " AND status = 'resolved'"
-	}
-	where += " AND total_steps >= ?"
-	args = append(args, minSteps)
-
-	// If a tool fingerprint is provided, prefer sessions with a common prefix
-	if params.ToolFingerprint != "" {
-		prefix := params.ToolFingerprint
-		if idx := nthPipe(prefix, 3); idx > 0 {
-			prefix = prefix[:idx]
-		}
-		where += " AND tool_fingerprint LIKE ?"
-		args = append(args, prefix+"%")
-	}
-
-	args = append(args, maxResults)
-
-	query := fmt.Sprintf(
-		`SELECT %s FROM investigation_sessions %s ORDER BY started_at DESC LIMIT ?`,
-		investigationSessionColumns, where,
-	)
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("finding similar sessions: %w", err)
-	}
-	defer rows.Close()
-
-	var result []store.InvestigationSession
-	for rows.Next() {
-		sess, err := scanSessionRow(rows)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, *sess)
-	}
-	return result, rows.Err()
 }
 
 // scanSessionRow scans a *sql.Rows row (used in List).
@@ -772,12 +696,34 @@ func scanSessionRow(rows *sql.Rows) (*store.InvestigationSession, error) {
 		return nil, err
 	}
 
+	populateSession(&sess, dsID, seqJSON, startedAt, lastActivityAt, endedAt,
+		createdWatcherJSON, resolvedErrorJSON, investigatedErrorJSON, createdHCJSON,
+		triggeredByAlert, triggeredByWatcher, triggeredByHC,
+		createdNoteJSON, autoNoteJSON,
+		runbooksJSON, explainedJSON, killedJSON, traceIDsJSON,
+		preSnapshotJSON, postSnapshotJSON,
+		recurrenceGroup, previousSessionID, fixDurability,
+		filesModifiedJSON, filesReadJSON, linkedDeployID)
+
+	return &sess, nil
+}
+
+// populateSession fills in the parsed fields of an InvestigationSession.
+func populateSession(sess *store.InvestigationSession,
+	dsID sql.NullInt64, seqJSON, startedAt, lastActivityAt string, endedAt sql.NullString,
+	createdWatcherJSON, resolvedErrorJSON, investigatedErrorJSON, createdHCJSON string,
+	triggeredByAlert, triggeredByWatcher, triggeredByHC sql.NullString,
+	createdNoteJSON, autoNoteJSON string,
+	runbooksJSON, explainedJSON, killedJSON, traceIDsJSON string,
+	preSnapshotJSON, postSnapshotJSON string,
+	recurrenceGroup, previousSessionID sql.NullString, fixDurability sql.NullInt64,
+	filesModifiedJSON, filesReadJSON string, linkedDeployID sql.NullInt64,
+) {
 	if dsID.Valid {
 		v := int(dsID.Int64)
 		sess.PrimaryDatasourceID = &v
 	}
 
-	// JSON array columns
 	unmarshalStringSlice := func(raw string) []string {
 		var s []string
 		if raw != "" && raw != "[]" {
@@ -805,11 +751,9 @@ func scanSessionRow(rows *sql.Rows) (*store.InvestigationSession, error) {
 	sess.FilesModified = unmarshalStringSlice(filesModifiedJSON)
 	sess.FilesRead = unmarshalStringSlice(filesReadJSON)
 
-	// JSON map columns
 	json.Unmarshal([]byte(preSnapshotJSON), &sess.PreInvestigationSnapshot)
 	json.Unmarshal([]byte(postSnapshotJSON), &sess.PostInvestigationSnapshot)
 
-	// Nullable TEXT columns
 	if triggeredByAlert.Valid {
 		sess.TriggeredByAlertID = &triggeredByAlert.String
 	}
@@ -841,6 +785,4 @@ func scanSessionRow(rows *sql.Rows) (*store.InvestigationSession, error) {
 		v := int(fixDurability.Int64)
 		sess.FixDurabilitySeconds = &v
 	}
-
-	return &sess, nil
 }

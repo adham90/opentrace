@@ -1,24 +1,29 @@
 package store
 
-import "time"
+import (
+	"time"
+
+	"github.com/uptrace/bun"
+)
 
 // UserSession represents a pre-computed user session aggregation.
 type UserSession struct {
-	ID              int64     `json:"id"`
-	SessionID       string    `json:"session_id"`
-	UserID          string    `json:"user_id,omitempty"`
-	Service         string    `json:"service"`
-	Environment     string    `json:"environment,omitempty"`
-	StartedAt       time.Time `json:"started_at"`
-	EndedAt         time.Time `json:"ended_at"`
-	RequestCount    int       `json:"request_count"`
-	ErrorCount      int       `json:"error_count"`
-	TotalDurationMs float64   `json:"total_duration_ms"`
-	EntryPath       string    `json:"entry_path"`
-	ExitPath        string    `json:"exit_path"`
-	ExitStatus      int       `json:"exit_status"`
-	HasError        bool      `json:"has_error"`
-	CreatedAt       time.Time `json:"created_at"`
+	bun.BaseModel   `bun:"table:user_sessions" json:"-"`
+	ID              int64     `bun:"id,pk,autoincrement" json:"id"`
+	SessionID       string    `bun:"session_id" json:"session_id"`
+	UserID          string    `bun:"user_id" json:"user_id,omitempty"`
+	Service         string    `bun:"service" json:"service"`
+	Environment     string    `bun:"environment" json:"environment,omitempty"`
+	StartedAt       time.Time `bun:"started_at" json:"started_at"`
+	EndedAt         time.Time `bun:"ended_at" json:"ended_at"`
+	RequestCount    int       `bun:"request_count" json:"request_count"`
+	ErrorCount      int       `bun:"error_count" json:"error_count"`
+	TotalDurationMs float64   `bun:"total_duration_ms" json:"total_duration_ms"`
+	EntryPath       string    `bun:"entry_path" json:"entry_path"`
+	ExitPath        string    `bun:"exit_path" json:"exit_path"`
+	ExitStatus      int       `bun:"exit_status" json:"exit_status"`
+	HasError        bool      `bun:"has_error" json:"has_error"`
+	CreatedAt       time.Time `bun:"created_at" json:"created_at"`
 }
 
 // SessionListParams defines filters for listing user sessions.
@@ -68,12 +73,13 @@ type PathAnalysisParams struct {
 
 // Funnel represents a user-defined conversion funnel.
 type Funnel struct {
-	ID        int64        `json:"id"`
-	Name      string       `json:"name"`
-	Service   string       `json:"service,omitempty"`
-	Steps     []FunnelStep `json:"steps"`
-	CreatedAt time.Time    `json:"created_at"`
-	UpdatedAt time.Time    `json:"updated_at"`
+	bun.BaseModel `bun:"table:funnels" json:"-"`
+	ID            int64        `bun:"id,pk,autoincrement" json:"id"`
+	Name          string       `bun:"name" json:"name"`
+	Service       string       `bun:"service" json:"service,omitempty"`
+	Steps         []FunnelStep `bun:"steps" json:"steps"`
+	CreatedAt     time.Time    `bun:"created_at" json:"created_at"`
+	UpdatedAt     time.Time    `bun:"updated_at" json:"updated_at"`
 }
 
 // FunnelStep represents one step in a conversion funnel.

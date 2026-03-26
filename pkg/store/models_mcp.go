@@ -1,19 +1,24 @@
 package store
 
-import "time"
+import (
+	"time"
+
+	"github.com/uptrace/bun"
+)
 
 // MCPActivityEvent represents a single MCP tool call or connection event.
 type MCPActivityEvent struct {
-	ID            int64     `json:"id"`
-	SessionID     string    `json:"session_id"`
-	UserID        string    `json:"user_id,omitempty"`
-	ToolName      string    `json:"tool_name"`
-	Arguments     string    `json:"arguments,omitempty"`
-	ResultPreview string    `json:"result_preview,omitempty"`
-	IsError       bool      `json:"is_error"`
-	DurationMs    *int64    `json:"duration_ms,omitempty"`
-	EventType     string    `json:"event_type"`
-	CreatedAt     time.Time `json:"created_at"`
+	bun.BaseModel `bun:"table:mcp_activity" json:"-"`
+	ID            int64     `bun:"id,pk,autoincrement" json:"id"`
+	SessionID     string    `bun:"session_id" json:"session_id"`
+	UserID        string    `bun:"user_id" json:"user_id,omitempty"`
+	ToolName      string    `bun:"tool_name" json:"tool_name"`
+	Arguments     string    `bun:"arguments" json:"arguments,omitempty"`
+	ResultPreview string    `bun:"result_preview" json:"result_preview,omitempty"`
+	IsError       bool      `bun:"is_error" json:"is_error"`
+	DurationMs    *int64    `bun:"duration_ms" json:"duration_ms,omitempty"`
+	EventType     string    `bun:"event_type" json:"event_type"`
+	CreatedAt     time.Time `bun:"created_at" json:"created_at"`
 }
 
 // LogMCPActivityParams defines input for logging an MCP activity event.

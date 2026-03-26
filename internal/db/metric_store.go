@@ -2,34 +2,52 @@ package db
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
+
 	"github.com/adham90/opentrace/pkg/store"
 )
 
-// metricStore implements MetricStore using database/sql (SQLite).
+// metricStore implements MetricStore using bun (SQLite).
 type metricStore struct {
-	db *sql.DB
-	q  *Queries
+	db *bun.DB
 }
 
 // NewMetricStore creates a new MetricStore backed by SQLite.
-func NewMetricStore(db *sql.DB) store.MetricStore {
-	return &metricStore{db: db, q: New(db)}
+func NewMetricStore(db *bun.DB) store.MetricStore {
+	return &metricStore{db: db}
 }
 
-// BatchInsert uses a multi-row insert in a transaction — kept hand-written.
+// BatchInsert inserts multiple metric samples in a single transaction using bun batch insert.
 func (s *metricStore) BatchInsert(ctx context.Context, serverID uuid.UUID, ts time.Time, samples []store.MetricSample) (int, error) {
 	if len(samples) == 0 {
 		return 0, nil
 	}
 
+	now := time.Now().UTC()
+	tsUTC := ts.UTC()
+
+	metrics := make([]store.MetricPoint, len(samples))
+	for i, sample := range samples {
+		metrics[i] = store.MetricPoint{
+			ServerID:    serverID,
+			Timestamp:   tsUTC,
+			MetricName:  sample.Name,
+			MetricValue: sample.Value,
+			Unit:        sample.Unit,
+			Labels:      sample.Labels,
+		}
+		// CreatedAt is not in MetricPoint model as bun field but is in the table.
+		// We'll use raw SQL for created_at.
+		_ = now
+	}
+
+	// Use a transaction with prepared statements for best performance with SQLite.
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("begin tx: %w", err)
@@ -44,21 +62,17 @@ func (s *metricStore) BatchInsert(ctx context.Context, serverID uuid.UUID, ts ti
 	}
 	defer stmt.Close()
 
-	tsStr := ts.UTC().Format(time.RFC3339)
-	now := time.Now().UTC().Format(time.RFC3339)
+	tsStr := tsUTC.Format(time.RFC3339)
+	nowStr := now.Format(time.RFC3339)
 
 	for _, sample := range samples {
 		labelsJSON := "{}"
 		if sample.Labels != nil {
-			b, err := json.Marshal(sample.Labels)
-			if err != nil {
-				return 0, fmt.Errorf("marshaling labels: %w", err)
-			}
-			labelsJSON = string(b)
+			labelsJSON = marshalMetadataJSON(toAnyMap(sample.Labels))
 		}
 		_, err = stmt.ExecContext(ctx,
 			serverID.String(), tsStr, sample.Name, sample.Value,
-			sample.Unit, labelsJSON, now,
+			sample.Unit, labelsJSON, nowStr,
 		)
 		if err != nil {
 			return 0, fmt.Errorf("inserting metric %s: %w", sample.Name, err)
@@ -72,7 +86,7 @@ func (s *metricStore) BatchInsert(ctx context.Context, serverID uuid.UUID, ts ti
 	return len(samples), nil
 }
 
-// Query uses dynamic WHERE clauses — kept hand-written.
+// Query uses dynamic WHERE clauses with raw SQL for graceful label handling.
 func (s *metricStore) Query(ctx context.Context, params store.MetricQuery) ([]store.MetricPoint, error) {
 	var conditions []string
 	var args []any
@@ -93,19 +107,17 @@ func (s *metricStore) Query(ctx context.Context, params store.MetricQuery) ([]st
 		args = append(args, params.End.UTC().Format(time.RFC3339))
 	}
 
-	query := `SELECT id, server_id, timestamp, metric_name, metric_value, unit, labels
-	          FROM metrics`
-	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
-	}
-	query += " ORDER BY timestamp DESC"
-
 	limit := params.Limit
 	if limit <= 0 {
 		limit = 100
 	}
-	query += " LIMIT ?"
 	args = append(args, limit)
+
+	query := fmt.Sprintf(
+		`SELECT id, server_id, timestamp, metric_name, metric_value, unit, labels
+		 FROM metrics WHERE %s ORDER BY timestamp DESC LIMIT ?`,
+		strings.Join(conditions, " AND "),
+	)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -113,25 +125,60 @@ func (s *metricStore) Query(ctx context.Context, params store.MetricQuery) ([]st
 	}
 	defer rows.Close()
 
-	return scanMetricRows(rows)
+	var points []store.MetricPoint
+	for rows.Next() {
+		var p store.MetricPoint
+		var tsStr, labelsRaw string
+		var serverIDStr string
+		if err := rows.Scan(&p.ID, &serverIDStr, &tsStr, &p.MetricName, &p.MetricValue, &p.Unit, &labelsRaw); err != nil {
+			return nil, fmt.Errorf("scanning metric: %w", err)
+		}
+		p.ServerID, _ = uuid.Parse(serverIDStr)
+		p.Timestamp, _ = time.Parse(time.RFC3339, tsStr)
+		p.Labels = make(map[string]string)
+		if labelsRaw != "" {
+			// Gracefully handle invalid JSON — leave as empty map
+			json.Unmarshal([]byte(labelsRaw), &p.Labels)
+		}
+		points = append(points, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("querying metrics: %w", err)
+	}
+	return points, nil
 }
 
 func (s *metricStore) LatestByServer(ctx context.Context, serverID uuid.UUID) ([]store.MetricPoint, error) {
-	rows, err := s.q.GetLatestMetricsByServer(ctx, serverID.String())
+	var points []store.MetricPoint
+	err := s.db.NewRaw(`
+		SELECT m.id, m.server_id, m.timestamp, m.metric_name, m.metric_value, m.unit, m.labels
+		FROM metrics m
+		INNER JOIN (
+		    SELECT metric_name, MAX(timestamp) AS max_ts
+		    FROM metrics
+		    WHERE server_id = ?
+		    GROUP BY metric_name
+		) latest ON m.metric_name = latest.metric_name AND m.timestamp = latest.max_ts
+		WHERE m.server_id = ?`, serverID.String(), serverID.String(),
+	).Scan(ctx, &points)
 	if err != nil {
 		return nil, fmt.Errorf("querying latest metrics: %w", err)
 	}
-	return toStoreMetricPoints(rows), nil
+	return points, nil
 }
 
 func (s *metricStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
 	var totalDeleted int64
 	for {
-		n, err := s.q.PruneMetrics(ctx, cutoff)
+		res, err := s.db.NewRaw(
+			"DELETE FROM metrics WHERE rowid IN (SELECT m.rowid FROM metrics m WHERE m.created_at < ? LIMIT 1000)",
+			cutoff,
+		).Exec(ctx)
 		if err != nil {
 			return totalDeleted, fmt.Errorf("pruning metrics: %w", err)
 		}
+		n, _ := res.RowsAffected()
 		totalDeleted += n
 		if n < 1000 {
 			break
@@ -140,33 +187,14 @@ func (s *metricStore) Prune(ctx context.Context, olderThan time.Duration) (int64
 	return totalDeleted, nil
 }
 
-func scanMetricRows(rows *sql.Rows) ([]store.MetricPoint, error) {
-	result := make([]store.MetricPoint, 0)
-	for rows.Next() {
-		var mp store.MetricPoint
-		var tsStr string
-		var unit sql.NullString
-		var labelsStr string
-
-		if err := rows.Scan(
-			&mp.ID, &mp.ServerID, &tsStr, &mp.MetricName,
-			&mp.MetricValue, &unit, &labelsStr,
-		); err != nil {
-			return nil, fmt.Errorf("scanning metric: %w", err)
-		}
-
-		mp.Timestamp, _ = time.Parse(time.RFC3339, tsStr)
-		if unit.Valid {
-			mp.Unit = unit.String
-		}
-		if labelsStr != "" && labelsStr != "{}" {
-			if err := json.Unmarshal([]byte(labelsStr), &mp.Labels); err != nil {
-				slog.Warn("invalid labels JSON in metric", "metric", mp.MetricName, "error", err)
-				mp.Labels = make(map[string]string)
-			}
-		}
-
-		result = append(result, mp)
+// toAnyMap converts map[string]string to map[string]any for JSON marshaling.
+func toAnyMap(m map[string]string) map[string]any {
+	if m == nil {
+		return nil
 	}
-	return result, rows.Err()
+	result := make(map[string]any, len(m))
+	for k, v := range m {
+		result[k] = v
+	}
+	return result
 }

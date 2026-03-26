@@ -89,7 +89,7 @@ func TestOpenSQLite_MaxOpenConns(t *testing.T) {
 	}
 	defer db.Close()
 
-	stats := db.Stats()
+	stats := db.DB.Stats()
 	if stats.MaxOpenConnections != 1 {
 		t.Errorf("MaxOpenConns = %d, want 1", stats.MaxOpenConnections)
 	}

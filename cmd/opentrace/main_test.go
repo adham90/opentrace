@@ -14,18 +14,18 @@ import (
 )
 
 func TestAppStartup(t *testing.T) {
-	db, err := dbstore.OpenSQLite(":memory:")
+	bunDB, err := dbstore.OpenSQLite(":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	defer db.Close()
+	defer bunDB.Close()
 
-	if err := dbstore.RunSQLiteMigrations(db); err != nil {
+	if err := dbstore.RunSQLiteMigrations(bunDB); err != nil {
 		t.Fatalf("migrations: %v", err)
 	}
 
-	dsStore := dbstore.NewDataSourceStore(db)
-	logStore := dbstore.NewLogStore(db)
+	dsStore := dbstore.NewDataSourceStore(bunDB)
+	logStore := dbstore.NewLogStore(bunDB)
 	registry := connector.NewRegistry()
 	srv := web.NewServer(dsStore, logStore, registry, nil)
 

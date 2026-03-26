@@ -9,21 +9,22 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
+
 	"github.com/adham90/opentrace/pkg/store"
 )
 
-// serverStore implements ServerStore using database/sql (SQLite).
+// serverStore implements ServerStore using bun (SQLite).
 type serverStore struct {
-	db *sql.DB
-	q  *Queries
+	db *bun.DB
 }
 
 // NewServerStore creates a new ServerStore backed by SQLite.
-func NewServerStore(db *sql.DB) store.ServerStore {
-	return &serverStore{db: db, q: New(db)}
+func NewServerStore(db *bun.DB) store.ServerStore {
+	return &serverStore{db: db}
 }
 
-// Register uses a transaction for upsert-on-hostname logic — kept hand-written.
+// Register uses a transaction for upsert-on-hostname logic.
 func (s *serverStore) Register(ctx context.Context, params store.RegisterServerParams) (*store.Server, error) {
 	now := time.Now().UTC()
 	nowStr := now.Format(time.RFC3339)
@@ -97,15 +98,15 @@ func (s *serverStore) Register(ctx context.Context, params store.RegisterServerP
 }
 
 func (s *serverStore) GetByID(ctx context.Context, id uuid.UUID) (*store.Server, error) {
-	row, err := s.q.GetServerByID(ctx, id.String())
+	srv := new(store.Server)
+	err := s.db.NewSelect().Model(srv).Where("id = ?", id.String()).Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, store.ErrNotFound
 		}
 		return nil, fmt.Errorf("querying server: %w", err)
 	}
-	srv := toStoreServerFromRow(row)
-	return &srv, nil
+	return srv, nil
 }
 
 func (s *serverStore) List(ctx context.Context, params store.ListServerParams) ([]store.Server, error) {
@@ -113,25 +114,28 @@ func (s *serverStore) List(ctx context.Context, params store.ListServerParams) (
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.q.ListServers(ctx, ListServersParams{
-		RowOffset: int64(params.Offset),
-		RowLimit:  int64(limit),
-	})
+
+	var servers []store.Server
+	err := s.db.NewSelect().Model(&servers).
+		OrderExpr("hostname ASC").
+		Offset(params.Offset).
+		Limit(limit).
+		Scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("querying servers: %w", err)
 	}
-	return toStoreServers(rows), nil
+	return servers, nil
 }
 
 func (s *serverStore) Update(ctx context.Context, id uuid.UUID, params store.UpdateServerParams) (*store.Server, error) {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC()
 
 	if params.DisplayName != nil {
-		err := s.q.UpdateServerDisplayName(ctx, UpdateServerDisplayNameParams{
-			DisplayName: nullString(*params.DisplayName),
-			UpdatedAt:   now,
-			ID:          id.String(),
-		})
+		_, err := s.db.NewUpdate().Model((*store.Server)(nil)).
+			Set("display_name = ?", *params.DisplayName).
+			Set("updated_at = ?", now).
+			Where("id = ?", id.String()).
+			Exec(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("updating server: %w", err)
 		}
@@ -141,15 +145,16 @@ func (s *serverStore) Update(ctx context.Context, id uuid.UUID, params store.Upd
 }
 
 func (s *serverStore) UpdateHeartbeat(ctx context.Context, id uuid.UUID) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-	n, err := s.q.UpdateServerHeartbeat(ctx, UpdateServerHeartbeatParams{
-		LastSeenAt: nullString(now),
-		UpdatedAt:  now,
-		ID:         id.String(),
-	})
+	now := time.Now().UTC()
+	res, err := s.db.NewUpdate().Model((*store.Server)(nil)).
+		Set("last_seen_at = ?", now).
+		Set("updated_at = ?", now).
+		Where("id = ?", id.String()).
+		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("updating heartbeat: %w", err)
 	}
+	n, _ := res.RowsAffected()
 	if n == 0 {
 		return store.ErrNotFound
 	}
@@ -157,10 +162,13 @@ func (s *serverStore) UpdateHeartbeat(ctx context.Context, id uuid.UUID) error {
 }
 
 func (s *serverStore) Delete(ctx context.Context, id uuid.UUID) error {
-	n, err := s.q.DeleteServer(ctx, id.String())
+	res, err := s.db.NewDelete().Model((*store.Server)(nil)).
+		Where("id = ?", id.String()).
+		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("deleting server: %w", err)
 	}
+	n, _ := res.RowsAffected()
 	if n == 0 {
 		return store.ErrNotFound
 	}
@@ -169,13 +177,16 @@ func (s *serverStore) Delete(ctx context.Context, id uuid.UUID) error {
 
 func (s *serverStore) MarkStaleOffline(ctx context.Context, threshold time.Duration) (int, error) {
 	cutoff := time.Now().UTC().Add(-threshold).Format(time.RFC3339)
-	now := time.Now().UTC().Format(time.RFC3339)
-	n, err := s.q.MarkStaleServersOffline(ctx, MarkStaleServersOfflineParams{
-		UpdatedAt: now,
-		Cutoff:    nullString(cutoff),
-	})
+	now := time.Now().UTC()
+	res, err := s.db.NewUpdate().Model((*store.Server)(nil)).
+		Set("status = ?", string(store.ServerOffline)).
+		Set("updated_at = ?", now).
+		Where("status = ?", string(store.ServerOnline)).
+		Where("last_seen_at < ?", cutoff).
+		Exec(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("marking stale servers offline: %w", err)
 	}
+	n, _ := res.RowsAffected()
 	return int(n), nil
 }

@@ -8,21 +8,21 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uptrace/bun"
+
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 type traceStore struct {
-	db *sql.DB
-	q  *Queries
+	db *bun.DB
 }
 
 // NewTraceStore creates a new TraceStore backed by SQLite.
-func NewTraceStore(db *sql.DB) store.TraceStore {
-	return &traceStore{db: db, q: New(db)}
+func NewTraceStore(db *bun.DB) store.TraceStore {
+	return &traceStore{db: db}
 }
 
 // UpsertTraceStatus uses a transaction with read-modify-write for services list merging.
-// Kept hand-written because of complex logic.
 func (s *traceStore) UpsertTraceStatus(ctx context.Context, traceID string, entry store.LogEntry) error {
 	if traceID == "" {
 		return nil
@@ -61,7 +61,7 @@ func (s *traceStore) UpsertTraceStatus(ctx context.Context, traceID string, entr
 	isRoot := entry.SpanID != "" && entry.ParentSpanID == ""
 
 	if err == sql.ErrNoRows {
-		// New trace — insert
+		// New trace -- insert
 		services := "[]"
 		if entry.Service != "" {
 			servicesJSON, _ := json.Marshal([]string{entry.Service})
@@ -152,15 +152,15 @@ func (s *traceStore) UpsertTraceStatus(ctx context.Context, traceID string, entr
 
 // GetTraceStatus returns the current status of a trace.
 func (s *traceStore) GetTraceStatus(ctx context.Context, traceID string) (*store.TraceStatus, error) {
-	row, err := s.q.GetTraceStatusByID(ctx, traceID)
+	ts := new(store.TraceStatus)
+	err := s.db.NewSelect().Model(ts).Where("trace_id = ?", traceID).Scan(ctx)
 	if err == sql.ErrNoRows {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("query trace_status: %w", err)
 	}
-	ts := toStoreTraceStatus(row)
-	return &ts, nil
+	return ts, nil
 }
 
 // ListRecentTraces returns paginated recent traces ordered by last_updated_at descending.
@@ -170,30 +170,37 @@ func (s *traceStore) ListRecentTraces(ctx context.Context, limit, offset int) ([
 	}
 
 	// Get total count
-	total, err := s.q.CountTraceStatuses(ctx)
+	total, err := s.db.NewSelect().Model((*store.TraceStatus)(nil)).Count(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count trace_status: %w", err)
 	}
 
-	rows, err := s.q.ListRecentTraces(ctx, ListRecentTracesParams{
-		ResultsOffset: int64(offset),
-		MaxResults:    int64(limit),
-	})
+	var traces []store.TraceStatus
+	err = s.db.NewSelect().Model(&traces).
+		OrderExpr("last_updated_at DESC").
+		Offset(offset).
+		Limit(limit).
+		Scan(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query trace_status: %w", err)
 	}
 
-	return toStoreTraceStatuses(rows), int(total), nil
+	return traces, total, nil
 }
 
 // MarkStaleTraces marks partial traces as 'timeout' if their last_updated_at
 // is older than the given threshold.
 func (s *traceStore) MarkStaleTraces(ctx context.Context, olderThan time.Duration) (int, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
-	n, err := s.q.MarkStaleTraces(ctx, cutoff)
+	res, err := s.db.NewUpdate().Model((*store.TraceStatus)(nil)).
+		Set("status = ?", "timeout").
+		Where("status = ?", "partial").
+		Where("last_updated_at < ?", cutoff).
+		Exec(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("mark stale traces: %w", err)
 	}
+	n, _ := res.RowsAffected()
 	return int(n), nil
 }
 

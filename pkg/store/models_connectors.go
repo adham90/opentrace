@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
 )
 
 type ConnectorType string
@@ -27,21 +28,22 @@ const (
 )
 
 type DataSource struct {
-	ID            uuid.UUID       `json:"id"`
-	Type          ConnectorType   `json:"type"`
-	Name          string          `json:"name"`
-	Config        map[string]any  `json:"config"`
-	Status        ConnectorStatus `json:"status"`
-	StatusMessage *string         `json:"status_message,omitempty"`
-	LastTestedAt  *time.Time      `json:"last_tested_at,omitempty"`
-	CreatedAt     time.Time       `json:"created_at"`
-	UpdatedAt     time.Time       `json:"updated_at"`
+	bun.BaseModel `bun:"table:data_sources" json:"-"`
+	ID            uuid.UUID       `bun:"id,pk" json:"id"`
+	Type          ConnectorType   `bun:"type" json:"type"`
+	Name          string          `bun:"name" json:"name"`
+	Config        map[string]any  `bun:"config" json:"config"`
+	Status        ConnectorStatus `bun:"status" json:"status"`
+	StatusMessage *string         `bun:"status_message" json:"status_message,omitempty"`
+	LastTestedAt  *time.Time      `bun:"last_tested_at" json:"last_tested_at,omitempty"`
+	CreatedAt     time.Time       `bun:"created_at" json:"created_at"`
+	UpdatedAt     time.Time       `bun:"updated_at" json:"updated_at"`
 }
 
 type CreateDataSourceParams struct {
-	Type        ConnectorType  `json:"type"`
-	Name        string         `json:"name"`
-	Config      map[string]any `json:"config"`
+	Type   ConnectorType  `json:"type"`
+	Name   string         `json:"name"`
+	Config map[string]any `json:"config"`
 }
 
 type UpdateDataSourceParams struct {

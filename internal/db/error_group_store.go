@@ -4,25 +4,22 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	sq "github.com/Masterminds/squirrel"
+	"github.com/uptrace/bun"
+
 	"github.com/adham90/opentrace/pkg/store"
 )
 
-var psql = sq.StatementBuilder.PlaceholderFormat(sq.Question)
-
 type errorGroupStore struct {
-	db *sql.DB
-	q  *Queries
+	db *bun.DB
 }
 
 // NewErrorGroupStore creates a new ErrorGroupStore backed by SQLite.
-func NewErrorGroupStore(db *sql.DB) store.ErrorGroupStore {
-	return &errorGroupStore{db: db, q: New(db)}
+func NewErrorGroupStore(db *bun.DB) store.ErrorGroupStore {
+	return &errorGroupStore{db: db}
 }
 
 // Upsert inserts or updates an error group from an ingested log entry.
@@ -39,100 +36,109 @@ func (s *errorGroupStore) Upsert(ctx context.Context, entry store.LogEntry) erro
 	now := time.Now().UTC().Format(time.RFC3339)
 	ts := entry.Timestamp.UTC().Format(time.RFC3339)
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	qtx := s.q.WithTx(tx)
-
 	// Use NULL for last_log_id when the log entry ID is zero (not yet persisted).
 	var lastLogID sql.NullInt64
 	if entry.ID > 0 {
 		lastLogID = sql.NullInt64{Int64: entry.ID, Valid: true}
 	}
 
-	// Check if error group exists and its current status.
-	existingStatus, err := qtx.GetErrorGroupStatus(ctx, entry.ErrorFingerprint)
-	if errors.Is(err, sql.ErrNoRows) {
-		// New error group.
-		err = qtx.InsertErrorGroup(ctx, InsertErrorGroupParams{
-			Fingerprint:    entry.ErrorFingerprint,
-			Service:        entry.Service,
-			Environment:    entry.Environment,
-			ExceptionClass: entry.ExceptionClass,
-			Message:        truncate(entry.Message, 500),
-			SourceFile:     entry.SourceFile,
-			SourceLine:     int64(entry.SourceLine),
-			FirstSeenAt:    ts,
-			LastSeenAt:     ts,
-			LastLogID:      lastLogID,
-		})
-		if err != nil {
-			return fmt.Errorf("insert error group: %w", err)
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		// Check if error group exists and its current status.
+		var existingStatus string
+		err := tx.NewRaw(`SELECT status FROM error_groups WHERE fingerprint = ?`, entry.ErrorFingerprint).Scan(ctx, &existingStatus)
+		if err == sql.ErrNoRows {
+			// New error group.
+			_, err = tx.NewRaw(`
+				INSERT INTO error_groups (fingerprint, service, environment, exception_class, message,
+					source_file, source_line, first_seen_at, last_seen_at, last_log_id)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				entry.ErrorFingerprint, entry.Service, entry.Environment,
+				entry.ExceptionClass, truncate(entry.Message, 500),
+				entry.SourceFile, entry.SourceLine, ts, ts, lastLogID,
+			).Exec(ctx)
+			if err != nil {
+				return fmt.Errorf("insert error group: %w", err)
+			}
+			return nil
 		}
-	} else if err != nil {
-		return fmt.Errorf("check existing: %w", err)
-	} else {
-		// Existing error group — update counts.
-		err = qtx.IncrementErrorGroupCount(ctx, IncrementErrorGroupCountParams{
-			LastSeenAt:  ts,
-			LastLogID:   lastLogID,
-			Fingerprint: entry.ErrorFingerprint,
-		})
+		if err != nil {
+			return fmt.Errorf("check existing: %w", err)
+		}
+
+		// Existing error group -- update counts.
+		_, err = tx.NewRaw(`
+			UPDATE error_groups SET
+				occurrence_count = occurrence_count + 1,
+				last_seen_at = ?,
+				last_log_id = ?
+			WHERE fingerprint = ?`, ts, lastLogID, entry.ErrorFingerprint,
+		).Exec(ctx)
 		if err != nil {
 			return fmt.Errorf("update error group: %w", err)
 		}
 
-		// Reopen if it was resolved (not ignored — ignored stays ignored).
+		// Reopen if it was resolved (not ignored -- ignored stays ignored).
 		if existingStatus == string(store.ErrorGroupResolved) {
-			err = qtx.ReopenErrorGroup(ctx, entry.ErrorFingerprint)
+			_, err = tx.NewRaw(`
+				UPDATE error_groups SET status = 'unresolved', reopened_count = reopened_count + 1
+				WHERE fingerprint = ?`, entry.ErrorFingerprint,
+			).Exec(ctx)
 			if err != nil {
 				return fmt.Errorf("reopen error group: %w", err)
 			}
-			err = qtx.InsertErrorGroupEvent(ctx, InsertErrorGroupEventParams{
-				Fingerprint: entry.ErrorFingerprint,
-				Action:      "reopened",
-				Reason:      "New occurrence after resolution",
-				CreatedAt:   now,
-			})
+
+			_, err = tx.NewRaw(`
+				INSERT INTO error_group_events (fingerprint, action, reason, created_at)
+				VALUES (?, ?, ?, ?)`,
+				entry.ErrorFingerprint, "reopened", "New occurrence after resolution", now,
+			).Exec(ctx)
 			if err != nil {
 				return fmt.Errorf("insert reopen event: %w", err)
 			}
 		}
-	}
 
-	return tx.Commit()
+		return nil
+	})
 }
 
 func (s *errorGroupStore) Get(ctx context.Context, fingerprint string) (*store.ErrorGroup, error) {
-	row, err := s.q.GetErrorGroup(ctx, fingerprint)
-	if errors.Is(err, sql.ErrNoRows) {
+	var eg errorGroupRow
+	err := s.db.NewRaw(`
+		SELECT fingerprint, service, environment, exception_class, message,
+			source_file, source_line, status, first_seen_at, last_seen_at,
+			occurrence_count, last_log_id, reopened_count, resolved_at, ignored_at,
+			unique_users, impact_score, COALESCE(common_context, '{}')
+		FROM error_groups WHERE fingerprint = ?`, fingerprint,
+	).Scan(ctx,
+		&eg.Fingerprint, &eg.Service, &eg.Environment, &eg.ExceptionClass, &eg.Message,
+		&eg.SourceFile, &eg.SourceLine, &eg.Status, &eg.FirstSeenAt, &eg.LastSeenAt,
+		&eg.OccurrenceCount, &eg.LastLogID, &eg.ReopenedCount, &eg.ResolvedAt, &eg.IgnoredAt,
+		&eg.UniqueUsers, &eg.ImpactScore, &eg.CommonContext,
+	)
+	if err == sql.ErrNoRows {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	return errorGroupToStore(row), nil
+	return eg.toStore(), nil
 }
 
 func (s *errorGroupStore) List(ctx context.Context, params store.ListErrorGroupParams) ([]store.ErrorGroup, error) {
-	qb := psql.Select(
-		"fingerprint", "service", "environment", "exception_class", "message",
-		"source_file", "source_line", "status", "first_seen_at", "last_seen_at",
-		"occurrence_count", "last_log_id", "reopened_count", "resolved_at", "ignored_at",
-		"unique_users", "impact_score", "COALESCE(common_context, '{}')").
-		From("error_groups")
+	var conditions []string
+	var args []any
 
 	if params.Status != "" {
-		qb = qb.Where(sq.Eq{"status": string(params.Status)})
+		conditions = append(conditions, "status = ?")
+		args = append(args, string(params.Status))
 	}
 	if params.Service != "" {
-		qb = qb.Where(sq.Eq{"service": params.Service})
+		conditions = append(conditions, "service = ?")
+		args = append(args, params.Service)
 	}
 	if params.Environment != "" {
-		qb = qb.Where(sq.Eq{"environment": params.Environment})
+		conditions = append(conditions, "environment = ?")
+		args = append(args, params.Environment)
 	}
 
 	orderBy := "last_seen_at DESC"
@@ -142,18 +148,24 @@ func (s *errorGroupStore) List(ctx context.Context, params store.ListErrorGroupP
 	case "first_seen_at":
 		orderBy = "first_seen_at DESC"
 	}
-	qb = qb.OrderBy(orderBy)
 
 	limit := params.Limit
 	if limit <= 0 {
 		limit = 50
 	}
-	qb = qb.Limit(uint64(limit)).Offset(uint64(params.Offset))
 
-	query, args, err := qb.ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("building list query: %w", err)
+	query := `SELECT fingerprint, service, environment, exception_class, message,
+		source_file, source_line, status, first_seen_at, last_seen_at,
+		occurrence_count, last_log_id, reopened_count, resolved_at, ignored_at,
+		unique_users, impact_score, COALESCE(common_context, '{}')
+		FROM error_groups`
+
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
+	query += " ORDER BY " + orderBy
+	query += " LIMIT ? OFFSET ?"
+	args = append(args, limit, params.Offset)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -163,149 +175,190 @@ func (s *errorGroupStore) List(ctx context.Context, params store.ListErrorGroupP
 
 	var groups []store.ErrorGroup
 	for rows.Next() {
-		eg, err := scanErrorGroup(rows)
-		if err != nil {
+		var eg errorGroupRow
+		if err := rows.Scan(
+			&eg.Fingerprint, &eg.Service, &eg.Environment, &eg.ExceptionClass, &eg.Message,
+			&eg.SourceFile, &eg.SourceLine, &eg.Status, &eg.FirstSeenAt, &eg.LastSeenAt,
+			&eg.OccurrenceCount, &eg.LastLogID, &eg.ReopenedCount, &eg.ResolvedAt, &eg.IgnoredAt,
+			&eg.UniqueUsers, &eg.ImpactScore, &eg.CommonContext,
+		); err != nil {
 			return nil, err
 		}
-		groups = append(groups, *eg)
+		groups = append(groups, *eg.toStore())
 	}
 	return groups, rows.Err()
 }
 
 func (s *errorGroupStore) Count(ctx context.Context, status store.ErrorGroupStatus) (int, error) {
+	var n int
 	if status != "" {
-		n, err := s.q.CountErrorGroupsByStatus(ctx, string(status))
-		return int(n), err
+		err := s.db.NewRaw(`SELECT COUNT(*) FROM error_groups WHERE status = ?`, string(status)).Scan(ctx, &n)
+		return n, err
 	}
-	n, err := s.q.CountAllErrorGroups(ctx)
-	return int(n), err
+	err := s.db.NewRaw(`SELECT COUNT(*) FROM error_groups`).Scan(ctx, &n)
+	return n, err
 }
 
 func (s *errorGroupStore) Resolve(ctx context.Context, fingerprint string, reason string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		res, err := tx.NewRaw(`
+			UPDATE error_groups SET status = 'resolved', resolved_at = ?
+			WHERE fingerprint = ? AND status != 'resolved'`,
+			now, fingerprint,
+		).Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("resolve: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return store.ErrNotFound
+		}
 
-	qtx := s.q.WithTx(tx)
+		_, err = tx.NewRaw(`
+			INSERT INTO error_group_events (fingerprint, action, reason, created_at)
+			VALUES (?, ?, ?, ?)`,
+			fingerprint, "resolved", reason, now,
+		).Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("insert resolve event: %w", err)
+		}
 
-	n, err := qtx.ResolveErrorGroup(ctx, ResolveErrorGroupParams{
-		ResolvedAt:  sql.NullString{String: now, Valid: true},
-		Fingerprint: fingerprint,
+		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("resolve: %w", err)
-	}
-	if n == 0 {
-		return store.ErrNotFound
-	}
-
-	err = qtx.InsertErrorGroupEvent(ctx, InsertErrorGroupEventParams{
-		Fingerprint: fingerprint,
-		Action:      "resolved",
-		Reason:      reason,
-		CreatedAt:   now,
-	})
-	if err != nil {
-		return fmt.Errorf("insert resolve event: %w", err)
-	}
-
-	return tx.Commit()
 }
 
 func (s *errorGroupStore) Ignore(ctx context.Context, fingerprint string, reason string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		res, err := tx.NewRaw(`
+			UPDATE error_groups SET status = 'ignored', ignored_at = ?
+			WHERE fingerprint = ? AND status != 'ignored'`,
+			now, fingerprint,
+		).Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("ignore: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return store.ErrNotFound
+		}
 
-	qtx := s.q.WithTx(tx)
+		_, err = tx.NewRaw(`
+			INSERT INTO error_group_events (fingerprint, action, reason, created_at)
+			VALUES (?, ?, ?, ?)`,
+			fingerprint, "ignored", reason, now,
+		).Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("insert ignore event: %w", err)
+		}
 
-	n, err := qtx.IgnoreErrorGroup(ctx, IgnoreErrorGroupParams{
-		IgnoredAt:   sql.NullString{String: now, Valid: true},
-		Fingerprint: fingerprint,
+		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("ignore: %w", err)
-	}
-	if n == 0 {
-		return store.ErrNotFound
-	}
-
-	err = qtx.InsertErrorGroupEvent(ctx, InsertErrorGroupEventParams{
-		Fingerprint: fingerprint,
-		Action:      "ignored",
-		Reason:      reason,
-		CreatedAt:   now,
-	})
-	if err != nil {
-		return fmt.Errorf("insert ignore event: %w", err)
-	}
-
-	return tx.Commit()
 }
 
 func (s *errorGroupStore) ListEvents(ctx context.Context, fingerprint string, limit int) ([]store.ErrorGroupEvent, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := s.q.ListErrorGroupEvents(ctx, ListErrorGroupEventsParams{
-		Fingerprint: fingerprint,
-		RowLimit:    int64(limit),
-	})
+
+	type row struct {
+		Fingerprint string `bun:"fingerprint"`
+		Action      string `bun:"action"`
+		Reason      string `bun:"reason"`
+		CreatedAt   string `bun:"created_at"`
+	}
+
+	var rows []row
+	err := s.db.NewRaw(`
+		SELECT fingerprint, action, reason, created_at
+		FROM error_group_events
+		WHERE fingerprint = ?
+		ORDER BY created_at DESC
+		LIMIT ?`, fingerprint, limit,
+	).Scan(ctx, &rows)
 	if err != nil {
 		return nil, fmt.Errorf("list events: %w", err)
 	}
-	return errorGroupEventsToStore(rows), nil
+
+	events := make([]store.ErrorGroupEvent, len(rows))
+	for i, r := range rows {
+		events[i] = store.ErrorGroupEvent{
+			Fingerprint: r.Fingerprint,
+			Action:      r.Action,
+			Reason:      r.Reason,
+			CreatedAt:   parseTime(r.CreatedAt),
+		}
+	}
+	return events, nil
 }
 
 func (s *errorGroupStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-olderThan).UTC().Format(time.RFC3339)
-	return s.q.PruneErrorGroups(ctx, cutoff)
+	res, err := s.db.NewRaw(`DELETE FROM error_groups WHERE last_seen_at < ?`, cutoff).Exec(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
-// scanErrorGroup scans a row into an ErrorGroup.
-func scanErrorGroup(sc interface{ Scan(...any) error }) (*store.ErrorGroup, error) {
-	var eg store.ErrorGroup
-	var firstSeen, lastSeen string
-	var resolvedAt, ignoredAt sql.NullString
-	var lastLogID sql.NullInt64
-	var commonCtxJSON string
+// errorGroupRow is a scan helper for error group queries.
+type errorGroupRow struct {
+	Fingerprint     string
+	Service         string
+	Environment     string
+	ExceptionClass  string
+	Message         string
+	SourceFile      string
+	SourceLine      int
+	Status          string
+	FirstSeenAt     string
+	LastSeenAt      string
+	OccurrenceCount int
+	LastLogID       sql.NullInt64
+	ReopenedCount   int
+	ResolvedAt      sql.NullString
+	IgnoredAt       sql.NullString
+	UniqueUsers     int
+	ImpactScore     float64
+	CommonContext   string
+}
 
-	err := sc.Scan(
-		&eg.Fingerprint, &eg.Service, &eg.Environment, &eg.ExceptionClass, &eg.Message,
-		&eg.SourceFile, &eg.SourceLine, &eg.Status, &firstSeen, &lastSeen,
-		&eg.OccurrenceCount, &lastLogID, &eg.ReopenedCount, &resolvedAt, &ignoredAt,
-		&eg.UniqueUsers, &eg.ImpactScore, &commonCtxJSON,
-	)
-	if err != nil {
-		return nil, err
+func (r *errorGroupRow) toStore() *store.ErrorGroup {
+	eg := &store.ErrorGroup{
+		Fingerprint:     r.Fingerprint,
+		Service:         r.Service,
+		Environment:     r.Environment,
+		ExceptionClass:  r.ExceptionClass,
+		Message:         r.Message,
+		SourceFile:      r.SourceFile,
+		SourceLine:      r.SourceLine,
+		Status:          store.ErrorGroupStatus(r.Status),
+		FirstSeenAt:     parseTime(r.FirstSeenAt),
+		LastSeenAt:      parseTime(r.LastSeenAt),
+		OccurrenceCount: r.OccurrenceCount,
+		ReopenedCount:   r.ReopenedCount,
+		UniqueUsers:     r.UniqueUsers,
+		ImpactScore:     r.ImpactScore,
 	}
-
-	eg.FirstSeenAt, _ = time.Parse(time.RFC3339, firstSeen)
-	eg.LastSeenAt, _ = time.Parse(time.RFC3339, lastSeen)
-	if lastLogID.Valid {
-		eg.LastLogID = &lastLogID.Int64
+	if r.LastLogID.Valid {
+		eg.LastLogID = &r.LastLogID.Int64
 	}
-	if resolvedAt.Valid {
-		t, _ := time.Parse(time.RFC3339, resolvedAt.String)
+	if r.ResolvedAt.Valid {
+		t, _ := time.Parse(time.RFC3339, r.ResolvedAt.String)
 		eg.ResolvedAt = &t
 	}
-	if ignoredAt.Valid {
-		t, _ := time.Parse(time.RFC3339, ignoredAt.String)
+	if r.IgnoredAt.Valid {
+		t, _ := time.Parse(time.RFC3339, r.IgnoredAt.String)
 		eg.IgnoredAt = &t
 	}
-	if commonCtxJSON != "" && commonCtxJSON != "{}" {
-		json.Unmarshal([]byte(commonCtxJSON), &eg.CommonContext)
+	if r.CommonContext != "" && r.CommonContext != "{}" {
+		json.Unmarshal([]byte(r.CommonContext), &eg.CommonContext)
 	}
-
-	return &eg, nil
+	return eg
 }
 
 // truncate limits a string to maxLen characters.

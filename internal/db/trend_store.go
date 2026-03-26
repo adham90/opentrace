@@ -2,24 +2,24 @@ package db
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"math"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/uptrace/bun"
+
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 type trendStore struct {
-	db *sql.DB
-	q  *Queries
+	db *bun.DB
 }
 
 // NewTrendStore creates a TrendStore backed by SQLite.
-func NewTrendStore(db *sql.DB) store.TrendStore {
-	return &trendStore{db: db, q: New(db)}
+func NewTrendStore(db *bun.DB) store.TrendStore {
+	return &trendStore{db: db}
 }
 
 // AggregateBuckets reads raw logs + request_summaries and populates metric_buckets
@@ -31,7 +31,6 @@ func (s *trendStore) AggregateBuckets(ctx context.Context, interval string, sinc
 	}
 
 	now := time.Now().UTC()
-	// Align since to bucket boundary
 	since = since.Truncate(bucketDur)
 
 	for t := since; t.Before(now); t = t.Add(bucketDur) {
@@ -122,7 +121,7 @@ func (s *trendStore) AggregateBuckets(ctx context.Context, interval string, sinc
 		}
 		rows2.Close()
 
-		// Compute percentiles per service+env (we need the raw durations)
+		// Compute percentiles per service+env
 		type percKey struct{ service, env string }
 		percentiles := make(map[percKey]struct{ p50, p95, p99 float64 })
 
@@ -157,7 +156,6 @@ func (s *trendStore) AggregateBuckets(ctx context.Context, interval string, sinc
 			}
 		}
 
-		// Upsert metric buckets: one per service+env (aggregated across endpoints)
 		// Merge logAggs and reqAggs by service+env
 		type bucketKey struct{ service, env string }
 		merged := make(map[bucketKey]*store.MetricBucket)
@@ -194,7 +192,6 @@ func (s *trendStore) AggregateBuckets(ctx context.Context, interval string, sinc
 			}
 			b.RequestCount += a.requestCount
 			b.ErrorCount += a.errorCount
-			// Use weighted average if there are multiple endpoints
 			if b.AvgDurationMs == 0 {
 				b.AvgDurationMs = a.avgDur
 			} else {
@@ -221,7 +218,7 @@ func (s *trendStore) AggregateBuckets(ctx context.Context, interval string, sinc
 
 		// Upsert all buckets
 		for _, b := range merged {
-			_, err := s.db.ExecContext(ctx, `
+			_, err := s.db.NewRaw(`
 				INSERT INTO metric_buckets (
 					bucket_start, bucket_interval, service, endpoint, environment,
 					request_count, error_count, log_count,
@@ -244,14 +241,14 @@ func (s *trendStore) AggregateBuckets(ctx context.Context, interval string, sinc
 			`, b.BucketStart.Format(time.RFC3339), b.BucketInterval, b.Service, b.Endpoint, b.Environment,
 				b.RequestCount, b.ErrorCount, b.LogCount,
 				b.AvgDurationMs, b.P50DurationMs, b.P95DurationMs, b.P99DurationMs, b.MaxDurationMs,
-				b.AvgSQLCount, b.AvgDBTimeMs, b.AvgCacheHitRatio, b.AvgHTTPExternalMs)
+				b.AvgSQLCount, b.AvgDBTimeMs, b.AvgCacheHitRatio, b.AvgHTTPExternalMs,
+			).Exec(ctx)
 			if err != nil {
 				return fmt.Errorf("upserting metric bucket: %w", err)
 			}
 		}
 
-		// Detect deploy markers: find distinct commit hashes in this bucket
-		// Collect results first, then insert (avoids deadlock with MaxOpenConns=1)
+		// Detect deploy markers
 		type deployInfo struct {
 			svc, env, hash, firstSeen string
 			cnt                       int
@@ -278,12 +275,12 @@ func (s *trendStore) AggregateBuckets(ctx context.Context, interval string, sinc
 			deployRows.Close()
 		}
 		for _, d := range deploys {
-			_, _ = s.db.ExecContext(ctx, `
+			_, _ = s.db.NewRaw(`
 				INSERT INTO deploy_markers (service, environment, commit_hash, first_seen_at, request_count)
 				VALUES (?, ?, ?, ?, ?)
 				ON CONFLICT(service, environment, commit_hash) DO UPDATE SET
 					request_count = deploy_markers.request_count + excluded.request_count
-			`, d.svc, d.env, d.hash, d.firstSeen, d.cnt)
+			`, d.svc, d.env, d.hash, d.firstSeen, d.cnt).Exec(ctx)
 		}
 	}
 
@@ -359,22 +356,42 @@ func (s *trendStore) QueryTrends(ctx context.Context, params store.TrendQueryPar
 func (s *trendStore) ListDeployMarkers(ctx context.Context, service string, since time.Time) ([]store.DeployMarker, error) {
 	sinceStr := since.Format(time.RFC3339)
 
-	if service != "" {
-		rows, err := s.q.ListDeployMarkersByServiceSince(ctx, ListDeployMarkersByServiceSinceParams{
-			Since:   sinceStr,
-			Service: service,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("querying deploy markers: %w", err)
-		}
-		return deployMarkersToStore(rows), nil
+	type row struct {
+		ID           int64  `bun:"id"`
+		Service      string `bun:"service"`
+		Environment  string `bun:"environment"`
+		CommitHash   string `bun:"commit_hash"`
+		FirstSeenAt  string `bun:"first_seen_at"`
+		RequestCount int    `bun:"request_count"`
 	}
 
-	rows, err := s.q.ListDeployMarkersSince(ctx, sinceStr)
+	var query string
+	var args []any
+	if service != "" {
+		query = `SELECT id, service, environment, commit_hash, first_seen_at, request_count
+			FROM deploy_markers WHERE first_seen_at >= ? AND service = ? ORDER BY first_seen_at DESC`
+		args = []any{sinceStr, service}
+	} else {
+		query = `SELECT id, service, environment, commit_hash, first_seen_at, request_count
+			FROM deploy_markers WHERE first_seen_at >= ? ORDER BY first_seen_at DESC`
+		args = []any{sinceStr}
+	}
+
+	var rows []row
+	err := s.db.NewRaw(query, args...).Scan(ctx, &rows)
 	if err != nil {
 		return nil, fmt.Errorf("querying deploy markers: %w", err)
 	}
-	return deployMarkersToStore(rows), nil
+
+	results := make([]store.DeployMarker, len(rows))
+	for i, r := range rows {
+		results[i] = store.DeployMarker{
+			ID: r.ID, Service: r.Service, Environment: r.Environment,
+			CommitHash: r.CommitHash, FirstSeenAt: parseTime(r.FirstSeenAt),
+			RequestCount: r.RequestCount,
+		}
+	}
+	return results, nil
 }
 
 // Prune removes old metric buckets and deploy markers.
@@ -382,16 +399,18 @@ func (s *trendStore) Prune(ctx context.Context, olderThan time.Duration) (int64,
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
 	var total int64
 
-	n, err := s.q.PruneTrendBuckets(ctx, cutoff)
+	res, err := s.db.NewRaw(`DELETE FROM metric_buckets WHERE bucket_start < ?`, cutoff).Exec(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("pruning metric buckets: %w", err)
 	}
+	n, _ := res.RowsAffected()
 	total += n
 
-	n, err = s.q.PruneDeployMarkers(ctx, cutoff)
+	res, err = s.db.NewRaw(`DELETE FROM deploy_markers WHERE first_seen_at < ?`, cutoff).Exec(ctx)
 	if err != nil {
 		return total, fmt.Errorf("pruning deploy markers: %w", err)
 	}
+	n, _ = res.RowsAffected()
 	total += n
 
 	return total, nil

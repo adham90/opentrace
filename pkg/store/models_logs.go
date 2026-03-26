@@ -1,70 +1,76 @@
 package store
 
-import "time"
+import (
+	"time"
+
+	"github.com/uptrace/bun"
+)
 
 // LogEntry represents an ingested log line.
 type LogEntry struct {
-	ID               int64           `json:"id"`
-	Timestamp        time.Time       `json:"timestamp"`
-	Level            string          `json:"level"`
-	Service          string          `json:"service,omitempty"`
-	Environment      string          `json:"environment,omitempty"`
-	CommitHash       string          `json:"commit_hash,omitempty"`
-	TraceID          string          `json:"trace_id,omitempty"`
-	SpanID           string          `json:"span_id,omitempty"`
-	ParentSpanID     string          `json:"parent_span_id,omitempty"`
-	RequestID        string          `json:"request_id,omitempty"`
-	UserID           string          `json:"user_id,omitempty"`
-	SessionID        string          `json:"session_id,omitempty"`
-	Message          string          `json:"message"`
-	EventType        string          `json:"event_type,omitempty"`
-	ExceptionClass   string          `json:"exception_class,omitempty"`
-	ErrorFingerprint string          `json:"error_fingerprint,omitempty"`
-	SourceFile       string          `json:"source_file,omitempty"`
-	SourceLine       int             `json:"source_line,omitempty"`
-	Metadata         map[string]any  `json:"metadata,omitempty"`
-	MetadataJSON     string          `json:"-"` // pre-marshaled metadata; avoids double marshal on hot path
-	RequestSummary   *RequestSummary `json:"request_summary,omitempty"`
-	CreatedAt        time.Time       `json:"created_at"`
+	bun.BaseModel  `bun:"table:logs" json:"-"`
+	ID             int64           `bun:"id,pk,autoincrement" json:"id"`
+	Timestamp      time.Time       `bun:"timestamp" json:"timestamp"`
+	Level          string          `bun:"level" json:"level"`
+	Service        string          `bun:"service" json:"service,omitempty"`
+	Environment    string          `bun:"environment" json:"environment,omitempty"`
+	CommitHash     string          `bun:"commit_hash" json:"commit_hash,omitempty"`
+	TraceID        string          `bun:"trace_id" json:"trace_id,omitempty"`
+	SpanID         string          `bun:"span_id" json:"span_id,omitempty"`
+	ParentSpanID   string          `bun:"parent_span_id" json:"parent_span_id,omitempty"`
+	RequestID      string          `bun:"request_id" json:"request_id,omitempty"`
+	UserID         string          `bun:"user_id" json:"user_id,omitempty"`
+	SessionID      string          `bun:"session_id" json:"session_id,omitempty"`
+	Message        string          `bun:"message" json:"message"`
+	EventType      string          `bun:"event_type" json:"event_type,omitempty"`
+	ExceptionClass string          `bun:"exception_class" json:"exception_class,omitempty"`
+	ErrorFingerprint string        `bun:"error_fingerprint" json:"error_fingerprint,omitempty"`
+	SourceFile     string          `bun:"source_file" json:"source_file,omitempty"`
+	SourceLine     int             `bun:"source_line" json:"source_line,omitempty"`
+	Metadata       map[string]any  `bun:"metadata" json:"metadata,omitempty"`
+	MetadataJSON   string          `bun:"-" json:"-"` // pre-marshaled metadata; avoids double marshal on hot path
+	RequestSummary *RequestSummary `bun:"rel:has-one,join:id=log_id" json:"request_summary,omitempty"`
+	CreatedAt      time.Time       `bun:"created_at" json:"created_at"`
 }
 
 // RequestSummary holds structured performance metrics for an HTTP request.
 type RequestSummary struct {
-	ID                  int64   `json:"id"`
-	LogID               int64   `json:"log_id"`
-	Controller          string  `json:"controller,omitempty"`
-	Action              string  `json:"action,omitempty"`
-	Method              string  `json:"method,omitempty"`
-	Path                string  `json:"path,omitempty"`
-	Status              int     `json:"status,omitempty"`
-	DurationMs          float64 `json:"duration_ms,omitempty"`
-	DBTimeMs            float64 `json:"db_time_ms,omitempty"`
-	ViewTimeMs          float64 `json:"view_time_ms,omitempty"`
-	SQLCount            int     `json:"sql_count,omitempty"`
-	SQLTotalMs          float64 `json:"sql_total_ms,omitempty"`
-	SQLSlowestMs        float64 `json:"sql_slowest_ms,omitempty"`
-	SQLSlowestName      string  `json:"sql_slowest_name,omitempty"`
-	NPlusOne            bool    `json:"n_plus_one,omitempty"`
-	ViewCount           int     `json:"view_count,omitempty"`
-	ViewTotalMs         float64 `json:"view_total_ms,omitempty"`
-	ViewSlowestMs       float64 `json:"view_slowest_ms,omitempty"`
-	ViewSlowestTemplate string  `json:"view_slowest_template,omitempty"`
-	CacheReads          int     `json:"cache_reads,omitempty"`
-	CacheHits           int     `json:"cache_hits,omitempty"`
-	CacheWrites         int     `json:"cache_writes,omitempty"`
-	CacheHitRatio       float64 `json:"cache_hit_ratio,omitempty"`
-	HTTPExternalCount   int     `json:"http_external_count,omitempty"`
-	HTTPExternalTotalMs float64 `json:"http_external_total_ms,omitempty"`
-	HTTPSlowestMs       float64 `json:"http_slowest_ms,omitempty"`
-	HTTPSlowestHost     string  `json:"http_slowest_host,omitempty"`
-	MemoryBeforeMb      float64 `json:"memory_before_mb,omitempty"`
-	MemoryAfterMb       float64 `json:"memory_after_mb,omitempty"`
-	MemoryDeltaMb       float64 `json:"memory_delta_mb,omitempty"`
-	Timeline            string  `json:"timeline,omitempty"`
-	TimeBreakdown       string  `json:"time_breakdown,omitempty"`
-	DuplicateQueries    int     `json:"duplicate_queries,omitempty"`
-	WorstDuplicateCount int     `json:"worst_duplicate_count,omitempty"`
-	TopDuplicates       string  `json:"top_duplicates,omitempty"`
+	bun.BaseModel       `bun:"table:request_summaries" json:"-"`
+	ID                  int64   `bun:"id,pk,autoincrement" json:"id"`
+	LogID               int64   `bun:"log_id" json:"log_id"`
+	Controller          string  `bun:"controller" json:"controller,omitempty"`
+	Action              string  `bun:"action" json:"action,omitempty"`
+	Method              string  `bun:"method" json:"method,omitempty"`
+	Path                string  `bun:"path" json:"path,omitempty"`
+	Status              int     `bun:"status" json:"status,omitempty"`
+	DurationMs          float64 `bun:"duration_ms" json:"duration_ms,omitempty"`
+	DBTimeMs            float64 `bun:"db_time_ms" json:"db_time_ms,omitempty"`
+	ViewTimeMs          float64 `bun:"view_time_ms" json:"view_time_ms,omitempty"`
+	SQLCount            int     `bun:"sql_count" json:"sql_count,omitempty"`
+	SQLTotalMs          float64 `bun:"sql_total_ms" json:"sql_total_ms,omitempty"`
+	SQLSlowestMs        float64 `bun:"sql_slowest_ms" json:"sql_slowest_ms,omitempty"`
+	SQLSlowestName      string  `bun:"sql_slowest_name" json:"sql_slowest_name,omitempty"`
+	NPlusOne            bool    `bun:"n_plus_one" json:"n_plus_one,omitempty"`
+	ViewCount           int     `bun:"view_count" json:"view_count,omitempty"`
+	ViewTotalMs         float64 `bun:"view_total_ms" json:"view_total_ms,omitempty"`
+	ViewSlowestMs       float64 `bun:"view_slowest_ms" json:"view_slowest_ms,omitempty"`
+	ViewSlowestTemplate string  `bun:"view_slowest_template" json:"view_slowest_template,omitempty"`
+	CacheReads          int     `bun:"cache_reads" json:"cache_reads,omitempty"`
+	CacheHits           int     `bun:"cache_hits" json:"cache_hits,omitempty"`
+	CacheWrites         int     `bun:"cache_writes" json:"cache_writes,omitempty"`
+	CacheHitRatio       float64 `bun:"cache_hit_ratio" json:"cache_hit_ratio,omitempty"`
+	HTTPExternalCount   int     `bun:"http_external_count" json:"http_external_count,omitempty"`
+	HTTPExternalTotalMs float64 `bun:"http_external_total_ms" json:"http_external_total_ms,omitempty"`
+	HTTPSlowestMs       float64 `bun:"http_slowest_ms" json:"http_slowest_ms,omitempty"`
+	HTTPSlowestHost     string  `bun:"http_slowest_host" json:"http_slowest_host,omitempty"`
+	MemoryBeforeMb      float64 `bun:"memory_before_mb" json:"memory_before_mb,omitempty"`
+	MemoryAfterMb       float64 `bun:"memory_after_mb" json:"memory_after_mb,omitempty"`
+	MemoryDeltaMb       float64 `bun:"memory_delta_mb" json:"memory_delta_mb,omitempty"`
+	Timeline            string  `bun:"timeline" json:"timeline,omitempty"`
+	TimeBreakdown       string  `bun:"time_breakdown" json:"time_breakdown,omitempty"`
+	DuplicateQueries    int     `bun:"duplicate_queries" json:"duplicate_queries,omitempty"`
+	WorstDuplicateCount int     `bun:"worst_duplicate_count" json:"worst_duplicate_count,omitempty"`
+	TopDuplicates       string  `bun:"top_duplicates" json:"top_duplicates,omitempty"`
 }
 
 // LogSearchParams defines filters for log search.

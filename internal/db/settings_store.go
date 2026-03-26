@@ -7,18 +7,19 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/uptrace/bun"
+
 	"github.com/adham90/opentrace/pkg/store"
 )
 
-// settingsStore implements SettingsStore using database/sql (SQLite).
+// settingsStore implements SettingsStore using bun (SQLite).
 type settingsStore struct {
-	db *sql.DB
-	q  *Queries
+	db *bun.DB
 }
 
 // NewSettingsStore creates a new SettingsStore backed by SQLite.
-func NewSettingsStore(db *sql.DB) store.SettingsStore {
-	return &settingsStore{db: db, q: New(db)}
+func NewSettingsStore(db *bun.DB) store.SettingsStore {
+	return &settingsStore{db: db}
 }
 
 const retentionKey = "retention"
@@ -30,8 +31,24 @@ const statementTimeoutKey = "statement_timeout"
 const mcpNameKey = "mcp_name"
 const samplingRulesKey = "sampling_rules"
 
+// getSetting reads a single value from app_config by key.
+func (s *settingsStore) getSetting(ctx context.Context, key string) (string, error) {
+	var value string
+	err := s.db.NewRaw("SELECT value FROM app_config WHERE key = ?", key).Scan(ctx, &value)
+	return value, err
+}
+
+// upsertSetting writes a key-value pair to app_config, creating or updating.
+func (s *settingsStore) upsertSetting(ctx context.Context, key, value string) error {
+	_, err := s.db.NewRaw(
+		"INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+		key, value,
+	).Exec(ctx)
+	return err
+}
+
 func (s *settingsStore) GetRetention(ctx context.Context) (*store.RetentionSettings, error) {
-	raw, err := s.q.GetSetting(ctx, retentionKey)
+	raw, err := s.getSetting(ctx, retentionKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return &store.RetentionSettings{RetentionDays: 30}, nil
 	}
@@ -51,18 +68,14 @@ func (s *settingsStore) SetRetention(ctx context.Context, settings store.Retenti
 	if err != nil {
 		return fmt.Errorf("marshaling retention setting: %w", err)
 	}
-	err = s.q.UpsertSetting(ctx, UpsertSettingParams{
-		Key:   retentionKey,
-		Value: string(raw),
-	})
-	if err != nil {
+	if err := s.upsertSetting(ctx, retentionKey, string(raw)); err != nil {
 		return fmt.Errorf("upserting retention setting: %w", err)
 	}
 	return nil
 }
 
 func (s *settingsStore) GetAPIKey(ctx context.Context) (string, error) {
-	val, err := s.q.GetSetting(ctx, apiKeyKey)
+	val, err := s.getSetting(ctx, apiKeyKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -73,18 +86,14 @@ func (s *settingsStore) GetAPIKey(ctx context.Context) (string, error) {
 }
 
 func (s *settingsStore) SetAPIKey(ctx context.Context, key string) error {
-	err := s.q.UpsertSetting(ctx, UpsertSettingParams{
-		Key:   apiKeyKey,
-		Value: key,
-	})
-	if err != nil {
+	if err := s.upsertSetting(ctx, apiKeyKey, key); err != nil {
 		return fmt.Errorf("upserting api key: %w", err)
 	}
 	return nil
 }
 
 func (s *settingsStore) GetAutoUpdate(ctx context.Context) (bool, error) {
-	val, err := s.q.GetSetting(ctx, autoUpdateKey)
+	val, err := s.getSetting(ctx, autoUpdateKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -99,18 +108,14 @@ func (s *settingsStore) SetAutoUpdate(ctx context.Context, enabled bool) error {
 	if enabled {
 		val = "1"
 	}
-	err := s.q.UpsertSetting(ctx, UpsertSettingParams{
-		Key:   autoUpdateKey,
-		Value: val,
-	})
-	if err != nil {
+	if err := s.upsertSetting(ctx, autoUpdateKey, val); err != nil {
 		return fmt.Errorf("upserting auto_update: %w", err)
 	}
 	return nil
 }
 
 func (s *settingsStore) GetCORSOrigins(ctx context.Context) (string, error) {
-	val, err := s.q.GetSetting(ctx, corsOriginsKey)
+	val, err := s.getSetting(ctx, corsOriginsKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -121,11 +126,7 @@ func (s *settingsStore) GetCORSOrigins(ctx context.Context) (string, error) {
 }
 
 func (s *settingsStore) SetCORSOrigins(ctx context.Context, origins string) error {
-	err := s.q.UpsertSetting(ctx, UpsertSettingParams{
-		Key:   corsOriginsKey,
-		Value: origins,
-	})
-	if err != nil {
+	if err := s.upsertSetting(ctx, corsOriginsKey, origins); err != nil {
 		return fmt.Errorf("upserting cors_origins: %w", err)
 	}
 	return nil
@@ -148,7 +149,7 @@ func (s *settingsStore) SetStatementTimeout(ctx context.Context, val int) error 
 }
 
 func (s *settingsStore) GetMCPName(ctx context.Context) (string, error) {
-	val, err := s.q.GetSetting(ctx, mcpNameKey)
+	val, err := s.getSetting(ctx, mcpNameKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -159,11 +160,7 @@ func (s *settingsStore) GetMCPName(ctx context.Context) (string, error) {
 }
 
 func (s *settingsStore) SetMCPName(ctx context.Context, name string) error {
-	err := s.q.UpsertSetting(ctx, UpsertSettingParams{
-		Key:   mcpNameKey,
-		Value: name,
-	})
-	if err != nil {
+	if err := s.upsertSetting(ctx, mcpNameKey, name); err != nil {
 		return fmt.Errorf("upserting mcp_name: %w", err)
 	}
 	return nil
@@ -171,7 +168,7 @@ func (s *settingsStore) SetMCPName(ctx context.Context, name string) error {
 
 // getIntSetting reads an integer from app_config, returning defaultVal if missing.
 func (s *settingsStore) getIntSetting(ctx context.Context, key string, defaultVal int) (int, error) {
-	val, err := s.q.GetSetting(ctx, key)
+	val, err := s.getSetting(ctx, key)
 	if errors.Is(err, sql.ErrNoRows) {
 		return defaultVal, nil
 	}
@@ -187,18 +184,14 @@ func (s *settingsStore) getIntSetting(ctx context.Context, key string, defaultVa
 
 // setIntSetting writes an integer to app_config.
 func (s *settingsStore) setIntSetting(ctx context.Context, key string, val int) error {
-	err := s.q.UpsertSetting(ctx, UpsertSettingParams{
-		Key:   key,
-		Value: fmt.Sprintf("%d", val),
-	})
-	if err != nil {
+	if err := s.upsertSetting(ctx, key, fmt.Sprintf("%d", val)); err != nil {
 		return fmt.Errorf("upserting %s: %w", key, err)
 	}
 	return nil
 }
 
 func (s *settingsStore) GetSamplingRules(ctx context.Context) ([]store.SamplingRule, error) {
-	raw, err := s.q.GetSetting(ctx, samplingRulesKey)
+	raw, err := s.getSetting(ctx, samplingRulesKey)
 	if errors.Is(err, sql.ErrNoRows) || raw == "" {
 		return nil, nil // no sampling configured
 	}
@@ -217,11 +210,7 @@ func (s *settingsStore) SetSamplingRules(ctx context.Context, rules []store.Samp
 	if err != nil {
 		return fmt.Errorf("marshaling sampling_rules: %w", err)
 	}
-	err = s.q.UpsertSetting(ctx, UpsertSettingParams{
-		Key:   samplingRulesKey,
-		Value: string(raw),
-	})
-	if err != nil {
+	if err := s.upsertSetting(ctx, samplingRulesKey, string(raw)); err != nil {
 		return fmt.Errorf("upserting sampling_rules: %w", err)
 	}
 	return nil

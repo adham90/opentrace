@@ -7,13 +7,15 @@ import (
 	"database/sql"
 	"testing"
 
+	"github.com/uptrace/bun"
+
 	dbstore "github.com/adham90/opentrace/internal/db"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
-// SetupTestDB opens an in-memory SQLite database with all migrations applied.
+// SetupTestBunDB opens an in-memory SQLite database (bun) with all migrations applied.
 // The database is automatically closed when the test completes.
-func SetupTestDB(t *testing.T) *sql.DB {
+func SetupTestBunDB(t *testing.T) *bun.DB {
 	t.Helper()
 
 	db, err := dbstore.OpenSQLite(":memory:")
@@ -30,10 +32,18 @@ func SetupTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
+// SetupTestDB opens an in-memory SQLite database with all migrations applied.
+// Returns the underlying *sql.DB for backward compatibility.
+// The database is automatically closed when the test completes.
+func SetupTestDB(t *testing.T) *sql.DB {
+	t.Helper()
+	return SetupTestBunDB(t).DB
+}
+
 // SetupTestStores creates a full Stores instance backed by an in-memory SQLite database.
 // Useful when tests need multiple stores wired together.
 func SetupTestStores(t *testing.T) (*sql.DB, store.Stores) {
 	t.Helper()
-	db := SetupTestDB(t)
-	return db, dbstore.NewStores(db)
+	bunDB := SetupTestBunDB(t)
+	return bunDB.DB, dbstore.NewStores(bunDB)
 }

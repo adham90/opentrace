@@ -11,18 +11,18 @@ import (
 
 func setupWatchTestDB(t *testing.T) (store.WatchStore, store.LogStore) {
 	t.Helper()
-	db, err := dbstore.OpenSQLite(":memory:")
+	bunDB, err := dbstore.OpenSQLite(":memory:")
 	if err != nil {
 		t.Fatalf("opening in-memory SQLite: %v", err)
 	}
-	if err := dbstore.RunSQLiteMigrations(db); err != nil {
-		db.Close()
+	if err := dbstore.RunSQLiteMigrations(bunDB); err != nil {
+		bunDB.Close()
 		t.Fatalf("running migrations: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { bunDB.Close() })
 
-	watchStore := dbstore.NewWatchStore(db)
-	logStore := dbstore.NewLogStore(db)
+	watchStore := dbstore.NewWatchStore(bunDB)
+	logStore := dbstore.NewLogStore(bunDB)
 	return watchStore, logStore
 }
 

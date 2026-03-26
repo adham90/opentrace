@@ -1,6 +1,10 @@
 package store
 
-import "time"
+import (
+	"time"
+
+	"github.com/uptrace/bun"
+)
 
 // CodeEntityType identifies the kind of source code entity.
 type CodeEntityType string
@@ -13,19 +17,20 @@ const (
 
 // CodeEntity represents a tracked source code path with risk scoring.
 type CodeEntity struct {
-	ID                  int64          `json:"id"`
-	EntityType          CodeEntityType `json:"entity_type"`
-	EntityName          string         `json:"entity_name"`
-	Service             string         `json:"service"`
-	RiskScore           float64        `json:"risk_score"`
-	ErrorCount          int            `json:"error_count"`
-	InvestigationCount  int            `json:"investigation_count"`
-	AvgDurationMs       *float64       `json:"avg_duration_ms,omitempty"`
-	LastErrorAt         *time.Time     `json:"last_error_at,omitempty"`
-	LastInvestigationAt *time.Time     `json:"last_investigation_at,omitempty"`
-	Metadata            map[string]any `json:"metadata,omitempty"`
-	CreatedAt           time.Time      `json:"created_at"`
-	UpdatedAt           time.Time      `json:"updated_at"`
+	bun.BaseModel       `bun:"table:code_entities" json:"-"`
+	ID                  int64          `bun:"id,pk,autoincrement" json:"id"`
+	EntityType          CodeEntityType `bun:"entity_type" json:"entity_type"`
+	EntityName          string         `bun:"entity_name" json:"entity_name"`
+	Service             string         `bun:"service" json:"service"`
+	RiskScore           float64        `bun:"risk_score" json:"risk_score"`
+	ErrorCount          int            `bun:"error_count" json:"error_count"`
+	InvestigationCount  int            `bun:"investigation_count" json:"investigation_count"`
+	AvgDurationMs       *float64       `bun:"avg_duration_ms" json:"avg_duration_ms,omitempty"`
+	LastErrorAt         *time.Time     `bun:"last_error_at" json:"last_error_at,omitempty"`
+	LastInvestigationAt *time.Time     `bun:"last_investigation_at" json:"last_investigation_at,omitempty"`
+	Metadata            map[string]any `bun:"metadata_json" json:"metadata,omitempty"`
+	CreatedAt           time.Time      `bun:"created_at" json:"created_at"`
+	UpdatedAt           time.Time      `bun:"updated_at" json:"updated_at"`
 }
 
 // UpsertCodeEntityParams defines input for creating or updating a code entity.

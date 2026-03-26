@@ -1,13 +1,13 @@
 package db
 
 import (
-	"database/sql"
+	"github.com/uptrace/bun"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 // NewStores creates all store implementations backed by the given SQLite database.
-func NewStores(db *sql.DB) store.Stores {
+func NewStores(db *bun.DB) store.Stores {
 	return store.Stores{
 		DSStore:                   NewDataSourceStore(db),
 		LogStore:                  NewLogStore(db),
