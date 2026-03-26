@@ -48,6 +48,7 @@ func OpenSQLite(path string) (*bun.DB, error) {
 // These are safe to use with WAL journal mode.
 func applySQLitePragmas(db *sql.DB) error {
 	pragmas := []string{
+		"PRAGMA foreign_keys = ON",                               // enforce FK constraints (DSN param not supported by modernc driver)
 		fmt.Sprintf("PRAGMA cache_size = %d", sqliteCacheSizeKB), // 64MB page cache (default: 2MB)
 		"PRAGMA synchronous = NORMAL",                            // safe with WAL, skips fsync per write
 		fmt.Sprintf("PRAGMA mmap_size = %d", sqliteMmapSize),    // 30MB memory-mapped I/O

@@ -1,1 +1,0 @@
-ALTER TABLE watchers ADD COLUMN effort TEXT NOT NULL DEFAULT 'medium';
