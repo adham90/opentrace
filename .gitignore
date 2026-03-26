@@ -29,6 +29,9 @@ node_modules/
 # Templ generated files
 *_templ.go
 
+# Air live reload
+tmp/
+
 # OS
 .DS_Store
 Thumbs.db

@@ -20,7 +20,7 @@ go mod tidy                         # after adding new imports
 - Store booleans as INTEGER 0/1, timestamps as RFC3339 TEXT, UUIDs as TEXT
 - Cast MCP tool args from `float64` (JSON default) before using as `int`
 - When adding a store interface method, update ALL mock implementations (web, mcp, watcher)
-- When adding a new store, add to `store.Stores` struct + `NewStores()` factory (2 places only)
+- When adding a new store, add to `pkg/store/` (interface + model), `internal/db/` (implementation), and `queries/` (sqlc SQL)
 - Use the `server.Module` pattern for new domain features — see `internal/domains/` for examples
 - Run `go mod tidy` after adding new imports
 - Cap all pagination `limit` params to a reasonable maximum (100-500)
@@ -40,11 +40,12 @@ go mod tidy                         # after adding new imports
 ## Conventions
 
 - **HTTP handlers**: Use Chi router, return JSON via `server.WriteJSON`/`server.WriteError`
-- **Store layer**: One interface per domain in `internal/store/iface_*.go`, models in `models_*.go`
+- **Store layer**: Interfaces in `pkg/store/iface_*.go`, models in `pkg/store/models_*.go`, implementations in `internal/db/`
+- **Queries**: Static SQL in `queries/*.sql` → `sqlc generate` → `internal/db/*.sql.go`. Dynamic queries use squirrel.
 - **Domains**: Each domain in `internal/domains/<name>/` with a `Module` var and `mount()` function
 - **MCP tools**: Consolidated tools in `internal/mcp/tools/`, registered via `internal/mcp/catalog.go`
-- **Migrations**: Sequential numbered SQL files in `internal/store/sqlite_migrations/`
-- **Tests**: In-memory SQLite for store tests, hand-written behavioral mocks in `web/mock_test.go`
+- **Migrations**: Sequential numbered SQL files in `migrations/`
+- **Tests**: In-memory SQLite for store tests, hand-written behavioral mocks in `web/mock_test.go`, shared helpers in `internal/testutil/`
 
 ## Telegram Notifications
 
