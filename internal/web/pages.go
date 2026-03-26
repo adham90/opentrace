@@ -28,13 +28,13 @@ func (s *Server) layoutData(r *http.Request, title, nav string) views.LayoutData
 	}
 }
 
-// Page handlers moved to domain modules:
-//   - Logs: internal/modules/logs/
-//   - Errors: internal/modules/errors/
-//   - Health: internal/modules/healthchecks/
-//   - Connectors: internal/modules/connectors/
-//   - Tools: internal/modules/tools/
-//   - Sessions: internal/modules/investigations/
-//   - Watchers: internal/modules/watches/
-//   - Settings/Users: internal/modules/settings/
-//   - Auth/Profile: internal/modules/auth/
+// Page handlers moved to domain packages:
+//   - Logs: internal/domains/logs/
+//   - Errors: internal/domains/errors/
+//   - Health: internal/domains/healthchecks/
+//   - Connectors: internal/domains/connectors/
+//   - Tools: internal/domains/tools/
+//   - Sessions: internal/domains/investigations/
+//   - Watchers: internal/domains/watches/
+//   - Settings/Users: internal/domains/settings/
+//   - Auth/Profile: internal/domains/auth/

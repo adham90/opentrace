@@ -1,4 +1,4 @@
-package web
+package ingest
 
 import (
 	"bytes"
@@ -11,19 +11,51 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/metrics"
+	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 )
 
-// batchIDPattern matches a UUID in 8-4-4-4-12 hex format.
+const (
+	// APIVersion is the current ingestion API version. Increment on breaking changes.
+	APIVersion = 1
+	// MinClientAPIVersion is the minimum client API version the server accepts.
+	MinClientAPIVersion = 1
+)
+
+// WatchStreamEvaluator is a minimal interface to avoid importing the watcher package.
+type WatchStreamEvaluator interface {
+	OnLogsReceived(entries []store.LogEntry)
+}
+
+// Handler holds the dependencies for the log ingestion HTTP handler.
+type Handler struct {
+	LogStore         store.LogStore
+	SettingsStore    store.SettingsStore
+	ErrorGroupStore  store.ErrorGroupStore
+	ErrorImpactStore store.ErrorImpactStore
+	CodeEntityStore  store.CodeEntityStore
+	TraceStore       store.TraceStore
+	DSStore          store.DataSourceStore
+	Registry         *connector.Registry
+	Cfg              *config.Config
+	WatchStream      WatchStreamEvaluator
+	Queue            *Queue
+
+	logsConnMu sync.Mutex
+}
+
+// BatchIDPattern matches a UUID in 8-4-4-4-12 hex format.
 var batchIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// isValidBatchID checks whether the given string is a valid UUID format.
-func isValidBatchID(id string) bool {
+// IsValidBatchID checks whether the given string is a valid UUID format.
+func IsValidBatchID(id string) bool {
 	return batchIDPattern.MatchString(id)
 }
 
@@ -83,26 +115,27 @@ type ingestRequestSummary struct {
 	TopDuplicates       json.RawMessage `json:"top_duplicates,omitempty"`
 }
 
-func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
+// HandleIngestLogs is the HTTP handler for POST /api/logs.
+func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 	// Check client API version compatibility
 	if clientVersion := r.Header.Get("X-API-Version"); clientVersion != "" {
 		v, err := strconv.Atoi(clientVersion)
 		if err != nil {
 			w.Header().Set("X-API-Version", strconv.Itoa(APIVersion))
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid X-API-Version: %s", clientVersion))
+			server.WriteError(w, http.StatusBadRequest, fmt.Sprintf("invalid X-API-Version: %s", clientVersion))
 			return
 		}
 		if v < MinClientAPIVersion {
 			w.Header().Set("X-API-Version", strconv.Itoa(APIVersion))
 			w.Header().Set("X-Min-Client-API-Version", strconv.Itoa(MinClientAPIVersion))
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("client API version %d is below minimum %d, please upgrade", v, MinClientAPIVersion))
+			server.WriteError(w, http.StatusBadRequest, fmt.Sprintf("client API version %d is below minimum %d, please upgrade", v, MinClientAPIVersion))
 			return
 		}
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "failed to read request body")
+		server.WriteError(w, http.StatusBadRequest, "failed to read request body")
 		return
 	}
 
@@ -111,13 +144,13 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 	if len(trimmed) > 0 && trimmed[0] == '{' {
 		var single ingestLogEntry
 		if err := json.Unmarshal(trimmed, &single); err != nil {
-			writeError(w, http.StatusBadRequest, formatJSONError(err, "object"))
+			server.WriteError(w, http.StatusBadRequest, server.FormatJSONError(err, "object"))
 			return
 		}
 		entries = []ingestLogEntry{single}
 	} else {
 		if err := json.Unmarshal(trimmed, &entries); err != nil {
-			writeError(w, http.StatusBadRequest, formatJSONError(err, "array"))
+			server.WriteError(w, http.StatusBadRequest, server.FormatJSONError(err, "array"))
 			return
 		}
 	}
@@ -141,11 +174,11 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 			missing = append(missing, "message")
 		}
 		if len(missing) > 0 {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("entry %d: missing required field(s): %s", i, strings.Join(missing, ", ")))
+			server.WriteError(w, http.StatusBadRequest, fmt.Sprintf("entry %d: missing required field(s): %s", i, strings.Join(missing, ", ")))
 			return
 		}
 		if !validLevels[e.Level] {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("entry %d: 'level' must be one of: debug, info, warn, error, fatal (got %q)", i, e.Level))
+			server.WriteError(w, http.StatusBadRequest, fmt.Sprintf("entry %d: 'level' must be one of: debug, info, warn, error, fatal (got %q)", i, e.Level))
 			return
 		}
 	}
@@ -153,13 +186,13 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 	// Check for duplicate batch
 	batchID := r.Header.Get("X-Batch-ID")
 	if batchID != "" {
-		if !isValidBatchID(batchID) {
-			writeError(w, http.StatusBadRequest, "invalid X-Batch-ID format (expected UUID)")
+		if !IsValidBatchID(batchID) {
+			server.WriteError(w, http.StatusBadRequest, "invalid X-Batch-ID format (expected UUID)")
 			return
 		}
-		existing, err := s.logStore.GetBatch(r.Context(), batchID)
+		existing, err := h.LogStore.GetBatch(r.Context(), batchID)
 		if err == nil && existing != nil {
-			writeJSON(w, http.StatusOK, map[string]any{
+			server.WriteJSON(w, http.StatusOK, map[string]any{
 				"count":        existing.LogCount,
 				"deduplicated": true,
 			})
@@ -238,22 +271,22 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 
 	// Apply sampling rules
 	originalCount := len(logEntries)
-	if s.settingsStore != nil {
-		rules, _ := s.settingsStore.GetSamplingRules(r.Context())
+	if h.SettingsStore != nil {
+		rules, _ := h.SettingsStore.GetSamplingRules(r.Context())
 		if len(rules) > 0 {
-			logEntries = applySamplingRules(logEntries, rules)
+			logEntries = ApplySamplingRules(logEntries, rules)
 		}
 	}
 
 	// Use async ingest queue if available; otherwise fall back to synchronous insert
 	var count int
-	if s.ingestQueue != nil {
-		count, err = s.ingestQueue.Enqueue(r.Context(), logEntries)
+	if h.Queue != nil {
+		count, err = h.Queue.Enqueue(r.Context(), logEntries)
 	} else {
-		count, err = s.logStore.BatchInsert(r.Context(), logEntries)
+		count, err = h.LogStore.BatchInsert(r.Context(), logEntries)
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to insert logs")
+		server.WriteError(w, http.StatusInternalServerError, "failed to insert logs")
 		return
 	}
 
@@ -264,39 +297,39 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 
 	// Record batch ID after successful insert
 	if batchID != "" {
-		_ = s.logStore.RecordBatch(r.Context(), batchID, count)
+		_ = h.LogStore.RecordBatch(r.Context(), batchID, count)
 	}
 
 	if count > 0 {
-		s.ensureLogsConnector(r.Context())
-		if s.watchStream != nil {
-			go s.watchStream.OnLogsReceived(logEntries)
+		h.ensureLogsConnector(r.Context())
+		if h.WatchStream != nil {
+			go h.WatchStream.OnLogsReceived(logEntries)
 		}
 		// Upsert error groups and track impact for entries with error_fingerprint.
-		if s.errorGroupStore != nil {
+		if h.ErrorGroupStore != nil {
 			for _, e := range logEntries {
 				if e.ErrorFingerprint != "" {
-					_ = s.errorGroupStore.Upsert(r.Context(), e)
+					_ = h.ErrorGroupStore.Upsert(r.Context(), e)
 					// Track user impact if we have a user ID
-					if s.errorImpactStore != nil && e.UserID != "" {
-						_ = s.errorImpactStore.TrackImpact(r.Context(), e.ErrorFingerprint, e.UserID, e.Metadata, e.ID, e.Service)
+					if h.ErrorImpactStore != nil && e.UserID != "" {
+						_ = h.ErrorImpactStore.TrackImpact(r.Context(), e.ErrorFingerprint, e.UserID, e.Metadata, e.ID, e.Service)
 					}
 				}
 			}
 		}
 		// Populate code entities from error log stack traces (Stage 5).
-		if s.codeEntityStore != nil {
+		if h.CodeEntityStore != nil {
 			for _, e := range logEntries {
 				if e.Level == "error" || e.Level == "fatal" {
-					go mcpserver.PopulateFromErrorLog(context.Background(), s.codeEntityStore, e)
+					go mcpserver.PopulateFromErrorLog(context.Background(), h.CodeEntityStore, e)
 				}
 			}
 		}
 		// Update distributed trace reassembly status for entries with a trace_id.
-		if s.traceStore != nil {
+		if h.TraceStore != nil {
 			for _, e := range logEntries {
 				if e.TraceID != "" {
-					_ = s.traceStore.UpsertTraceStatus(r.Context(), e.TraceID, e)
+					_ = h.TraceStore.UpsertTraceStatus(r.Context(), e.TraceID, e)
 				}
 			}
 		}
@@ -310,29 +343,29 @@ func (s *Server) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
 	if len(logEntries) < originalCount {
 		resp["sampled"] = true
 	}
-	writeJSON(w, status, resp)
+	server.WriteJSON(w, status, resp)
 }
 
 // ensureLogsConnector auto-creates and registers a logs connector if one
 // doesn't already exist. Called after each successful log ingestion so the
 // AI agent can use the log_search tool. Uses a mutex instead of sync.Once
 // so it can retry after transient failures or re-register after deletion.
-func (s *Server) ensureLogsConnector(ctx context.Context) {
+func (h *Handler) ensureLogsConnector(ctx context.Context) {
 	// Fast path: already registered in memory (no lock needed)
-	if s.registry.Get(connector.ConnectorLogs) != nil {
+	if h.Registry.Get(connector.ConnectorLogs) != nil {
 		return
 	}
 
-	s.logsConnMu.Lock()
-	defer s.logsConnMu.Unlock()
+	h.logsConnMu.Lock()
+	defer h.logsConnMu.Unlock()
 
 	// Double-check after acquiring lock
-	if s.registry.Get(connector.ConnectorLogs) != nil {
+	if h.Registry.Get(connector.ConnectorLogs) != nil {
 		return
 	}
 
 	// Check if a logs data source row already exists in the DB
-	sources, err := s.dsStore.List(ctx, store.ListDataSourceParams{Type: store.ConnectorLogs})
+	sources, err := h.DSStore.List(ctx, store.ListDataSourceParams{Type: store.ConnectorLogs})
 	if err != nil {
 		slog.Warn("ensureLogsConnector: failed to list data sources", "error", err)
 		return
@@ -344,7 +377,7 @@ func (s *Server) ensureLogsConnector(ctx context.Context) {
 
 	// Create DB row if it doesn't exist
 	if dsID == nil {
-		created, err := s.dsStore.Create(ctx, store.CreateDataSourceParams{
+		created, err := h.DSStore.Create(ctx, store.CreateDataSourceParams{
 			Type:   store.ConnectorLogs,
 			Name:   "Log Ingestion",
 			Config: map[string]any{},
@@ -357,12 +390,12 @@ func (s *Server) ensureLogsConnector(ctx context.Context) {
 	}
 
 	// Create and register the runtime connector
-	lc := connector.NewLogsConnector(s.logStore)
-	s.registry.Register(lc)
+	lc := connector.NewLogsConnector(h.LogStore)
+	h.Registry.Register(lc)
 
 	// Update DB status to connected
 	connected := store.StatusConnected
-	if _, err := s.dsStore.Update(ctx, dsID.ID, store.UpdateDataSourceParams{
+	if _, err := h.DSStore.Update(ctx, dsID.ID, store.UpdateDataSourceParams{
 		Status: &connected,
 	}); err != nil {
 		slog.Warn("ensureLogsConnector: failed to update status", "error", err)

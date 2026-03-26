@@ -11,8 +11,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	authmod "github.com/adham90/opentrace/internal/modules/auth"
-	"github.com/adham90/opentrace/internal/modules/onboarding"
+	authmod "github.com/adham90/opentrace/internal/domains/auth"
+	"github.com/adham90/opentrace/internal/domains/onboarding"
 	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 )
@@ -24,15 +24,19 @@ func newTestServer(t *testing.T) (*Server, *mockUserStore, *mockSessionStore) {
 	us := newMockUserStore()
 	ss := newMockSessionStore()
 	sharedDeps := &server.Deps{
-		UserStore:    us,
-		SessionStore: ss,
+		Stores: store.Stores{
+			UserStore:    us,
+			SessionStore: ss,
+		},
 	}
 	srv := NewServerWithDeps(ServerDeps{
-		DSStore:      newMockStore(),
-		LogStore:     newMockLogStore(),
-		UserStore:    us,
-		SessionStore: ss,
-		SharedDeps:   sharedDeps,
+		Stores: store.Stores{
+			DSStore:      newMockStore(),
+			LogStore:     newMockLogStore(),
+			UserStore:    us,
+			SessionStore: ss,
+		},
+		SharedDeps: sharedDeps,
 		Modules: []server.Module{
 			authmod.Module,
 			onboarding.Module,

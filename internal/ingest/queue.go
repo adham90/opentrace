@@ -1,4 +1,4 @@
-package web
+package ingest
 
 import (
 	"context"
@@ -10,11 +10,11 @@ import (
 	"github.com/adham90/opentrace/internal/store"
 )
 
-// IngestQueue buffers incoming log entries and flushes them in batches to reduce
+// Queue buffers incoming log entries and flushes them in batches to reduce
 // write contention on SQLite (which allows only a single writer at a time).
 // Entries are flushed when: the buffer reaches maxBatchSize, the flush interval
 // fires, or Flush()/Stop() is called explicitly.
-type IngestQueue struct {
+type Queue struct {
 	logStore      store.LogStore
 	maxQueueSize  int
 	maxBatchSize  int
@@ -31,16 +31,16 @@ type IngestQueue struct {
 	overflowCount atomic.Int64
 }
 
-// IngestQueueConfig holds configuration for the IngestQueue.
-type IngestQueueConfig struct {
+// QueueConfig holds configuration for the Queue.
+type QueueConfig struct {
 	MaxQueueSize  int           // Maximum entries buffered before overflow fallback (default 10000)
 	MaxBatchSize  int           // Maximum entries per flush batch (default 1000)
 	FlushInterval time.Duration // Timer-based flush interval (default 100ms)
 }
 
-// NewIngestQueue creates and starts a new IngestQueue with the given configuration.
+// NewQueue creates and starts a new Queue with the given configuration.
 // The queue starts a background goroutine that flushes on a timer.
-func NewIngestQueue(logStore store.LogStore, cfg IngestQueueConfig) *IngestQueue {
+func NewQueue(logStore store.LogStore, cfg QueueConfig) *Queue {
 	if cfg.MaxQueueSize <= 0 {
 		cfg.MaxQueueSize = 10000
 	}
@@ -51,7 +51,7 @@ func NewIngestQueue(logStore store.LogStore, cfg IngestQueueConfig) *IngestQueue
 		cfg.FlushInterval = 100 * time.Millisecond
 	}
 
-	q := &IngestQueue{
+	q := &Queue{
 		logStore:      logStore,
 		maxQueueSize:  cfg.MaxQueueSize,
 		maxBatchSize:  cfg.MaxBatchSize,
@@ -69,7 +69,7 @@ func NewIngestQueue(logStore store.LogStore, cfg IngestQueueConfig) *IngestQueue
 // Enqueue adds entries to the buffer. It returns immediately (non-blocking for
 // the HTTP handler). If the queue is full, it falls back to synchronous insert
 // so no data is lost.
-func (q *IngestQueue) Enqueue(ctx context.Context, entries []store.LogEntry) (int, error) {
+func (q *Queue) Enqueue(ctx context.Context, entries []store.LogEntry) (int, error) {
 	q.mu.Lock()
 
 	if q.stopped {
@@ -125,7 +125,7 @@ func (q *IngestQueue) Enqueue(ctx context.Context, entries []store.LogEntry) (in
 }
 
 // Flush drains the buffer and writes all buffered entries to the store.
-func (q *IngestQueue) Flush() {
+func (q *Queue) Flush() {
 	q.mu.Lock()
 	if len(q.buffer) == 0 {
 		q.mu.Unlock()
@@ -142,7 +142,7 @@ func (q *IngestQueue) Flush() {
 
 // flushBatch writes a batch of entries to the store. It splits into chunks of
 // maxBatchSize if needed.
-func (q *IngestQueue) flushBatch(entries []store.LogEntry) {
+func (q *Queue) flushBatch(entries []store.LogEntry) {
 	for len(entries) > 0 {
 		end := q.maxBatchSize
 		if end > len(entries) {
@@ -173,7 +173,7 @@ func (q *IngestQueue) flushBatch(entries []store.LogEntry) {
 }
 
 // flushLoop runs in the background and triggers flushes on a timer.
-func (q *IngestQueue) flushLoop() {
+func (q *Queue) flushLoop() {
 	defer q.wg.Done()
 
 	ticker := time.NewTicker(q.flushInterval)
@@ -193,7 +193,7 @@ func (q *IngestQueue) flushLoop() {
 
 // Stop gracefully shuts down the queue: it marks the queue as stopped,
 // signals the flush loop to exit, and waits for remaining entries to be flushed.
-func (q *IngestQueue) Stop() {
+func (q *Queue) Stop() {
 	q.mu.Lock()
 	if q.stopped {
 		q.mu.Unlock()
@@ -212,19 +212,19 @@ func (q *IngestQueue) Stop() {
 }
 
 // QueueDepth returns the current number of buffered entries.
-func (q *IngestQueue) QueueDepth() int {
+func (q *Queue) QueueDepth() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.buffer)
 }
 
 // FlushCount returns the total number of flush operations performed.
-func (q *IngestQueue) FlushCount() int64 {
+func (q *Queue) FlushCount() int64 {
 	return q.flushCount.Load()
 }
 
 // OverflowCount returns the total number of times the queue overflowed
 // and entries were inserted synchronously.
-func (q *IngestQueue) OverflowCount() int64 {
+func (q *Queue) OverflowCount() int64 {
 	return q.overflowCount.Load()
 }

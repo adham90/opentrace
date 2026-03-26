@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	authmod "github.com/adham90/opentrace/internal/modules/auth"
-	"github.com/adham90/opentrace/internal/modules/onboarding"
+	authmod "github.com/adham90/opentrace/internal/domains/auth"
+	"github.com/adham90/opentrace/internal/domains/onboarding"
 	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 )
@@ -20,17 +20,21 @@ func newOnboardingTestServer(t *testing.T) *Server {
 	ss := newMockSessionStore()
 	settings := newMockSettingsStore()
 	sharedDeps := &server.Deps{
-		UserStore:     us,
-		SessionStore:  ss,
-		SettingsStore: settings,
+		Stores: store.Stores{
+			UserStore:     us,
+			SessionStore:  ss,
+			SettingsStore: settings,
+		},
 	}
 	srv := NewServerWithDeps(ServerDeps{
-		DSStore:       newMockStore(),
-		LogStore:      newMockLogStore(),
-		UserStore:     us,
-		SessionStore:  ss,
-		SettingsStore: settings,
-		SharedDeps:    sharedDeps,
+		Stores: store.Stores{
+			DSStore:       newMockStore(),
+			LogStore:      newMockLogStore(),
+			UserStore:     us,
+			SessionStore:  ss,
+			SettingsStore: settings,
+		},
+		SharedDeps: sharedDeps,
 		Modules: []server.Module{
 			authmod.Module,
 			onboarding.Module,
@@ -67,17 +71,21 @@ func TestOnboardingPage_RedirectsWhenUsersExist(t *testing.T) {
 	})
 
 	sharedDeps := &server.Deps{
-		UserStore:     us,
-		SessionStore:  ss,
-		SettingsStore: settings,
+		Stores: store.Stores{
+			UserStore:     us,
+			SessionStore:  ss,
+			SettingsStore: settings,
+		},
 	}
 	srv := NewServerWithDeps(ServerDeps{
-		DSStore:       newMockStore(),
-		LogStore:      newMockLogStore(),
-		UserStore:     us,
-		SessionStore:  ss,
-		SettingsStore: settings,
-		SharedDeps:    sharedDeps,
+		Stores: store.Stores{
+			DSStore:       newMockStore(),
+			LogStore:      newMockLogStore(),
+			UserStore:     us,
+			SessionStore:  ss,
+			SettingsStore: settings,
+		},
+		SharedDeps: sharedDeps,
 		Modules: []server.Module{
 			authmod.Module,
 			onboarding.Module,
@@ -103,17 +111,21 @@ func TestOnboardingSubmit_CreatesAdminAndAPIKey(t *testing.T) {
 	settings := newMockSettingsStore()
 
 	sharedDeps := &server.Deps{
-		UserStore:     us,
-		SessionStore:  ss,
-		SettingsStore: settings,
+		Stores: store.Stores{
+			UserStore:     us,
+			SessionStore:  ss,
+			SettingsStore: settings,
+		},
 	}
 	srv := NewServerWithDeps(ServerDeps{
-		DSStore:       newMockStore(),
-		LogStore:      newMockLogStore(),
-		UserStore:     us,
-		SessionStore:  ss,
-		SettingsStore: settings,
-		SharedDeps:    sharedDeps,
+		Stores: store.Stores{
+			DSStore:       newMockStore(),
+			LogStore:      newMockLogStore(),
+			UserStore:     us,
+			SessionStore:  ss,
+			SettingsStore: settings,
+		},
+		SharedDeps: sharedDeps,
 		Modules: []server.Module{
 			authmod.Module,
 			onboarding.Module,
@@ -196,17 +208,21 @@ func TestOnboardingSubmit_RejectsWhenUsersExist(t *testing.T) {
 	})
 
 	sharedDeps := &server.Deps{
-		UserStore:     us,
-		SessionStore:  ss,
-		SettingsStore: settings,
+		Stores: store.Stores{
+			UserStore:     us,
+			SessionStore:  ss,
+			SettingsStore: settings,
+		},
 	}
 	srv := NewServerWithDeps(ServerDeps{
-		DSStore:       newMockStore(),
-		LogStore:      newMockLogStore(),
-		UserStore:     us,
-		SessionStore:  ss,
-		SettingsStore: settings,
-		SharedDeps:    sharedDeps,
+		Stores: store.Stores{
+			DSStore:       newMockStore(),
+			LogStore:      newMockLogStore(),
+			UserStore:     us,
+			SessionStore:  ss,
+			SettingsStore: settings,
+		},
+		SharedDeps: sharedDeps,
 		Modules: []server.Module{
 			authmod.Module,
 			onboarding.Module,

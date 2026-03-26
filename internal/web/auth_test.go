@@ -17,10 +17,12 @@ func TestSessionAuth_NoCookie(t *testing.T) {
 	us := newMockUserStore()
 	ss := newMockSessionStore()
 	srv := NewServerWithDeps(ServerDeps{
-		DSStore:      newMockStore(),
-		LogStore:     newMockLogStore(),
-		UserStore:    us,
-		SessionStore: ss,
+		Stores: store.Stores{
+			DSStore:      newMockStore(),
+			LogStore:     newMockLogStore(),
+			UserStore:    us,
+			SessionStore: ss,
+		},
 	})
 
 	var gotUser *store.User
@@ -66,10 +68,12 @@ func TestSessionAuth_ValidSession(t *testing.T) {
 	}
 
 	srv := NewServerWithDeps(ServerDeps{
-		DSStore:      newMockStore(),
-		LogStore:     newMockLogStore(),
-		UserStore:    us,
-		SessionStore: ss,
+		Stores: store.Stores{
+			DSStore:      newMockStore(),
+			LogStore:     newMockLogStore(),
+			UserStore:    us,
+			SessionStore: ss,
+		},
 	})
 
 	var gotUser *store.User
@@ -103,10 +107,12 @@ func TestSessionAuth_InvalidToken(t *testing.T) {
 	us := newMockUserStore()
 	ss := newMockSessionStore()
 	srv := NewServerWithDeps(ServerDeps{
-		DSStore:      newMockStore(),
-		LogStore:     newMockLogStore(),
-		UserStore:    us,
-		SessionStore: ss,
+		Stores: store.Stores{
+			DSStore:      newMockStore(),
+			LogStore:     newMockLogStore(),
+			UserStore:    us,
+			SessionStore: ss,
+		},
 	})
 
 	var gotUser *store.User
@@ -222,9 +228,11 @@ func TestRequireAdmin_WithAdmin(t *testing.T) {
 func TestRedirectToOnboarding_NoUsers(t *testing.T) {
 	us := newMockUserStore() // empty store, Count() == 0
 	srv := NewServerWithDeps(ServerDeps{
-		DSStore:   newMockStore(),
-		LogStore:  newMockLogStore(),
-		UserStore: us,
+		Stores: store.Stores{
+			DSStore:   newMockStore(),
+			LogStore:  newMockLogStore(),
+			UserStore: us,
+		},
 	})
 
 	handler := srv.RedirectToOnboardingIfNeeded(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -261,9 +269,11 @@ func TestRedirectToOnboarding_WithUsers(t *testing.T) {
 	}
 
 	srv := NewServerWithDeps(ServerDeps{
-		DSStore:   newMockStore(),
-		LogStore:  newMockLogStore(),
-		UserStore: us,
+		Stores: store.Stores{
+			DSStore:   newMockStore(),
+			LogStore:  newMockLogStore(),
+			UserStore: us,
+		},
 	})
 
 	handler := srv.RedirectToOnboardingIfNeeded(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

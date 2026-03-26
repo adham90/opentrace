@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adham90/opentrace/internal/ingest"
 	"github.com/adham90/opentrace/internal/store"
 )
 
@@ -42,7 +43,7 @@ func makeQueueEntries(n int) []store.LogEntry {
 
 func TestIngestQueue_EnqueueAndFlush(t *testing.T) {
 	ls := newCountingLogStore()
-	q := NewIngestQueue(ls, IngestQueueConfig{
+	q := ingest.NewQueue(ls, ingest.QueueConfig{
 		MaxQueueSize:  100,
 		MaxBatchSize:  50,
 		FlushInterval: 1 * time.Hour, // disable timer-based flush
@@ -84,7 +85,7 @@ func TestIngestQueue_EnqueueAndFlush(t *testing.T) {
 
 func TestIngestQueue_FlushOnBatchFull(t *testing.T) {
 	ls := newCountingLogStore()
-	q := NewIngestQueue(ls, IngestQueueConfig{
+	q := ingest.NewQueue(ls, ingest.QueueConfig{
 		MaxQueueSize:  200,
 		MaxBatchSize:  10,
 		FlushInterval: 1 * time.Hour, // disable timer
@@ -112,7 +113,7 @@ func TestIngestQueue_FlushOnBatchFull(t *testing.T) {
 
 func TestIngestQueue_FlushOnTimer(t *testing.T) {
 	ls := newCountingLogStore()
-	q := NewIngestQueue(ls, IngestQueueConfig{
+	q := ingest.NewQueue(ls, ingest.QueueConfig{
 		MaxQueueSize:  1000,
 		MaxBatchSize:  100,
 		FlushInterval: 50 * time.Millisecond, // fast timer
@@ -140,7 +141,7 @@ func TestIngestQueue_FlushOnTimer(t *testing.T) {
 
 func TestIngestQueue_FlushOnShutdown(t *testing.T) {
 	ls := newCountingLogStore()
-	q := NewIngestQueue(ls, IngestQueueConfig{
+	q := ingest.NewQueue(ls, ingest.QueueConfig{
 		MaxQueueSize:  1000,
 		MaxBatchSize:  1000,
 		FlushInterval: 1 * time.Hour, // disable timer
@@ -167,7 +168,7 @@ func TestIngestQueue_FlushOnShutdown(t *testing.T) {
 
 func TestIngestQueue_OverflowFallback(t *testing.T) {
 	ls := newCountingLogStore()
-	q := NewIngestQueue(ls, IngestQueueConfig{
+	q := ingest.NewQueue(ls, ingest.QueueConfig{
 		MaxQueueSize:  5,
 		MaxBatchSize:  100,
 		FlushInterval: 1 * time.Hour, // disable timer
@@ -204,7 +205,7 @@ func TestIngestQueue_OverflowFallback(t *testing.T) {
 
 func TestIngestQueue_OverflowWhenQueueCompletelyFull(t *testing.T) {
 	ls := newCountingLogStore()
-	q := NewIngestQueue(ls, IngestQueueConfig{
+	q := ingest.NewQueue(ls, ingest.QueueConfig{
 		MaxQueueSize:  3,
 		MaxBatchSize:  100,
 		FlushInterval: 1 * time.Hour,
@@ -240,7 +241,7 @@ func TestIngestQueue_OverflowWhenQueueCompletelyFull(t *testing.T) {
 
 func TestIngestQueue_ConcurrentEnqueue(t *testing.T) {
 	ls := newCountingLogStore()
-	q := NewIngestQueue(ls, IngestQueueConfig{
+	q := ingest.NewQueue(ls, ingest.QueueConfig{
 		MaxQueueSize:  10000,
 		MaxBatchSize:  100,
 		FlushInterval: 10 * time.Millisecond,
@@ -284,17 +285,17 @@ func TestIngestQueue_ConcurrentEnqueue(t *testing.T) {
 }
 
 func TestIngestQueue_NilQueueFallback(t *testing.T) {
-	// Verify that a nil ingestQueue in the server falls back to direct BatchInsert
+	// Verify that a nil Queue in the ingest handler falls back to direct BatchInsert
 	ls := newMockLogStore()
-	srv := &Server{
-		logStore: ls,
-		// ingestQueue is nil (default)
+	h := &ingest.Handler{
+		LogStore: ls,
+		// Queue is nil (default)
 	}
 
-	// The handler would call BatchInsert directly when ingestQueue is nil
+	// The handler would call BatchInsert directly when Queue is nil
 	// This tests the logic branch, not the HTTP handler
-	if srv.ingestQueue != nil {
-		t.Fatal("expected ingestQueue to be nil")
+	if h.Queue != nil {
+		t.Fatal("expected Queue to be nil")
 	}
 
 	entries := makeQueueEntries(3)
@@ -309,7 +310,7 @@ func TestIngestQueue_NilQueueFallback(t *testing.T) {
 
 func TestIngestQueue_StopIsIdempotent(t *testing.T) {
 	ls := newCountingLogStore()
-	q := NewIngestQueue(ls, IngestQueueConfig{
+	q := ingest.NewQueue(ls, ingest.QueueConfig{
 		MaxQueueSize:  100,
 		MaxBatchSize:  100,
 		FlushInterval: 1 * time.Hour,
@@ -321,7 +322,7 @@ func TestIngestQueue_StopIsIdempotent(t *testing.T) {
 
 func TestIngestQueue_EnqueueAfterStop(t *testing.T) {
 	ls := newCountingLogStore()
-	q := NewIngestQueue(ls, IngestQueueConfig{
+	q := ingest.NewQueue(ls, ingest.QueueConfig{
 		MaxQueueSize:  100,
 		MaxBatchSize:  100,
 		FlushInterval: 1 * time.Hour,
@@ -349,7 +350,7 @@ func TestIngestQueue_EnqueueAfterStop(t *testing.T) {
 
 func TestIngestQueue_Metrics(t *testing.T) {
 	ls := newCountingLogStore()
-	q := NewIngestQueue(ls, IngestQueueConfig{
+	q := ingest.NewQueue(ls, ingest.QueueConfig{
 		MaxQueueSize:  100,
 		MaxBatchSize:  100,
 		FlushInterval: 1 * time.Hour,

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adham90/opentrace/internal/store"
 	"github.com/adham90/opentrace/internal/version"
 )
 
@@ -170,8 +171,10 @@ func TestVersionCheckHandler_ForceBypassesCache(t *testing.T) {
 	srv, setTag := fakeGitHubServer(t, "v0.1.4")
 
 	server := NewServerWithDeps(ServerDeps{
-		DSStore:  newMockStore(),
-		LogStore: newMockLogStore(),
+		Stores: store.Stores{
+			DSStore:  newMockStore(),
+			LogStore: newMockLogStore(),
+		},
 	})
 	server.versionChecker = &versionChecker{
 		cacheTTL: 1 * time.Hour,

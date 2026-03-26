@@ -109,70 +109,18 @@ func initApp(ctx context.Context) (*server.Deps, error) {
 	}
 	slog.Info("database ready")
 
-	// Initialize stores
-	dsStore := store.NewDataSourceStore(db)
-	logStore := store.NewLogStore(db)
-	serverStore := store.NewServerStore(db)
-	metricStore := store.NewMetricStore(db)
-	userStore := store.NewUserStore(db)
-	sessionStore := store.NewSessionStore(db)
-	settingsStore := store.NewSettingsStore(db)
-	mcpActivityStore := store.NewMCPActivityStore(db)
-	auditStore := store.NewAuditStore(db)
-	watchStore := store.NewWatchStore(db)
-	errorGroupStore := store.NewErrorGroupStore(db)
-	healthCheckStore := store.NewHealthCheckStore(db)
-	agentNoteStore := store.NewAgentNoteStore(db)
-	trendStore := store.NewTrendStore(db)
-	analyticsStore := store.NewAnalyticsStore(db)
-	journeyStore := store.NewJourneyStore(db)
-	errorImpactStore := store.NewErrorImpactStore(db)
-	traceStore := store.NewTraceStore(db)
-	investigationSessionStore := store.NewInvestigationSessionStore(db)
-	toolTransitionStore := store.NewToolTransitionStore(db)
-	workflowTemplateStore := store.NewWorkflowTemplateStore(db)
-	queryMemoryStore := store.NewQueryMemoryStore(db)
-	runbookEffectivenessStore := store.NewRunbookEffectivenessStore(db)
-	codeEntityStore := store.NewCodeEntityStore(db)
-	deployStore := store.NewDeployStore(db)
-	eventStore := store.NewEventStore(db)
-	testCorrelationStore := store.NewTestCorrelationStore(db)
+	// Initialize all stores from a single constructor
+	stores := store.NewStores(db)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()
-	reconnectConnectors(ctx, dsStore, logStore, registry, cfg, settingsStore)
+	reconnectConnectors(ctx, stores.DSStore, stores.LogStore, registry, cfg, stores.SettingsStore)
 
 	return &server.Deps{
-		DB:                        db,
-		Cfg:                       cfg,
-		DSStore:                   dsStore,
-		LogStore:                  logStore,
-		ServerStore:               serverStore,
-		MetricStore:               metricStore,
-		UserStore:                 userStore,
-		SessionStore:              sessionStore,
-		SettingsStore:             settingsStore,
-		MCPActivityStore:          mcpActivityStore,
-		AuditStore:                auditStore,
-		WatchStore:                watchStore,
-		ErrorGroupStore:           errorGroupStore,
-		HealthCheckStore:          healthCheckStore,
-		AgentNoteStore:            agentNoteStore,
-		TrendStore:                trendStore,
-		AnalyticsStore:            analyticsStore,
-		JourneyStore:              journeyStore,
-		ErrorImpactStore:          errorImpactStore,
-		TraceStore:                traceStore,
-		InvestigationSessionStore: investigationSessionStore,
-		ToolTransitionStore:       toolTransitionStore,
-		WorkflowTemplateStore:     workflowTemplateStore,
-		QueryMemoryStore:          queryMemoryStore,
-		RunbookEffectivenessStore: runbookEffectivenessStore,
-		CodeEntityStore:           codeEntityStore,
-		DeployStore:               deployStore,
-		EventStore:                eventStore,
-		TestCorrelationStore:      testCorrelationStore,
-		Registry:                  registry,
+		DB:       db,
+		Cfg:      cfg,
+		Stores:   stores,
+		Registry: registry,
 	}, nil
 }
 
@@ -200,37 +148,13 @@ func runMCP() error {
 	}
 
 	return mcpserver.Serve(mcpserver.Deps{
-		Ctx:              ctx,
-		Registry:         deps.Registry,
-		LogStore:         deps.LogStore,
-		ServerStore:      deps.ServerStore,
-		MetricStore:      deps.MetricStore,
-		UserStore:        deps.UserStore,
-		MCPToken:         os.Getenv("OPENTRACE_MCP_TOKEN"),
-		ServerName:       mcpName,
-		DataSourceStore:  deps.DSStore,
-		SettingsStore:    deps.SettingsStore,
-		Config:           deps.Cfg,
-		MCPActivityStore: deps.MCPActivityStore,
-		AuditStore:       deps.AuditStore,
-		WatchStore:       deps.WatchStore,
-		WatchMetrics:     watchMetrics,
-		ErrorGroupStore:    deps.ErrorGroupStore,
-		HealthCheckStore:   deps.HealthCheckStore,
-		AgentNoteStore:     deps.AgentNoteStore,
-		TrendStore:         deps.TrendStore,
-		AnalyticsStore:     deps.AnalyticsStore,
-		JourneyStore:       deps.JourneyStore,
-		ErrorImpactStore:             deps.ErrorImpactStore,
-		InvestigationSessionStore:    deps.InvestigationSessionStore,
-		ToolTransitionStore:          deps.ToolTransitionStore,
-		WorkflowTemplateStore:        deps.WorkflowTemplateStore,
-		QueryMemoryStore:             deps.QueryMemoryStore,
-		RunbookEffectivenessStore:    deps.RunbookEffectivenessStore,
-		CodeEntityStore:              deps.CodeEntityStore,
-		DeployStore:                  deps.DeployStore,
-		EventStore:                   deps.EventStore,
-		TestCorrelationStore:         deps.TestCorrelationStore,
+		Ctx:          ctx,
+		Registry:     deps.Registry,
+		MCPToken:     os.Getenv("OPENTRACE_MCP_TOKEN"),
+		ServerName:   mcpName,
+		Config:       deps.Cfg,
+		Stores:       deps.Stores,
+		WatchMetrics: watchMetrics,
 	})
 }
 
@@ -276,28 +200,11 @@ func run() error {
 
 	// Build MCP tool catalog for the /tools page (auto-detected from MCP registrations).
 	toolCatalog := mcpserver.BuildCatalog(mcpserver.Deps{
-		Ctx:             ctx,
-		Registry:        deps.Registry,
-		LogStore:        deps.LogStore,
-		ServerStore:     deps.ServerStore,
-		MetricStore:     deps.MetricStore,
-		DataSourceStore: deps.DSStore,
-		SettingsStore:   deps.SettingsStore,
-		Config:          deps.Cfg,
-		AuditStore:      deps.AuditStore,
-		WatchStore:      deps.WatchStore,
-		WatchMetrics:    watchMetrics,
-		ErrorGroupStore:  deps.ErrorGroupStore,
-		HealthCheckStore: deps.HealthCheckStore,
-		AgentNoteStore:  deps.AgentNoteStore,
-		TrendStore:      deps.TrendStore,
-		AnalyticsStore:  deps.AnalyticsStore,
-		JourneyStore:    deps.JourneyStore,
-		ErrorImpactStore: deps.ErrorImpactStore,
-		CodeEntityStore:          deps.CodeEntityStore,
-		DeployStore:              deps.DeployStore,
-		EventStore:               deps.EventStore,
-		TestCorrelationStore:     deps.TestCorrelationStore,
+		Ctx:          ctx,
+		Registry:     deps.Registry,
+		Config:       deps.Cfg,
+		Stores:       deps.Stores,
+		WatchMetrics: watchMetrics,
 	})
 	deps.ToolCatalog = toolCatalog
 
@@ -315,39 +222,17 @@ func run() error {
 
 	// Create server
 	srv := web.NewServerWithDeps(web.ServerDeps{
-		Ctx:              ctx,
-		DB:               deps.DB,
-		DSStore:          deps.DSStore,
-		LogStore:         deps.LogStore,
-		ServerStore:      deps.ServerStore,
-		MetricStore:      deps.MetricStore,
-		UserStore:        deps.UserStore,
-		SessionStore:     deps.SessionStore,
-		SettingsStore:    deps.SettingsStore,
-		Registry:         deps.Registry,
-		ToolCatalog:      toolCatalog,
-		Cfg:              deps.Cfg,
-		MCPActivityStore: deps.MCPActivityStore,
-		AuditStore:       deps.AuditStore,
+		Ctx:                  ctx,
+		DB:                   deps.DB,
+		Stores:               deps.Stores,
+		Registry:             deps.Registry,
+		ToolCatalog:          toolCatalog,
+		Cfg:                  deps.Cfg,
 		WatchStreamEvaluator: watchStream,
-		WatchStore:           deps.WatchStore,
 		WatchMetrics:         watchMetrics,
-		ErrorGroupStore:      deps.ErrorGroupStore,
-		HealthCheckStore:     deps.HealthCheckStore,
-		AgentNoteStore:       deps.AgentNoteStore,
-		TrendStore:           deps.TrendStore,
-		AnalyticsStore:       deps.AnalyticsStore,
-		JourneyStore:         deps.JourneyStore,
-		ErrorImpactStore:     deps.ErrorImpactStore,
-		TraceStore:                deps.TraceStore,
-		InvestigationSessionStore: deps.InvestigationSessionStore,
-		CodeEntityStore:           deps.CodeEntityStore,
-		DeployStore:               deps.DeployStore,
-		EventStore:                deps.EventStore,
-		TestCorrelationStore:      deps.TestCorrelationStore,
-		ReliabilityProvider:       hcSched,
-		SharedDeps:                deps,
-		Modules:                   modules,
+		ReliabilityProvider:  hcSched,
+		SharedDeps:           deps,
+		Modules:              modules,
 	})
 
 	httpServer := &http.Server{

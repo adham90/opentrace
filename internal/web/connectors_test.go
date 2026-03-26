@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/adham90/opentrace/internal/connector"
-	"github.com/adham90/opentrace/internal/modules/connectors"
+	"github.com/adham90/opentrace/internal/domains/connectors"
 	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 )
@@ -25,15 +25,19 @@ func setupTestServer() (*Server, *mockDataSourceStore) {
 	})
 	reg := connector.NewRegistry()
 	deps := &server.Deps{
-		DSStore:  ms,
-		LogStore: ls,
+		Stores: store.Stores{
+			DSStore:   ms,
+			LogStore:  ls,
+			UserStore: us,
+		},
 		Registry: reg,
-		UserStore: us,
 	}
 	srv := NewServerWithDeps(ServerDeps{
-		DSStore:    ms,
-		LogStore:   ls,
-		UserStore:  us,
+		Stores: store.Stores{
+			DSStore:   ms,
+			LogStore:  ls,
+			UserStore: us,
+		},
 		Registry:   reg,
 		SharedDeps: deps,
 		Modules:    []server.Module{connectors.Module},

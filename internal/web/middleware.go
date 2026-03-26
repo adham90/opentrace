@@ -42,11 +42,12 @@ func CSRFToken(ctx context.Context) string {
 }
 
 const csrfCookieName = "opentrace_csrf"
-const csrfTokenLen = 32
+const csrfTokenBytes = 32 // byte length of the random CSRF token
+const cspNonceBytes  = 16 // byte length of the per-request CSP nonce
 
 // generateCSRFToken creates a cryptographically random CSRF token.
 func generateCSRFToken() (string, error) {
-	b := make([]byte, csrfTokenLen)
+	b := make([]byte, csrfTokenBytes)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
@@ -120,8 +121,8 @@ func CSRFProtect(next http.Handler) http.Handler {
 // It generates a per-request cryptographic nonce for inline scripts/styles.
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Generate 16 random bytes, base64-encode for the nonce value.
-		var buf [16]byte
+		// Generate cspNonceBytes random bytes, base64-encode for the nonce value.
+		var buf [cspNonceBytes]byte
 		if _, err := rand.Read(buf[:]); err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return

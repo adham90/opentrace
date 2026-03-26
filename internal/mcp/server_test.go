@@ -471,9 +471,9 @@ func TestAccessControl_ValidAdminToken(t *testing.T) {
 	}
 
 	deps := Deps{
-		Registry:  connector.NewRegistry(),
-		UserStore: us,
-		MCPToken:  token,
+		Registry: connector.NewRegistry(),
+		Stores:   store.Stores{UserStore: us},
+		MCPToken: token,
 	}
 	hasAccess, isAdmin := testAccessControl(deps)
 	if !hasAccess {
@@ -499,9 +499,9 @@ func TestAccessControl_ValidMemberToken(t *testing.T) {
 	}
 
 	deps := Deps{
-		Registry:  connector.NewRegistry(),
-		UserStore: us,
-		MCPToken:  token,
+		Registry: connector.NewRegistry(),
+		Stores:   store.Stores{UserStore: us},
+		MCPToken: token,
 	}
 	hasAccess, isAdmin := testAccessControl(deps)
 	if !hasAccess {
@@ -518,9 +518,9 @@ func TestAccessControl_InvalidToken(t *testing.T) {
 	}
 
 	deps := Deps{
-		Registry:  connector.NewRegistry(),
-		UserStore: us,
-		MCPToken:  "bad-token",
+		Registry: connector.NewRegistry(),
+		Stores:   store.Stores{UserStore: us},
+		MCPToken: "bad-token",
 	}
 	hasAccess, _ := testAccessControl(deps)
 	if hasAccess {
@@ -536,9 +536,9 @@ func TestAccessControl_EmptyToken(t *testing.T) {
 	}
 
 	deps := Deps{
-		Registry:  connector.NewRegistry(),
-		UserStore: us,
-		MCPToken:  "",
+		Registry: connector.NewRegistry(),
+		Stores:   store.Stores{UserStore: us},
+		MCPToken: "",
 	}
 	hasAccess, isAdmin := testAccessControl(deps)
 	if !hasAccess {

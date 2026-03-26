@@ -23,6 +23,7 @@ import (
 	assetsFS "github.com/adham90/opentrace/assets"
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/ingest"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	mcpgoserver "github.com/mark3labs/mcp-go/server"
 	"github.com/adham90/opentrace/internal/server"
@@ -32,10 +33,10 @@ import (
 )
 
 const (
-	// APIVersion is the current ingestion API version. Increment on breaking changes.
-	APIVersion = 1
-	// MinClientAPIVersion is the minimum client API version the server accepts.
-	MinClientAPIVersion = 1
+	// maxRequestBodyBytes is the global limit on HTTP request body size (10 MB).
+	maxRequestBodyBytes = 10 << 20
+	// auditChannelBuffer is the capacity of the async audit-log channel.
+	auditChannelBuffer = 256
 )
 
 // serverCapabilities advertises features the server supports.
@@ -92,15 +93,14 @@ type Server struct {
 	loginLimiter   *RateLimiter
 	apiLimiter     *RateLimiter
 	secureCookies  bool
-	logsConnMu     sync.Mutex
 	metricsConnMu  sync.Mutex
 
 	// Domain modules (isolated packages mounted on the API router)
 	sharedDeps *server.Deps
 	modules    []server.Module
 
-	// Async log ingestion queue (nil = synchronous fallback)
-	ingestQueue *IngestQueue
+	// Log ingestion handler (extracted to internal/ingest)
+	ingestHandler *ingest.Handler
 
 	// Bounded audit log channel with background worker
 	auditCh  chan auditEntry
@@ -121,47 +121,28 @@ type auditEntry struct {
 
 // ServerDeps holds all dependencies for the web server.
 type ServerDeps struct {
-	Ctx           context.Context // app lifecycle context; nil defaults to Background
-	DB            *sql.DB
-	DSStore       store.DataSourceStore
-	LogStore      store.LogStore
-	ServerStore   store.ServerStore
-	MetricStore   store.MetricStore
-	UserStore     store.UserStore
-	SessionStore  store.SessionStore
-	SettingsStore store.SettingsStore
-	Registry      *connector.Registry
-	ToolCatalog   *mcpserver.ToolCatalog
-	Cfg           *config.Config
-	MCPActivityStore store.MCPActivityStore
-	AuditStore       store.AuditStore
+	Ctx     context.Context // app lifecycle context; nil defaults to Background
+	DB      *sql.DB
+	Stores  store.Stores
+
+	Registry             *connector.Registry
+	ToolCatalog          *mcpserver.ToolCatalog
+	Cfg                  *config.Config
 	WatchStreamEvaluator *watcher.WatchStreamEvaluator
-	WatchStore           store.WatchStore
 	WatchMetrics         *watcher.WatchMetrics
-	ErrorGroupStore      store.ErrorGroupStore
-	HealthCheckStore     store.HealthCheckStore
-	AgentNoteStore       store.AgentNoteStore
-	TrendStore           store.TrendStore
-	AnalyticsStore       store.AnalyticsStore
-	JourneyStore         store.JourneyStore
-	ErrorImpactStore     store.ErrorImpactStore
-	TraceStore                   store.TraceStore
-	InvestigationSessionStore    store.InvestigationSessionStore
-	CodeEntityStore              store.CodeEntityStore
-	DeployStore                  store.DeployStore
-	EventStore                   store.EventStore
-	TestCorrelationStore         store.TestCorrelationStore
-	IngestQueue                  *IngestQueue
-	ReliabilityProvider          ReliabilityProvider
-	SharedDeps                   *server.Deps
-	Modules                      []server.Module
+	IngestQueue          *ingest.Queue
+	ReliabilityProvider  ReliabilityProvider
+	SharedDeps           *server.Deps
+	Modules              []server.Module
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
 func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, registry *connector.Registry, cfg *config.Config) *Server {
 	return NewServerWithDeps(ServerDeps{
-		DSStore:  dsStore,
-		LogStore: logStore,
+		Stores: store.Stores{
+			DSStore:  dsStore,
+			LogStore: logStore,
+		},
 		Registry: registry,
 		Cfg:      cfg,
 	})
@@ -170,41 +151,40 @@ func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, registry 
 // NewServerWithDeps creates a new Server using the ServerDeps struct.
 func NewServerWithDeps(deps ServerDeps) *Server {
 	srv := &Server{
-		db:            deps.DB,
-		dsStore:       deps.DSStore,
-		logStore:      deps.LogStore,
-		serverStore:   deps.ServerStore,
-		metricStore:   deps.MetricStore,
-		userStore:     deps.UserStore,
-		sessionStore:  deps.SessionStore,
-		settingsStore: deps.SettingsStore,
-		registry:      deps.Registry,
-		toolCatalog:   deps.ToolCatalog,
-		cfg:           deps.Cfg,
-		mcpActivityStore: deps.MCPActivityStore,
-		auditStore:       deps.AuditStore,
-		watchStream:      deps.WatchStreamEvaluator,
-		watchStore:       deps.WatchStore,
-		watchMetrics:     deps.WatchMetrics,
-		errorGroupStore:    deps.ErrorGroupStore,
-		healthCheckStore:   deps.HealthCheckStore,
-		agentNoteStore:     deps.AgentNoteStore,
-		trendStore:         deps.TrendStore,
-		analyticsStore:     deps.AnalyticsStore,
-		journeyStore:       deps.JourneyStore,
-		errorImpactStore:   deps.ErrorImpactStore,
-		traceStore:                deps.TraceStore,
-		investigationSessionStore: deps.InvestigationSessionStore,
-		codeEntityStore:           deps.CodeEntityStore,
-		deployStore:               deps.DeployStore,
-		eventStore:                deps.EventStore,
-		testCorrelationStore:      deps.TestCorrelationStore,
-		ingestQueue:               deps.IngestQueue,
+		db:                        deps.DB,
+		dsStore:                   deps.Stores.DSStore,
+		logStore:                  deps.Stores.LogStore,
+		serverStore:               deps.Stores.ServerStore,
+		metricStore:               deps.Stores.MetricStore,
+		userStore:                 deps.Stores.UserStore,
+		sessionStore:              deps.Stores.SessionStore,
+		settingsStore:             deps.Stores.SettingsStore,
+		registry:                  deps.Registry,
+		toolCatalog:               deps.ToolCatalog,
+		cfg:                       deps.Cfg,
+		mcpActivityStore:          deps.Stores.MCPActivityStore,
+		auditStore:                deps.Stores.AuditStore,
+		watchStream:               deps.WatchStreamEvaluator,
+		watchStore:                deps.Stores.WatchStore,
+		watchMetrics:              deps.WatchMetrics,
+		errorGroupStore:           deps.Stores.ErrorGroupStore,
+		healthCheckStore:          deps.Stores.HealthCheckStore,
+		agentNoteStore:            deps.Stores.AgentNoteStore,
+		trendStore:                deps.Stores.TrendStore,
+		analyticsStore:            deps.Stores.AnalyticsStore,
+		journeyStore:              deps.Stores.JourneyStore,
+		errorImpactStore:          deps.Stores.ErrorImpactStore,
+		traceStore:                deps.Stores.TraceStore,
+		investigationSessionStore: deps.Stores.InvestigationSessionStore,
+		codeEntityStore:           deps.Stores.CodeEntityStore,
+		deployStore:               deps.Stores.DeployStore,
+		eventStore:                deps.Stores.EventStore,
+		testCorrelationStore:      deps.Stores.TestCorrelationStore,
 		reliabilityProvider:       deps.ReliabilityProvider,
 		sharedDeps:                deps.SharedDeps,
 		modules:                   deps.Modules,
-		versionChecker:      newVersionChecker("adham90", "opentrace"),
-		auditCh:            make(chan auditEntry, 256),
+		versionChecker:            newVersionChecker("adham90", "opentrace"),
+		auditCh:                   make(chan auditEntry, auditChannelBuffer),
 	}
 
 	// Set audit context — used as parent for per-write timeouts
@@ -216,6 +196,23 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	// Start audit log worker
 	srv.auditWg.Add(1)
 	go srv.auditWorker()
+
+	// Create the log ingestion handler
+	srv.ingestHandler = &ingest.Handler{
+		LogStore:         deps.Stores.LogStore,
+		SettingsStore:    deps.Stores.SettingsStore,
+		ErrorGroupStore:  deps.Stores.ErrorGroupStore,
+		ErrorImpactStore: deps.Stores.ErrorImpactStore,
+		CodeEntityStore:  deps.Stores.CodeEntityStore,
+		TraceStore:       deps.Stores.TraceStore,
+		DSStore:          deps.Stores.DSStore,
+		Registry:         deps.Registry,
+		Cfg:              deps.Cfg,
+		Queue:            deps.IngestQueue,
+	}
+	if deps.WatchStreamEvaluator != nil {
+		srv.ingestHandler.WatchStream = deps.WatchStreamEvaluator
+	}
 
 	cfg := deps.Cfg
 
@@ -243,7 +240,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Use(PrometheusMiddleware)
 	router.Use(SecurityHeaders)
 	router.Use(wrapCompressSkipMCP(middleware.Compress(5))) // gzip compression, bypassed for /mcp/ SSE
-	router.Use(MaxBodySize(10 << 20))  // 10 MB global body limit
+	router.Use(MaxBodySize(maxRequestBodyBytes)) // 10 MB global body limit
 	router.Use(srv.SessionAuth)        // skips /static/ and /healthz paths internally
 	router.Use(CSRFProtect)            // double-submit cookie CSRF protection
 
@@ -343,13 +340,13 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 
 	// API
 	router.Route("/api", func(r chi.Router) {
-		r.Use(DecompressRequest(10 << 20)) // 10MB decompressed limit (zip bomb protection)
+		r.Use(DecompressRequest(maxRequestBodyBytes)) // 10MB decompressed limit (zip bomb protection)
 
 		// CORS for cross-origin browser requests (JS error tracking)
 		r.Use(srv.DynamicCORSMiddleware)
 
 		// Log ingestion with dynamic API key auth + rate limiting
-		r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/logs", srv.handleIngestLogs)
+		r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/logs", srv.ingestHandler.HandleIngestLogs)
 
 		// Expose the API router and middleware so domain modules can
 		// register webhook routes with API key auth (see deploys, events,
@@ -364,7 +361,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		// healthchecks, trends, analytics, error impact, journeys, traces,
 		// deploys, events, code entities, test gaps, mcp activity,
 		// investigations, servers, watches, and settings are handled
-		// by domain modules. See internal/modules/ and cmd/opentrace/modules.go.
+		// by domain packages. See internal/domains/ and cmd/opentrace/domains.go.
 
 		// Dev-mode live-reload endpoint
 		if cfg != nil && cfg.DevMode {
@@ -396,8 +393,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 
 	// Flush and stop the ingest queue before closing other resources
-	if s.ingestQueue != nil {
-		s.ingestQueue.Stop()
+	if s.ingestHandler != nil && s.ingestHandler.Queue != nil {
+		s.ingestHandler.Queue.Stop()
 	}
 
 	// Drain audit log channel
@@ -519,8 +516,8 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		"commit":                 version.Commit,
 		"date":                   version.Date,
 		"is_docker":              isDocker(),
-		"api_version":            APIVersion,
-		"min_client_api_version": MinClientAPIVersion,
+		"api_version":            ingest.APIVersion,
+		"min_client_api_version": ingest.MinClientAPIVersion,
 		"capabilities":           serverCapabilities,
 	})
 }

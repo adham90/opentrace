@@ -14,12 +14,19 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// SQLite tuning constants — extracted from pragmas and DSN parameters.
+const (
+	sqliteBusyTimeoutMs = 5000      // milliseconds to wait for a locked table
+	sqliteCacheSizeKB   = -64000    // negative = KB; 64 MB page cache (default ~2 MB)
+	sqliteMmapSize      = 30000000  // 30 MB memory-mapped I/O window
+)
+
 //go:embed sqlite_migrations/*.sql
 var sqliteMigrations embed.FS
 
 // OpenSQLite opens a SQLite database with recommended settings.
 func OpenSQLite(path string) (*sql.DB, error) {
-	dsn := path + "?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on"
+	dsn := fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=%d&_foreign_keys=on", path, sqliteBusyTimeoutMs)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite: %w", err)
@@ -39,10 +46,10 @@ func OpenSQLite(path string) (*sql.DB, error) {
 // These are safe to use with WAL journal mode.
 func applySQLitePragmas(db *sql.DB) error {
 	pragmas := []string{
-		"PRAGMA cache_size = -64000",  // 64MB page cache (default: 2MB)
-		"PRAGMA synchronous = NORMAL", // safe with WAL, skips fsync per write
-		"PRAGMA mmap_size = 30000000", // 30MB memory-mapped I/O
-		"PRAGMA temp_store = MEMORY",  // temp tables in RAM
+		fmt.Sprintf("PRAGMA cache_size = %d", sqliteCacheSizeKB), // 64MB page cache (default: 2MB)
+		"PRAGMA synchronous = NORMAL",                            // safe with WAL, skips fsync per write
+		fmt.Sprintf("PRAGMA mmap_size = %d", sqliteMmapSize),    // 30MB memory-mapped I/O
+		"PRAGMA temp_store = MEMORY",                             // temp tables in RAM
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {

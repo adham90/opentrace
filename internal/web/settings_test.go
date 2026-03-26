@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/adham90/opentrace/internal/config"
-	"github.com/adham90/opentrace/internal/modules/settings"
+	"github.com/adham90/opentrace/internal/domains/settings"
 	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 )
@@ -26,17 +26,21 @@ func newSettingsTestServer(t *testing.T) *Server {
 	})
 	ss := newMockSettingsStore()
 	deps := &server.Deps{
-		SettingsStore: ss,
-		UserStore:     us,
+		Stores: store.Stores{
+			SettingsStore: ss,
+			UserStore:     us,
+		},
 	}
 	return NewServerWithDeps(ServerDeps{
-		DSStore:       newMockStore(),
-		LogStore:      newMockLogStore(),
-		UserStore:     us,
-		SessionStore:  newMockSessionStore(),
-		SettingsStore: ss,
-		SharedDeps:    deps,
-		Modules:       []server.Module{settings.Module},
+		Stores: store.Stores{
+			DSStore:       newMockStore(),
+			LogStore:      newMockLogStore(),
+			UserStore:     us,
+			SessionStore:  newMockSessionStore(),
+			SettingsStore: ss,
+		},
+		SharedDeps: deps,
+		Modules:    []server.Module{settings.Module},
 	})
 }
 
@@ -214,19 +218,23 @@ func TestCORS_PutBlockedByEnvVar(t *testing.T) {
 	ss := newMockSettingsStore()
 	cfg := &config.Config{CORSAllowedOrigins: []string{"https://env.example.com"}}
 	deps := &server.Deps{
-		SettingsStore: ss,
-		UserStore:     us,
-		Cfg:           cfg,
+		Stores: store.Stores{
+			SettingsStore: ss,
+			UserStore:     us,
+		},
+		Cfg: cfg,
 	}
 	srv := NewServerWithDeps(ServerDeps{
-		DSStore:       newMockStore(),
-		LogStore:      newMockLogStore(),
-		UserStore:     us,
-		SessionStore:  newMockSessionStore(),
-		SettingsStore: ss,
-		Cfg:           cfg,
-		SharedDeps:    deps,
-		Modules:       []server.Module{settings.Module},
+		Stores: store.Stores{
+			DSStore:       newMockStore(),
+			LogStore:      newMockLogStore(),
+			UserStore:     us,
+			SessionStore:  newMockSessionStore(),
+			SettingsStore: ss,
+		},
+		Cfg:        cfg,
+		SharedDeps: deps,
+		Modules:    []server.Module{settings.Module},
 	})
 
 	rr := settingsRequest(t, srv, "PUT", "/api/settings/cors", `{"cors_origins":"https://other.com"}`)
@@ -246,19 +254,23 @@ func TestCORS_GetWithEnvOverride(t *testing.T) {
 	ss := newMockSettingsStore()
 	cfg := &config.Config{CORSAllowedOrigins: []string{"https://env.example.com"}}
 	deps := &server.Deps{
-		SettingsStore: ss,
-		UserStore:     us,
-		Cfg:           cfg,
+		Stores: store.Stores{
+			SettingsStore: ss,
+			UserStore:     us,
+		},
+		Cfg: cfg,
 	}
 	srv := NewServerWithDeps(ServerDeps{
-		DSStore:       newMockStore(),
-		LogStore:      newMockLogStore(),
-		UserStore:     us,
-		SessionStore:  newMockSessionStore(),
-		SettingsStore: ss,
-		Cfg:           cfg,
-		SharedDeps:    deps,
-		Modules:       []server.Module{settings.Module},
+		Stores: store.Stores{
+			DSStore:       newMockStore(),
+			LogStore:      newMockLogStore(),
+			UserStore:     us,
+			SessionStore:  newMockSessionStore(),
+			SettingsStore: ss,
+		},
+		Cfg:        cfg,
+		SharedDeps: deps,
+		Modules:    []server.Module{settings.Module},
 	})
 
 	rr := settingsRequest(t, srv, "GET", "/api/settings/cors", "")
@@ -287,19 +299,23 @@ func TestAPIKey_RegenerateBlockedByEnvVar(t *testing.T) {
 	ss := newMockSettingsStore()
 	cfg := &config.Config{APIKey: "env-key-123"}
 	deps := &server.Deps{
-		SettingsStore: ss,
-		UserStore:     us,
-		Cfg:           cfg,
+		Stores: store.Stores{
+			SettingsStore: ss,
+			UserStore:     us,
+		},
+		Cfg: cfg,
 	}
 	srv := NewServerWithDeps(ServerDeps{
-		DSStore:       newMockStore(),
-		LogStore:      newMockLogStore(),
-		UserStore:     us,
-		SessionStore:  newMockSessionStore(),
-		SettingsStore: ss,
-		Cfg:           cfg,
-		SharedDeps:    deps,
-		Modules:       []server.Module{settings.Module},
+		Stores: store.Stores{
+			DSStore:       newMockStore(),
+			LogStore:      newMockLogStore(),
+			UserStore:     us,
+			SessionStore:  newMockSessionStore(),
+			SettingsStore: ss,
+		},
+		Cfg:        cfg,
+		SharedDeps: deps,
+		Modules:    []server.Module{settings.Module},
 	})
 
 	rr := settingsRequest(t, srv, "POST", "/api/settings/api-key", "")

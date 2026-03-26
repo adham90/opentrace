@@ -12,7 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/adham90/opentrace/internal/config"
-	errorviews "github.com/adham90/opentrace/internal/modules/errors/views"
+	errorviews "github.com/adham90/opentrace/internal/domains/errors/views"
 	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 	"github.com/adham90/opentrace/internal/views"

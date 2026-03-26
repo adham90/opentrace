@@ -12,7 +12,8 @@ import (
 
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
-	"github.com/adham90/opentrace/internal/modules/logs"
+	"github.com/adham90/opentrace/internal/domains/logs"
+	"github.com/adham90/opentrace/internal/ingest"
 	"github.com/adham90/opentrace/internal/server"
 	"github.com/adham90/opentrace/internal/store"
 )
@@ -22,13 +23,17 @@ func setupTestServerWithLogStore() (*Server, *mockLogStore) {
 	ls := newMockLogStore()
 	reg := connector.NewRegistry()
 	deps := &server.Deps{
-		DSStore:  ms,
-		LogStore: ls,
+		Stores: store.Stores{
+			DSStore:  ms,
+			LogStore: ls,
+		},
 		Registry: reg,
 	}
 	srv := NewServerWithDeps(ServerDeps{
-		DSStore:    ms,
-		LogStore:   ls,
+		Stores: store.Stores{
+			DSStore:  ms,
+			LogStore: ls,
+		},
 		Registry:   reg,
 		SharedDeps: deps,
 		Modules:    []server.Module{logs.Module},
@@ -41,13 +46,17 @@ func setupTestServerFull() (*Server, *mockDataSourceStore, *mockLogStore, *conne
 	ls := newMockLogStore()
 	reg := connector.NewRegistry()
 	deps := &server.Deps{
-		DSStore:  ms,
-		LogStore: ls,
+		Stores: store.Stores{
+			DSStore:  ms,
+			LogStore: ls,
+		},
 		Registry: reg,
 	}
 	srv := NewServerWithDeps(ServerDeps{
-		DSStore:    ms,
-		LogStore:   ls,
+		Stores: store.Stores{
+			DSStore:  ms,
+			LogStore: ls,
+		},
 		Registry:   reg,
 		SharedDeps: deps,
 		Modules:    []server.Module{logs.Module},
@@ -643,15 +652,15 @@ func TestHandleVersion_IncludesAPIVersionFields(t *testing.T) {
 	if resp["api_version"] == nil {
 		t.Error("expected api_version in response")
 	}
-	if int(resp["api_version"].(float64)) != APIVersion {
-		t.Errorf("api_version = %v, want %d", resp["api_version"], APIVersion)
+	if int(resp["api_version"].(float64)) != ingest.APIVersion {
+		t.Errorf("api_version = %v, want %d", resp["api_version"], ingest.APIVersion)
 	}
 
 	if resp["min_client_api_version"] == nil {
 		t.Error("expected min_client_api_version in response")
 	}
-	if int(resp["min_client_api_version"].(float64)) != MinClientAPIVersion {
-		t.Errorf("min_client_api_version = %v, want %d", resp["min_client_api_version"], MinClientAPIVersion)
+	if int(resp["min_client_api_version"].(float64)) != ingest.MinClientAPIVersion {
+		t.Errorf("min_client_api_version = %v, want %d", resp["min_client_api_version"], ingest.MinClientAPIVersion)
 	}
 
 	caps, ok := resp["capabilities"].([]any)

@@ -17,39 +17,13 @@ import (
 )
 
 // Deps holds shared dependencies injected into every domain module.
-// Adding a new dependency = one field here, one line in cmd/opentrace/main.go.
+// Adding a new store = one field in store.Stores + one line in NewStores().
 type Deps struct {
 	DB  *sql.DB
 	Cfg *config.Config
 
-	// Stores
-	DSStore                   store.DataSourceStore
-	LogStore                  store.LogStore
-	ServerStore               store.ServerStore
-	MetricStore               store.MetricStore
-	UserStore                 store.UserStore
-	SessionStore              store.SessionStore
-	SettingsStore             store.SettingsStore
-	MCPActivityStore          store.MCPActivityStore
-	AuditStore                store.AuditStore
-	WatchStore                store.WatchStore
-	ErrorGroupStore           store.ErrorGroupStore
-	HealthCheckStore          store.HealthCheckStore
-	AgentNoteStore            store.AgentNoteStore
-	TrendStore                store.TrendStore
-	AnalyticsStore            store.AnalyticsStore
-	JourneyStore              store.JourneyStore
-	ErrorImpactStore          store.ErrorImpactStore
-	TraceStore                store.TraceStore
-	InvestigationSessionStore    store.InvestigationSessionStore
-	ToolTransitionStore          store.ToolTransitionStore
-	WorkflowTemplateStore        store.WorkflowTemplateStore
-	QueryMemoryStore             store.QueryMemoryStore
-	RunbookEffectivenessStore    store.RunbookEffectivenessStore
-	CodeEntityStore              store.CodeEntityStore
-	DeployStore               store.DeployStore
-	EventStore                store.EventStore
-	TestCorrelationStore      store.TestCorrelationStore
+	// Stores — embedded so modules can access deps.LogStore directly.
+	store.Stores
 
 	// Infrastructure
 	Registry     *connector.Registry

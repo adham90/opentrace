@@ -1,4 +1,4 @@
-package web
+package ingest
 
 import (
 	"math/rand"
@@ -7,10 +7,10 @@ import (
 	"github.com/adham90/opentrace/internal/store"
 )
 
-// applySamplingRules filters log entries according to the given sampling rules.
+// ApplySamplingRules filters log entries according to the given sampling rules.
 // Entries whose service matches a rule are randomly kept based on the rule's rate.
 // Error/warn/fatal logs are always kept when KeepErrors is true for the matching rule.
-func applySamplingRules(entries []store.LogEntry, rules []store.SamplingRule) []store.LogEntry {
+func ApplySamplingRules(entries []store.LogEntry, rules []store.SamplingRule) []store.LogEntry {
 	// Build a map of service -> rule for fast lookup
 	ruleMap := make(map[string]*store.SamplingRule, len(rules))
 	var defaultRule *store.SamplingRule
@@ -39,7 +39,7 @@ func applySamplingRules(entries []store.LogEntry, rules []store.SamplingRule) []
 		}
 
 		// Always keep error/warn/fatal if KeepErrors is set
-		if rule.KeepErrors && isErrorLevel(e.Level) {
+		if rule.KeepErrors && IsErrorLevel(e.Level) {
 			filtered = append(filtered, e)
 			continue
 		}
@@ -52,8 +52,8 @@ func applySamplingRules(entries []store.LogEntry, rules []store.SamplingRule) []
 	return filtered
 }
 
-// isErrorLevel returns true if the log level indicates an error, warning, or fatal.
-func isErrorLevel(level string) bool {
+// IsErrorLevel returns true if the log level indicates an error, warning, or fatal.
+func IsErrorLevel(level string) bool {
 	switch strings.ToLower(level) {
 	case "error", "warn", "warning", "fatal":
 		return true

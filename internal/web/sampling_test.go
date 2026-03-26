@@ -4,17 +4,18 @@ import (
 	"math"
 	"testing"
 
+	"github.com/adham90/opentrace/internal/ingest"
 	"github.com/adham90/opentrace/internal/store"
 )
 
 func TestApplySamplingRules_NoRules(t *testing.T) {
 	entries := makeEntries(100, "info", "my-service")
-	result := applySamplingRules(entries, nil)
+	result := ingest.ApplySamplingRules(entries, nil)
 	if len(result) != 100 {
 		t.Errorf("expected 100 entries, got %d", len(result))
 	}
 
-	result = applySamplingRules(entries, []store.SamplingRule{})
+	result = ingest.ApplySamplingRules(entries, []store.SamplingRule{})
 	if len(result) != 100 {
 		t.Errorf("expected 100 entries, got %d", len(result))
 	}
@@ -26,7 +27,7 @@ func TestApplySamplingRules_DefaultRuleHalf(t *testing.T) {
 		{Service: "*", Rate: 0.5, KeepErrors: true},
 	}
 
-	result := applySamplingRules(entries, rules)
+	result := ingest.ApplySamplingRules(entries, rules)
 	ratio := float64(len(result)) / float64(len(entries))
 	// Allow generous tolerance for randomness: 0.3 to 0.7
 	if ratio < 0.3 || ratio > 0.7 {
@@ -44,7 +45,7 @@ func TestApplySamplingRules_PerServiceRule(t *testing.T) {
 		{Service: "service-a", Rate: 0.0, KeepErrors: false},
 	}
 
-	result := applySamplingRules(entries, rules)
+	result := ingest.ApplySamplingRules(entries, rules)
 
 	// service-a should all be dropped (rate=0), service-b should all be kept (no rule)
 	var aCount, bCount int
@@ -78,7 +79,7 @@ func TestApplySamplingRules_ErrorsAlwaysKept(t *testing.T) {
 		{Service: "*", Rate: 0.0, KeepErrors: true},
 	}
 
-	result := applySamplingRules(entries, rules)
+	result := ingest.ApplySamplingRules(entries, rules)
 	if len(result) != len(entries) {
 		t.Errorf("expected all %d error/warn entries kept, got %d", len(entries), len(result))
 	}
@@ -90,7 +91,7 @@ func TestApplySamplingRules_ErrorsNotKeptWhenKeepErrorsFalse(t *testing.T) {
 		{Service: "*", Rate: 0.0, KeepErrors: false},
 	}
 
-	result := applySamplingRules(entries, rules)
+	result := ingest.ApplySamplingRules(entries, rules)
 	if len(result) != 0 {
 		t.Errorf("expected 0 entries when KeepErrors=false and rate=0, got %d", len(result))
 	}
@@ -102,7 +103,7 @@ func TestApplySamplingRules_RateZero(t *testing.T) {
 		{Service: "*", Rate: 0.0, KeepErrors: true},
 	}
 
-	result := applySamplingRules(entries, rules)
+	result := ingest.ApplySamplingRules(entries, rules)
 	if len(result) != 0 {
 		t.Errorf("expected 0 entries at rate 0, got %d", len(result))
 	}
@@ -114,7 +115,7 @@ func TestApplySamplingRules_RateOne(t *testing.T) {
 		{Service: "*", Rate: 1.0, KeepErrors: true},
 	}
 
-	result := applySamplingRules(entries, rules)
+	result := ingest.ApplySamplingRules(entries, rules)
 	if len(result) != 1000 {
 		t.Errorf("expected 1000 entries at rate 1.0, got %d", len(result))
 	}
@@ -131,7 +132,7 @@ func TestApplySamplingRules_MixedLevelsWithSampling(t *testing.T) {
 		{Service: "*", Rate: 0.0, KeepErrors: true},
 	}
 
-	result := applySamplingRules(entries, rules)
+	result := ingest.ApplySamplingRules(entries, rules)
 	// All info should be dropped, all errors kept
 	if len(result) != 100 {
 		t.Errorf("expected 100 error entries kept, got %d", len(result))
@@ -153,7 +154,7 @@ func TestApplySamplingRules_DefaultAndServiceSpecific(t *testing.T) {
 		{Service: "noisy-svc", Rate: 0.0, KeepErrors: false}, // drop all from noisy-svc
 	}
 
-	result := applySamplingRules(entries, rules)
+	result := ingest.ApplySamplingRules(entries, rules)
 
 	var criticalCount, noisyCount int
 	for _, e := range result {
@@ -193,9 +194,9 @@ func TestIsErrorLevel(t *testing.T) {
 		{"", false},
 	}
 	for _, tc := range tests {
-		got := isErrorLevel(tc.level)
+		got := ingest.IsErrorLevel(tc.level)
 		if got != tc.want {
-			t.Errorf("isErrorLevel(%q) = %v, want %v", tc.level, got, tc.want)
+			t.Errorf("ingest.IsErrorLevel(%q) = %v, want %v", tc.level, got, tc.want)
 		}
 	}
 }
@@ -219,14 +220,14 @@ func TestApplySamplingRules_BoundaryRates(t *testing.T) {
 
 	// Rate exactly 0
 	rules := []store.SamplingRule{{Service: "*", Rate: 0.0, KeepErrors: false}}
-	result := applySamplingRules(entries, rules)
+	result := ingest.ApplySamplingRules(entries, rules)
 	if len(result) != 0 {
 		t.Errorf("rate=0: expected 0, got %d", len(result))
 	}
 
 	// Rate exactly 1
 	rules = []store.SamplingRule{{Service: "*", Rate: 1.0, KeepErrors: false}}
-	result = applySamplingRules(entries, rules)
+	result = ingest.ApplySamplingRules(entries, rules)
 	if len(result) != 100 {
 		t.Errorf("rate=1: expected 100, got %d", len(result))
 	}
@@ -234,7 +235,7 @@ func TestApplySamplingRules_BoundaryRates(t *testing.T) {
 	// Very small rate
 	entries = makeEntries(100000, "info", "svc")
 	rules = []store.SamplingRule{{Service: "*", Rate: 0.001, KeepErrors: false}}
-	result = applySamplingRules(entries, rules)
+	result = ingest.ApplySamplingRules(entries, rules)
 	expectedApprox := 100.0
 	if math.Abs(float64(len(result))-expectedApprox) > 200 {
 		t.Errorf("rate=0.001: expected ~100, got %d", len(result))
