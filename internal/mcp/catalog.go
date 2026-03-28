@@ -6,8 +6,8 @@ import "github.com/adham90/opentrace/pkg/server"
 type CatalogEntry struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Access      string `json:"access"`          // "read" or "admin"
-	Category    string `json:"-"`               // grouping key (not serialized directly)
+	Access      string `json:"access"` // "read" or "admin"
+	Category    string `json:"-"`      // grouping key (not serialized directly)
 	Requires    string `json:"requires,omitempty"`
 }
 
@@ -60,17 +60,17 @@ func (tc *ToolCatalog) CategoriesForDisplay() []server.ToolCatalogCategory {
 // categoryDescriptions maps category names to their UI descriptions.
 var categoryDescriptions = map[string]string{
 	"Database Introspection": "Analyze database performance, table health, and active connections",
-"Log Intelligence":       "Analyze log patterns, volumes, and distributed traces",
+	"Log Intelligence":       "Analyze log patterns, volumes, and distributed traces",
 	"Connectors":             "View and manage database connectors",
 	"Server Metrics":         "Monitor server infrastructure health and performance",
 	"Connector Queries":      "Dynamic tools registered by active database connectors",
 	"Health":                 "System health digests and summaries",
 	"Settings":               "View and manage OpenTrace configuration",
-	"Errors":                "Track and manage application errors grouped by fingerprint",
+	"Errors":                 "Track and manage application errors grouped by fingerprint",
 	"Incidents":              "Investigate incidents with chronological event timelines",
-	"Uptime":                "Monitor HTTP endpoint availability, response times, and uptime percentage",
-	"Overview":              "High-level system health summaries and multi-source investigation",
-	"Agent Memory":          "Persistent notes for the AI agent to carry context across sessions",
+	"Uptime":                 "Monitor HTTP endpoint availability, response times, and uptime percentage",
+	"Overview":               "High-level system health summaries and multi-source investigation",
+	"Agent Memory":           "Persistent notes for the AI agent to carry context across sessions",
 }
 
 // CatalogBuilder accumulates tool entries and builds a ToolCatalog.

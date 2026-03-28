@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -21,26 +20,17 @@ func HandleQueries(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 		return errResult, nil
 	}
 
-	orderBy := "total_exec_time"
-	if v, ok := args["order_by"].(string); ok && v != "" {
-		allowed := map[string]bool{
-			"calls": true, "total_exec_time": true, "mean_exec_time": true,
-			"rows": true, "shared_blks_hit": true, "shared_blks_read": true,
-		}
-		if allowed[v] {
-			orderBy = v
-		}
+	orderBy := ArgStringDefault(args, "order_by", "total_exec_time")
+	allowed := map[string]bool{
+		"calls": true, "total_exec_time": true, "mean_exec_time": true,
+		"rows": true, "shared_blks_hit": true, "shared_blks_read": true,
+	}
+	if !allowed[orderBy] {
+		orderBy = "total_exec_time"
 	}
 
-	limit := 20
-	if v, ok := args["limit"].(float64); ok && v > 0 {
-		limit = int(v)
-		if limit > 100 {
-			limit = 100
-		}
-	}
-
-	filter, _ := args["filter"].(string)
+	limit := ArgInt(args, "limit", 20, 100)
+	filter := ArgString(args, "filter")
 
 	whereClause := ""
 	if filter != "" {
@@ -134,11 +124,7 @@ LIMIT %d`, whereClause, orderBy, limit)
 		}
 	}
 
-	data, err := json.Marshal(resp)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
-	}
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }
 
 // ---------------------------------------------------------------------------
@@ -154,7 +140,7 @@ func normalizeQueryFingerprint(query string) string {
 }
 
 func HandleExplain(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
-	query, _ := args["query"].(string)
+	query := ArgString(args, "query")
 	if query == "" {
 		return NewToolResultError("query is required for the explain action"), nil
 	}
@@ -169,19 +155,16 @@ func HandleExplain(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 		return errResult, nil
 	}
 
-	analyze := false
-	if v, ok := args["analyze"].(bool); ok {
-		analyze = v
-	}
+	analyze := ArgBool(args, "analyze")
 
 	buffers := true
 	if v, ok := args["buffers"].(bool); ok {
 		buffers = v
 	}
 
-	outputFormat := "text"
-	if v, ok := args["format"].(string); ok && (v == "json" || v == "text") {
-		outputFormat = v
+	outputFormat := ArgStringDefault(args, "format", "text")
+	if outputFormat != "json" && outputFormat != "text" {
+		outputFormat = "text"
 	}
 
 	// Build the EXPLAIN command.
@@ -249,11 +232,7 @@ func HandleExplain(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 		deps.SessionTracking.TrackExplainedQuery(fingerprint)
 	}
 
-	data, err := json.Marshal(resp)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
-	}
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }
 
 // analyzeExplainPlan inspects EXPLAIN output text for common performance issues.

@@ -48,7 +48,7 @@ func DatabaseHandler(deps DatabaseDeps) ToolHandlerFunc {
 	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
 		args := GetArguments(request)
 
-		action, _ := args["action"].(string)
+		action := ArgString(args, "action")
 		if action == "" {
 			return NewToolResultError("action is required. Available: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions"), nil
 		}

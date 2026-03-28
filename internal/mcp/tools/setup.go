@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -22,7 +21,7 @@ type SetupDeps struct {
 func SetupHandler(d SetupDeps) ToolHandlerFunc {
 	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
 		args := GetArguments(request)
-		action, _ := args["action"].(string)
+		action := ArgString(args, "action")
 
 		switch action {
 		case "status":
@@ -100,12 +99,11 @@ func HandleSetupStatus(ctx context.Context, d SetupDeps) (*CallToolResult, error
 		status["message"] = "OpenTrace is running but not receiving logs yet. Set up an SDK to start sending data."
 	}
 
-	data, _ := json.Marshal(status)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(status)
 }
 
 func HandleSetupDetect(_ context.Context, _ SetupDeps, args map[string]any) (*CallToolResult, error) {
-	filesStr, _ := args["files"].(string)
+	filesStr := ArgString(args, "files")
 	if filesStr == "" {
 		return NewToolResultText(`To detect the framework, provide a comma-separated list of files in the project root.
 
@@ -131,8 +129,7 @@ Or look for these common indicators:
 		"next_step":          fmt.Sprintf(`Run: setup(action: "guide", framework: "%s")`, framework.id),
 	}
 
-	data, _ := json.Marshal(result)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(result)
 }
 
 type frameworkDetection struct {
@@ -215,7 +212,7 @@ func trimSpace(s string) string {
 }
 
 func HandleSetupGuide(ctx context.Context, d SetupDeps, args map[string]any) (*CallToolResult, error) {
-	framework, _ := args["framework"].(string)
+	framework := ArgString(args, "framework")
 	if framework == "" {
 		return NewToolResultError("framework is required. Use: rails, node, express, nextjs, django, fastapi, python, go"), nil
 	}
@@ -379,12 +376,11 @@ func HandleSetupVerify(ctx context.Context, d SetupDeps) (*CallToolResult, error
 		}
 	}
 
-	data, _ := json.Marshal(result)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(result)
 }
 
 func HandleSetupDBGuide(_ context.Context, _ SetupDeps, args map[string]any) (*CallToolResult, error) {
-	dbType, _ := args["database"].(string)
+	dbType := ArgString(args, "database")
 	if dbType == "" {
 		return NewToolResultError("database is required. Use: postgres, mysql, redis"), nil
 	}

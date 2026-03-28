@@ -31,7 +31,7 @@ func LogsHandler(deps LogsDeps) ToolHandlerFunc {
 	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
 		args := GetArguments(request)
 
-		action, _ := args["action"].(string)
+		action := ArgString(args, "action")
 		switch action {
 		case "search":
 			return LogsSearch(ctx, args, deps)

@@ -97,6 +97,19 @@ func humanSize(bytes int64) string {
 	}
 }
 
+// round2 rounds a float64 to 2 decimal places.
+func round2(f float64) float64 {
+	return float64(int(f*100)) / 100
+}
+
+// absFloat returns the absolute value of a float64.
+func absFloat(f float64) float64 {
+	if f < 0 {
+		return -f
+	}
+	return f
+}
+
 // parsePostgresArray parses a simple Postgres array literal like {a,b,c}.
 func parsePostgresArray(s string) []string {
 	s = strings.TrimPrefix(s, "{")

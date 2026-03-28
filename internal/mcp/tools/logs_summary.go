@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
@@ -16,13 +15,10 @@ import (
 // ---------------------------------------------------------------------------
 
 func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
-	timeRange := "1h"
-	if v, ok := args["time_range"].(string); ok && v != "" {
-		timeRange = v
-	}
-	serviceFilter, _ := args["service"].(string)
-	environmentFilter, _ := args["environment"].(string)
-	commitFilter, _ := args["commit_hash"].(string)
+	timeRange := ArgStringDefault(args, "time_range", "1h")
+	serviceFilter := ArgString(args, "service")
+	environmentFilter := ArgString(args, "environment")
+	commitFilter := ArgString(args, "commit_hash")
 
 	duration, err := parseTimeRange(timeRange)
 	if err != nil {
@@ -333,11 +329,5 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 	if len(slowestEndpoints) > 0 {
 		suggestions = append(suggestions, Suggest("logs", "Investigate slow endpoints", map[string]any{"action": "performance", "sort_by": "duration_ms"}))
 	}
-	withSuggestionsRanked(resp, deps.Ranker, suggestions...)
-
-	data, err := json.Marshal(resp)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil
-	}
-	return NewToolResultText(string(data)), nil
+	return JSONResultRanked(resp, deps.Ranker, suggestions...)
 }

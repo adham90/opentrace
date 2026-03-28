@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -22,7 +21,7 @@ type WatchesDeps struct {
 func WatchesHandler(d WatchesDeps) ToolHandlerFunc {
 	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
 		args := GetArguments(request)
-		action, _ := args["action"].(string)
+		action := ArgString(args, "action")
 
 		switch action {
 		case "status":
@@ -47,15 +46,11 @@ func WatchesHandler(d WatchesDeps) ToolHandlerFunc {
 
 func HandleWatchStatus(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
 	params := store.ListWatchParams{}
-	if v, ok := args["status"].(string); ok {
+	if v := ArgString(args, "status"); v != "" {
 		params.Status = store.WatchStatus(v)
 	}
-	if v, ok := args["service"].(string); ok {
-		params.Service = v
-	}
-	if v, ok := args["session_id"].(string); ok {
-		params.SessionID = v
-	}
+	params.Service = ArgString(args, "service")
+	params.SessionID = ArgString(args, "session_id")
 
 	var watches []store.Watch
 	if params.Status == "" {
@@ -137,50 +132,27 @@ func HandleWatchStatus(ctx context.Context, d WatchesDeps, args map[string]any) 
 			break
 		}
 	}
-	WithSuggestions(result, suggestions...)
-
-	data, _ := json.Marshal(result)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(result, suggestions...)
 }
 
 func HandleWatchCreate(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
-	metricStr, _ := args["metric"].(string)
-	operatorStr, _ := args["operator"].(string)
-	threshold, _ := args["threshold"].(float64)
-
 	params := store.CreateWatchParams{
-		Metric:    store.WatchMetric(metricStr),
-		Operator:  store.WatchOperator(operatorStr),
-		Threshold: threshold,
+		Metric:    store.WatchMetric(ArgString(args, "metric")),
+		Operator:  store.WatchOperator(ArgString(args, "operator")),
+		Threshold: ArgFloat(args, "threshold", 0),
 	}
 
-	if v, ok := args["service"].(string); ok {
-		params.Service = v
-	}
-	if v, ok := args["endpoint"].(string); ok {
-		params.Endpoint = v
-	}
-	if v, ok := args["environment"].(string); ok {
-		params.Environment = v
-	}
-	if v, ok := args["commit_hash"].(string); ok {
-		params.CommitHash = v
-	}
-	if v, ok := args["duration"].(string); ok {
-		params.Duration = v
-	}
-	if v, ok := args["urgency"].(string); ok {
+	params.Service = ArgString(args, "service")
+	params.Endpoint = ArgString(args, "endpoint")
+	params.Environment = ArgString(args, "environment")
+	params.CommitHash = ArgString(args, "commit_hash")
+	params.Duration = ArgString(args, "duration")
+	if v := ArgString(args, "urgency"); v != "" {
 		params.Urgency = store.WatchUrgency(v)
 	}
-	if v, ok := args["check_interval"].(string); ok {
-		params.CheckInterval = v
-	}
-	if v, ok := args["min_consecutive"].(float64); ok {
-		params.MinConsecutive = int(v)
-	}
-	if v, ok := args["session_id"].(string); ok {
-		params.SessionID = v
-	}
+	params.CheckInterval = ArgString(args, "check_interval")
+	params.MinConsecutive = ArgInt(args, "min_consecutive", 0, 100)
+	params.SessionID = ArgString(args, "session_id")
 	params.CreatedBy = "mcp"
 
 	w, err := d.WatchStore.Create(ctx, params)
@@ -195,12 +167,11 @@ func HandleWatchCreate(ctx context.Context, d WatchesDeps, args map[string]any) 
 		w, _ = d.WatchStore.GetByID(ctx, w.ID)
 	}
 
-	data, _ := json.Marshal(w)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(w)
 }
 
 func HandleWatchDelete(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
-	watchID, _ := args["watch_id"].(string)
+	watchID := ArgString(args, "watch_id")
 	if watchID == "" {
 		return NewToolResultError("watch_id is required for delete action"), nil
 	}
@@ -211,7 +182,7 @@ func HandleWatchDelete(ctx context.Context, d WatchesDeps, args map[string]any) 
 }
 
 func HandleWatchAlerts(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
-	service, _ := args["service"].(string)
+	service := ArgString(args, "service")
 	alerts, err := d.WatchStore.ListAlerts(ctx, "", "pending", 20)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to list alerts: %v", err)), nil
@@ -227,24 +198,18 @@ func HandleWatchAlerts(ctx context.Context, d WatchesDeps, args map[string]any) 
 		}
 	}
 
-	result := map[string]any{
+	return JSONResult(map[string]any{
 		"count":  len(filtered),
 		"alerts": filtered,
-	}
-
-	data, _ := json.Marshal(result)
-	return NewToolResultText(string(data)), nil
+	})
 }
 
 func HandleWatchDismiss(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
-	alertID, _ := args["alert_id"].(string)
+	alertID := ArgString(args, "alert_id")
 	if alertID == "" {
 		return NewToolResultError("alert_id is required for dismiss action"), nil
 	}
-	reason, _ := args["reason"].(string)
-	if reason == "" {
-		reason = "dismissed by agent"
-	}
+	reason := ArgStringDefault(args, "reason", "dismissed by agent")
 	if err := d.WatchStore.DismissAlert(ctx, alertID, reason); err != nil {
 		return nil, fmt.Errorf("dismissing alert: %w", err)
 	}
@@ -252,7 +217,7 @@ func HandleWatchDismiss(ctx context.Context, d WatchesDeps, args map[string]any)
 }
 
 func HandleWatchAcknowledge(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
-	alertID, _ := args["alert_id"].(string)
+	alertID := ArgString(args, "alert_id")
 	if alertID == "" {
 		return NewToolResultError("alert_id is required for acknowledge action"), nil
 	}
@@ -263,8 +228,8 @@ func HandleWatchAcknowledge(ctx context.Context, d WatchesDeps, args map[string]
 }
 
 func HandleWatchInvestigate(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
-	alertID, _ := args["alert_id"].(string)
-	service, _ := args["service"].(string)
+	alertID := ArgString(args, "alert_id")
+	service := ArgString(args, "service")
 
 	// Mode A: investigate a specific alert
 	if alertID != "" {
@@ -287,10 +252,7 @@ func HandleWatchInvestigate(ctx context.Context, d WatchesDeps, args map[string]
 				"service": w.Service,
 			}))
 		}
-		WithSuggestions(resp, suggestions...)
-
-		data, _ := json.Marshal(resp)
-		return NewToolResultText(string(data)), nil
+		return JSONResult(resp, suggestions...)
 	}
 
 	// Mode B: one-shot investigation
@@ -298,10 +260,7 @@ func HandleWatchInvestigate(ctx context.Context, d WatchesDeps, args map[string]
 		return nil, fmt.Errorf("either alert_id or service is required")
 	}
 
-	windowStr, _ := args["window"].(string)
-	if windowStr == "" {
-		windowStr = "1h"
-	}
+	windowStr := ArgStringDefault(args, "window", "1h")
 	window, err := time.ParseDuration(windowStr)
 	if err != nil {
 		window = 1 * time.Hour
@@ -407,8 +366,5 @@ func HandleWatchInvestigate(ctx context.Context, d WatchesDeps, args map[string]
 			"service":         service,
 		}))
 	}
-	WithSuggestions(resp, suggestions...)
-
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp, suggestions...)
 }

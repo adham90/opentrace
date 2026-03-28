@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -20,7 +19,7 @@ func HandleIndexes(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 		return errResult, nil
 	}
 
-	tableName, _ := args["table_name"].(string)
+	tableName := ArgString(args, "table_name")
 	includeSuggestions := true
 	if v, ok := args["include_suggestions"].(bool); ok {
 		includeSuggestions = v
@@ -147,8 +146,7 @@ func HandleIndexes(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 		}
 	}
 
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }
 
 func fetchUnusedIndexes(ctx context.Context, qe connector.QueryExecutor, tableName string, includeSuggestions bool) ([]map[string]any, error) {

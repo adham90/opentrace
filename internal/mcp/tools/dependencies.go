@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 
@@ -22,7 +21,7 @@ type DependenciesDeps struct {
 func DependenciesHandler(d DependenciesDeps) ToolHandlerFunc {
 	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
 		args := GetArguments(request)
-		action, _ := args["action"].(string)
+		action := ArgString(args, "action")
 
 		switch action {
 		case "service":
@@ -38,7 +37,7 @@ func DependenciesHandler(d DependenciesDeps) ToolHandlerFunc {
 }
 
 func HandleDepsService(ctx context.Context, d DependenciesDeps, args map[string]any) (*CallToolResult, error) {
-	service, _ := args["service"].(string)
+	service := ArgString(args, "service")
 	if service == "" {
 		return NewToolResultError("service is required"), nil
 	}
@@ -125,12 +124,11 @@ func HandleDepsService(ctx context.Context, d DependenciesDeps, args map[string]
 		}
 	}
 
-	data, _ := json.Marshal(result)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(result)
 }
 
 func HandleDepsBlastRadius(ctx context.Context, d DependenciesDeps, args map[string]any) (*CallToolResult, error) {
-	service, _ := args["service"].(string)
+	service := ArgString(args, "service")
 	if service == "" {
 		return NewToolResultError("service is required"), nil
 	}
@@ -177,14 +175,13 @@ func HandleDepsBlastRadius(ctx context.Context, d DependenciesDeps, args map[str
 		}
 	}
 
-	data, _ := json.Marshal(result)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(result)
 }
 
 func HandleDepsChangeRisk(ctx context.Context, d DependenciesDeps, args map[string]any) (*CallToolResult, error) {
-	file, _ := args["file"].(string)
-	endpoint, _ := args["endpoint"].(string)
-	service, _ := args["service"].(string)
+	file := ArgString(args, "file")
+	endpoint := ArgString(args, "endpoint")
+	service := ArgString(args, "service")
 
 	if file == "" && endpoint == "" {
 		return NewToolResultError("file or endpoint is required"), nil
@@ -299,6 +296,5 @@ func HandleDepsChangeRisk(ctx context.Context, d DependenciesDeps, args map[stri
 		}
 	}
 
-	data, _ := json.Marshal(result)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(result)
 }

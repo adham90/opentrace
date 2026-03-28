@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -21,7 +20,7 @@ type ServersDeps struct {
 func ServersHandler(d ServersDeps) ToolHandlerFunc {
 	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
 		args := GetArguments(request)
-		action, _ := args["action"].(string)
+		action := ArgString(args, "action")
 
 		switch action {
 		case "list":
@@ -42,17 +41,13 @@ func HandleListServers(ctx context.Context, d ServersDeps) (*CallToolResult, err
 		return NewToolResultError(fmt.Sprintf("failed to list servers: %v", err)), nil
 	}
 	if len(servers) == 0 {
-		return NewToolResultText("No monitored servers."), nil
+		return EmptyResult("No monitored servers.")
 	}
-	data, err := json.Marshal(servers)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to marshal servers: %v", err)), nil
-	}
-	return NewToolResultText(string(data)), nil
+	return JSONResult(servers)
 }
 
 func HandleQueryMetrics(ctx context.Context, d ServersDeps, args map[string]any) (*CallToolResult, error) {
-	serverIDStr, _ := args["server_id"].(string)
+	serverIDStr := ArgString(args, "server_id")
 	if serverIDStr == "" {
 		return NewToolResultError("server_id is required"), nil
 	}
@@ -63,40 +58,32 @@ func HandleQueryMetrics(ctx context.Context, d ServersDeps, args map[string]any)
 	}
 
 	q := store.MetricQuery{ServerID: serverID}
-	if v, ok := args["metric_name"].(string); ok {
-		q.MetricName = v
-	}
-	if v, ok := args["start"].(string); ok && v != "" {
+	q.MetricName = ArgString(args, "metric_name")
+	if v := ArgString(args, "start"); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			q.Start = &t
 		}
 	}
-	if v, ok := args["end"].(string); ok && v != "" {
+	if v := ArgString(args, "end"); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			q.End = &t
 		}
 	}
-	if v, ok := args["limit"].(float64); ok && v > 0 {
-		q.Limit = int(v)
-	}
+	q.Limit = ArgInt(args, "limit", 0, 1000)
 
 	points, err := d.MetricStore.Query(ctx, q)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to query metrics: %v", err)), nil
 	}
 	if len(points) == 0 {
-		return NewToolResultText("No metrics found matching the given criteria."), nil
+		return EmptyResult("No metrics found matching the given criteria.")
 	}
 
-	data, err := json.Marshal(points)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to marshal metrics: %v", err)), nil
-	}
-	return NewToolResultText(string(data)), nil
+	return JSONResult(points)
 }
 
 func HandleServerHealth(ctx context.Context, d ServersDeps, args map[string]any) (*CallToolResult, error) {
-	serverIDStr, _ := args["server_id"].(string)
+	serverIDStr := ArgString(args, "server_id")
 	if serverIDStr == "" {
 		return NewToolResultError("server_id is required"), nil
 	}
@@ -116,13 +103,8 @@ func HandleServerHealth(ctx context.Context, d ServersDeps, args map[string]any)
 		return NewToolResultError(fmt.Sprintf("failed to query metrics: %v", err)), nil
 	}
 
-	result := map[string]any{
+	return JSONResult(map[string]any{
 		"server":  srv,
 		"metrics": latest,
-	}
-	data, err := json.Marshal(result)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to marshal: %v", err)), nil
-	}
-	return NewToolResultText(string(data)), nil
+	})
 }

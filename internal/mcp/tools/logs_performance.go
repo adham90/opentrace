@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -16,10 +15,7 @@ import (
 
 func LogsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	// Parse time range (default: 24h).
-	timeRange := "24h"
-	if v, ok := args["time_range"].(string); ok && v != "" {
-		timeRange = v
-	}
+	timeRange := ArgStringDefault(args, "time_range", "24h")
 	duration, err := parseTimeRange(timeRange)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("invalid time_range: %v. Use formats like '1h', '24h', '7d'.", err)), nil
@@ -32,41 +28,21 @@ func LogsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*
 		End:   &now,
 	}
 
-	if v, ok := args["controller"].(string); ok && v != "" {
-		params.Controller = v
-	}
-	if v, ok := args["path"].(string); ok && v != "" {
-		params.Path = v
-	}
-	if v, ok := args["n_plus_one_only"].(bool); ok {
-		params.NPlusOneOnly = v
-	}
-	if v, ok := args["min_duration_ms"].(float64); ok && v > 0 {
-		params.MinDurationMs = v
-	}
-	if v, ok := args["min_sql_count"].(float64); ok && v > 0 {
-		params.MinSQLCount = int(v)
-	}
+	params.Controller = ArgString(args, "controller")
+	params.Path = ArgString(args, "path")
+	params.NPlusOneOnly = ArgBool(args, "n_plus_one_only")
+	params.MinDurationMs = ArgFloat(args, "min_duration_ms", 0)
+	params.MinSQLCount = ArgInt(args, "min_sql_count", 0, 10000)
 
-	sortBy := "duration_ms"
-	if v, ok := args["sort_by"].(string); ok && v != "" {
-		switch v {
-		case "duration_ms", "sql_count", "db_time_ms", "duplicate_queries":
-			sortBy = v
-		default:
-			return NewToolResultError(fmt.Sprintf("invalid sort_by: %q. Use duration_ms, sql_count, db_time_ms, or duplicate_queries.", v)), nil
-		}
+	sortBy := ArgStringDefault(args, "sort_by", "duration_ms")
+	switch sortBy {
+	case "duration_ms", "sql_count", "db_time_ms", "duplicate_queries":
+		// valid
+	default:
+		return NewToolResultError(fmt.Sprintf("invalid sort_by: %q. Use duration_ms, sql_count, db_time_ms, or duplicate_queries.", sortBy)), nil
 	}
 	params.SortBy = sortBy
-
-	limit := 20
-	if v, ok := args["limit"].(float64); ok && v > 0 {
-		limit = int(v)
-		if limit > 100 {
-			limit = 100
-		}
-	}
-	params.Limit = limit
+	params.Limit = ArgInt(args, "limit", 20, 100)
 
 	results, err := deps.LogStore.SearchRequestSummaries(ctx, params)
 	if err != nil {
@@ -177,11 +153,5 @@ func LogsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*
 	if len(perfEntries) > 0 {
 		suggestions = append(suggestions, Suggest("overview", "Get full system overview", map[string]any{"action": "diagnose"}))
 	}
-	withSuggestionsRanked(resp, deps.Ranker, suggestions...)
-
-	data, err := json.Marshal(resp)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil
-	}
-	return NewToolResultText(string(data)), nil
+	return JSONResultRanked(resp, deps.Ranker, suggestions...)
 }

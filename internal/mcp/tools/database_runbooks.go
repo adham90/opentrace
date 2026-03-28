@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -16,7 +15,7 @@ func RunbookHandler(deps RunbookDeps) ToolHandlerFunc {
 	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
 		args := GetArguments(request)
 
-		playbook, _ := args["playbook"].(string)
+		playbook := ArgString(args, "playbook")
 		if playbook == "" {
 			return NewToolResultError("playbook is required. Available: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike"), nil
 		}
@@ -168,8 +167,7 @@ func RunbookSlowDB(ctx context.Context, registry *connector.Registry) (*CallTool
 		"diagnosis": diagnosis,
 	}
 
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }
 
 func RunbookConnExhaustion(ctx context.Context, registry *connector.Registry) (*CallToolResult, error) {
@@ -237,8 +235,7 @@ func RunbookConnExhaustion(ctx context.Context, registry *connector.Registry) (*
 	}
 
 	resp := map[string]any{"playbook": "connection_exhaustion", "sections": sections, "diagnosis": diagnosis}
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }
 
 func RunbookDiskPressure(ctx context.Context, registry *connector.Registry) (*CallToolResult, error) {
@@ -293,8 +290,7 @@ func RunbookDiskPressure(ctx context.Context, registry *connector.Registry) (*Ca
 	}
 
 	resp := map[string]any{"playbook": "disk_pressure", "sections": sections, "diagnosis": diagnosis}
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }
 
 func RunbookReplicationLag(ctx context.Context, registry *connector.Registry) (*CallToolResult, error) {
@@ -360,8 +356,7 @@ func RunbookReplicationLag(ctx context.Context, registry *connector.Registry) (*
 	}
 
 	resp := map[string]any{"playbook": "replication_lag", "sections": sections, "diagnosis": diagnosis}
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }
 
 func RunbookErrorSpike(ctx context.Context, logStore store.LogStore) (*CallToolResult, error) {
@@ -423,6 +418,5 @@ func RunbookErrorSpike(ctx context.Context, logStore store.LogStore) (*CallToolR
 	}
 
 	resp := map[string]any{"playbook": "error_spike", "sections": sections, "diagnosis": diagnosis}
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }

@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 
@@ -125,11 +124,7 @@ LIMIT 50`
 		resp["message"] = "No blocking lock chains found — the database has no lock contention."
 	}
 
-	data, err := json.Marshal(resp)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
-	}
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }
 
 func fetchAllLocks(ctx context.Context, qe connector.QueryExecutor) (*CallToolResult, error) {
@@ -189,9 +184,5 @@ LIMIT 100`
 		resp["message"] = "No locks currently held."
 	}
 
-	data, err := json.Marshal(resp)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
-	}
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }

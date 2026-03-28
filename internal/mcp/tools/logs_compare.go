@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -17,22 +16,14 @@ import (
 // ---------------------------------------------------------------------------
 
 func LogsCompare(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
-	metric, _ := args["metric"].(string)
+	metric := ArgString(args, "metric")
 	if metric == "" {
 		return NewToolResultError("metric is required (errors, log_volume)"), nil
 	}
 
-	currentPeriod := "last_1h"
-	if v, ok := args["current_period"].(string); ok && v != "" {
-		currentPeriod = v
-	}
-
-	baselinePeriod := "previous"
-	if v, ok := args["baseline_period"].(string); ok && v != "" {
-		baselinePeriod = v
-	}
-
-	serviceFilter, _ := args["service"].(string)
+	currentPeriod := ArgStringDefault(args, "current_period", "last_1h")
+	baselinePeriod := ArgStringDefault(args, "baseline_period", "previous")
+	serviceFilter := ArgString(args, "service")
 
 	now := time.Now().UTC()
 	currentStart, currentEnd, err := logsResolvePeriod(currentPeriod, now)
@@ -148,8 +139,7 @@ func LogsCompareErrors(ctx context.Context, ls store.LogStore, curStart, curEnd,
 		resp["warnings"] = warnings
 	}
 
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }
 
 func LogsCompareLogVolume(ctx context.Context, ls store.LogStore, curStart, curEnd, baseStart, baseEnd time.Time, service string) (*CallToolResult, error) {
@@ -215,6 +205,5 @@ func LogsCompareLogVolume(ctx context.Context, ls store.LogStore, curStart, curE
 		},
 	}
 
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }

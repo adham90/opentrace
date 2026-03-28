@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
@@ -16,23 +15,11 @@ import (
 // ---------------------------------------------------------------------------
 
 func LogsStats(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
-	timeRange := "1h"
-	if v, ok := args["time_range"].(string); ok && v != "" {
-		timeRange = v
-	}
-
-	groupBy := "level"
-	if v, ok := args["group_by"].(string); ok && v != "" {
-		groupBy = v
-	}
-
-	serviceFilter, _ := args["service"].(string)
-	levelFilter, _ := args["level"].(string)
-
-	bucketInterval := "5m"
-	if v, ok := args["bucket_interval"].(string); ok && v != "" {
-		bucketInterval = v
-	}
+	timeRange := ArgStringDefault(args, "time_range", "1h")
+	groupBy := ArgStringDefault(args, "group_by", "level")
+	serviceFilter := ArgString(args, "service")
+	levelFilter := ArgString(args, "level")
+	bucketInterval := ArgStringDefault(args, "bucket_interval", "5m")
 
 	duration, err := parseTimeRange(timeRange)
 	if err != nil {
@@ -134,8 +121,7 @@ func LogsStatsByLevel(ctx context.Context, ls store.LogStore, params store.LogCo
 		resp["warnings"] = warnings
 	}
 
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }
 
 func LogsStatsByService(ctx context.Context, ls store.LogStore, params store.LogCountParams, since, until time.Time) (*CallToolResult, error) {
@@ -188,8 +174,7 @@ func LogsStatsByService(ctx context.Context, ls store.LogStore, params store.Log
 		resp["warnings"] = warnings
 	}
 
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }
 
 func LogsStatsByPattern(ctx context.Context, ls store.LogStore, since, until time.Time, service string) (*CallToolResult, error) {
@@ -313,6 +298,5 @@ func LogsStatsByPattern(ctx context.Context, ls store.LogStore, since, until tim
 		resp["warnings"] = warnings
 	}
 
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }

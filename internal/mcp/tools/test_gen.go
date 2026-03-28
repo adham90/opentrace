@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 
@@ -22,7 +21,7 @@ type TestGenDeps struct {
 func TestGenHandler(d TestGenDeps) ToolHandlerFunc {
 	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
 		args := GetArguments(request)
-		action, _ := args["action"].(string)
+		action := ArgString(args, "action")
 
 		switch action {
 		case "context":
@@ -38,7 +37,7 @@ func TestGenHandler(d TestGenDeps) ToolHandlerFunc {
 }
 
 func HandleTestGenContext(ctx context.Context, d TestGenDeps, args map[string]any) (*CallToolResult, error) {
-	fingerprint, _ := args["fingerprint"].(string)
+	fingerprint := ArgString(args, "fingerprint")
 	if fingerprint == "" {
 		return NewToolResultError("fingerprint is required for context action"), nil
 	}
@@ -108,8 +107,7 @@ func HandleTestGenContext(ctx context.Context, d TestGenDeps, args map[string]an
 		eg.Service,
 	)
 
-	data, _ := json.Marshal(result)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(result)
 }
 
 func HandleTestGenSuggest(ctx context.Context, d TestGenDeps, args map[string]any) (*CallToolResult, error) {
@@ -117,14 +115,8 @@ func HandleTestGenSuggest(ctx context.Context, d TestGenDeps, args map[string]an
 		return NewToolResultError("ErrorGroupStore not configured"), nil
 	}
 
-	limit := 10
-	if v, ok := args["limit"].(float64); ok && v > 0 {
-		limit = int(v)
-	}
-	if limit > 30 {
-		limit = 30
-	}
-	service, _ := args["service"].(string)
+	limit := ArgInt(args, "limit", 10, 30)
+	service := ArgString(args, "service")
 
 	// Get unresolved errors sorted by occurrence (most impactful first)
 	groups, err := d.ErrorGroupStore.List(ctx, store.ListErrorGroupParams{
@@ -150,7 +142,7 @@ func HandleTestGenSuggest(ctx context.Context, d TestGenDeps, args map[string]an
 			"rank":             i + 1,
 			"fingerprint":      g.Fingerprint,
 			"exception_class":  g.ExceptionClass,
-			"message":          truncate(g.Message, 80),
+			"message":          Truncate(g.Message, 80),
 			"service":          g.Service,
 			"occurrences":      g.OccurrenceCount,
 			"priority":         priority,
@@ -171,23 +163,16 @@ func HandleTestGenSuggest(ctx context.Context, d TestGenDeps, args map[string]an
 		suggestions = append(suggestions, suggestion)
 	}
 
-	data, _ := json.Marshal(map[string]any{
+	return JSONResult(map[string]any{
 		"suggestions": suggestions,
 		"count":       len(suggestions),
 		"tip":         "Use test_gen(action: \"context\", fingerprint: \"...\") to get test-ready data for any error.",
 	})
-	return NewToolResultText(string(data)), nil
 }
 
 func HandleTestGenCoverage(ctx context.Context, d TestGenDeps, args map[string]any) (*CallToolResult, error) {
-	limit := 10
-	if v, ok := args["limit"].(float64); ok && v > 0 {
-		limit = int(v)
-	}
-	if limit > 30 {
-		limit = 30
-	}
-	service, _ := args["service"].(string)
+	limit := ArgInt(args, "limit", 10, 30)
+	service := ArgString(args, "service")
 
 	var gaps []map[string]any
 
@@ -232,12 +217,11 @@ func HandleTestGenCoverage(ctx context.Context, d TestGenDeps, args map[string]a
 		}
 	}
 
-	data, _ := json.Marshal(map[string]any{
+	return JSONResult(map[string]any{
 		"uncovered_errors": gaps,
 		"count":            len(gaps),
 		"tip":              "Use test_gen(action: \"context\", fingerprint: \"...\") to get test-ready data for any error.",
 	})
-	return NewToolResultText(string(data)), nil
 }
 
 func sanitizeTestName(s string) string {
@@ -255,7 +239,7 @@ func sanitizeTestName(s string) string {
 }
 
 func describeEdgeCase(message string) string {
-	msg := truncate(message, 60)
+	msg := Truncate(message, 60)
 	if msg == "" {
 		return "this edge case"
 	}

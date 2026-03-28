@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -27,7 +26,7 @@ type ConnectorsDeps struct {
 func ConnectorsHandler(d ConnectorsDeps) ToolHandlerFunc {
 	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
 		args := GetArguments(request)
-		action, _ := args["action"].(string)
+		action := ArgString(args, "action")
 
 		switch action {
 		case "list":
@@ -51,7 +50,7 @@ func ConnectorsHandler(d ConnectorsDeps) ToolHandlerFunc {
 func HandleConnectorList(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
 	if d.DSStore != nil {
 		var params store.ListDataSourceParams
-		if v, ok := args["type"].(string); ok && v != "" {
+		if v := ArgString(args, "type"); v != "" {
 			params.Type = store.ConnectorType(v)
 		}
 
@@ -60,7 +59,7 @@ func HandleConnectorList(ctx context.Context, d ConnectorsDeps, args map[string]
 			return NewToolResultError(fmt.Sprintf("failed to list connectors: %v", err)), nil
 		}
 		if len(connectors) == 0 {
-			return NewToolResultText("No connectors found."), nil
+			return EmptyResult("No connectors found.")
 		}
 
 		type connectorEntry struct {
@@ -100,20 +99,16 @@ func HandleConnectorList(ctx context.Context, d ConnectorsDeps, args map[string]
 			entries = append(entries, e)
 		}
 
-		data, err := json.Marshal(entries)
-		if err != nil {
-			return NewToolResultError(fmt.Sprintf("failed to marshal connectors: %v", err)), nil
-		}
-		return NewToolResultText(string(data)), nil
+		return JSONResult(entries)
 	}
 
 	// Fallback: no store, just list active registry tools.
 	if d.Registry == nil {
-		return NewToolResultText("No connectors are currently active."), nil
+		return EmptyResult("No connectors are currently active.")
 	}
 	tools := d.Registry.AllTools()
 	if len(tools) == 0 {
-		return NewToolResultText("No connectors are currently active."), nil
+		return EmptyResult("No connectors are currently active.")
 	}
 
 	var b strings.Builder
@@ -130,7 +125,7 @@ func HandleConnectorGet(ctx context.Context, d ConnectorsDeps, args map[string]a
 		return NewToolResultError("DataSourceStore not configured"), nil
 	}
 
-	idStr, _ := args["connector_id"].(string)
+	idStr := ArgString(args, "connector_id")
 	if idStr == "" {
 		return NewToolResultError("connector_id is required"), nil
 	}
@@ -148,11 +143,7 @@ func HandleConnectorGet(ctx context.Context, d ConnectorsDeps, args map[string]a
 		return NewToolResultError(fmt.Sprintf("failed to fetch connector: %v", err)), nil
 	}
 
-	data, err := json.Marshal(ds)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to marshal connector: %v", err)), nil
-	}
-	return NewToolResultText(string(data)), nil
+	return JSONResult(ds)
 }
 
 func HandleConnectorCreate(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
@@ -160,12 +151,12 @@ func HandleConnectorCreate(ctx context.Context, d ConnectorsDeps, args map[strin
 		return NewToolResultError("DataSourceStore not configured"), nil
 	}
 
-	name, _ := args["name"].(string)
+	name := ArgString(args, "name")
 	if name == "" {
 		return NewToolResultError("name is required"), nil
 	}
 
-	dsType, _ := args["connector_type"].(string)
+	dsType := ArgString(args, "connector_type")
 	if dsType == "" {
 		return NewToolResultError("connector_type is required (database, mysql, redis, turso, or logs)"), nil
 	}
@@ -181,14 +172,14 @@ func HandleConnectorCreate(ctx context.Context, d ConnectorsDeps, args map[strin
 	}
 
 	cfg := make(map[string]any)
-	if connStr, ok := args["connection_string"].(string); ok && connStr != "" {
+	if connStr := ArgString(args, "connection_string"); connStr != "" {
 		cfg["connection_string"] = connStr
 	} else if needsConnStr[dsType] {
 		return NewToolResultError(fmt.Sprintf("connection_string is required for %s connectors", dsType)), nil
 	}
 
 	if dsType == "turso" {
-		if authToken, ok := args["auth_token"].(string); ok && authToken != "" {
+		if authToken := ArgString(args, "auth_token"); authToken != "" {
 			cfg["auth_token"] = authToken
 		}
 	}
@@ -210,7 +201,7 @@ func HandleConnectorTest(ctx context.Context, d ConnectorsDeps, args map[string]
 		return NewToolResultError("DataSourceStore not configured"), nil
 	}
 
-	idStr, _ := args["connector_id"].(string)
+	idStr := ArgString(args, "connector_id")
 	if idStr == "" {
 		return NewToolResultError("connector_id is required"), nil
 	}
@@ -267,7 +258,7 @@ func HandleConnectorUpdate(ctx context.Context, d ConnectorsDeps, args map[strin
 		return NewToolResultError("DataSourceStore not configured"), nil
 	}
 
-	idStr, _ := args["connector_id"].(string)
+	idStr := ArgString(args, "connector_id")
 	if idStr == "" {
 		return NewToolResultError("connector_id is required"), nil
 	}
@@ -287,12 +278,12 @@ func HandleConnectorUpdate(ctx context.Context, d ConnectorsDeps, args map[strin
 
 	var params store.UpdateDataSourceParams
 
-	if v, ok := args["name"].(string); ok && v != "" {
+	if v := ArgString(args, "name"); v != "" {
 		params.Name = &v
 	}
 
 	configChanged := false
-	if connStr, ok := args["connection_string"].(string); ok && connStr != "" {
+	if connStr := ArgString(args, "connection_string"); connStr != "" {
 		params.Config = map[string]any{"connection_string": connStr}
 		configChanged = true
 	}
@@ -322,7 +313,7 @@ func HandleConnectorDelete(ctx context.Context, d ConnectorsDeps, args map[strin
 		return NewToolResultError("DataSourceStore not configured"), nil
 	}
 
-	idStr, _ := args["connector_id"].(string)
+	idStr := ArgString(args, "connector_id")
 	if idStr == "" {
 		return NewToolResultError("connector_id is required"), nil
 	}

@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -23,7 +22,7 @@ func DeploysHandler(d DeploysDeps) ToolHandlerFunc {
 		}
 
 		args := GetArguments(request)
-		action, _ := args["action"].(string)
+		action := ArgString(args, "action")
 
 		switch action {
 		case "history":
@@ -39,14 +38,8 @@ func DeploysHandler(d DeploysDeps) ToolHandlerFunc {
 }
 
 func HandleDeployHistory(ctx context.Context, d DeploysDeps, args map[string]any) (*CallToolResult, error) {
-	service, _ := args["service"].(string)
-	limit := 10
-	if l, ok := args["limit"].(float64); ok && l > 0 {
-		limit = int(l)
-	}
-	if limit > 50 {
-		limit = 50
-	}
+	service := ArgString(args, "service")
+	limit := ArgInt(args, "limit", 10, 50)
 
 	deploys, err := d.DeployStore.GetRecent(ctx, service, limit)
 	if err != nil {
@@ -54,7 +47,7 @@ func HandleDeployHistory(ctx context.Context, d DeploysDeps, args map[string]any
 	}
 
 	if len(deploys) == 0 {
-		return NewToolResultText(`{"message":"No deploys recorded","deploys":[]}`), nil
+		return EmptyResult(`{"message":"No deploys recorded","deploys":[]}`)
 	}
 
 	items := make([]map[string]any, 0, len(deploys))
@@ -79,17 +72,14 @@ func HandleDeployHistory(ctx context.Context, d DeploysDeps, args map[string]any
 		items = append(items, item)
 	}
 
-	resp := map[string]any{
+	return JSONResult(map[string]any{
 		"count":   len(items),
 		"deploys": items,
-	}
-
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	})
 }
 
 func HandleDeployImpact(ctx context.Context, d DeploysDeps, args map[string]any) (*CallToolResult, error) {
-	commitHash, _ := args["commit_hash"].(string)
+	commitHash := ArgString(args, "commit_hash")
 	if commitHash == "" {
 		return NewToolResultError("commit_hash is required"), nil
 	}
@@ -144,34 +134,23 @@ func HandleDeployImpact(ctx context.Context, d DeploysDeps, args map[string]any)
 		resp["linked_investigation_ids"] = dep.LinkedInvestigationIDs
 	}
 
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }
 
 func HandleDeployRecord(ctx context.Context, d DeploysDeps, args map[string]any) (*CallToolResult, error) {
-	service, _ := args["service"].(string)
+	service := ArgString(args, "service")
 	if service == "" {
 		return NewToolResultError("service is required"), nil
 	}
-	commit, _ := args["commit"].(string)
+	commit := ArgString(args, "commit")
 	if commit == "" {
 		return NewToolResultError("commit is required"), nil
 	}
 
-	author, _ := args["author"].(string)
-	branch, _ := args["branch"].(string)
-	environment, _ := args["environment"].(string)
-
-	var filesChanged []string
-	if rawFiles, ok := args["files"]; ok {
-		if arr, ok := rawFiles.([]any); ok {
-			for _, f := range arr {
-				if s, ok := f.(string); ok {
-					filesChanged = append(filesChanged, s)
-				}
-			}
-		}
-	}
+	author := ArgString(args, "author")
+	branch := ArgString(args, "branch")
+	environment := ArgString(args, "environment")
+	filesChanged := ArgStringSlice(args, "files")
 
 	dep, err := d.DeployStore.Create(ctx, store.CreateDeployParams{
 		Service:      service,
@@ -186,15 +165,12 @@ func HandleDeployRecord(ctx context.Context, d DeploysDeps, args map[string]any)
 		return NewToolResultError(fmt.Sprintf("failed to record deploy: %v", err)), nil
 	}
 
-	resp := map[string]any{
+	return JSONResult(map[string]any{
 		"message":     "Deploy recorded successfully",
 		"deploy_id":   dep.ID,
 		"service":     dep.Service,
 		"commit_hash": dep.CommitHash,
 		"status":      dep.Status,
 		"deployed_at": dep.DeployedAt.Format(time.RFC3339),
-	}
-
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	})
 }

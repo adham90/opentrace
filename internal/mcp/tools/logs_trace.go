@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
@@ -16,15 +15,12 @@ import (
 // ---------------------------------------------------------------------------
 
 func LogsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
-	traceID, _ := args["trace_id"].(string)
+	traceID := ArgString(args, "trace_id")
 	if traceID == "" {
 		return NewToolResultError("trace_id is required"), nil
 	}
 
-	includeContext := false
-	if v, ok := args["include_context"].(bool); ok {
-		includeContext = v
-	}
+	includeContext := ArgBool(args, "include_context")
 
 	// Fetch all log entries for this trace.
 	entries, err := deps.LogStore.Search(ctx, store.LogSearchParams{
@@ -41,13 +37,11 @@ func LogsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallTo
 	})
 
 	if len(entries) == 0 {
-		resp := map[string]any{
+		return JSONResult(map[string]any{
 			"trace_id":      traceID,
 			"total_entries": 0,
 			"message":       "No log entries found for this trace ID",
-		}
-		data, _ := json.Marshal(resp)
-		return NewToolResultText(string(data)), nil
+		})
 	}
 
 	firstTime := entries[0].Timestamp
@@ -202,6 +196,5 @@ func LogsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallTo
 		deps.TraceSessionRecorder(traceID)
 	}
 
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }

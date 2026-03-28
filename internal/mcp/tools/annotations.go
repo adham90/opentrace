@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -22,7 +21,7 @@ type AnnotationsDeps struct {
 func AnnotationsHandler(d AnnotationsDeps) ToolHandlerFunc {
 	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
 		args := GetArguments(request)
-		action, _ := args["action"].(string)
+		action := ArgString(args, "action")
 
 		switch action {
 		case "file":
@@ -38,7 +37,7 @@ func AnnotationsHandler(d AnnotationsDeps) ToolHandlerFunc {
 }
 
 func HandleAnnotationsFile(ctx context.Context, d AnnotationsDeps, args map[string]any) (*CallToolResult, error) {
-	filePath, _ := args["path"].(string)
+	filePath := ArgString(args, "path")
 	if filePath == "" {
 		return NewToolResultError("path is required for file action"), nil
 	}
@@ -62,7 +61,7 @@ func HandleAnnotationsFile(ctx context.Context, d AnnotationsDeps, args map[stri
 
 	// Get endpoint analytics if available
 	if d.AnalyticsStore != nil && controller != "" {
-		service, _ := args["service"].(string)
+		service := ArgString(args, "service")
 		eps, err := d.AnalyticsStore.TopEndpoints(ctx, store.TopEndpointParams{
 			Service: service,
 			Limit:   20,
@@ -109,7 +108,7 @@ func HandleAnnotationsFile(ctx context.Context, d AnnotationsDeps, args map[stri
 					openErrors = append(openErrors, map[string]any{
 						"fingerprint":     g.Fingerprint,
 						"exception_class": g.ExceptionClass,
-						"message":         truncate(g.Message, 100),
+						"message":         Truncate(g.Message, 100),
 						"occurrences":     g.OccurrenceCount,
 						"last_seen":       g.LastSeenAt.Format("2006-01-02 15:04"),
 					})
@@ -121,14 +120,13 @@ func HandleAnnotationsFile(ctx context.Context, d AnnotationsDeps, args map[stri
 		}
 	}
 
-	data, _ := json.Marshal(result)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(result)
 }
 
 func HandleAnnotationsFunction(ctx context.Context, d AnnotationsDeps, args map[string]any) (*CallToolResult, error) {
-	controller, _ := args["controller"].(string)
-	endpoint, _ := args["endpoint"].(string)
-	service, _ := args["service"].(string)
+	controller := ArgString(args, "controller")
+	endpoint := ArgString(args, "endpoint")
+	service := ArgString(args, "service")
 
 	if controller == "" && endpoint == "" {
 		return NewToolResultError("controller or endpoint is required for function action"), nil
@@ -161,19 +159,12 @@ func HandleAnnotationsFunction(ctx context.Context, d AnnotationsDeps, args map[
 		}
 	}
 
-	data, _ := json.Marshal(result)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(result)
 }
 
 func HandleAnnotationsHotspots(ctx context.Context, d AnnotationsDeps, args map[string]any) (*CallToolResult, error) {
-	limit := 10
-	if v, ok := args["limit"].(float64); ok && v > 0 {
-		limit = int(v)
-	}
-	if limit > 50 {
-		limit = 50
-	}
-	service, _ := args["service"].(string)
+	limit := ArgInt(args, "limit", 10, 50)
+	service := ArgString(args, "service")
 
 	var hotspots []map[string]any
 
@@ -195,14 +186,13 @@ func HandleAnnotationsHotspots(ctx context.Context, d AnnotationsDeps, args map[
 	}
 
 	if len(hotspots) == 0 {
-		return NewToolResultText(`{"message": "No code entity data available. Code risk scores are computed from error and investigation data over time."}`), nil
+		return EmptyResult(`{"message": "No code entity data available. Code risk scores are computed from error and investigation data over time."}`)
 	}
 
-	data, _ := json.Marshal(map[string]any{
+	return JSONResult(map[string]any{
 		"hotspots": hotspots,
 		"count":    len(hotspots),
 	})
-	return NewToolResultText(string(data)), nil
 }
 
 // controllerFromPath extracts a controller name from a file path using conventions.

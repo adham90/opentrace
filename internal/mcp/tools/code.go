@@ -92,7 +92,7 @@ func CodeHandler(d CodeDeps) ToolHandlerFunc {
 
 	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
 		args := GetArguments(request)
-		action, _ := args["action"].(string)
+		action := ArgString(args, "action")
 
 		entry, ok := actionMap[action]
 		if !ok {

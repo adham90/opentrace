@@ -2,10 +2,8 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
-
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -24,7 +22,7 @@ type CodeIntelDeps struct {
 func CodeIntelHandler(d CodeIntelDeps) ToolHandlerFunc {
 	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
 		args := GetArguments(request)
-		action, _ := args["action"].(string)
+		action := ArgString(args, "action")
 
 		switch action {
 		case "risk":
@@ -48,19 +46,8 @@ func HandleCodeRisk(ctx context.Context, d CodeIntelDeps, args map[string]any) (
 		return NewToolResultError("CodeEntityStore not configured"), nil
 	}
 
-	service, _ := args["service"].(string)
-
-	var files []string
-	if rawFiles, ok := args["files"]; ok {
-		switch v := rawFiles.(type) {
-		case []any:
-			for _, f := range v {
-				if s, ok := f.(string); ok {
-					files = append(files, s)
-				}
-			}
-		}
-	}
+	service := ArgString(args, "service")
+	files := ArgStringSlice(args, "files")
 
 	if len(files) == 0 {
 		return NewToolResultError("files array is required"), nil
@@ -108,8 +95,7 @@ func HandleCodeRisk(ctx context.Context, d CodeIntelDeps, args map[string]any) (
 		"assessment": assessment,
 	}
 
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }
 
 func HandleFragile(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
@@ -117,14 +103,8 @@ func HandleFragile(ctx context.Context, d CodeIntelDeps, args map[string]any) (*
 		return NewToolResultError("CodeEntityStore not configured"), nil
 	}
 
-	service, _ := args["service"].(string)
-	limit := 10
-	if l, ok := args["limit"].(float64); ok && l > 0 {
-		limit = int(l)
-	}
-	if limit > 50 {
-		limit = 50
-	}
+	service := ArgString(args, "service")
+	limit := ArgInt(args, "limit", 10, 50)
 
 	entities, err := d.CodeEntityStore.TopByRisk(ctx, service, limit)
 	if err != nil {
@@ -132,7 +112,7 @@ func HandleFragile(ctx context.Context, d CodeIntelDeps, args map[string]any) (*
 	}
 
 	if len(entities) == 0 {
-		return NewToolResultText(`{"message":"No code entities with risk data found","entities":[]}`), nil
+		return EmptyResult(`{"message":"No code entities with risk data found","entities":[]}`)
 	}
 
 	items := make([]map[string]any, 0, len(entities))
@@ -148,18 +128,15 @@ func HandleFragile(ctx context.Context, d CodeIntelDeps, args map[string]any) (*
 		})
 	}
 
-	resp := map[string]any{
+	return JSONResult(map[string]any{
 		"count":    len(items),
 		"entities": items,
-	}
-
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	})
 }
 
 func HandleCodeContext(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
 	// Check if this is a task-based context request
-	task, _ := args["task"].(string)
+	task := ArgString(args, "task")
 	if task != "" {
 		return HandleTaskContext(ctx, d, args, task)
 	}
@@ -168,11 +145,11 @@ func HandleCodeContext(ctx context.Context, d CodeIntelDeps, args map[string]any
 		return NewToolResultError("CodeEntityStore not configured"), nil
 	}
 
-	entityName, _ := args["entity_name"].(string)
+	entityName := ArgString(args, "entity_name")
 	if entityName == "" {
 		return NewToolResultError("entity_name is required"), nil
 	}
-	service, _ := args["service"].(string)
+	service := ArgString(args, "service")
 
 	types := []store.CodeEntityType{store.CodeEntityFile, store.CodeEntityController, store.CodeEntityEndpoint}
 	var entity *store.CodeEntity
@@ -185,12 +162,11 @@ func HandleCodeContext(ctx context.Context, d CodeIntelDeps, args map[string]any
 	}
 
 	if entity == nil {
-		data, _ := json.Marshal(map[string]any{
+		return JSONResult(map[string]any{
 			"message":     fmt.Sprintf("No code entity found for %q", entityName),
 			"entity_name": entityName,
 			"service":     service,
 		})
-		return NewToolResultText(string(data)), nil
 	}
 
 	resp := map[string]any{
@@ -221,12 +197,11 @@ func HandleCodeContext(ctx context.Context, d CodeIntelDeps, args map[string]any
 		}
 	}
 
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp)
 }
 
 func HandleTaskContext(ctx context.Context, d CodeIntelDeps, args map[string]any, task string) (*CallToolResult, error) {
-	service, _ := args["service"].(string)
+	service := ArgString(args, "service")
 
 	taskType := classifyTaskType(task)
 	result := map[string]any{
@@ -247,11 +222,7 @@ func HandleTaskContext(ctx context.Context, d CodeIntelDeps, args map[string]any
 		buildEditingContext(ctx, d, service, result)
 	}
 
-	data, err := json.Marshal(result)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to marshal context: %v", err)), nil
-	}
-	return NewToolResultText(string(data)), nil
+	return JSONResult(result)
 }
 
 func HandleTestGaps(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
@@ -259,12 +230,8 @@ func HandleTestGaps(ctx context.Context, d CodeIntelDeps, args map[string]any) (
 		return NewToolResultError("TestCorrelationStore not configured"), nil
 	}
 
-	service, _ := args["service"].(string)
-
-	limit := 10
-	if v, ok := args["limit"].(float64); ok && v > 0 {
-		limit = int(v)
-	}
+	service := ArgString(args, "service")
+	limit := ArgInt(args, "limit", 10, 100)
 
 	paths, err := d.TestCorrelationStore.TopByPriority(ctx, service, limit)
 	if err != nil {
@@ -272,19 +239,13 @@ func HandleTestGaps(ctx context.Context, d CodeIntelDeps, args map[string]any) (
 	}
 
 	if len(paths) == 0 {
-		return NewToolResultText("No uncovered error paths found."), nil
+		return EmptyResult("No uncovered error paths found.")
 	}
 
-	result := map[string]any{
+	return JSONResult(map[string]any{
 		"count": len(paths),
 		"paths": paths,
-	}
-
-	data, err := json.Marshal(result)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to marshal: %v", err)), nil
-	}
-	return NewToolResultText(string(data)), nil
+	})
 }
 
 func HandleTestPriority(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
@@ -292,7 +253,7 @@ func HandleTestPriority(ctx context.Context, d CodeIntelDeps, args map[string]an
 		return NewToolResultError("TestCorrelationStore not configured"), nil
 	}
 
-	fingerprint, _ := args["fingerprint"].(string)
+	fingerprint := ArgString(args, "fingerprint")
 	if fingerprint == "" {
 		return NewToolResultError("fingerprint parameter is required"), nil
 	}
@@ -318,11 +279,7 @@ func HandleTestPriority(ctx context.Context, d CodeIntelDeps, args map[string]an
 		}
 	}
 
-	data, err := json.Marshal(result)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to marshal: %v", err)), nil
-	}
-	return NewToolResultText(string(data)), nil
+	return JSONResult(result)
 }
 
 // --- helpers ---
@@ -377,151 +334,4 @@ func classifyTaskType(task string) string {
 	}
 
 	return "editing"
-}
-
-func buildDebuggingContext(ctx context.Context, d CodeIntelDeps, service string, result map[string]any) {
-	if d.ErrorGroupStore != nil {
-		params := store.ListErrorGroupParams{
-			Status: store.ErrorGroupUnresolved,
-			Limit:  5,
-		}
-		if service != "" {
-			params.Service = service
-		}
-		if groups, err := d.ErrorGroupStore.List(ctx, params); err == nil && len(groups) > 0 {
-			result["error_groups"] = groups
-		}
-	}
-
-	if d.DeployStore != nil {
-		if deploys, err := d.DeployStore.GetRecent(ctx, service, 3); err == nil && len(deploys) > 0 {
-			result["recent_deploys"] = deploys
-		}
-	}
-
-	if d.CodeEntityStore != nil {
-		if entities, err := d.CodeEntityStore.TopByRisk(ctx, service, 3); err == nil && len(entities) > 0 {
-			result["code_risk"] = entities
-		}
-	}
-
-	if d.InvestigationSessionStore != nil {
-		params := store.ListInvestigationSessionParams{
-			Status: store.InvestigationStatusOpen,
-			Limit:  5,
-		}
-		if service != "" {
-			params.Service = service
-		}
-		if sessions, err := d.InvestigationSessionStore.List(ctx, params); err == nil && len(sessions) > 0 {
-			result["active_investigations"] = sessions
-		}
-	}
-
-	if d.AgentNoteStore != nil && service != "" {
-		if note, err := d.AgentNoteStore.Get(ctx, "service", service); err == nil && note != nil {
-			result["agent_notes"] = note.Note
-		}
-	}
-}
-
-func buildDeployingContext(ctx context.Context, d CodeIntelDeps, service string, result map[string]any) {
-	if d.CodeEntityStore != nil {
-		if entities, err := d.CodeEntityStore.TopByRisk(ctx, service, 5); err == nil && len(entities) > 0 {
-			result["code_risk"] = entities
-		}
-	}
-
-	if d.DeployStore != nil {
-		if deploys, err := d.DeployStore.GetRecent(ctx, service, 5); err == nil && len(deploys) > 0 {
-			result["recent_deploys"] = deploys
-		}
-	}
-
-	if d.TestCorrelationStore != nil {
-		if paths, err := d.TestCorrelationStore.TopByPriority(ctx, service, 5); err == nil && len(paths) > 0 {
-			result["uncovered_paths"] = paths
-		}
-	}
-}
-
-func buildTestingContext(ctx context.Context, d CodeIntelDeps, service string, result map[string]any) {
-	if d.TestCorrelationStore != nil {
-		if paths, err := d.TestCorrelationStore.TopByPriority(ctx, service, 10); err == nil && len(paths) > 0 {
-			result["uncovered_paths"] = paths
-		}
-	}
-
-	if d.ErrorGroupStore != nil {
-		params := store.ListErrorGroupParams{
-			Status: store.ErrorGroupUnresolved,
-			Limit:  5,
-		}
-		if service != "" {
-			params.Service = service
-		}
-		if groups, err := d.ErrorGroupStore.List(ctx, params); err == nil && len(groups) > 0 {
-			result["error_groups"] = groups
-		}
-	}
-
-	if d.CodeEntityStore != nil {
-		if entities, err := d.CodeEntityStore.TopByRisk(ctx, service, 5); err == nil && len(entities) > 0 {
-			result["code_risk"] = entities
-		}
-	}
-}
-
-func buildReviewingContext(ctx context.Context, d CodeIntelDeps, service string, result map[string]any) {
-	if d.CodeEntityStore != nil {
-		if entities, err := d.CodeEntityStore.TopByRisk(ctx, service, 5); err == nil && len(entities) > 0 {
-			result["code_risk"] = entities
-		}
-	}
-
-	if d.ErrorGroupStore != nil {
-		params := store.ListErrorGroupParams{
-			Status: store.ErrorGroupUnresolved,
-			Limit:  5,
-		}
-		if service != "" {
-			params.Service = service
-		}
-		if groups, err := d.ErrorGroupStore.List(ctx, params); err == nil && len(groups) > 0 {
-			result["recent_errors"] = groups
-		}
-	}
-
-	if d.DeployStore != nil {
-		if deploys, err := d.DeployStore.GetRecent(ctx, service, 3); err == nil && len(deploys) > 0 {
-			result["related_deploys"] = deploys
-		}
-	}
-}
-
-func buildEditingContext(ctx context.Context, d CodeIntelDeps, service string, result map[string]any) {
-	if d.CodeEntityStore != nil {
-		if entities, err := d.CodeEntityStore.TopByRisk(ctx, service, 3); err == nil && len(entities) > 0 {
-			result["code_risk"] = entities
-		}
-	}
-
-	if d.AgentNoteStore != nil && service != "" {
-		if note, err := d.AgentNoteStore.Get(ctx, "service", service); err == nil && note != nil {
-			result["agent_notes"] = note.Note
-		}
-	}
-
-	if d.ErrorGroupStore != nil {
-		params := store.ListErrorGroupParams{
-			Status: store.ErrorGroupUnresolved,
-			Limit:  3,
-		}
-		if service != "" {
-			params.Service = service
-		}
-		if groups, err := d.ErrorGroupStore.List(ctx, params); err == nil && len(groups) > 0 {
-			result["recent_errors"] = groups
-		}
-	}
 }

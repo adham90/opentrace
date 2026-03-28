@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -23,7 +22,7 @@ func HealthchecksHandler(d HealthchecksDeps) ToolHandlerFunc {
 		}
 
 		args := GetArguments(request)
-		action, _ := args["action"].(string)
+		action := ArgString(args, "action")
 
 		switch action {
 		case "list":
@@ -47,7 +46,7 @@ func HandleHealthcheckList(ctx context.Context, d HealthchecksDeps) (*CallToolRe
 	}
 
 	if len(checks) == 0 {
-		return NewToolResultText("No health checks configured. Use healthchecks with action=create to add one."), nil
+		return EmptyResult("No health checks configured. Use healthchecks with action=create to add one.")
 	}
 
 	type checkSummary struct {
@@ -85,20 +84,14 @@ func HandleHealthcheckList(ctx context.Context, d HealthchecksDeps) (*CallToolRe
 		summaries[i] = s
 	}
 
-	resp := map[string]any{
+	return JSONResult(map[string]any{
 		"count":        len(summaries),
 		"healthchecks": summaries,
-	}
-
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	})
 }
 
 func HandleHealthcheckUptime(ctx context.Context, d HealthchecksDeps, args map[string]any) (*CallToolResult, error) {
-	hours := 24.0
-	if v, ok := args["hours"].(float64); ok && v > 0 {
-		hours = v
-	}
+	hours := ArgFloat(args, "hours", 24.0)
 	if hours > 720 {
 		hours = 720
 	}
@@ -111,7 +104,7 @@ func HandleHealthcheckUptime(ctx context.Context, d HealthchecksDeps, args map[s
 	}
 
 	if len(summaries) == 0 {
-		return NewToolResultText("No health checks configured. Use healthchecks with action=create to add one."), nil
+		return EmptyResult("No health checks configured. Use healthchecks with action=create to add one.")
 	}
 
 	type extSummary struct {
@@ -146,18 +139,16 @@ func HandleHealthcheckUptime(ctx context.Context, d HealthchecksDeps, args map[s
 			break
 		}
 	}
-	WithSuggestions(resp, suggestions...)
 
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	return JSONResult(resp, suggestions...)
 }
 
 func HandleHealthcheckCreate(ctx context.Context, d HealthchecksDeps, args map[string]any) (*CallToolResult, error) {
-	name, _ := args["name"].(string)
+	name := ArgString(args, "name")
 	if name == "" {
 		return NewToolResultError("name is required"), nil
 	}
-	url, _ := args["url"].(string)
+	url := ArgString(args, "url")
 	if url == "" {
 		return NewToolResultError("url is required"), nil
 	}
@@ -166,17 +157,17 @@ func HandleHealthcheckCreate(ctx context.Context, d HealthchecksDeps, args map[s
 		Name: name,
 		URL:  url,
 	}
-	if v, ok := args["method"].(string); ok && v != "" {
+	if v := ArgString(args, "method"); v != "" {
 		params.Method = v
 	}
-	if v, ok := args["interval_secs"].(float64); ok && v > 0 {
-		params.IntervalSecs = int(v)
+	if v := ArgInt(args, "interval_secs", 0, 86400); v > 0 {
+		params.IntervalSecs = v
 	}
-	if v, ok := args["timeout_secs"].(float64); ok && v > 0 {
-		params.TimeoutSecs = int(v)
+	if v := ArgInt(args, "timeout_secs", 0, 300); v > 0 {
+		params.TimeoutSecs = v
 	}
-	if v, ok := args["expected_status"].(float64); ok && v > 0 {
-		params.ExpectedStatus = int(v)
+	if v := ArgInt(args, "expected_status", 0, 599); v > 0 {
+		params.ExpectedStatus = v
 	}
 
 	hc, err := d.HealthCheckStore.Create(ctx, params)
@@ -184,7 +175,7 @@ func HandleHealthcheckCreate(ctx context.Context, d HealthchecksDeps, args map[s
 		return NewToolResultError(fmt.Sprintf("failed to create health check: %v", err)), nil
 	}
 
-	resp := map[string]any{
+	return JSONResult(map[string]any{
 		"id":              hc.ID,
 		"name":            hc.Name,
 		"url":             hc.URL,
@@ -194,14 +185,11 @@ func HandleHealthcheckCreate(ctx context.Context, d HealthchecksDeps, args map[s
 		"expected_status": hc.ExpectedStatus,
 		"enabled":         hc.Enabled,
 		"message":         fmt.Sprintf("Health check '%s' created. It will be probed every %ds.", hc.Name, hc.IntervalSecs),
-	}
-
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	})
 }
 
 func HandleHealthcheckDelete(ctx context.Context, d HealthchecksDeps, args map[string]any) (*CallToolResult, error) {
-	id, _ := args["id"].(string)
+	id := ArgString(args, "id")
 	if id == "" {
 		return NewToolResultError("id is required"), nil
 	}
@@ -210,12 +198,9 @@ func HandleHealthcheckDelete(ctx context.Context, d HealthchecksDeps, args map[s
 		return NewToolResultError(fmt.Sprintf("failed to delete health check: %v", err)), nil
 	}
 
-	resp := map[string]any{
+	return JSONResult(map[string]any{
 		"status":  "deleted",
 		"id":      id,
 		"message": "Health check and all its results have been deleted.",
-	}
-
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
+	})
 }
