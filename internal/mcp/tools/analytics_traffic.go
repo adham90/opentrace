@@ -8,6 +8,56 @@ import (
 	"github.com/adham90/opentrace/pkg/store"
 )
 
+// ---------------------------------------------------------------------------
+// Typed response structs for analytics traffic
+// ---------------------------------------------------------------------------
+
+// TrafficResponse is the typed response for the analytics traffic action.
+type TrafficResponse struct {
+	TimeRange      TimeRange       `json:"time_range"`
+	Summary        TrafficSummary  `json:"summary"`
+	StatusBreakdown map[string]int `json:"status_breakdown"`
+	MethodBreakdown map[string]int `json:"method_breakdown"`
+}
+
+// TimeRange represents a start/end time window.
+type TimeRange struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
+}
+
+// TrafficSummary holds aggregate traffic metrics.
+type TrafficSummary struct {
+	TotalRequests   int     `json:"total_requests"`
+	UniqueEndpoints int     `json:"unique_endpoints"`
+	ErrorRate       float64 `json:"error_rate"`
+	AvgDurationMs   float64 `json:"avg_duration_ms"`
+	P95DurationMs   float64 `json:"p95_duration_ms"`
+}
+
+// EndpointsResponse is the typed response for the analytics endpoints action.
+type EndpointsResponse struct {
+	SortBy    string           `json:"sort_by"`
+	Endpoints []EndpointResult `json:"endpoints"`
+}
+
+// EndpointResult is a single endpoint's analytics.
+type EndpointResult struct {
+	Method          string         `json:"method"`
+	Endpoint        string         `json:"endpoint"`
+	PathPattern     string         `json:"path_pattern,omitempty"`
+	RequestCount    int            `json:"request_count"`
+	ErrorRate       float64        `json:"error_rate"`
+	AvgDurationMs   float64        `json:"avg_duration_ms"`
+	P95DurationMs   float64        `json:"p95_duration_ms"`
+	AvgSQLCount     float64        `json:"avg_sql_count"`
+	StatusBreakdown map[string]int `json:"status_breakdown"`
+}
+
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
+
 func HandleTraffic(ctx context.Context, d AnalyticsDeps, args map[string]any) (*CallToolResult, error) {
 	service := ArgString(args, "service")
 	sinceStr := ArgStringDefault(args, "since", "24h")
@@ -29,20 +79,20 @@ func HandleTraffic(ctx context.Context, d AnalyticsDeps, args map[string]any) (*
 		return NewToolResultError(fmt.Sprintf("failed to get traffic summary: %v", err)), nil
 	}
 
-	resp := map[string]any{
-		"time_range": map[string]any{
-			"start": since.Format(time.RFC3339),
-			"end":   now.Format(time.RFC3339),
+	resp := &TrafficResponse{
+		TimeRange: TimeRange{
+			Start: since.Format(time.RFC3339),
+			End:   now.Format(time.RFC3339),
 		},
-		"summary": map[string]any{
-			"total_requests":   summary.TotalRequests,
-			"unique_endpoints": summary.UniqueEndpoints,
-			"error_rate":       round2(summary.ErrorRate * 100),
-			"avg_duration_ms":  round2(summary.AvgDurationMs),
-			"p95_duration_ms":  round2(summary.P95DurationMs),
+		Summary: TrafficSummary{
+			TotalRequests:   summary.TotalRequests,
+			UniqueEndpoints: summary.UniqueEndpoints,
+			ErrorRate:       round2(summary.ErrorRate * 100),
+			AvgDurationMs:   round2(summary.AvgDurationMs),
+			P95DurationMs:   round2(summary.P95DurationMs),
 		},
-		"status_breakdown": summary.StatusBreakdown,
-		"method_breakdown": summary.MethodBreakdown,
+		StatusBreakdown: summary.StatusBreakdown,
+		MethodBreakdown: summary.MethodBreakdown,
 	}
 
 	return JSONResult(resp,
@@ -85,25 +135,13 @@ func HandleEndpoints(ctx context.Context, d AnalyticsDeps, args map[string]any) 
 		return NewToolResultError(fmt.Sprintf("failed to get endpoints: %v", err)), nil
 	}
 
-	type endpointResult struct {
-		Method          string         `json:"method"`
-		Endpoint        string         `json:"endpoint"`
-		PathPattern     string         `json:"path_pattern,omitempty"`
-		RequestCount    int            `json:"request_count"`
-		ErrorRate       float64        `json:"error_rate"`
-		AvgDurationMs   float64        `json:"avg_duration_ms"`
-		P95DurationMs   float64        `json:"p95_duration_ms"`
-		AvgSQLCount     float64        `json:"avg_sql_count"`
-		StatusBreakdown map[string]int `json:"status_breakdown"`
-	}
-
-	var results []endpointResult
+	var results []EndpointResult
 	for _, e := range endpoints {
 		errRate := float64(0)
 		if e.RequestCount > 0 {
 			errRate = float64(e.ErrorCount) / float64(e.RequestCount) * 100
 		}
-		results = append(results, endpointResult{
+		results = append(results, EndpointResult{
 			Method:        e.Method,
 			Endpoint:      e.Controller + "#" + e.Action,
 			PathPattern:   e.PathPattern,
@@ -121,9 +159,9 @@ func HandleEndpoints(ctx context.Context, d AnalyticsDeps, args map[string]any) 
 		})
 	}
 
-	resp := map[string]any{
-		"sort_by":   sortBy,
-		"endpoints": results,
+	resp := &EndpointsResponse{
+		SortBy:    sortBy,
+		Endpoints: results,
 	}
 
 	return JSONResult(resp,

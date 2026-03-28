@@ -9,7 +9,32 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Action: list — list error groups (from errorGroupsHandler)
+// Typed response structs for errors list
+// ---------------------------------------------------------------------------
+
+// ErrorListResponse is the typed response for the errors list action.
+type ErrorListResponse struct {
+	TotalUnresolved int                 `json:"total_unresolved"`
+	Returned        int                 `json:"returned"`
+	ErrorGroups     []ErrorGroupSummary `json:"error_groups"`
+}
+
+// ErrorGroupSummary is a compact view of an error group for listing.
+type ErrorGroupSummary struct {
+	Fingerprint     string `json:"fingerprint"`
+	Service         string `json:"service"`
+	Environment     string `json:"environment,omitempty"`
+	ExceptionClass  string `json:"exception_class,omitempty"`
+	Message         string `json:"message"`
+	Status          string `json:"status"`
+	OccurrenceCount int    `json:"occurrence_count"`
+	LastSeenAt      string `json:"last_seen_at"`
+	FirstSeenAt     string `json:"first_seen_at"`
+	ReopenedCount   int    `json:"reopened_count,omitempty"`
+}
+
+// ---------------------------------------------------------------------------
+// Handler
 // ---------------------------------------------------------------------------
 
 func ErrorsList(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
@@ -39,25 +64,11 @@ func ErrorsList(ctx context.Context, deps ErrorsDeps, args map[string]any) (*Cal
 		return EmptyResult("No error groups found matching the criteria.")
 	}
 
-	// Count totals for context.
 	unresolvedCount, _ := deps.ErrorGroupStore.Count(ctx, store.ErrorGroupUnresolved)
 
-	type groupSummary struct {
-		Fingerprint     string `json:"fingerprint"`
-		Service         string `json:"service"`
-		Environment     string `json:"environment,omitempty"`
-		ExceptionClass  string `json:"exception_class,omitempty"`
-		Message         string `json:"message"`
-		Status          string `json:"status"`
-		OccurrenceCount int    `json:"occurrence_count"`
-		LastSeenAt      string `json:"last_seen_at"`
-		FirstSeenAt     string `json:"first_seen_at"`
-		ReopenedCount   int    `json:"reopened_count,omitempty"`
-	}
-
-	summaries := make([]groupSummary, len(groups))
+	summaries := make([]ErrorGroupSummary, len(groups))
 	for i, g := range groups {
-		summaries[i] = groupSummary{
+		summaries[i] = ErrorGroupSummary{
 			Fingerprint:     g.Fingerprint,
 			Service:         g.Service,
 			Environment:     g.Environment,
@@ -71,13 +82,12 @@ func ErrorsList(ctx context.Context, deps ErrorsDeps, args map[string]any) (*Cal
 		}
 	}
 
-	resp := map[string]any{
-		"total_unresolved": unresolvedCount,
-		"returned":         len(summaries),
-		"error_groups":     summaries,
+	resp := &ErrorListResponse{
+		TotalUnresolved: unresolvedCount,
+		Returned:        len(summaries),
+		ErrorGroups:     summaries,
 	}
 
-	// Suggest investigating the top error.
 	var suggestions []ToolSuggestion
 	if len(summaries) > 0 {
 		suggestions = append(suggestions, Suggest("errors", "Investigate the most frequent error", map[string]any{"action": "detail", "fingerprint": summaries[0].Fingerprint}))

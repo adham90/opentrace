@@ -1,18 +1,26 @@
-package tools
+// Package overview provides business logic for the system overview domain.
+// It aggregates data from multiple stores into typed reports, independent
+// of any transport (MCP, HTTP, CLI).
+package overview
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
 
-// ---------------------------------------------------------------------------
-// Typed response structs for overview status
-// ---------------------------------------------------------------------------
+// Service aggregates data from multiple stores for system overview reports.
+type Service struct {
+	Logs         store.LogStore
+	ErrorGroups  store.ErrorGroupStore
+	Watches      store.WatchStore
+	HealthChecks store.HealthCheckStore
+	DataSources  store.DataSourceStore
+	Servers      store.ServerStore
+}
 
-// StatusReport is the typed response for the overview status action.
+// StatusReport is the result of a system status check.
 type StatusReport struct {
 	Logs         *LogStats        `json:"logs,omitempty"`
 	ErrorGroups  *ErrorGroupStats `json:"error_groups,omitempty"`
@@ -53,17 +61,13 @@ type ServerStats struct {
 	Offline int `json:"offline"`
 }
 
-// ---------------------------------------------------------------------------
-// Handler
-// ---------------------------------------------------------------------------
-
-func HandleOverviewStatus(ctx context.Context, d OverviewDeps) (*CallToolResult, error) {
+// Status returns a snapshot of system health across all subsystems.
+func (s *Service) Status(ctx context.Context) (*StatusReport, error) {
 	report := &StatusReport{}
 
-	// Logs (last hour)
-	if d.LogStore != nil {
+	if s.Logs != nil {
 		now := time.Now()
-		counts, err := d.LogStore.CountByLevel(ctx, store.LogCountParams{
+		counts, err := s.Logs.CountByLevel(ctx, store.LogCountParams{
 			Since: now.Add(-1 * time.Hour),
 			Until: now,
 		})
@@ -83,29 +87,26 @@ func HandleOverviewStatus(ctx context.Context, d OverviewDeps) (*CallToolResult,
 		}
 	}
 
-	// Unresolved error groups
-	if d.ErrorGroupStore != nil {
-		unresolvedCount, err := d.ErrorGroupStore.Count(ctx, store.ErrorGroupUnresolved)
+	if s.ErrorGroups != nil {
+		unresolvedCount, err := s.ErrorGroups.Count(ctx, store.ErrorGroupUnresolved)
 		if err == nil && unresolvedCount > 0 {
 			report.ErrorGroups = &ErrorGroupStats{Unresolved: unresolvedCount}
 		}
 	}
 
-	// Active watch alerts
-	if d.WatchStore != nil {
-		pendingCount, err := d.WatchStore.CountPendingAlerts(ctx)
+	if s.Watches != nil {
+		pendingCount, err := s.Watches.CountPendingAlerts(ctx)
 		if err == nil && pendingCount > 0 {
 			report.WatchAlerts = &AlertStats{Pending: pendingCount}
 		}
 	}
 
-	// Health checks
-	if d.HealthCheckStore != nil {
-		summaries, err := d.HealthCheckStore.UptimeSummaries(ctx, time.Now().Add(-1*time.Hour))
+	if s.HealthChecks != nil {
+		summaries, err := s.HealthChecks.UptimeSummaries(ctx, time.Now().Add(-1*time.Hour))
 		if err == nil && len(summaries) > 0 {
 			hs := &HealthStats{Total: len(summaries)}
-			for _, s := range summaries {
-				switch store.HealthCheckStatus(s.CurrentStatus) {
+			for _, sum := range summaries {
+				switch store.HealthCheckStatus(sum.CurrentStatus) {
 				case store.HealthCheckDown:
 					hs.Down++
 				case store.HealthCheckDegraded:
@@ -116,9 +117,8 @@ func HandleOverviewStatus(ctx context.Context, d OverviewDeps) (*CallToolResult,
 		}
 	}
 
-	// Connectors
-	if d.DSStore != nil {
-		connectors, err := d.DSStore.List(ctx, store.ListDataSourceParams{})
+	if s.DataSources != nil {
+		connectors, err := s.DataSources.List(ctx, store.ListDataSourceParams{})
 		if err == nil {
 			cs := &ConnectorStats{Total: len(connectors)}
 			for _, c := range connectors {
@@ -133,9 +133,8 @@ func HandleOverviewStatus(ctx context.Context, d OverviewDeps) (*CallToolResult,
 		}
 	}
 
-	// Servers
-	if d.ServerStore != nil {
-		servers, err := d.ServerStore.List(ctx, store.ListServerParams{})
+	if s.Servers != nil {
+		servers, err := s.Servers.List(ctx, store.ListServerParams{})
 		if err == nil {
 			ss := &ServerStats{Total: len(servers)}
 			for _, srv := range servers {
@@ -150,18 +149,20 @@ func HandleOverviewStatus(ctx context.Context, d OverviewDeps) (*CallToolResult,
 		}
 	}
 
-	// Suggested next tools based on findings.
-	var suggestions []ToolSuggestion
-	if report.ErrorGroups != nil && report.ErrorGroups.Unresolved > 0 {
-		suggestions = append(suggestions, Suggest("errors", fmt.Sprintf("%d unresolved errors", report.ErrorGroups.Unresolved), map[string]any{"action": "list", "status": "unresolved"}))
-	}
-	if report.Logs != nil && report.Logs.ErrorsLastHour > 0 {
-		suggestions = append(suggestions, Suggest("logs", "Investigate errors in last hour", map[string]any{"action": "summary"}))
-	}
-	if report.HealthChecks != nil && report.HealthChecks.Down > 0 {
-		suggestions = append(suggestions, Suggest("healthchecks", fmt.Sprintf("%d endpoints down", report.HealthChecks.Down), map[string]any{"action": "uptime"}))
-	}
-	suggestions = append(suggestions, Suggest("overview", "Deep dive into a specific service", map[string]any{"action": "diagnose"}))
+	return report, nil
+}
 
-	return JSONResult(report, suggestions...)
+// HasErrors returns true if there are unresolved error groups.
+func (r *StatusReport) HasErrors() bool {
+	return r.ErrorGroups != nil && r.ErrorGroups.Unresolved > 0
+}
+
+// HasLogErrors returns true if there were errors in the last hour.
+func (r *StatusReport) HasLogErrors() bool {
+	return r.Logs != nil && r.Logs.ErrorsLastHour > 0
+}
+
+// HasDownChecks returns true if health checks are failing.
+func (r *StatusReport) HasDownChecks() bool {
+	return r.HealthChecks != nil && r.HealthChecks.Down > 0
 }
