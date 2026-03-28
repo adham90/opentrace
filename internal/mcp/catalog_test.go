@@ -114,6 +114,94 @@ func TestBuildCatalog_WithDeps(t *testing.T) {
 	}
 }
 
+func TestCategoriesForDisplay_NilCatalog(t *testing.T) {
+	var tc *ToolCatalog
+	result := tc.CategoriesForDisplay()
+	if result != nil {
+		t.Error("nil ToolCatalog.CategoriesForDisplay() should return nil")
+	}
+}
+
+func TestCategoriesForDisplay_EmptyCatalog(t *testing.T) {
+	tc := &ToolCatalog{}
+	result := tc.CategoriesForDisplay()
+	if len(result) != 0 {
+		t.Errorf("empty catalog CategoriesForDisplay() should return empty slice, got %d", len(result))
+	}
+}
+
+func TestCategoriesForDisplay_MapsCorrectly(t *testing.T) {
+	b := &CatalogBuilder{}
+	b.Add("db_query_stats", "Show top queries", "Database Introspection", "read", "database connector")
+	b.Add("db_table_stats", "Show table stats", "Database Introspection", "admin", "")
+	b.Add("log_stats", "Log volume stats", "Log Intelligence", "read", "")
+
+	tc := b.Build()
+	display := tc.CategoriesForDisplay()
+
+	if len(display) != 2 {
+		t.Fatalf("expected 2 categories, got %d", len(display))
+	}
+
+	// Verify first category mapping.
+	if display[0].Name != "Database Introspection" {
+		t.Errorf("category[0].Name = %q, want %q", display[0].Name, "Database Introspection")
+	}
+	if display[0].Description == "" {
+		t.Error("category description should come from categoryDescriptions map")
+	}
+	if len(display[0].Tools) != 2 {
+		t.Fatalf("category[0] tools = %d, want 2", len(display[0].Tools))
+	}
+
+	// Verify tool field mapping.
+	tool := display[0].Tools[0]
+	if tool.Name != "db_query_stats" {
+		t.Errorf("tool.Name = %q, want %q", tool.Name, "db_query_stats")
+	}
+	if tool.Description != "Show top queries" {
+		t.Errorf("tool.Description = %q, want %q", tool.Description, "Show top queries")
+	}
+	if tool.Access != "read" {
+		t.Errorf("tool.Access = %q, want %q", tool.Access, "read")
+	}
+	if tool.Requires != "database connector" {
+		t.Errorf("tool.Requires = %q, want %q", tool.Requires, "database connector")
+	}
+
+	// Verify second category.
+	if display[1].Name != "Log Intelligence" {
+		t.Errorf("category[1].Name = %q, want %q", display[1].Name, "Log Intelligence")
+	}
+	if len(display[1].Tools) != 1 {
+		t.Fatalf("category[1] tools = %d, want 1", len(display[1].Tools))
+	}
+}
+
+func TestCategoriesForDisplay_PreservesInsertionOrder(t *testing.T) {
+	b := &CatalogBuilder{}
+	b.Add("t1", "desc1", "Zebra Category", "read", "")
+	b.Add("t2", "desc2", "Alpha Category", "read", "")
+	b.Add("t3", "desc3", "Middle Category", "admin", "")
+
+	tc := b.Build()
+	display := tc.CategoriesForDisplay()
+
+	if len(display) != 3 {
+		t.Fatalf("expected 3 categories, got %d", len(display))
+	}
+	// Insertion order, NOT alphabetical.
+	if display[0].Name != "Zebra Category" {
+		t.Errorf("category[0] = %q, want %q", display[0].Name, "Zebra Category")
+	}
+	if display[1].Name != "Alpha Category" {
+		t.Errorf("category[1] = %q, want %q", display[1].Name, "Alpha Category")
+	}
+	if display[2].Name != "Middle Category" {
+		t.Errorf("category[2] = %q, want %q", display[2].Name, "Middle Category")
+	}
+}
+
 func TestBuildCatalog_MinimalDeps(t *testing.T) {
 	// With only a registry, conditional tools should be omitted.
 	cat := BuildCatalog(Deps{

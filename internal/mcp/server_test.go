@@ -416,6 +416,280 @@ func (m *mockUserStore) Count(ctx context.Context) (int, error) {
 	return len(m.users), m.err
 }
 
+// --- NewConfiguredServer tests ---
+
+func TestNewConfiguredServer_MinimalDeps(t *testing.T) {
+	deps := Deps{
+		Registry: connector.NewRegistry(),
+	}
+	s := NewConfiguredServer(deps, false, nil)
+	if s == nil {
+		t.Fatal("expected non-nil server")
+	}
+}
+
+func TestNewConfiguredServer_CustomServerName(t *testing.T) {
+	deps := Deps{
+		Registry:   connector.NewRegistry(),
+		ServerName: "my-custom-server",
+	}
+	s := NewConfiguredServer(deps, false, nil)
+	if s == nil {
+		t.Fatal("expected non-nil server")
+	}
+}
+
+func TestNewConfiguredServer_WithActivityStore(t *testing.T) {
+	as := &mockMCPActivityStore{}
+	deps := Deps{
+		Registry: connector.NewRegistry(),
+		Stores:   store.Stores{MCPActivityStore: as},
+	}
+	// ActivityLogger should be auto-created when MCPActivityStore is set.
+	s := NewConfiguredServer(deps, false, nil)
+	if s == nil {
+		t.Fatal("expected non-nil server")
+	}
+}
+
+func TestNewConfiguredServer_PresetActivityLogger(t *testing.T) {
+	as := &mockMCPActivityStore{}
+	al := NewActivityLogger(context.Background(), as, 8, 1)
+	defer al.Close()
+
+	deps := Deps{
+		Registry:       connector.NewRegistry(),
+		Stores:         store.Stores{MCPActivityStore: as},
+		ActivityLogger: al,
+	}
+	s := NewConfiguredServer(deps, true, nil)
+	if s == nil {
+		t.Fatal("expected non-nil server")
+	}
+}
+
+func TestNewConfiguredServer_WithSessionTracker(t *testing.T) {
+	st := NewSessionTracker(context.Background(), nil, nil, "test")
+	deps := Deps{
+		Registry:       connector.NewRegistry(),
+		SessionTracker: st,
+	}
+	s := NewConfiguredServer(deps, false, nil)
+	if s == nil {
+		t.Fatal("expected non-nil server")
+	}
+}
+
+func TestNewConfiguredServer_AdminRegistersWriteTools(t *testing.T) {
+	registry := connector.NewRegistry()
+	registry.Register(&mockDataSource{
+		connType: connector.ConnectorDatabase,
+		tools: []connector.Tool{
+			{Name: "run_query", Description: "Run SQL"},
+		},
+	})
+
+	deps := Deps{
+		Registry: registry,
+	}
+	// Admin mode should not panic with connector tools.
+	s := NewConfiguredServer(deps, true, nil)
+	if s == nil {
+		t.Fatal("expected non-nil server")
+	}
+}
+
+// --- wrapHandler tests ---
+
+func TestWrapHandler_WithoutActivityStore(t *testing.T) {
+	deps := Deps{
+		Registry: connector.NewRegistry(),
+	}
+	called := false
+	inner := func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		called = true
+		return NewToolResultText("ok"), nil
+	}
+	handler := wrapHandler(deps, "test_tool", inner)
+
+	result, err := handler(context.Background(), makeRequest(nil))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !called {
+		t.Error("inner handler was not called")
+	}
+	if result.IsError {
+		t.Error("expected success result")
+	}
+}
+
+func TestWrapHandler_WithActivityStore(t *testing.T) {
+	as := &mockMCPActivityStore{}
+	al := NewActivityLogger(context.Background(), as, 8, 1)
+	defer al.Close()
+
+	deps := Deps{
+		Registry:       connector.NewRegistry(),
+		Stores:         store.Stores{MCPActivityStore: as},
+		ActivityLogger: al,
+	}
+	called := false
+	inner := func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		called = true
+		return NewToolResultText("logged"), nil
+	}
+	handler := wrapHandler(deps, "test_tool", inner)
+
+	result, err := handler(context.Background(), makeRequest(nil))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !called {
+		t.Error("inner handler was not called")
+	}
+	text := resultText(t, result)
+	if text != "logged" {
+		t.Errorf("text = %q, want %q", text, "logged")
+	}
+}
+
+// --- rankingServiceAdapter tests ---
+
+func TestRankingServiceAdapter_NilWhenNoServices(t *testing.T) {
+	deps := Deps{}
+	adapter := rankingServiceAdapter(deps)
+	if adapter != nil {
+		t.Error("expected nil adapter when no RankingService or SessionTracker")
+	}
+}
+
+func TestRankingServiceAdapter_NilWhenOnlyRanking(t *testing.T) {
+	deps := Deps{
+		RankingService: &RankingService{},
+	}
+	adapter := rankingServiceAdapter(deps)
+	if adapter != nil {
+		t.Error("expected nil adapter when SessionTracker is nil")
+	}
+}
+
+func TestRankingServiceAdapter_NilWhenOnlySession(t *testing.T) {
+	deps := Deps{
+		SessionTracker: NewSessionTracker(context.Background(), nil, nil, "test"),
+	}
+	adapter := rankingServiceAdapter(deps)
+	if adapter != nil {
+		t.Error("expected nil adapter when RankingService is nil")
+	}
+}
+
+func TestRankingServiceAdapter_NonNilWhenBothPresent(t *testing.T) {
+	deps := Deps{
+		RankingService: &RankingService{},
+		SessionTracker: NewSessionTracker(context.Background(), nil, nil, "test"),
+	}
+	adapter := rankingServiceAdapter(deps)
+	if adapter == nil {
+		t.Error("expected non-nil adapter when both services are present")
+	}
+}
+
+// --- handleSessionSummaryFromArgs tests ---
+
+func TestHandleSessionSummaryFromArgs_NilTracker(t *testing.T) {
+	result, err := handleSessionSummaryFromArgs(nil, map[string]any{"summary": "test"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected error result when session tracker is nil")
+	}
+	text := resultText(t, result)
+	if !contains(text, "session tracking is not enabled") {
+		t.Errorf("expected 'session tracking is not enabled', got %q", text)
+	}
+}
+
+func TestHandleSessionSummaryFromArgs_EmptySummary(t *testing.T) {
+	st := NewSessionTracker(context.Background(), nil, nil, "test")
+	result, err := handleSessionSummaryFromArgs(st, map[string]any{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected error result when summary is empty")
+	}
+	text := resultText(t, result)
+	if !contains(text, "summary is required") {
+		t.Errorf("expected 'summary is required', got %q", text)
+	}
+}
+
+func TestHandleSessionSummaryFromArgs_Success(t *testing.T) {
+	st := NewSessionTracker(context.Background(), nil, nil, "test")
+	result, err := handleSessionSummaryFromArgs(st, map[string]any{
+		"summary":    "Fixed the auth issue",
+		"root_cause": "Token expiry misconfigured",
+		"outcome":    "resolved",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Errorf("expected success, got error: %s", resultText(t, result))
+	}
+	text := resultText(t, result)
+	if !contains(text, "saved") {
+		t.Errorf("expected 'saved' in response, got %q", text)
+	}
+}
+
+// --- buildGateway tests ---
+
+func TestBuildGateway_ReadOnly(t *testing.T) {
+	deps := Deps{
+		Registry: connector.NewRegistry(),
+	}
+	b := &CatalogBuilder{}
+	gw := buildGateway(deps, false, b)
+	if gw == nil {
+		t.Fatal("expected non-nil gateway")
+	}
+	// Should have at least connectors, database, overview, setup tools.
+	if len(gw.entries) < 4 {
+		t.Errorf("expected at least 4 gateway entries, got %d", len(gw.entries))
+	}
+	// Admin tool should NOT be registered.
+	for _, e := range gw.entries {
+		if e.Name == "admin" {
+			t.Error("admin tool should not be registered in read-only mode")
+		}
+	}
+}
+
+func TestBuildGateway_Admin(t *testing.T) {
+	deps := Deps{
+		Registry: connector.NewRegistry(),
+	}
+	b := &CatalogBuilder{}
+	gw := buildGateway(deps, true, b)
+	if gw == nil {
+		t.Fatal("expected non-nil gateway")
+	}
+	// Admin tool should be registered.
+	found := false
+	for _, e := range gw.entries {
+		if e.Name == "admin" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("admin tool should be registered in admin mode")
+	}
+}
+
 // testAccessControl mirrors the access-control logic from Serve() so we can
 // test it without starting a blocking stdio server.
 func testAccessControl(deps Deps) (hasAccess, isAdmin bool) {

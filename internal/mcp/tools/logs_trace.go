@@ -15,7 +15,7 @@ import (
 // action: trace — distributed trace assembly (from traceLookupHandler)
 // ---------------------------------------------------------------------------
 
-func logsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
+func LogsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	traceID, _ := args["trace_id"].(string)
 	if traceID == "" {
 		return NewToolResultError("trace_id is required"), nil

@@ -64,6 +64,14 @@ type Deps struct {
 
 	// WatchMetrics is not a store — it's a runtime metrics collector.
 	WatchMetrics *watcher.WatchMetrics
+
+	// Runtime services — created during Serve()/NewConfiguredServer(), not by callers.
+	// Exported so tests can inject them directly.
+	ActivityLogger     *ActivityLogger
+	SessionTracker     *SessionTracker
+	RecurrenceDetector *RecurrenceDetector
+	RankingService     *RankingService
+	ContextInjector    *ContextInjector
 }
 
 // NewConfiguredServer creates an MCPServer and registers tools based on the
@@ -77,14 +85,13 @@ func NewConfiguredServer(deps Deps, isAdmin bool, serverOpts *mcp.ServerOptions)
 		name = "opentrace"
 	}
 
-	// Set the package-level activity store for tool logging.
-	activityStoreForLogging = deps.MCPActivityStore
-	if deps.MCPActivityStore != nil {
+	// Initialize activity logger on deps if not already set.
+	if deps.ActivityLogger == nil && deps.MCPActivityStore != nil {
 		alCtx := deps.Ctx
 		if alCtx == nil {
 			alCtx = context.Background()
 		}
-		activityLogger = NewActivityLogger(alCtx, deps.MCPActivityStore, 256, 2)
+		deps.ActivityLogger = NewActivityLogger(alCtx, deps.MCPActivityStore, 256, 2)
 	}
 
 	if serverOpts == nil {
@@ -120,9 +127,6 @@ func NewConfiguredServer(deps Deps, isAdmin bool, serverOpts *mcp.ServerOptions)
 
 	// Register MCP prompts
 	addPrompts(s)
-
-	// Clear the package-level store after registration.
-	activityStoreForLogging = nil
 
 	return s
 }
@@ -184,65 +188,66 @@ func Serve(deps Deps) error {
 	}
 
 	if deps.InvestigationSessionStore != nil {
-		sessionTracker = NewSessionTracker(appCtx, deps.InvestigationSessionStore, authUser, "stdio")
-		recurrenceDetector = NewRecurrenceDetector(deps.InvestigationSessionStore)
+		deps.SessionTracker = NewSessionTracker(appCtx, deps.InvestigationSessionStore, authUser, "stdio")
+		deps.RecurrenceDetector = NewRecurrenceDetector(deps.InvestigationSessionStore)
 
 		// Wire session tracking via InitializedHandler.
+		st := deps.SessionTracker // capture for closure
 		serverOpts.InitializedHandler = func(_ context.Context, req *mcp.InitializedRequest) {
-			sessionTracker.OnInitialize(req)
+			st.OnInitialize(req)
 		}
 
-		// Stage 3: Wire transition and activity stores into session tracker
+		// Wire transition and activity stores into session tracker
 		if deps.ToolTransitionStore != nil {
-			sessionTracker.SetTransitionStore(deps.ToolTransitionStore)
+			deps.SessionTracker.SetTransitionStore(deps.ToolTransitionStore)
 		}
 		if deps.MCPActivityStore != nil {
-			sessionTracker.SetActivityStore(deps.MCPActivityStore)
+			deps.SessionTracker.SetActivityStore(deps.MCPActivityStore)
 		}
 
-		// Stage 4: Wire additional stores into session tracker
+		// Wire additional stores into session tracker
 		if deps.AgentNoteStore != nil {
-			sessionTracker.SetNoteStore(deps.AgentNoteStore)
+			deps.SessionTracker.SetNoteStore(deps.AgentNoteStore)
 		}
 		if deps.RunbookEffectivenessStore != nil {
-			sessionTracker.SetRunbookStore(deps.RunbookEffectivenessStore)
+			deps.SessionTracker.SetRunbookStore(deps.RunbookEffectivenessStore)
 		}
 		if deps.QueryMemoryStore != nil {
-			sessionTracker.SetQueryMemoryStore(deps.QueryMemoryStore)
+			deps.SessionTracker.SetQueryMemoryStore(deps.QueryMemoryStore)
 		}
 		if deps.TrendStore != nil {
-			sessionTracker.SetTrendStore(deps.TrendStore)
+			deps.SessionTracker.SetTrendStore(deps.TrendStore)
 		}
 		if deps.AuditStore != nil {
-			sessionTracker.SetAuditStore(deps.AuditStore)
+			deps.SessionTracker.SetAuditStore(deps.AuditStore)
 		}
 
-		// Stage 5: Wire code entity + deploy stores into session tracker
+		// Wire code entity + deploy stores into session tracker
 		if deps.CodeEntityStore != nil {
-			sessionTracker.SetCodeEntityStore(deps.CodeEntityStore)
+			deps.SessionTracker.SetCodeEntityStore(deps.CodeEntityStore)
 		}
 		if deps.ErrorGroupStore != nil {
-			sessionTracker.SetErrorGroupStore(deps.ErrorGroupStore)
+			deps.SessionTracker.SetErrorGroupStore(deps.ErrorGroupStore)
 		}
 		if deps.DeployStore != nil {
-			sessionTracker.SetDeployStore(deps.DeployStore)
+			deps.SessionTracker.SetDeployStore(deps.DeployStore)
 		}
 
-		// Stage 6: Wire event + test correlation stores into session tracker
+		// Wire event + test correlation stores into session tracker
 		if deps.EventStore != nil {
-			sessionTracker.SetEventStore(deps.EventStore)
+			deps.SessionTracker.SetEventStore(deps.EventStore)
 		}
 		if deps.TestCorrelationStore != nil {
-			sessionTracker.SetTestCorrelationStore(deps.TestCorrelationStore)
+			deps.SessionTracker.SetTestCorrelationStore(deps.TestCorrelationStore)
 		}
 	}
 
-	// Stage 3: Initialize ranking service and context injector
+	// Initialize ranking service and context injector
 	if deps.ToolTransitionStore != nil {
-		rankingService = NewRankingService(deps.ToolTransitionStore, deps.WorkflowTemplateStore)
+		deps.RankingService = NewRankingService(deps.ToolTransitionStore, deps.WorkflowTemplateStore)
 	}
 	if deps.InvestigationSessionStore != nil && deps.ToolTransitionStore != nil {
-		contextInjector = NewContextInjector(deps.InvestigationSessionStore, deps.ToolTransitionStore, ContextInjectorDeps{
+		deps.ContextInjector = NewContextInjector(deps.InvestigationSessionStore, deps.ToolTransitionStore, ContextInjectorDeps{
 			NoteStore:        deps.AgentNoteStore,
 			RunbookStore:     deps.RunbookEffectivenessStore,
 			QueryMemoryStore: deps.QueryMemoryStore,
@@ -264,34 +269,13 @@ func Serve(deps Deps) error {
 	err := s.Run(context.Background(), &mcp.StdioTransport{})
 
 	// Clean up on exit.
-	if sessionTracker != nil {
-		sessionTracker.CloseSession()
+	if deps.SessionTracker != nil {
+		deps.SessionTracker.CloseSession()
 	}
-	if activityLogger != nil {
-		activityLogger.Close()
+	if deps.ActivityLogger != nil {
+		deps.ActivityLogger.Close()
 	}
 
 	return err
 }
 
-// activityStore is set by NewConfiguredServer when an MCPActivityStore is
-// available. It is used by maybeAddTool to wrap handlers with activity logging.
-// This is package-level to avoid threading it through every addXxxTools call.
-var activityStoreForLogging store.MCPActivityStore
-var activityLogger *ActivityLogger
-
-// sessionTracker is set by Serve/NewConfiguredServer when an
-// InvestigationSessionStore is available. Used by wrapWithActivityLog to
-// tag activity with real session/user identity.
-var sessionTracker *SessionTracker
-
-// recurrenceDetector is set alongside sessionTracker when an
-// InvestigationSessionStore is available. Used by tool handlers
-// to link subsystem entities and detect recurring investigations.
-var recurrenceDetector *RecurrenceDetector
-
-// rankingService replaces static tool suggestions with data-driven rankings.
-var rankingService *RankingService
-
-// contextInjector enriches tool responses with investigation memory.
-var contextInjector *ContextInjector

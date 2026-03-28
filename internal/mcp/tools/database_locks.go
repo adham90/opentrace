@@ -13,7 +13,7 @@ import (
 // Action: locks — lock contention
 // ---------------------------------------------------------------------------
 
-func handleLocks(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
+func HandleLocks(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil

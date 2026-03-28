@@ -28,22 +28,22 @@ func CodeIntelHandler(d CodeIntelDeps) ToolHandlerFunc {
 
 		switch action {
 		case "risk":
-			return handleCodeRisk(ctx, d, args)
+			return HandleCodeRisk(ctx, d, args)
 		case "fragile":
-			return handleFragile(ctx, d, args)
+			return HandleFragile(ctx, d, args)
 		case "context":
-			return handleCodeContext(ctx, d, args)
+			return HandleCodeContext(ctx, d, args)
 		case "test_gaps":
-			return handleTestGaps(ctx, d, args)
+			return HandleTestGaps(ctx, d, args)
 		case "test_priority":
-			return handleTestPriority(ctx, d, args)
+			return HandleTestPriority(ctx, d, args)
 		default:
 			return NewToolResultError(fmt.Sprintf("unknown action: %s (use risk, fragile, context, test_gaps, test_priority)", action)), nil
 		}
 	}
 }
 
-func handleCodeRisk(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
+func HandleCodeRisk(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
 	if d.CodeEntityStore == nil {
 		return NewToolResultError("CodeEntityStore not configured"), nil
 	}
@@ -112,7 +112,7 @@ func handleCodeRisk(ctx context.Context, d CodeIntelDeps, args map[string]any) (
 	return NewToolResultText(string(data)), nil
 }
 
-func handleFragile(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
+func HandleFragile(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
 	if d.CodeEntityStore == nil {
 		return NewToolResultError("CodeEntityStore not configured"), nil
 	}
@@ -157,11 +157,11 @@ func handleFragile(ctx context.Context, d CodeIntelDeps, args map[string]any) (*
 	return NewToolResultText(string(data)), nil
 }
 
-func handleCodeContext(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
+func HandleCodeContext(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
 	// Check if this is a task-based context request
 	task, _ := args["task"].(string)
 	if task != "" {
-		return handleTaskContext(ctx, d, args, task)
+		return HandleTaskContext(ctx, d, args, task)
 	}
 
 	if d.CodeEntityStore == nil {
@@ -225,7 +225,7 @@ func handleCodeContext(ctx context.Context, d CodeIntelDeps, args map[string]any
 	return NewToolResultText(string(data)), nil
 }
 
-func handleTaskContext(ctx context.Context, d CodeIntelDeps, args map[string]any, task string) (*CallToolResult, error) {
+func HandleTaskContext(ctx context.Context, d CodeIntelDeps, args map[string]any, task string) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 
 	taskType := classifyTaskType(task)
@@ -254,7 +254,7 @@ func handleTaskContext(ctx context.Context, d CodeIntelDeps, args map[string]any
 	return NewToolResultText(string(data)), nil
 }
 
-func handleTestGaps(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
+func HandleTestGaps(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
 	if d.TestCorrelationStore == nil {
 		return NewToolResultError("TestCorrelationStore not configured"), nil
 	}
@@ -287,7 +287,7 @@ func handleTestGaps(ctx context.Context, d CodeIntelDeps, args map[string]any) (
 	return NewToolResultText(string(data)), nil
 }
 
-func handleTestPriority(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
+func HandleTestPriority(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
 	if d.TestCorrelationStore == nil {
 		return NewToolResultError("TestCorrelationStore not configured"), nil
 	}

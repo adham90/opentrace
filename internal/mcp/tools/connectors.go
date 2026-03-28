@@ -31,24 +31,24 @@ func ConnectorsHandler(d ConnectorsDeps) ToolHandlerFunc {
 
 		switch action {
 		case "list":
-			return handleConnectorList(ctx, d, args)
+			return HandleConnectorList(ctx, d, args)
 		case "get":
-			return handleConnectorGet(ctx, d, args)
+			return HandleConnectorGet(ctx, d, args)
 		case "create":
-			return handleConnectorCreate(ctx, d, args)
+			return HandleConnectorCreate(ctx, d, args)
 		case "test":
-			return handleConnectorTest(ctx, d, args)
+			return HandleConnectorTest(ctx, d, args)
 		case "update":
-			return handleConnectorUpdate(ctx, d, args)
+			return HandleConnectorUpdate(ctx, d, args)
 		case "delete":
-			return handleConnectorDelete(ctx, d, args)
+			return HandleConnectorDelete(ctx, d, args)
 		default:
 			return NewToolResultError(fmt.Sprintf("unknown action: %s (use list, get, create, test, update, delete)", action)), nil
 		}
 	}
 }
 
-func handleConnectorList(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
+func HandleConnectorList(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
 	if d.DSStore != nil {
 		var params store.ListDataSourceParams
 		if v, ok := args["type"].(string); ok && v != "" {
@@ -125,7 +125,7 @@ func handleConnectorList(ctx context.Context, d ConnectorsDeps, args map[string]
 	return NewToolResultText(b.String()), nil
 }
 
-func handleConnectorGet(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
+func HandleConnectorGet(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
 	if d.DSStore == nil {
 		return NewToolResultError("DataSourceStore not configured"), nil
 	}
@@ -155,7 +155,7 @@ func handleConnectorGet(ctx context.Context, d ConnectorsDeps, args map[string]a
 	return NewToolResultText(string(data)), nil
 }
 
-func handleConnectorCreate(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
+func HandleConnectorCreate(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
 	if d.DSStore == nil {
 		return NewToolResultError("DataSourceStore not configured"), nil
 	}
@@ -205,7 +205,7 @@ func handleConnectorCreate(ctx context.Context, d ConnectorsDeps, args map[strin
 	return NewToolResultText(fmt.Sprintf("Connector %q created (id: %s, type: %s, status: %s). Use connectors with action=test to verify the connection.", ds.Name, ds.ID, ds.Type, ds.Status)), nil
 }
 
-func handleConnectorTest(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
+func HandleConnectorTest(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
 	if d.DSStore == nil {
 		return NewToolResultError("DataSourceStore not configured"), nil
 	}
@@ -262,7 +262,7 @@ func handleConnectorTest(ctx context.Context, d ConnectorsDeps, args map[string]
 	return NewToolResultText(fmt.Sprintf("Connector %q (%s) tested and connected successfully.", ds.Name, ds.Type)), nil
 }
 
-func handleConnectorUpdate(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
+func HandleConnectorUpdate(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
 	if d.DSStore == nil {
 		return NewToolResultError("DataSourceStore not configured"), nil
 	}
@@ -317,7 +317,7 @@ func handleConnectorUpdate(ctx context.Context, d ConnectorsDeps, args map[strin
 	return NewToolResultText(msg), nil
 }
 
-func handleConnectorDelete(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
+func HandleConnectorDelete(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
 	if d.DSStore == nil {
 		return NewToolResultError("DataSourceStore not configured"), nil
 	}

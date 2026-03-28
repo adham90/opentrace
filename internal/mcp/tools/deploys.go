@@ -27,18 +27,18 @@ func DeploysHandler(d DeploysDeps) ToolHandlerFunc {
 
 		switch action {
 		case "history":
-			return handleDeployHistory(ctx, d, args)
+			return HandleDeployHistory(ctx, d, args)
 		case "impact":
-			return handleDeployImpact(ctx, d, args)
+			return HandleDeployImpact(ctx, d, args)
 		case "record":
-			return handleDeployRecord(ctx, d, args)
+			return HandleDeployRecord(ctx, d, args)
 		default:
 			return NewToolResultError(fmt.Sprintf("unknown action: %s (use history, impact, record)", action)), nil
 		}
 	}
 }
 
-func handleDeployHistory(ctx context.Context, d DeploysDeps, args map[string]any) (*CallToolResult, error) {
+func HandleDeployHistory(ctx context.Context, d DeploysDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 	limit := 10
 	if l, ok := args["limit"].(float64); ok && l > 0 {
@@ -88,7 +88,7 @@ func handleDeployHistory(ctx context.Context, d DeploysDeps, args map[string]any
 	return NewToolResultText(string(data)), nil
 }
 
-func handleDeployImpact(ctx context.Context, d DeploysDeps, args map[string]any) (*CallToolResult, error) {
+func HandleDeployImpact(ctx context.Context, d DeploysDeps, args map[string]any) (*CallToolResult, error) {
 	commitHash, _ := args["commit_hash"].(string)
 	if commitHash == "" {
 		return NewToolResultError("commit_hash is required"), nil
@@ -148,7 +148,7 @@ func handleDeployImpact(ctx context.Context, d DeploysDeps, args map[string]any)
 	return NewToolResultText(string(data)), nil
 }
 
-func handleDeployRecord(ctx context.Context, d DeploysDeps, args map[string]any) (*CallToolResult, error) {
+func HandleDeployRecord(ctx context.Context, d DeploysDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 	if service == "" {
 		return NewToolResultError("service is required"), nil

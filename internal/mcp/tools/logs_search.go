@@ -16,7 +16,7 @@ import (
 // action: search — full-text log search with filters (from logSearchHandler)
 // ---------------------------------------------------------------------------
 
-func logsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
+func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	query, _ := args["query"].(string)
 	service, _ := args["service"].(string)
 	level, _ := args["level"].(string)
@@ -345,7 +345,7 @@ func logsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallT
 // action: context — surrounding log entries around a log ID (from logContextHandler)
 // ---------------------------------------------------------------------------
 
-func logsContext(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
+func LogsContext(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	logID, ok := args["log_id"].(float64)
 	if !ok || logID <= 0 {
 		return NewToolResultError("log_id is required (positive integer)"), nil
@@ -495,7 +495,7 @@ func logsContext(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 // action: attributes — discover distinct values for log fields (from listLogAttributesHandler)
 // ---------------------------------------------------------------------------
 
-func logsAttributes(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
+func LogsAttributes(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	field, _ := args["field"].(string)
 	if field == "" {
 		return NewToolResultError("field is required (service, level, event_type, environment, commit_hash, request_id, exception_class, error_fingerprint, source_file, or metadata_key)"), nil

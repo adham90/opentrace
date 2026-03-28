@@ -34,21 +34,21 @@ func LogsHandler(deps LogsDeps) ToolHandlerFunc {
 		action, _ := args["action"].(string)
 		switch action {
 		case "search":
-			return logsSearch(ctx, args, deps)
+			return LogsSearch(ctx, args, deps)
 		case "context":
-			return logsContext(ctx, args, deps)
+			return LogsContext(ctx, args, deps)
 		case "attributes":
-			return logsAttributes(ctx, args, deps)
+			return LogsAttributes(ctx, args, deps)
 		case "stats":
-			return logsStats(ctx, args, deps)
+			return LogsStats(ctx, args, deps)
 		case "summary":
-			return logsSummary(ctx, args, deps)
+			return LogsSummary(ctx, args, deps)
 		case "performance":
-			return logsPerformance(ctx, args, deps)
+			return LogsPerformance(ctx, args, deps)
 		case "trace":
-			return logsTrace(ctx, args, deps)
+			return LogsTrace(ctx, args, deps)
 		case "compare":
-			return logsCompare(ctx, args, deps)
+			return LogsCompare(ctx, args, deps)
 		default:
 			return NewToolResultError(
 				"action is required and must be one of: search, context, attributes, stats, summary, performance, trace, compare",

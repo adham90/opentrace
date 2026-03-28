@@ -26,26 +26,26 @@ func WatchesHandler(d WatchesDeps) ToolHandlerFunc {
 
 		switch action {
 		case "status":
-			return handleWatchStatus(ctx, d, args)
+			return HandleWatchStatus(ctx, d, args)
 		case "create":
-			return handleWatchCreate(ctx, d, args)
+			return HandleWatchCreate(ctx, d, args)
 		case "delete":
-			return handleWatchDelete(ctx, d, args)
+			return HandleWatchDelete(ctx, d, args)
 		case "alerts":
-			return handleWatchAlerts(ctx, d, args)
+			return HandleWatchAlerts(ctx, d, args)
 		case "dismiss":
-			return handleWatchDismiss(ctx, d, args)
+			return HandleWatchDismiss(ctx, d, args)
 		case "acknowledge":
-			return handleWatchAcknowledge(ctx, d, args)
+			return HandleWatchAcknowledge(ctx, d, args)
 		case "investigate":
-			return handleWatchInvestigate(ctx, d, args)
+			return HandleWatchInvestigate(ctx, d, args)
 		default:
 			return NewToolResultError(fmt.Sprintf("unknown action: %s (use status, create, delete, alerts, dismiss, acknowledge, investigate)", action)), nil
 		}
 	}
 }
 
-func handleWatchStatus(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
+func HandleWatchStatus(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
 	params := store.ListWatchParams{}
 	if v, ok := args["status"].(string); ok {
 		params.Status = store.WatchStatus(v)
@@ -143,7 +143,7 @@ func handleWatchStatus(ctx context.Context, d WatchesDeps, args map[string]any) 
 	return NewToolResultText(string(data)), nil
 }
 
-func handleWatchCreate(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
+func HandleWatchCreate(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
 	metricStr, _ := args["metric"].(string)
 	operatorStr, _ := args["operator"].(string)
 	threshold, _ := args["threshold"].(float64)
@@ -199,7 +199,7 @@ func handleWatchCreate(ctx context.Context, d WatchesDeps, args map[string]any) 
 	return NewToolResultText(string(data)), nil
 }
 
-func handleWatchDelete(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
+func HandleWatchDelete(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
 	watchID, _ := args["watch_id"].(string)
 	if watchID == "" {
 		return NewToolResultError("watch_id is required for delete action"), nil
@@ -210,7 +210,7 @@ func handleWatchDelete(ctx context.Context, d WatchesDeps, args map[string]any) 
 	return NewToolResultText(fmt.Sprintf(`{"status":"stopped","watch_id":"%s"}`, watchID)), nil
 }
 
-func handleWatchAlerts(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
+func HandleWatchAlerts(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 	alerts, err := d.WatchStore.ListAlerts(ctx, "", "pending", 20)
 	if err != nil {
@@ -236,7 +236,7 @@ func handleWatchAlerts(ctx context.Context, d WatchesDeps, args map[string]any) 
 	return NewToolResultText(string(data)), nil
 }
 
-func handleWatchDismiss(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
+func HandleWatchDismiss(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
 	alertID, _ := args["alert_id"].(string)
 	if alertID == "" {
 		return NewToolResultError("alert_id is required for dismiss action"), nil
@@ -251,7 +251,7 @@ func handleWatchDismiss(ctx context.Context, d WatchesDeps, args map[string]any)
 	return NewToolResultText(fmt.Sprintf(`{"status":"dismissed","alert_id":"%s","reason":"%s"}`, alertID, reason)), nil
 }
 
-func handleWatchAcknowledge(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
+func HandleWatchAcknowledge(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
 	alertID, _ := args["alert_id"].(string)
 	if alertID == "" {
 		return NewToolResultError("alert_id is required for acknowledge action"), nil
@@ -262,7 +262,7 @@ func handleWatchAcknowledge(ctx context.Context, d WatchesDeps, args map[string]
 	return NewToolResultText(fmt.Sprintf(`{"status":"acknowledged","alert_id":"%s"}`, alertID)), nil
 }
 
-func handleWatchInvestigate(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
+func HandleWatchInvestigate(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
 	alertID, _ := args["alert_id"].(string)
 	service, _ := args["service"].(string)
 

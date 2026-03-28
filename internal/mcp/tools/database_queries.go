@@ -15,7 +15,7 @@ import (
 // Action: queries — query stats from pg_stat_statements
 // ---------------------------------------------------------------------------
 
-func handleQueries(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
+func HandleQueries(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil
@@ -153,7 +153,7 @@ func normalizeQueryFingerprint(query string) string {
 	return strings.TrimSpace(queryFingerprintRe.ReplaceAllString(query, "?"))
 }
 
-func handleExplain(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
+func HandleExplain(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
 		return NewToolResultError("query is required for the explain action"), nil

@@ -16,7 +16,7 @@ import (
 // action: compare — compare metrics between two time periods (from comparePeriodsHandler)
 // ---------------------------------------------------------------------------
 
-func logsCompare(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
+func LogsCompare(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	metric, _ := args["metric"].(string)
 	if metric == "" {
 		return NewToolResultError("metric is required (errors, log_volume)"), nil
@@ -47,15 +47,15 @@ func logsCompare(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 
 	switch metric {
 	case "errors":
-		return logsCompareErrors(ctx, deps.LogStore, currentStart, currentEnd, baseStart, baseEnd, serviceFilter)
+		return LogsCompareErrors(ctx, deps.LogStore, currentStart, currentEnd, baseStart, baseEnd, serviceFilter)
 	case "log_volume":
-		return logsCompareLogVolume(ctx, deps.LogStore, currentStart, currentEnd, baseStart, baseEnd, serviceFilter)
+		return LogsCompareLogVolume(ctx, deps.LogStore, currentStart, currentEnd, baseStart, baseEnd, serviceFilter)
 	default:
 		return NewToolResultError(fmt.Sprintf("invalid metric: %q (use errors or log_volume)", metric)), nil
 	}
 }
 
-func logsCompareErrors(ctx context.Context, ls store.LogStore, curStart, curEnd, baseStart, baseEnd time.Time, service string) (*CallToolResult, error) {
+func LogsCompareErrors(ctx context.Context, ls store.LogStore, curStart, curEnd, baseStart, baseEnd time.Time, service string) (*CallToolResult, error) {
 	curParams := store.LogCountParams{Since: curStart, Until: curEnd, Service: service}
 	baseParams := store.LogCountParams{Since: baseStart, Until: baseEnd, Service: service}
 
@@ -152,7 +152,7 @@ func logsCompareErrors(ctx context.Context, ls store.LogStore, curStart, curEnd,
 	return NewToolResultText(string(data)), nil
 }
 
-func logsCompareLogVolume(ctx context.Context, ls store.LogStore, curStart, curEnd, baseStart, baseEnd time.Time, service string) (*CallToolResult, error) {
+func LogsCompareLogVolume(ctx context.Context, ls store.LogStore, curStart, curEnd, baseStart, baseEnd time.Time, service string) (*CallToolResult, error) {
 	curParams := store.LogCountParams{Since: curStart, Until: curEnd, Service: service}
 	baseParams := store.LogCountParams{Since: baseStart, Until: baseEnd, Service: service}
 

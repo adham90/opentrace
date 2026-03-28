@@ -35,25 +35,25 @@ func AdminHandler(d AdminDeps) ToolHandlerFunc {
 
 		switch action {
 		case "settings":
-			return handleSettings(ctx, d)
+			return HandleAdminSettings(ctx, d)
 		case "update_retention":
-			return handleUpdateRetention(ctx, d, args)
+			return HandleUpdateRetention(ctx, d, args)
 		case "users":
-			return handleListUsers(ctx, d)
+			return HandleListUsers(ctx, d)
 		case "update_role":
-			return handleUpdateRole(ctx, d, args)
+			return HandleUpdateRole(ctx, d, args)
 		case "toggle_active":
-			return handleToggleActive(ctx, d, args)
+			return HandleToggleActive(ctx, d, args)
 		case "delete_user":
-			return handleDeleteUser(ctx, d, args)
+			return HandleDeleteUser(ctx, d, args)
 		case "audit":
-			return handleAudit(ctx, d, args)
+			return HandleAudit(ctx, d, args)
 		case "notes":
-			return handleNotes(ctx, d, args)
+			return HandleNotes(ctx, d, args)
 		case "delete_note":
-			return handleDeleteNote(ctx, d, args)
+			return HandleDeleteNote(ctx, d, args)
 		case "activity":
-			return handleActivity(ctx, d)
+			return HandleAdminActivity(ctx, d)
 		case "session_summary":
 			if d.SessionSummaryCallback == nil {
 				return NewToolResultError("session tracking is not enabled"), nil
@@ -65,7 +65,7 @@ func AdminHandler(d AdminDeps) ToolHandlerFunc {
 	}
 }
 
-func handleSettings(ctx context.Context, d AdminDeps) (*CallToolResult, error) {
+func HandleAdminSettings(ctx context.Context, d AdminDeps) (*CallToolResult, error) {
 	if d.SettingsStore == nil {
 		return NewToolResultError("SettingsStore not configured"), nil
 	}
@@ -97,7 +97,7 @@ func handleSettings(ctx context.Context, d AdminDeps) (*CallToolResult, error) {
 	return NewToolResultText(string(data)), nil
 }
 
-func handleUpdateRetention(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
+func HandleUpdateRetention(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
 	if d.SettingsStore == nil {
 		return NewToolResultError("SettingsStore not configured"), nil
 	}
@@ -115,7 +115,7 @@ func handleUpdateRetention(ctx context.Context, d AdminDeps, args map[string]any
 	return NewToolResultText(fmt.Sprintf("Data retention updated to %d days. Logs, alerts, and watcher runs older than %d days will be pruned on the next cleanup cycle.", days, days)), nil
 }
 
-func handleListUsers(ctx context.Context, d AdminDeps) (*CallToolResult, error) {
+func HandleListUsers(ctx context.Context, d AdminDeps) (*CallToolResult, error) {
 	if d.UserStore == nil {
 		return NewToolResultError("UserStore not configured"), nil
 	}
@@ -155,7 +155,7 @@ func handleListUsers(ctx context.Context, d AdminDeps) (*CallToolResult, error) 
 	return NewToolResultText(string(data)), nil
 }
 
-func handleUpdateRole(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
+func HandleUpdateRole(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
 	if d.UserStore == nil {
 		return NewToolResultError("UserStore not configured"), nil
 	}
@@ -190,7 +190,7 @@ func handleUpdateRole(ctx context.Context, d AdminDeps, args map[string]any) (*C
 	return NewToolResultText(string(data)), nil
 }
 
-func handleToggleActive(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
+func HandleToggleActive(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
 	if d.UserStore == nil {
 		return NewToolResultError("UserStore not configured"), nil
 	}
@@ -229,7 +229,7 @@ func handleToggleActive(ctx context.Context, d AdminDeps, args map[string]any) (
 	return NewToolResultText(string(data)), nil
 }
 
-func handleDeleteUser(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
+func HandleDeleteUser(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
 	if d.UserStore == nil {
 		return NewToolResultError("UserStore not configured"), nil
 	}
@@ -261,7 +261,7 @@ func handleDeleteUser(ctx context.Context, d AdminDeps, args map[string]any) (*C
 	return NewToolResultText(string(data)), nil
 }
 
-func handleAudit(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
+func HandleAudit(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
 	if d.AuditStore == nil {
 		return NewToolResultError("AuditStore not configured"), nil
 	}
@@ -290,7 +290,7 @@ func handleAudit(ctx context.Context, d AdminDeps, args map[string]any) (*CallTo
 	return NewToolResultText(string(data)), nil
 }
 
-func handleNotes(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
+func HandleNotes(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
 	if d.AgentNoteStore == nil {
 		return NewToolResultError("AgentNoteStore not configured"), nil
 	}
@@ -353,7 +353,7 @@ func handleNotes(ctx context.Context, d AdminDeps, args map[string]any) (*CallTo
 	return NewToolResultText(string(data)), nil
 }
 
-func handleDeleteNote(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
+func HandleDeleteNote(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
 	if d.AgentNoteStore == nil {
 		return NewToolResultError("AgentNoteStore not configured"), nil
 	}
@@ -379,7 +379,7 @@ func handleDeleteNote(ctx context.Context, d AdminDeps, args map[string]any) (*C
 	return NewToolResultText(string(data)), nil
 }
 
-func handleActivity(ctx context.Context, d AdminDeps) (*CallToolResult, error) {
+func HandleAdminActivity(ctx context.Context, d AdminDeps) (*CallToolResult, error) {
 	if d.Registry == nil {
 		return NewToolResultError("No connector registry available."), nil
 	}

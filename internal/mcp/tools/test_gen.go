@@ -26,18 +26,18 @@ func TestGenHandler(d TestGenDeps) ToolHandlerFunc {
 
 		switch action {
 		case "context":
-			return handleTestGenContext(ctx, d, args)
+			return HandleTestGenContext(ctx, d, args)
 		case "suggest":
-			return handleTestGenSuggest(ctx, d, args)
+			return HandleTestGenSuggest(ctx, d, args)
 		case "coverage":
-			return handleTestGenCoverage(ctx, d, args)
+			return HandleTestGenCoverage(ctx, d, args)
 		default:
 			return NewToolResultError("unknown action: " + action + ". Use: context, suggest, coverage"), nil
 		}
 	}
 }
 
-func handleTestGenContext(ctx context.Context, d TestGenDeps, args map[string]any) (*CallToolResult, error) {
+func HandleTestGenContext(ctx context.Context, d TestGenDeps, args map[string]any) (*CallToolResult, error) {
 	fingerprint, _ := args["fingerprint"].(string)
 	if fingerprint == "" {
 		return NewToolResultError("fingerprint is required for context action"), nil
@@ -112,7 +112,7 @@ func handleTestGenContext(ctx context.Context, d TestGenDeps, args map[string]an
 	return NewToolResultText(string(data)), nil
 }
 
-func handleTestGenSuggest(ctx context.Context, d TestGenDeps, args map[string]any) (*CallToolResult, error) {
+func HandleTestGenSuggest(ctx context.Context, d TestGenDeps, args map[string]any) (*CallToolResult, error) {
 	if d.ErrorGroupStore == nil {
 		return NewToolResultError("ErrorGroupStore not configured"), nil
 	}
@@ -179,7 +179,7 @@ func handleTestGenSuggest(ctx context.Context, d TestGenDeps, args map[string]an
 	return NewToolResultText(string(data)), nil
 }
 
-func handleTestGenCoverage(ctx context.Context, d TestGenDeps, args map[string]any) (*CallToolResult, error) {
+func HandleTestGenCoverage(ctx context.Context, d TestGenDeps, args map[string]any) (*CallToolResult, error) {
 	limit := 10
 	if v, ok := args["limit"].(float64); ok && v > 0 {
 		limit = int(v)

@@ -26,18 +26,18 @@ func DependenciesHandler(d DependenciesDeps) ToolHandlerFunc {
 
 		switch action {
 		case "service":
-			return handleDepsService(ctx, d, args)
+			return HandleDepsService(ctx, d, args)
 		case "blast_radius":
-			return handleDepsBlastRadius(ctx, d, args)
+			return HandleDepsBlastRadius(ctx, d, args)
 		case "change_risk":
-			return handleDepsChangeRisk(ctx, d, args)
+			return HandleDepsChangeRisk(ctx, d, args)
 		default:
 			return NewToolResultError("unknown action: " + action + ". Use: service, blast_radius, change_risk"), nil
 		}
 	}
 }
 
-func handleDepsService(ctx context.Context, d DependenciesDeps, args map[string]any) (*CallToolResult, error) {
+func HandleDepsService(ctx context.Context, d DependenciesDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 	if service == "" {
 		return NewToolResultError("service is required"), nil
@@ -129,7 +129,7 @@ func handleDepsService(ctx context.Context, d DependenciesDeps, args map[string]
 	return NewToolResultText(string(data)), nil
 }
 
-func handleDepsBlastRadius(ctx context.Context, d DependenciesDeps, args map[string]any) (*CallToolResult, error) {
+func HandleDepsBlastRadius(ctx context.Context, d DependenciesDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 	if service == "" {
 		return NewToolResultError("service is required"), nil
@@ -181,7 +181,7 @@ func handleDepsBlastRadius(ctx context.Context, d DependenciesDeps, args map[str
 	return NewToolResultText(string(data)), nil
 }
 
-func handleDepsChangeRisk(ctx context.Context, d DependenciesDeps, args map[string]any) (*CallToolResult, error) {
+func HandleDepsChangeRisk(ctx context.Context, d DependenciesDeps, args map[string]any) (*CallToolResult, error) {
 	file, _ := args["file"].(string)
 	endpoint, _ := args["endpoint"].(string)
 	service, _ := args["service"].(string)

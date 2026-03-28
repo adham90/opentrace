@@ -25,22 +25,22 @@ func AnalyticsHandler(d AnalyticsDeps) ToolHandlerFunc {
 
 		switch action {
 		case "traffic":
-			return handleTraffic(ctx, d, args)
+			return HandleTraffic(ctx, d, args)
 		case "endpoints":
-			return handleEndpoints(ctx, d, args)
+			return HandleEndpoints(ctx, d, args)
 		case "heatmap":
-			return handleHeatmap(ctx, d, args)
+			return HandleHeatmap(ctx, d, args)
 		case "trends":
-			return handleTrends(ctx, d, args)
+			return HandleTrends(ctx, d, args)
 		case "movers":
-			return handleMovers(ctx, d, args)
+			return HandleMovers(ctx, d, args)
 		default:
 			return NewToolResultError(fmt.Sprintf("unknown action: %s (use traffic, endpoints, heatmap, trends, movers)", action)), nil
 		}
 	}
 }
 
-func handleTraffic(ctx context.Context, d AnalyticsDeps, args map[string]any) (*CallToolResult, error) {
+func HandleTraffic(ctx context.Context, d AnalyticsDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 
 	sinceStr := "24h"
@@ -97,7 +97,7 @@ func handleTraffic(ctx context.Context, d AnalyticsDeps, args map[string]any) (*
 	return NewToolResultText(string(data)), nil
 }
 
-func handleEndpoints(ctx context.Context, d AnalyticsDeps, args map[string]any) (*CallToolResult, error) {
+func HandleEndpoints(ctx context.Context, d AnalyticsDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 	sortBy, _ := args["sort_by"].(string)
 	if sortBy == "" {
@@ -195,7 +195,7 @@ func handleEndpoints(ctx context.Context, d AnalyticsDeps, args map[string]any) 
 	return NewToolResultText(string(data)), nil
 }
 
-func handleHeatmap(ctx context.Context, d AnalyticsDeps, args map[string]any) (*CallToolResult, error) {
+func HandleHeatmap(ctx context.Context, d AnalyticsDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 	metricField := "request_count"
 	if v, ok := args["metric"].(string); ok && v != "" {
@@ -256,7 +256,7 @@ func handleHeatmap(ctx context.Context, d AnalyticsDeps, args map[string]any) (*
 	return NewToolResultText(string(data)), nil
 }
 
-func handleTrends(ctx context.Context, d AnalyticsDeps, args map[string]any) (*CallToolResult, error) {
+func HandleTrends(ctx context.Context, d AnalyticsDeps, args map[string]any) (*CallToolResult, error) {
 	metric, _ := args["metric"].(string)
 	if metric == "" {
 		metric = "request_volume"
@@ -407,7 +407,7 @@ func handleTrends(ctx context.Context, d AnalyticsDeps, args map[string]any) (*C
 	return NewToolResultText(string(data)), nil
 }
 
-func handleMovers(ctx context.Context, d AnalyticsDeps, args map[string]any) (*CallToolResult, error) {
+func HandleMovers(ctx context.Context, d AnalyticsDeps, args map[string]any) (*CallToolResult, error) {
 	metric, _ := args["metric"].(string)
 	if metric == "" {
 		metric = "p95_response"

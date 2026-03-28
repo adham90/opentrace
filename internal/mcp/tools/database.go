@@ -55,37 +55,37 @@ func DatabaseHandler(deps DatabaseDeps) ToolHandlerFunc {
 
 		switch action {
 		case "queries":
-			return handleQueries(ctx, deps, args)
+			return HandleQueries(ctx, deps, args)
 		case "explain":
-			return handleExplain(ctx, deps, args)
+			return HandleExplain(ctx, deps, args)
 		case "tables":
-			return handleTables(ctx, deps, args)
+			return HandleTables(ctx, deps, args)
 		case "activity":
-			return handleDatabaseActivity(ctx, deps, args)
+			return HandleDatabaseActivity(ctx, deps, args)
 		case "locks":
-			return handleLocks(ctx, deps, args)
+			return HandleLocks(ctx, deps, args)
 		case "connections":
-			return handleConnections(ctx, deps, args)
+			return HandleConnections(ctx, deps, args)
 		case "indexes":
-			return handleIndexes(ctx, deps, args)
+			return HandleIndexes(ctx, deps, args)
 		case "schema":
-			return handleSchema(ctx, deps, args)
+			return HandleSchema(ctx, deps, args)
 		case "storage":
-			return handleStorage(ctx, deps, args)
+			return HandleStorage(ctx, deps, args)
 		case "kill_query":
-			return handleKillQuery(ctx, deps, args)
+			return HandleKillQuery(ctx, deps, args)
 		case "long_transactions":
-			return handleLongTransactions(ctx, deps, args)
+			return HandleLongTransactions(ctx, deps, args)
 		case "runbook":
-			return handleRunbookAction(ctx, deps, args)
+			return HandleRunbookAction(ctx, deps, args)
 		default:
 			return NewToolResultError(fmt.Sprintf("unknown action %q. Available: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions, runbook", action)), nil
 		}
 	}
 }
 
-// handleRunbookAction delegates to the existing runbook handler via RunbookDeps.
-func handleRunbookAction(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
+// HandleRunbookAction delegates to the existing runbook handler via RunbookDeps.
+func HandleRunbookAction(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	rbDeps := RunbookDeps{
 		Registry:                  deps.Registry,
 		LogStore:                  deps.LogStore,

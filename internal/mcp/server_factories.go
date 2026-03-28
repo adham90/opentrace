@@ -7,6 +7,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/mcp/tools"
 	"github.com/adham90/opentrace/internal/metrics"
 	"github.com/adham90/opentrace/pkg/store"
@@ -15,22 +16,27 @@ import (
 // rankingServiceAdapter returns a tools.SuggestionRanker that bridges
 // the consolidated tools package's SuggestionRanker interface with the
 // parent mcp package's RankingService and SessionTracker.
-func rankingServiceAdapter() tools.SuggestionRanker {
-	if rankingService == nil || sessionTracker == nil {
+func rankingServiceAdapter(deps Deps) tools.SuggestionRanker {
+	if deps.RankingService == nil || deps.SessionTracker == nil {
 		return nil
 	}
-	return &rankerAdapter{}
+	return &rankerAdapter{
+		ranking: deps.RankingService,
+		session: deps.SessionTracker,
+	}
 }
 
-// rankerAdapter implements tools.SuggestionRanker using the package-level
-// rankingService and sessionTracker.
-type rankerAdapter struct{}
+// rankerAdapter implements tools.SuggestionRanker using deps-provided services.
+type rankerAdapter struct {
+	ranking *RankingService
+	session *SessionTracker
+}
 
 func (r *rankerAdapter) RankAndTrack(suggestions []tools.ToolSuggestion) []tools.ToolSuggestion {
-	if rankingService == nil || sessionTracker == nil {
+	if r.ranking == nil || r.session == nil {
 		return suggestions
 	}
-	sess := sessionTracker.CurrentSession()
+	sess := r.session.CurrentSession()
 	if sess == nil {
 		return suggestions
 	}
@@ -52,7 +58,7 @@ func (r *rankerAdapter) RankAndTrack(suggestions []tools.ToolSuggestion) []tools
 	if len(sess.ToolSequence) > 0 {
 		currentTool = sess.ToolSequence[len(sess.ToolSequence)-1]
 	}
-	ranked := rankingService.RankSuggestions(context.Background(), RankingRequest{
+	ranked := r.ranking.RankSuggestions(context.Background(), RankingRequest{
 		CurrentTool:         currentTool,
 		Intent:              sess.Intent,
 		StepIndex:           sess.TotalSteps,
@@ -78,23 +84,9 @@ func (r *rankerAdapter) RankAndTrack(suggestions []tools.ToolSuggestion) []tools
 	}
 
 	// Track for acceptance detection.
-	sessionTracker.SetLastSuggestions(mcpSuggestions)
+	r.session.SetLastSuggestions(mcpSuggestions)
 
 	return result
-}
-
-// maybeAddTool registers a tool on the MCP server if s is non-nil.
-// When s is nil (catalog-only mode), this is a no-op.
-// If activity logging is enabled, wraps the handler to record tool calls.
-func maybeAddTool(s *mcp.Server, tool *mcp.Tool, handler ToolHandlerFunc) {
-	if s != nil {
-		// Wrap with Prometheus metrics recording (always active).
-		handler = wrapWithMetrics(tool.Name, handler)
-		if activityStoreForLogging != nil {
-			handler = wrapWithActivityLog(activityStoreForLogging, tool.Name, handler)
-		}
-		s.AddTool(tool, handler)
-	}
 }
 
 // wrapWithMetrics wraps a tool handler to record Prometheus metrics for each call.
@@ -106,13 +98,13 @@ func wrapWithMetrics(toolName string, handler ToolHandlerFunc) ToolHandlerFunc {
 }
 
 // wrapWithActivityLog wraps a tool handler to log its execution to the activity store.
-func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler ToolHandlerFunc) ToolHandlerFunc {
+func wrapWithActivityLog(deps Deps, toolName string, handler ToolHandlerFunc) ToolHandlerFunc {
 	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Snapshot the suggestions from the PREVIOUS tool's response before this
 		// handler runs and overwrites them with its own suggestions.
 		var priorSuggestions []ToolSuggestion
-		if sessionTracker != nil {
-			priorSuggestions = sessionTracker.SnapshotLastSuggestions()
+		if deps.SessionTracker != nil {
+			priorSuggestions = deps.SessionTracker.SnapshotLastSuggestions()
 		}
 
 		start := time.Now()
@@ -147,15 +139,15 @@ func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler Too
 		userID := ""
 		invSessionID := ""
 		stepIndex := 0
-		if sessionTracker != nil {
-			if uid := sessionTracker.UserID(); uid != "" {
+		if deps.SessionTracker != nil {
+			if uid := deps.SessionTracker.UserID(); uid != "" {
 				userID = uid
 			}
-			if sid := sessionTracker.CurrentSessionID(); sid != "" {
+			if sid := deps.SessionTracker.CurrentSessionID(); sid != "" {
 				invSessionID = sid
 				sessionID = sid
 			}
-			stepIndex = sessionTracker.RecordStep(toolName, isError, priorSuggestions)
+			stepIndex = deps.SessionTracker.RecordStep(toolName, isError, priorSuggestions)
 		}
 
 		// Check if this tool was in the prior suggestions (before handler overwrote them).
@@ -170,15 +162,12 @@ func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler Too
 		}
 
 		// Log via bounded activity logger to avoid unbounded goroutine growth.
-		// WasSuggested/SuggestionRank and PreviousStepIndex are included so the
-		// Log method can handle both INSERT and previous-step UPDATE atomically,
-		// avoiding races between async INSERT and sync UPDATE.
-		if activityLogger != nil {
+		if deps.ActivityLogger != nil {
 			prevStep := 0
 			if stepIndex > 1 {
 				prevStep = stepIndex - 1
 			}
-			activityLogger.Log(store.LogMCPActivityParams{
+			deps.ActivityLogger.Log(store.LogMCPActivityParams{
 				SessionID:              sessionID,
 				UserID:                 userID,
 				ToolName:               toolName,
@@ -196,10 +185,10 @@ func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler Too
 		}
 
 		// Inject investigation context for investigation-intent sessions.
-		if contextInjector != nil && sessionTracker != nil && result != nil && !result.IsError && len(result.Content) > 0 {
-			if sess := sessionTracker.CurrentSession(); sess != nil && sess.Intent == IntentInvestigation {
+		if deps.ContextInjector != nil && deps.SessionTracker != nil && result != nil && !result.IsError && len(result.Content) > 0 {
+			if sess := deps.SessionTracker.CurrentSession(); sess != nil && sess.Intent == IntentInvestigation {
 				if txt, ok := result.Content[0].(*mcp.TextContent); ok {
-					if enriched := InjectContextIntoResult(contextInjector, sess, toolName, txt.Text); enriched != txt.Text {
+					if enriched := InjectContextIntoResult(deps.ContextInjector, sess, toolName, txt.Text); enriched != txt.Text {
 						result.Content[0] = &mcp.TextContent{Text: enriched}
 					}
 				}
@@ -207,5 +196,60 @@ func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler Too
 		}
 
 		return result, err
+	}
+}
+
+// wrapHandler applies activity logging and metrics to a handler.
+func wrapHandler(deps Deps, toolName string, handler ToolHandlerFunc) ToolHandlerFunc {
+	handler = wrapWithMetrics(toolName, handler)
+	if deps.MCPActivityStore != nil {
+		handler = wrapWithActivityLog(deps, toolName, handler)
+	}
+	return handler
+}
+
+// ---------------------------------------------------------------------------
+// Legacy helpers (still needed for dynamic connector tools)
+// ---------------------------------------------------------------------------
+
+// convertTool maps a connector.Tool to an mcp.Tool with the appropriate
+// JSON Schema properties derived from the tool's parameter definitions.
+func convertTool(t connector.Tool) *mcp.Tool {
+	props := make(map[string]SchemaProperty)
+	var required []string
+	for _, p := range t.Params {
+		schemaType := "string"
+		switch p.Type {
+		case "int":
+			schemaType = "number"
+		case "bool":
+			schemaType = "boolean"
+		}
+		props[p.Name] = SchemaProperty{Type: schemaType}
+		if p.Required {
+			required = append(required, p.Name)
+		}
+	}
+	return &mcp.Tool{
+		Name:        t.Name,
+		Description: t.Description,
+		InputSchema: ToolSchema(props, required),
+	}
+}
+
+// bridgeHandler wraps a connector.Tool handler as an MCP ToolHandlerFunc.
+func bridgeHandler(t connector.Tool) ToolHandlerFunc {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := GetArguments(request)
+		if args == nil {
+			args = make(map[string]any)
+		}
+
+		result, err := t.Handler(ctx, args)
+		if err != nil {
+			return NewToolResultError(err.Error()), nil
+		}
+
+		return NewToolResultText(result), nil
 	}
 }

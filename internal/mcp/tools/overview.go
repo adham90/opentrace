@@ -37,23 +37,23 @@ func OverviewHandler(d OverviewDeps) ToolHandlerFunc {
 
 		switch action {
 		case "status":
-			return handleStatus(ctx, d)
+			return HandleOverviewStatus(ctx, d)
 		case "triage":
-			return handleTriage(ctx, d)
+			return HandleTriage(ctx, d)
 		case "diagnose":
-			return handleDiagnose(ctx, d, args)
+			return HandleDiagnose(ctx, d, args)
 		case "timeline":
-			return handleTimeline(ctx, d, args)
+			return HandleTimeline(ctx, d, args)
 		case "investigate":
-			return handleInvestigate(ctx, d, args)
+			return HandleOverviewInvestigate(ctx, d, args)
 		case "changes":
-			return handleChanges(ctx, d, args)
+			return HandleChanges(ctx, d, args)
 		case "settings":
-			return handleOverviewSettings(ctx, d)
+			return HandleOverviewSettings(ctx, d)
 		case "notes":
-			return handleOverviewNotes(ctx, d, args)
+			return HandleOverviewNotes(ctx, d, args)
 		case "delete_note":
-			return handleOverviewDeleteNote(ctx, d, args)
+			return HandleOverviewDeleteNote(ctx, d, args)
 		case "session_summary":
 			if d.SessionSummary == nil {
 				return NewToolResultError("session tracking is not enabled"), nil
@@ -67,7 +67,7 @@ func OverviewHandler(d OverviewDeps) ToolHandlerFunc {
 
 // --- status action ---
 
-func handleStatus(ctx context.Context, d OverviewDeps) (*CallToolResult, error) {
+func HandleOverviewStatus(ctx context.Context, d OverviewDeps) (*CallToolResult, error) {
 	overview := map[string]any{}
 
 	// Logs (last hour)
@@ -208,7 +208,7 @@ type triageEntry struct {
 	ID       string `json:"id"`
 }
 
-func handleTriage(ctx context.Context, d OverviewDeps) (*CallToolResult, error) {
+func HandleTriage(ctx context.Context, d OverviewDeps) (*CallToolResult, error) {
 	var items []triageEntry
 
 	// Unresolved error groups (highest priority)
@@ -391,7 +391,7 @@ func sevOrder(sev string) int {
 
 // --- diagnose action ---
 
-func handleDiagnose(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
+func HandleDiagnose(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 
 	// Parse timeframe (default 1h)
@@ -762,7 +762,7 @@ type timelineEvent struct {
 	ID       string `json:"id,omitempty"`
 }
 
-func handleTimeline(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
+func HandleTimeline(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
 	startStr, _ := args["start"].(string)
 	if startStr == "" {
 		return NewToolResultError("start is required (ISO 8601 format)"), nil
@@ -1067,7 +1067,7 @@ func minInt(a, b int) int {
 
 // --- investigate action ---
 
-func handleInvestigate(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
+func HandleOverviewInvestigate(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 	if service == "" {
 		return NewToolResultError("service is required for the investigate action"), nil
@@ -1248,7 +1248,7 @@ func handleInvestigate(ctx context.Context, d OverviewDeps, args map[string]any)
 
 // --- changes action ---
 
-func handleChanges(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
+func HandleChanges(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
 	since := GetSinceParam(args, 2*time.Hour)
 	now := time.Now().UTC()
 	windowDuration := now.Sub(since)
@@ -1378,7 +1378,7 @@ func handleChanges(ctx context.Context, d OverviewDeps, args map[string]any) (*C
 
 // --- notes action (agent memory) ---
 
-func handleOverviewNotes(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
+func HandleOverviewNotes(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
 	if d.AgentNoteStore == nil {
 		return NewToolResultError("AgentNoteStore not configured"), nil
 	}
@@ -1440,7 +1440,7 @@ func handleOverviewNotes(ctx context.Context, d OverviewDeps, args map[string]an
 	return NewToolResultText(string(data)), nil
 }
 
-func handleOverviewDeleteNote(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
+func HandleOverviewDeleteNote(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
 	if d.AgentNoteStore == nil {
 		return NewToolResultError("AgentNoteStore not configured"), nil
 	}
@@ -1468,7 +1468,7 @@ func handleOverviewDeleteNote(ctx context.Context, d OverviewDeps, args map[stri
 
 // --- settings action (read-only) ---
 
-func handleOverviewSettings(ctx context.Context, d OverviewDeps) (*CallToolResult, error) {
+func HandleOverviewSettings(ctx context.Context, d OverviewDeps) (*CallToolResult, error) {
 	if d.SettingsStore == nil {
 		return NewToolResultError("SettingsStore not configured"), nil
 	}

@@ -14,7 +14,7 @@ import (
 // Action: indexes — index analysis + bloat
 // ---------------------------------------------------------------------------
 
-func handleIndexes(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
+func HandleIndexes(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil

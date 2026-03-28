@@ -15,7 +15,7 @@ import (
 // action: summary — debugging overview (from logSummaryHandler)
 // ---------------------------------------------------------------------------
 
-func logsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
+func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	timeRange := "1h"
 	if v, ok := args["time_range"].(string); ok && v != "" {
 		timeRange = v

@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -58,6 +59,31 @@ func (m *mockLogStore) SearchRequestSummaries(_ context.Context, _ store.Request
 func (m *mockLogStore) RecordBatch(_ context.Context, _ string, _ int) error { return nil }
 func (m *mockLogStore) GetBatch(_ context.Context, _ string) (*store.BatchRecord, error) { return nil, nil }
 func (m *mockLogStore) PruneBatches(_ context.Context, _ time.Duration) (int64, error) { return 0, nil }
+
+func TestLogsConnector_TestConnection(t *testing.T) {
+	c := NewLogsConnector(&mockLogStore{})
+	err := c.TestConnection(context.Background())
+	if err != nil {
+		t.Fatalf("TestConnection() returned unexpected error: %v", err)
+	}
+}
+
+func TestLogsConnector_TestConnection_Error(t *testing.T) {
+	ms := &mockLogStore{err: fmt.Errorf("database unavailable")}
+	c := NewLogsConnector(ms)
+	err := c.TestConnection(context.Background())
+	if err == nil {
+		t.Fatal("TestConnection() should return error when store fails")
+	}
+}
+
+func TestLogsConnector_Close(t *testing.T) {
+	c := NewLogsConnector(&mockLogStore{})
+	err := c.Close()
+	if err != nil {
+		t.Fatalf("Close() returned unexpected error: %v", err)
+	}
+}
 
 func TestLogsConnector_Type(t *testing.T) {
 	c := NewLogsConnector(&mockLogStore{})

@@ -6,7 +6,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/mcp/tools"
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -32,7 +31,7 @@ func buildGateway(deps Deps, isAdmin bool, b *CatalogBuilder) *Gateway {
 func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 	// --- connectors ---
 	gw.Register("connectors",
-		wrapHandler("connectors", tools.ConnectorsHandler(tools.ConnectorsDeps{
+		wrapHandler(deps, "connectors", tools.ConnectorsHandler(tools.ConnectorsDeps{
 			DSStore:       deps.DSStore,
 			Registry:      deps.Registry,
 			LogStore:      deps.LogStore,
@@ -52,7 +51,7 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 
 	// --- database (now includes runbook) ---
 	gw.Register("database",
-		wrapHandler("database", tools.DatabaseHandler(tools.DatabaseDeps{
+		wrapHandler(deps, "database", tools.DatabaseHandler(tools.DatabaseDeps{
 			Registry:                  deps.Registry,
 			QueryMemoryStore:          deps.QueryMemoryStore,
 			LogStore:                  deps.LogStore,
@@ -72,23 +71,24 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 	// --- logs ---
 	if deps.LogStore != nil {
 		var traceRecorder tools.TraceSessionRecorder
-		if sessionTracker != nil {
+		if deps.SessionTracker != nil {
+			st := deps.SessionTracker // capture for closure
 			traceRecorder = func(traceID string) {
-				if sess := sessionTracker.CurrentSession(); sess != nil {
+				if sess := st.CurrentSession(); sess != nil {
 					traceIDs := append([]string{}, sess.TraceIDs...)
 					traceIDs = append(traceIDs, traceID)
-					sessionTracker.UpdateSession(store.UpdateInvestigationSessionParams{
+					st.UpdateSession(store.UpdateInvestigationSessionParams{
 						TraceIDs: traceIDs,
 					})
 				}
 			}
 		}
 		gw.Register("logs",
-			wrapHandler("logs", tools.LogsHandler(tools.LogsDeps{
+			wrapHandler(deps, "logs", tools.LogsHandler(tools.LogsDeps{
 				LogStore:             deps.LogStore,
 				ErrorGroupStore:      deps.ErrorGroupStore,
 				TraceSessionRecorder: traceRecorder,
-				Ranker:               rankingServiceAdapter(),
+				Ranker:               rankingServiceAdapter(deps),
 			})),
 			GatewayEntry{
 				Description: "Log intelligence: search, context, attributes, stats, summary, performance, trace, compare",
@@ -106,20 +106,20 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 	if deps.ErrorGroupStore != nil || deps.LogStore != nil || deps.ErrorImpactStore != nil {
 		var sess tools.SessionInfo
 		var rec tools.RecurrenceLinker
-		if sessionTracker != nil {
-			sess = sessionTracker
+		if deps.SessionTracker != nil {
+			sess = deps.SessionTracker
 		}
-		if recurrenceDetector != nil {
-			rec = recurrenceDetector
+		if deps.RecurrenceDetector != nil {
+			rec = deps.RecurrenceDetector
 		}
 		gw.Register("errors",
-			wrapHandler("errors", tools.ErrorsHandler(tools.ErrorsDeps{
+			wrapHandler(deps, "errors", tools.ErrorsHandler(tools.ErrorsDeps{
 				ErrorGroupStore:  deps.ErrorGroupStore,
 				LogStore:         deps.LogStore,
 				ErrorImpactStore: deps.ErrorImpactStore,
 				Session:          sess,
 				Recurrence:       rec,
-				Ranker:           rankingServiceAdapter(),
+				Ranker:           rankingServiceAdapter(deps),
 			})),
 			GatewayEntry{
 				Description: "Error management: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, new",
@@ -135,7 +135,7 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 	// --- healthchecks ---
 	if deps.HealthCheckStore != nil {
 		gw.Register("healthchecks",
-			wrapHandler("healthchecks", tools.HealthchecksHandler(tools.HealthchecksDeps{
+			wrapHandler(deps, "healthchecks", tools.HealthchecksHandler(tools.HealthchecksDeps{
 				HealthCheckStore: deps.HealthCheckStore,
 			})),
 			GatewayEntry{
@@ -152,13 +152,14 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 
 	// --- overview (includes agent memory: notes + session_summary) ---
 	var overviewSessionCallback tools.SessionSummaryCallback
-	if deps.InvestigationSessionStore != nil && sessionTracker != nil {
+	if deps.InvestigationSessionStore != nil && deps.SessionTracker != nil {
+		st := deps.SessionTracker // capture for closure
 		overviewSessionCallback = func(ctx context.Context, args map[string]any) (*mcp.CallToolResult, error) {
-			return handleSessionSummaryFromArgs(args)
+			return handleSessionSummaryFromArgs(st, args)
 		}
 	}
 	gw.Register("overview",
-		wrapHandler("overview", tools.OverviewHandler(tools.OverviewDeps{
+		wrapHandler(deps, "overview", tools.OverviewHandler(tools.OverviewDeps{
 			LogStore:         deps.LogStore,
 			DSStore:          deps.DSStore,
 			ServerStore:      deps.ServerStore,
@@ -183,7 +184,7 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 	// --- watches ---
 	if deps.WatchStore != nil {
 		gw.Register("watches",
-			wrapHandler("watches", tools.WatchesHandler(tools.WatchesDeps{
+			wrapHandler(deps, "watches", tools.WatchesHandler(tools.WatchesDeps{
 				WatchStore:   deps.WatchStore,
 				LogStore:     deps.LogStore,
 				WatchMetrics: deps.WatchMetrics,
@@ -203,7 +204,7 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 	// --- analytics ---
 	if deps.AnalyticsStore != nil || deps.TrendStore != nil {
 		gw.Register("analytics",
-			wrapHandler("analytics", tools.AnalyticsHandler(tools.AnalyticsDeps{
+			wrapHandler(deps, "analytics", tools.AnalyticsHandler(tools.AnalyticsDeps{
 				AnalyticsStore: deps.AnalyticsStore,
 				TrendStore:     deps.TrendStore,
 			})),
@@ -223,7 +224,7 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 	if deps.CodeEntityStore != nil || deps.TestCorrelationStore != nil ||
 		deps.AnalyticsStore != nil || deps.ErrorGroupStore != nil {
 		gw.Register("code",
-			wrapHandler("code", tools.CodeHandler(tools.CodeDeps{
+			wrapHandler(deps, "code", tools.CodeHandler(tools.CodeDeps{
 				CodeEntityStore:           deps.CodeEntityStore,
 				ErrorGroupStore:           deps.ErrorGroupStore,
 				ErrorImpactStore:          deps.ErrorImpactStore,
@@ -242,11 +243,11 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 					"gen_context", "gen_suggest", "gen_coverage",
 					"deps_service", "deps_blast", "deps_risk",
 				},
-				Category: "Code Intelligence",
-				Access:   "read",
-				ReadOnly: true,
+				Category:   "Code Intelligence",
+				Access:     "read",
+				ReadOnly:   true,
 				Idempotent: true,
-				Params:   map[string]string{"service": "Filter by service", "fingerprint": "Error fingerprint", "path": "Source file path", "files": "Array of file paths (risk)"},
+				Params:     map[string]string{"service": "Filter by service", "fingerprint": "Error fingerprint", "path": "Source file path", "files": "Array of file paths (risk)"},
 			})
 		b.Add("code", "Code intelligence, annotations, test generation, and dependency analysis", "Code Intelligence", "read", "")
 	}
@@ -254,7 +255,7 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 	// --- deploys ---
 	if deps.DeployStore != nil {
 		gw.Register("deploys",
-			wrapHandler("deploys", tools.DeploysHandler(tools.DeploysDeps{
+			wrapHandler(deps, "deploys", tools.DeploysHandler(tools.DeploysDeps{
 				DeployStore: deps.DeployStore,
 			})),
 			GatewayEntry{
@@ -271,7 +272,7 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 	// --- servers (unified: list_servers + query_metrics + server_health) ---
 	if deps.ServerStore != nil && deps.MetricStore != nil {
 		gw.Register("servers",
-			wrapHandler("servers", tools.ServersHandler(tools.ServersDeps{
+			wrapHandler(deps, "servers", tools.ServersHandler(tools.ServersDeps{
 				ServerStore: deps.ServerStore,
 				MetricStore: deps.MetricStore,
 			})),
@@ -289,7 +290,7 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 
 	// --- setup ---
 	gw.Register("setup",
-		wrapHandler("setup", tools.SetupHandler(tools.SetupDeps{
+		wrapHandler(deps, "setup", tools.SetupHandler(tools.SetupDeps{
 			LogStore:      deps.LogStore,
 			UserStore:     deps.UserStore,
 			SettingsStore: deps.SettingsStore,
@@ -313,7 +314,7 @@ func registerWriteTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 	for _, t := range deps.Registry.AllTools() {
 		handler := bridgeHandler(t)
 		gw.Register(t.Name,
-			wrapHandler(t.Name, handler),
+			wrapHandler(deps, t.Name, handler),
 			GatewayEntry{
 				Description: t.Description,
 				Category:    "Connector Queries",
@@ -323,7 +324,7 @@ func registerWriteTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 
 	// --- admin (settings, users, audit — no notes/session_summary, those are in overview for all users) ---
 	gw.Register("admin",
-		wrapHandler("admin", tools.AdminHandler(tools.AdminDeps{
+		wrapHandler(deps, "admin", tools.AdminHandler(tools.AdminDeps{
 			SettingsStore:    deps.SettingsStore,
 			UserStore:        deps.UserStore,
 			AuditStore:       deps.AuditStore,
@@ -343,9 +344,9 @@ func registerWriteTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 }
 
 // handleSessionSummaryFromArgs handles the session_summary action using the
-// package-level sessionTracker. This bridges the tools package (which can't
-// access the mcp package's sessionTracker) with the actual implementation.
-func handleSessionSummaryFromArgs(args map[string]any) (*mcp.CallToolResult, error) {
+// provided SessionTracker. This bridges the tools package with the session
+// tracking implementation.
+func handleSessionSummaryFromArgs(st *SessionTracker, args map[string]any) (*mcp.CallToolResult, error) {
 	summary, _ := args["summary"].(string)
 	rootCause, _ := args["root_cause"].(string)
 	fixApplied, _ := args["fix_applied"].(string)
@@ -356,7 +357,7 @@ func handleSessionSummaryFromArgs(args map[string]any) (*mcp.CallToolResult, err
 		return NewToolResultError("summary is required"), nil
 	}
 
-	if sessionTracker == nil {
+	if st == nil {
 		return NewToolResultError("session tracking is not enabled"), nil
 	}
 
@@ -391,72 +392,16 @@ func handleSessionSummaryFromArgs(args map[string]any) (*mcp.CallToolResult, err
 		params.PrimaryService = &primaryService
 	}
 
-	sessionTracker.UpdateSession(params)
+	st.UpdateSession(params)
 
 	resp := map[string]any{
 		"status":  "saved",
 		"message": "Session summary recorded. This will help future investigations of similar issues.",
 	}
-	if sessID := sessionTracker.CurrentSessionID(); sessID != "" {
+	if sessID := st.CurrentSessionID(); sessID != "" {
 		resp["session_id"] = sessID
 	}
 
 	data, _ := json.Marshal(resp)
 	return NewToolResultText(string(data)), nil
 }
-
-// wrapHandler applies activity logging and metrics to a handler.
-func wrapHandler(toolName string, handler ToolHandlerFunc) ToolHandlerFunc {
-	handler = wrapWithMetrics(toolName, handler)
-	if activityStoreForLogging != nil {
-		handler = wrapWithActivityLog(activityStoreForLogging, toolName, handler)
-	}
-	return handler
-}
-
-// ---------------------------------------------------------------------------
-// Legacy helpers (still needed for dynamic connector tools)
-// ---------------------------------------------------------------------------
-
-// convertTool maps a connector.Tool to an mcp.Tool with the appropriate
-// JSON Schema properties derived from the tool's parameter definitions.
-func convertTool(t connector.Tool) *mcp.Tool {
-	props := make(map[string]SchemaProperty)
-	var required []string
-	for _, p := range t.Params {
-		schemaType := "string"
-		switch p.Type {
-		case "int":
-			schemaType = "number"
-		case "bool":
-			schemaType = "boolean"
-		}
-		props[p.Name] = SchemaProperty{Type: schemaType}
-		if p.Required {
-			required = append(required, p.Name)
-		}
-	}
-	return &mcp.Tool{
-		Name:        t.Name,
-		Description: t.Description,
-		InputSchema: ToolSchema(props, required),
-	}
-}
-
-// bridgeHandler wraps a connector.Tool handler as an MCP ToolHandlerFunc.
-func bridgeHandler(t connector.Tool) ToolHandlerFunc {
-	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := GetArguments(request)
-		if args == nil {
-			args = make(map[string]any)
-		}
-
-		result, err := t.Handler(ctx, args)
-		if err != nil {
-			return NewToolResultError(err.Error()), nil
-		}
-
-		return NewToolResultText(result), nil
-	}
-}
-

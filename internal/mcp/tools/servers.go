@@ -25,18 +25,18 @@ func ServersHandler(d ServersDeps) ToolHandlerFunc {
 
 		switch action {
 		case "list":
-			return handleListServers(ctx, d)
+			return HandleListServers(ctx, d)
 		case "query":
-			return handleQueryMetrics(ctx, d, args)
+			return HandleQueryMetrics(ctx, d, args)
 		case "health":
-			return handleServerHealth(ctx, d, args)
+			return HandleServerHealth(ctx, d, args)
 		default:
 			return NewToolResultError(fmt.Sprintf("unknown action: %s (use list, query, health)", action)), nil
 		}
 	}
 }
 
-func handleListServers(ctx context.Context, d ServersDeps) (*CallToolResult, error) {
+func HandleListServers(ctx context.Context, d ServersDeps) (*CallToolResult, error) {
 	servers, err := d.ServerStore.List(ctx, store.ListServerParams{})
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to list servers: %v", err)), nil
@@ -51,7 +51,7 @@ func handleListServers(ctx context.Context, d ServersDeps) (*CallToolResult, err
 	return NewToolResultText(string(data)), nil
 }
 
-func handleQueryMetrics(ctx context.Context, d ServersDeps, args map[string]any) (*CallToolResult, error) {
+func HandleQueryMetrics(ctx context.Context, d ServersDeps, args map[string]any) (*CallToolResult, error) {
 	serverIDStr, _ := args["server_id"].(string)
 	if serverIDStr == "" {
 		return NewToolResultError("server_id is required"), nil
@@ -95,7 +95,7 @@ func handleQueryMetrics(ctx context.Context, d ServersDeps, args map[string]any)
 	return NewToolResultText(string(data)), nil
 }
 
-func handleServerHealth(ctx context.Context, d ServersDeps, args map[string]any) (*CallToolResult, error) {
+func HandleServerHealth(ctx context.Context, d ServersDeps, args map[string]any) (*CallToolResult, error) {
 	serverIDStr, _ := args["server_id"].(string)
 	if serverIDStr == "" {
 		return NewToolResultError("server_id is required"), nil

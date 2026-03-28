@@ -27,20 +27,20 @@ func HealthchecksHandler(d HealthchecksDeps) ToolHandlerFunc {
 
 		switch action {
 		case "list":
-			return handleHealthcheckList(ctx, d)
+			return HandleHealthcheckList(ctx, d)
 		case "uptime":
-			return handleHealthcheckUptime(ctx, d, args)
+			return HandleHealthcheckUptime(ctx, d, args)
 		case "create":
-			return handleHealthcheckCreate(ctx, d, args)
+			return HandleHealthcheckCreate(ctx, d, args)
 		case "delete":
-			return handleHealthcheckDelete(ctx, d, args)
+			return HandleHealthcheckDelete(ctx, d, args)
 		default:
 			return NewToolResultError(fmt.Sprintf("unknown action: %s (use list, uptime, create, delete)", action)), nil
 		}
 	}
 }
 
-func handleHealthcheckList(ctx context.Context, d HealthchecksDeps) (*CallToolResult, error) {
+func HandleHealthcheckList(ctx context.Context, d HealthchecksDeps) (*CallToolResult, error) {
 	checks, err := d.HealthCheckStore.List(ctx, store.ListHealthCheckParams{})
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to list health checks: %v", err)), nil
@@ -94,7 +94,7 @@ func handleHealthcheckList(ctx context.Context, d HealthchecksDeps) (*CallToolRe
 	return NewToolResultText(string(data)), nil
 }
 
-func handleHealthcheckUptime(ctx context.Context, d HealthchecksDeps, args map[string]any) (*CallToolResult, error) {
+func HandleHealthcheckUptime(ctx context.Context, d HealthchecksDeps, args map[string]any) (*CallToolResult, error) {
 	hours := 24.0
 	if v, ok := args["hours"].(float64); ok && v > 0 {
 		hours = v
@@ -152,7 +152,7 @@ func handleHealthcheckUptime(ctx context.Context, d HealthchecksDeps, args map[s
 	return NewToolResultText(string(data)), nil
 }
 
-func handleHealthcheckCreate(ctx context.Context, d HealthchecksDeps, args map[string]any) (*CallToolResult, error) {
+func HandleHealthcheckCreate(ctx context.Context, d HealthchecksDeps, args map[string]any) (*CallToolResult, error) {
 	name, _ := args["name"].(string)
 	if name == "" {
 		return NewToolResultError("name is required"), nil
@@ -200,7 +200,7 @@ func handleHealthcheckCreate(ctx context.Context, d HealthchecksDeps, args map[s
 	return NewToolResultText(string(data)), nil
 }
 
-func handleHealthcheckDelete(ctx context.Context, d HealthchecksDeps, args map[string]any) (*CallToolResult, error) {
+func HandleHealthcheckDelete(ctx context.Context, d HealthchecksDeps, args map[string]any) (*CallToolResult, error) {
 	id, _ := args["id"].(string)
 	if id == "" {
 		return NewToolResultError("id is required"), nil

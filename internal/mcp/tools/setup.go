@@ -26,22 +26,22 @@ func SetupHandler(d SetupDeps) ToolHandlerFunc {
 
 		switch action {
 		case "status":
-			return handleSetupStatus(ctx, d)
+			return HandleSetupStatus(ctx, d)
 		case "detect":
-			return handleSetupDetect(ctx, d, args)
+			return HandleSetupDetect(ctx, d, args)
 		case "guide":
-			return handleSetupGuide(ctx, d, args)
+			return HandleSetupGuide(ctx, d, args)
 		case "db_guide":
-			return handleSetupDBGuide(ctx, d, args)
+			return HandleSetupDBGuide(ctx, d, args)
 		case "verify":
-			return handleSetupVerify(ctx, d)
+			return HandleSetupVerify(ctx, d)
 		default:
 			return NewToolResultError("unknown action: " + action + ". Use: status, detect, guide, verify"), nil
 		}
 	}
 }
 
-func handleSetupStatus(ctx context.Context, d SetupDeps) (*CallToolResult, error) {
+func HandleSetupStatus(ctx context.Context, d SetupDeps) (*CallToolResult, error) {
 	status := map[string]any{
 		"server": "ok",
 	}
@@ -104,7 +104,7 @@ func handleSetupStatus(ctx context.Context, d SetupDeps) (*CallToolResult, error
 	return NewToolResultText(string(data)), nil
 }
 
-func handleSetupDetect(_ context.Context, _ SetupDeps, args map[string]any) (*CallToolResult, error) {
+func HandleSetupDetect(_ context.Context, _ SetupDeps, args map[string]any) (*CallToolResult, error) {
 	filesStr, _ := args["files"].(string)
 	if filesStr == "" {
 		return NewToolResultText(`To detect the framework, provide a comma-separated list of files in the project root.
@@ -214,7 +214,7 @@ func trimSpace(s string) string {
 	return s[start:end]
 }
 
-func handleSetupGuide(ctx context.Context, d SetupDeps, args map[string]any) (*CallToolResult, error) {
+func HandleSetupGuide(ctx context.Context, d SetupDeps, args map[string]any) (*CallToolResult, error) {
 	framework, _ := args["framework"].(string)
 	if framework == "" {
 		return NewToolResultError("framework is required. Use: rails, node, express, nextjs, django, fastapi, python, go"), nil
@@ -332,7 +332,7 @@ Then restart your app and call setup(action: "verify") to confirm logs are flowi
 	}
 }
 
-func handleSetupVerify(ctx context.Context, d SetupDeps) (*CallToolResult, error) {
+func HandleSetupVerify(ctx context.Context, d SetupDeps) (*CallToolResult, error) {
 	if d.LogStore == nil {
 		return NewToolResultError("LogStore not configured"), nil
 	}
@@ -383,7 +383,7 @@ func handleSetupVerify(ctx context.Context, d SetupDeps) (*CallToolResult, error
 	return NewToolResultText(string(data)), nil
 }
 
-func handleSetupDBGuide(_ context.Context, _ SetupDeps, args map[string]any) (*CallToolResult, error) {
+func HandleSetupDBGuide(_ context.Context, _ SetupDeps, args map[string]any) (*CallToolResult, error) {
 	dbType, _ := args["database"].(string)
 	if dbType == "" {
 		return NewToolResultError("database is required. Use: postgres, mysql, redis"), nil

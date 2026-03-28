@@ -15,7 +15,7 @@ import (
 // Action: tables — table stats
 // ---------------------------------------------------------------------------
 
-func handleTables(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
+func HandleTables(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil
@@ -161,7 +161,7 @@ LEFT JOIN pg_statio_user_tables io
 // Action: activity — current connections/activity
 // ---------------------------------------------------------------------------
 
-func handleDatabaseActivity(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
+func HandleDatabaseActivity(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil
@@ -330,7 +330,7 @@ LIMIT 20`
 // Action: schema — schema overview + config check + sequences
 // ---------------------------------------------------------------------------
 
-func handleSchema(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
+func HandleSchema(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil
@@ -750,7 +750,7 @@ func checkConfigWarning(name, setting, unit string) []string {
 // Action: storage — disk usage + checkpoint stats + vacuum
 // ---------------------------------------------------------------------------
 
-func handleStorage(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
+func HandleStorage(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil
@@ -1011,7 +1011,7 @@ func handleStorage(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 // Action: connections — pool stats + replication
 // ---------------------------------------------------------------------------
 
-func handleConnections(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
+func HandleConnections(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil
@@ -1329,7 +1329,7 @@ func handleConnections(ctx context.Context, deps DatabaseDeps, args map[string]a
 // Action: kill_query — terminate a query (admin action)
 // ---------------------------------------------------------------------------
 
-func handleKillQuery(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
+func HandleKillQuery(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	pidFloat, ok := args["pid"].(float64)
 	if !ok || pidFloat <= 0 {
 		return NewToolResultError("pid is required (positive integer). Use database action=activity to find PIDs of long-running queries."), nil
@@ -1428,7 +1428,7 @@ func handleKillQuery(ctx context.Context, deps DatabaseDeps, args map[string]any
 // Action: long_transactions — find long-running sessions
 // ---------------------------------------------------------------------------
 
-func handleLongTransactions(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
+func HandleLongTransactions(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil

@@ -26,18 +26,18 @@ func AnnotationsHandler(d AnnotationsDeps) ToolHandlerFunc {
 
 		switch action {
 		case "file":
-			return handleAnnotationsFile(ctx, d, args)
+			return HandleAnnotationsFile(ctx, d, args)
 		case "function":
-			return handleAnnotationsFunction(ctx, d, args)
+			return HandleAnnotationsFunction(ctx, d, args)
 		case "hotspots":
-			return handleAnnotationsHotspots(ctx, d, args)
+			return HandleAnnotationsHotspots(ctx, d, args)
 		default:
 			return NewToolResultError("unknown action: " + action + ". Use: file, function, hotspots"), nil
 		}
 	}
 }
 
-func handleAnnotationsFile(ctx context.Context, d AnnotationsDeps, args map[string]any) (*CallToolResult, error) {
+func HandleAnnotationsFile(ctx context.Context, d AnnotationsDeps, args map[string]any) (*CallToolResult, error) {
 	filePath, _ := args["path"].(string)
 	if filePath == "" {
 		return NewToolResultError("path is required for file action"), nil
@@ -125,7 +125,7 @@ func handleAnnotationsFile(ctx context.Context, d AnnotationsDeps, args map[stri
 	return NewToolResultText(string(data)), nil
 }
 
-func handleAnnotationsFunction(ctx context.Context, d AnnotationsDeps, args map[string]any) (*CallToolResult, error) {
+func HandleAnnotationsFunction(ctx context.Context, d AnnotationsDeps, args map[string]any) (*CallToolResult, error) {
 	controller, _ := args["controller"].(string)
 	endpoint, _ := args["endpoint"].(string)
 	service, _ := args["service"].(string)
@@ -165,7 +165,7 @@ func handleAnnotationsFunction(ctx context.Context, d AnnotationsDeps, args map[
 	return NewToolResultText(string(data)), nil
 }
 
-func handleAnnotationsHotspots(ctx context.Context, d AnnotationsDeps, args map[string]any) (*CallToolResult, error) {
+func HandleAnnotationsHotspots(ctx context.Context, d AnnotationsDeps, args map[string]any) (*CallToolResult, error) {
 	limit := 10
 	if v, ok := args["limit"].(float64); ok && v > 0 {
 		limit = int(v)

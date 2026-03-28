@@ -70,23 +70,23 @@ func ErrorsHandler(deps ErrorsDeps) ToolHandlerFunc {
 
 		switch action {
 		case "list":
-			return errorsList(ctx, deps, args)
+			return ErrorsList(ctx, deps, args)
 		case "detail":
-			return errorsDetail(ctx, deps, args)
+			return ErrorsDetail(ctx, deps, args)
 		case "investigate":
-			return errorsInvestigate(ctx, deps, args)
+			return ErrorsInvestigate(ctx, deps, args)
 		case "impact":
-			return errorsImpact(ctx, deps, args)
+			return ErrorsImpact(ctx, deps, args)
 		case "user_errors":
-			return errorsUserErrors(ctx, deps, args)
+			return ErrorsUserErrors(ctx, deps, args)
 		case "ranking":
-			return errorsRanking(ctx, deps, args)
+			return ErrorsRanking(ctx, deps, args)
 		case "resolve":
-			return errorsResolve(ctx, deps, args)
+			return ErrorsResolve(ctx, deps, args)
 		case "ignore":
-			return errorsIgnore(ctx, deps, args)
+			return ErrorsIgnore(ctx, deps, args)
 		case "new":
-			return handleNewErrors(ctx, deps, args)
+			return HandleNewErrors(ctx, deps, args)
 		default:
 			return NewToolResultError(fmt.Sprintf("unknown action: %q — valid actions: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, new", action)), nil
 		}
@@ -97,7 +97,7 @@ func ErrorsHandler(deps ErrorsDeps) ToolHandlerFunc {
 // Action: list — list error groups (from errorGroupsHandler)
 // ---------------------------------------------------------------------------
 
-func errorsList(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
+func ErrorsList(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.ErrorGroupStore == nil {
 		return NewToolResultError("ErrorGroupStore not configured"), nil
 	}
@@ -189,7 +189,7 @@ func errorsList(ctx context.Context, deps ErrorsDeps, args map[string]any) (*Cal
 // Action: detail — get error group details (from errorDetailHandler)
 // ---------------------------------------------------------------------------
 
-func errorsDetail(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
+func ErrorsDetail(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.ErrorGroupStore == nil {
 		return NewToolResultError("ErrorGroupStore not configured"), nil
 	}
@@ -313,7 +313,7 @@ func errorsDetail(ctx context.Context, deps ErrorsDeps, args map[string]any) (*C
 // Action: investigate — deep investigate (from investigateErrorHandler)
 // ---------------------------------------------------------------------------
 
-func errorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
+func ErrorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.LogStore == nil {
 		return NewToolResultError("LogStore not configured"), nil
 	}
@@ -580,7 +580,7 @@ func errorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 // Action: impact — error impact analysis (from errorImpactHandler)
 // ---------------------------------------------------------------------------
 
-func errorsImpact(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
+func ErrorsImpact(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.ErrorImpactStore == nil {
 		return NewToolResultError("ErrorImpactStore not configured"), nil
 	}
@@ -662,7 +662,7 @@ func errorsImpact(ctx context.Context, deps ErrorsDeps, args map[string]any) (*C
 // Action: user_errors — errors for a user (from userErrorsHandler)
 // ---------------------------------------------------------------------------
 
-func errorsUserErrors(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
+func ErrorsUserErrors(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.ErrorImpactStore == nil {
 		return NewToolResultError("ErrorImpactStore not configured"), nil
 	}
@@ -745,7 +745,7 @@ func errorsUserErrors(ctx context.Context, deps ErrorsDeps, args map[string]any)
 // Action: ranking — top errors by impact (from topErrorsByImpactHandler)
 // ---------------------------------------------------------------------------
 
-func errorsRanking(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
+func ErrorsRanking(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.ErrorImpactStore == nil {
 		return NewToolResultError("ErrorImpactStore not configured"), nil
 	}
@@ -844,7 +844,7 @@ func errorsRanking(ctx context.Context, deps ErrorsDeps, args map[string]any) (*
 // Action: resolve — resolve error group (from resolveErrorHandler)
 // ---------------------------------------------------------------------------
 
-func errorsResolve(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
+func ErrorsResolve(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.ErrorGroupStore == nil {
 		return NewToolResultError("ErrorGroupStore not configured"), nil
 	}
@@ -884,7 +884,7 @@ func errorsResolve(ctx context.Context, deps ErrorsDeps, args map[string]any) (*
 // Action: ignore — ignore error group (from ignoreErrorHandler)
 // ---------------------------------------------------------------------------
 
-func errorsIgnore(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
+func ErrorsIgnore(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.ErrorGroupStore == nil {
 		return NewToolResultError("ErrorGroupStore not configured"), nil
 	}
@@ -924,7 +924,7 @@ func errorsIgnore(ctx context.Context, deps ErrorsDeps, args map[string]any) (*C
 // Action: new — errors first seen within the given time window
 // ---------------------------------------------------------------------------
 
-func handleNewErrors(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
+func HandleNewErrors(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.ErrorGroupStore == nil {
 		return NewToolResultError("ErrorGroupStore not configured"), nil
 	}

@@ -26,15 +26,15 @@ func RunbookHandler(deps RunbookDeps) ToolHandlerFunc {
 
 		switch playbook {
 		case "slow_database":
-			result, err = runbookSlowDB(ctx, deps.Registry)
+			result, err = RunbookSlowDB(ctx, deps.Registry)
 		case "connection_exhaustion":
-			result, err = runbookConnExhaustion(ctx, deps.Registry)
+			result, err = RunbookConnExhaustion(ctx, deps.Registry)
 		case "disk_pressure":
-			result, err = runbookDiskPressure(ctx, deps.Registry)
+			result, err = RunbookDiskPressure(ctx, deps.Registry)
 		case "replication_lag":
-			result, err = runbookReplicationLag(ctx, deps.Registry)
+			result, err = RunbookReplicationLag(ctx, deps.Registry)
 		case "error_spike":
-			result, err = runbookErrorSpike(ctx, deps.LogStore)
+			result, err = RunbookErrorSpike(ctx, deps.LogStore)
 		default:
 			return NewToolResultError(fmt.Sprintf("unknown playbook %q. Available: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike", playbook)), nil
 		}
@@ -55,7 +55,7 @@ func RunbookHandler(deps RunbookDeps) ToolHandlerFunc {
 // Runbook implementations
 // ---------------------------------------------------------------------------
 
-func runbookSlowDB(ctx context.Context, registry *connector.Registry) (*CallToolResult, error) {
+func RunbookSlowDB(ctx context.Context, registry *connector.Registry) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(registry)
 	if errResult != nil {
 		return errResult, nil
@@ -172,7 +172,7 @@ func runbookSlowDB(ctx context.Context, registry *connector.Registry) (*CallTool
 	return NewToolResultText(string(data)), nil
 }
 
-func runbookConnExhaustion(ctx context.Context, registry *connector.Registry) (*CallToolResult, error) {
+func RunbookConnExhaustion(ctx context.Context, registry *connector.Registry) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(registry)
 	if errResult != nil {
 		return errResult, nil
@@ -241,7 +241,7 @@ func runbookConnExhaustion(ctx context.Context, registry *connector.Registry) (*
 	return NewToolResultText(string(data)), nil
 }
 
-func runbookDiskPressure(ctx context.Context, registry *connector.Registry) (*CallToolResult, error) {
+func RunbookDiskPressure(ctx context.Context, registry *connector.Registry) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(registry)
 	if errResult != nil {
 		return errResult, nil
@@ -297,7 +297,7 @@ func runbookDiskPressure(ctx context.Context, registry *connector.Registry) (*Ca
 	return NewToolResultText(string(data)), nil
 }
 
-func runbookReplicationLag(ctx context.Context, registry *connector.Registry) (*CallToolResult, error) {
+func RunbookReplicationLag(ctx context.Context, registry *connector.Registry) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(registry)
 	if errResult != nil {
 		return errResult, nil
@@ -364,7 +364,7 @@ func runbookReplicationLag(ctx context.Context, registry *connector.Registry) (*
 	return NewToolResultText(string(data)), nil
 }
 
-func runbookErrorSpike(ctx context.Context, logStore store.LogStore) (*CallToolResult, error) {
+func RunbookErrorSpike(ctx context.Context, logStore store.LogStore) (*CallToolResult, error) {
 	sections := make(map[string]any)
 	var diagnosis []string
 	now := time.Now().UTC()

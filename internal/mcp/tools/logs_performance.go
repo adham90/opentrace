@@ -14,7 +14,7 @@ import (
 // action: performance — request performance analysis (from requestPerformanceHandler)
 // ---------------------------------------------------------------------------
 
-func logsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
+func LogsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	// Parse time range (default: 24h).
 	timeRange := "24h"
 	if v, ok := args["time_range"].(string); ok && v != "" {
