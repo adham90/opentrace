@@ -20,9 +20,6 @@ type Config struct {
 
 	TrustedProxies []string
 
-	TLSCert string
-	TLSKey  string
-
 	CORSAllowedOrigins []string
 
 	DevMode bool
@@ -95,8 +92,6 @@ func Load() (*Config, error) {
 		MaxQueryRows:       maxQueryRows,
 		StatementTimeoutMS: stmtTimeout,
 		TrustedProxies:     parseTrustedProxies(os.Getenv("OPENTRACE_TRUSTED_PROXIES")),
-		TLSCert:            os.Getenv("OPENTRACE_TLS_CERT"),
-		TLSKey:             os.Getenv("OPENTRACE_TLS_KEY"),
 		CORSAllowedOrigins: parseCORSOrigins(os.Getenv("OPENTRACE_CORS_ORIGINS")),
 		DevMode:            os.Getenv("OPENTRACE_DEV") == "true",
 	}, nil

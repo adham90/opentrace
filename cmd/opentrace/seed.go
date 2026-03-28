@@ -20,7 +20,16 @@ func runSeed() error {
 	}
 	defer deps.DB.Close()
 
-	slog.Info("seeding database")
+	slog.Info("seeding database (idempotent — clears old seed data)")
+
+	// Clear old seed data for idempotency.
+	tables := []string{"watch_alerts", "watch_runs", "watches", "request_summaries",
+		"error_group_events", "error_groups", "deploys", "logs", "data_sources",
+		"metric_points", "servers"}
+	for _, t := range tables {
+		deps.DB.ExecContext(ctx, "DELETE FROM "+t)
+	}
+	slog.Info("cleared old seed data")
 
 	// --- Servers ---
 	servers := []store.RegisterServerParams{
@@ -39,14 +48,14 @@ func runSeed() error {
 			return fmt.Errorf("registering server %s: %w", p.Hostname, err)
 		}
 		serverIDs = append(serverIDs, s.ID)
-		slog.Info("seeded server", "hostname", p.Hostname, "id", s.ID)
 	}
+	slog.Info("seeded servers", "count", len(serverIDs))
 
-	// --- Metrics for each server ---
+	// --- Metrics for each server (60 points over 2 hours) ---
 	metricStore := deps.MetricStore
 	for i, sid := range serverIDs {
-		for m := 0; m < 30; m++ {
-			ts := time.Now().Add(-time.Duration(30-m) * 2 * time.Minute)
+		for m := 0; m < 60; m++ {
+			ts := time.Now().Add(-time.Duration(60-m) * 2 * time.Minute)
 			cpuBase := 15.0 + float64(i*10)
 			memBase := 40.0 + float64(i*8)
 			samples := []store.MetricSample{
@@ -59,11 +68,13 @@ func runSeed() error {
 			metricStore.BatchInsert(ctx, sid, ts, samples)
 		}
 	}
-	slog.Info("seeded metrics", "servers", len(serverIDs), "snapshots", 30)
+	slog.Info("seeded metrics", "servers", len(serverIDs))
 
-	// --- Logs ---
+	// --- Logs (spread over 7 days for time range testing) ---
 	services := []string{"payment-api", "user-service", "gateway", "notification-service", "order-service"}
-	levels := []string{"DEBUG", "INFO", "INFO", "INFO", "WARN", "ERROR"} // weighted toward INFO
+	environments := []string{"production", "production", "production", "staging"} // weighted to production
+	levels := []string{"DEBUG", "INFO", "INFO", "INFO", "INFO", "WARN", "ERROR"}
+
 	messages := map[string][]string{
 		"DEBUG": {
 			"Cache miss for key user:session:abc123",
@@ -79,7 +90,6 @@ func runSeed() error {
 			"Webhook delivered to https://hooks.example.com/notify",
 			"Background job completed: email_digest (processed 142 items)",
 			"Health check passed for upstream service",
-			"New deployment v2.14.3 rolling out",
 			"Cache warmed: 2,847 entries loaded in 3.2s",
 			"Rate limit reset for client app-mobile-ios",
 		},
@@ -102,50 +112,103 @@ func runSeed() error {
 		},
 	}
 
-	// Error fingerprints and exception classes for realistic error grouping
+	// Error details for realistic error grouping.
 	errorDetails := []struct {
 		exceptionClass   string
 		errorFingerprint string
 		message          string
+		sourceFile       string
+		sourceLine       int
 	}{
-		{"CardDeclinedException", "fp-card-declined-001", "Failed to process payment: card declined (4111****1234)"},
-		{"ConnectionTimeoutError", "fp-db-timeout-002", "Database connection timeout after 30s"},
-		{"NullPointerException", "fp-npe-orders-003", "Unhandled exception in /api/v1/orders: NullPointerException"},
-		{"ServiceUnavailableError", "fp-upstream-503-004", "External API returned 503: service unavailable"},
-		{"SMTPConnectionError", "fp-smtp-refused-005", "Failed to send notification email: SMTP connection refused"},
-		{"RateLimitExceeded", "fp-rate-limit-006", "Rate limit exceeded for client app-web-dashboard"},
-		{"TLSHandshakeError", "fp-tls-expired-007", "TLS handshake failed with upstream: certificate expired"},
+		{"CardDeclinedException", "fp-card-declined-001", "Failed to process payment: card declined (4111****1234)", "app/services/payment_processor.rb", 142},
+		{"ConnectionTimeoutError", "fp-db-timeout-002", "Database connection timeout after 30s", "app/models/order.rb", 67},
+		{"NullPointerException", "fp-npe-orders-003", "Unhandled exception in /api/v1/orders: NullPointerException", "app/controllers/orders_controller.rb", 28},
+		{"ServiceUnavailableError", "fp-upstream-503-004", "External API returned 503: service unavailable", "app/services/notification_client.rb", 95},
+		{"SMTPConnectionError", "fp-smtp-refused-005", "Failed to send notification email: SMTP connection refused", "app/mailers/order_mailer.rb", 33},
+		{"RateLimitExceeded", "fp-rate-limit-006", "Rate limit exceeded for client app-web-dashboard", "app/middleware/rate_limiter.rb", 51},
+		{"TLSHandshakeError", "fp-tls-expired-007", "TLS handshake failed with upstream: certificate expired", "lib/http_client.rb", 88},
 	}
 
-	var logEntries []store.LogEntry
+	// NEW errors — first seen recently (for "what's new" testing).
+	newErrorDetails := []struct {
+		exceptionClass   string
+		errorFingerprint string
+		message          string
+		sourceFile       string
+		sourceLine       int
+	}{
+		{"MemoryQuotaExceeded", "fp-mem-quota-008", "Worker process exceeded memory quota (512MB limit)", "app/jobs/report_generator.rb", 112},
+		{"DeadlockDetected", "fp-deadlock-009", "Database deadlock detected on table 'inventory'", "app/models/inventory.rb", 45},
+		{"InvalidJWTSignature", "fp-jwt-invalid-010", "JWT signature verification failed for request to /api/v1/admin", "app/middleware/auth.rb", 72},
+	}
+
 	now := time.Now()
-	for i := 0; i < 2000; i++ {
+	var logEntries []store.LogEntry
+
+	// Generate 5000 logs spread over 7 days.
+	for i := 0; i < 5000; i++ {
 		level := levels[rand.Intn(len(levels))]
 		svc := services[rand.Intn(len(services))]
+		env := environments[rand.Intn(len(environments))]
 		msgs := messages[level]
 		msg := msgs[rand.Intn(len(msgs))]
-		ts := now.Add(-time.Duration(rand.Intn(86400)) * time.Second) // last 24 hours
+		// Spread over 7 days with more weight on recent.
+		hoursAgo := rand.ExpFloat64() * 24 // exponential: most logs recent
+		if hoursAgo > 168 {
+			hoursAgo = 168 // cap at 7 days
+		}
+		ts := now.Add(-time.Duration(hoursAgo * float64(time.Hour)))
 
 		entry := store.LogEntry{
-			Timestamp: ts,
-			Level:     level,
-			Service:   svc,
-			Message:   msg,
+			Timestamp:   ts,
+			Level:       level,
+			Service:     svc,
+			Message:     msg,
+			Environment: env,
 		}
-		if rand.Float32() < 0.3 {
+		if rand.Float32() < 0.4 {
 			entry.TraceID = fmt.Sprintf("trace-%s", uuid.New().String()[:8])
 		}
-		// Add error details to ERROR entries
+		if rand.Float32() < 0.2 {
+			entry.RequestID = fmt.Sprintf("req-%s", uuid.New().String()[:8])
+		}
+
+		// Add error details.
 		if level == "ERROR" {
 			ed := errorDetails[rand.Intn(len(errorDetails))]
 			entry.ExceptionClass = ed.exceptionClass
 			entry.ErrorFingerprint = ed.errorFingerprint
 			entry.Message = ed.message
+			entry.SourceFile = ed.sourceFile
+			entry.SourceLine = ed.sourceLine
 		}
 		logEntries = append(logEntries, entry)
 	}
 
-	// --- Business event logs (event_type) ---
+	// Add "new" errors (first seen in last 2 hours).
+	for i := 0; i < 30; i++ {
+		ned := newErrorDetails[rand.Intn(len(newErrorDetails))]
+		svc := services[rand.Intn(len(services))]
+		ts := now.Add(-time.Duration(rand.Intn(120)) * time.Minute) // last 2 hours
+
+		entry := store.LogEntry{
+			Timestamp:        ts,
+			Level:            "ERROR",
+			Service:          svc,
+			Message:          ned.message,
+			ExceptionClass:   ned.exceptionClass,
+			ErrorFingerprint: ned.errorFingerprint,
+			SourceFile:       ned.sourceFile,
+			SourceLine:       ned.sourceLine,
+			Environment:      "production",
+		}
+		if rand.Float32() < 0.5 {
+			entry.TraceID = fmt.Sprintf("trace-%s", uuid.New().String()[:8])
+		}
+		logEntries = append(logEntries, entry)
+	}
+
+	// Business event logs.
 	eventEntries := []struct {
 		eventType string
 		service   string
@@ -170,11 +233,12 @@ func runSeed() error {
 	for _, ev := range eventEntries {
 		ts := now.Add(-time.Duration(rand.Intn(86400)) * time.Second)
 		entry := store.LogEntry{
-			Timestamp: ts,
-			Level:     "INFO",
-			Service:   ev.service,
-			Message:   ev.message,
-			EventType: ev.eventType,
+			Timestamp:   ts,
+			Level:       "INFO",
+			Service:     ev.service,
+			Message:     ev.message,
+			EventType:   ev.eventType,
+			Environment: "production",
 		}
 		if rand.Float32() < 0.3 {
 			entry.TraceID = fmt.Sprintf("trace-%s", uuid.New().String()[:8])
@@ -189,13 +253,70 @@ func runSeed() error {
 	}
 	slog.Info("seeded logs", "count", n)
 
+	// --- Request Summaries (for analytics) ---
+	controllers := []struct {
+		controller string
+		action     string
+		method     string
+		path       string
+		service    string
+	}{
+		{"OrdersController", "index", "GET", "/api/v1/orders", "order-service"},
+		{"OrdersController", "create", "POST", "/api/v1/orders", "order-service"},
+		{"OrdersController", "show", "GET", "/api/v1/orders/:id", "order-service"},
+		{"PaymentsController", "charge", "POST", "/api/v1/payments/charge", "payment-api"},
+		{"PaymentsController", "refund", "POST", "/api/v1/payments/refund", "payment-api"},
+		{"UsersController", "login", "POST", "/api/v1/auth/login", "user-service"},
+		{"UsersController", "profile", "GET", "/api/v1/users/me", "user-service"},
+		{"NotificationsController", "send", "POST", "/api/v1/notifications", "notification-service"},
+		{"HealthController", "check", "GET", "/health", "gateway"},
+		{"ReportsController", "summary", "GET", "/api/v1/reports/summary", "gateway"},
+	}
+
+	// Pick INFO log IDs to link request_summaries to.
+	var infoLogIDs []int64
+	rows, err := deps.DB.QueryContext(ctx, "SELECT id FROM logs WHERE level = 'INFO' ORDER BY RANDOM() LIMIT 500")
+	if err == nil {
+		for rows.Next() {
+			var id int64
+			if rows.Scan(&id) == nil {
+				infoLogIDs = append(infoLogIDs, id)
+			}
+		}
+		rows.Close()
+	}
+
+	reqCount := 0
+	for i, logID := range infoLogIDs {
+		c := controllers[i%len(controllers)]
+		duration := 20 + rand.Float64()*300 // 20-320ms
+		sqlCount := rand.Intn(8)
+		status := 200
+		if rand.Float32() < 0.05 {
+			status = 500
+		} else if rand.Float32() < 0.08 {
+			status = 404
+		} else if rand.Float32() < 0.03 {
+			status = 422
+		}
+		_, err := deps.DB.ExecContext(ctx,
+			`INSERT INTO request_summaries (log_id, controller, action, method, path, status, duration_ms, sql_count, sql_total_ms)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			logID, c.controller, c.action, c.method, c.path, status, duration, sqlCount, float64(sqlCount)*5.5,
+		)
+		if err == nil {
+			reqCount++
+		}
+	}
+	slog.Info("seeded request summaries", "count", reqCount)
+
 	// --- Error Groups (from error log entries) ---
 	errorGroupStore := deps.ErrorGroupStore
 	errorGroupCount := 0
 	for _, entry := range logEntries {
 		if entry.ErrorFingerprint != "" {
 			if err := errorGroupStore.Upsert(ctx, entry); err != nil {
-				slog.Warn("failed to upsert error group", "fingerprint", entry.ErrorFingerprint, "error", err)
+				// Ignore dups.
 			} else {
 				errorGroupCount++
 			}
@@ -203,255 +324,112 @@ func runSeed() error {
 	}
 	slog.Info("seeded error groups", "upserted", errorGroupCount)
 
-	// --- Watches (new agent-first system) ---
+	// --- Deploys (for deploy history/impact testing) ---
+	deployDefs := []struct {
+		service     string
+		env         string
+		commit      string
+		branch      string
+		author      string
+		daysAgo     int
+		status      store.DeployStatus
+		preErr      *float64
+		postErr     *float64
+		files       []string
+	}{
+		{"gateway", "production", "a1b2c3d", "main", "alice@example.com", 0, store.DeployStatusMeasured, ptr(0.02), ptr(0.05), []string{"lib/http_client.rb", "config/tls.yml"}},
+		{"payment-api", "production", "e4f5g6h", "main", "bob@example.com", 1, store.DeployStatusMeasured, ptr(0.01), ptr(0.01), []string{"app/services/payment_processor.rb"}},
+		{"order-service", "production", "i7j8k9l", "release/v2.15", "charlie@example.com", 2, store.DeployStatusMeasured, ptr(0.03), ptr(0.04), []string{"app/controllers/orders_controller.rb", "app/models/order.rb"}},
+		{"user-service", "production", "m0n1o2p", "main", "alice@example.com", 3, store.DeployStatusMeasured, ptr(0.005), ptr(0.005), []string{"app/controllers/users_controller.rb"}},
+		{"notification-service", "production", "q3r4s5t", "main", "bob@example.com", 5, store.DeployStatusMeasured, ptr(0.01), ptr(0.08), []string{"app/services/notification_client.rb", "app/mailers/order_mailer.rb"}},
+		{"gateway", "staging", "u6v7w8x", "feature/new-auth", "charlie@example.com", 0, store.DeployStatusPending, nil, nil, []string{"app/middleware/auth.rb"}},
+	}
+
+	for _, d := range deployDefs {
+		deployedAt := now.Add(-time.Duration(d.daysAgo) * 24 * time.Hour)
+		_, err := deps.DB.ExecContext(ctx,
+			`INSERT INTO deploys (service, environment, commit_hash, branch, author, files_changed_json, status, pre_error_rate, post_error_rate, deployed_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			d.service, d.env, d.commit, d.branch, d.author, "[]", string(d.status), d.preErr, d.postErr, deployedAt.Format(time.RFC3339),
+		)
+		if err != nil {
+			slog.Warn("failed to seed deploy", "service", d.service, "error", err)
+		} else {
+			slog.Info("seeded deploy", "service", d.service, "commit", d.commit, "days_ago", d.daysAgo)
+		}
+	}
+
+	// --- Watches ---
 	watchStore := deps.WatchStore
 
 	watchDefs := []store.CreateWatchParams{
-		{
-			Metric:         store.WatchMetricErrorRate,
-			Operator:       store.WatchOpGreaterThan,
-			Threshold:      0.05,
-			Service:        "payment-api",
-			Duration:       "2h",
-			Urgency:        store.WatchUrgencyCritical,
-			CheckInterval:  "1m",
-			BaselineWindow: "1h",
-			MinConsecutive: 3,
-			CreatedBy:      "claude-code",
-			SessionID:      "seed-session-001",
-		},
-		{
-			Metric:         store.WatchMetricResponseTime,
-			Operator:       store.WatchOpGreaterThan,
-			Threshold:      500,
-			Service:        "gateway",
-			Duration:       "4h",
-			Urgency:        store.WatchUrgencyHigh,
-			CheckInterval:  "2m",
-			BaselineWindow: "30m",
-			MinConsecutive: 2,
-			CreatedBy:      "claude-code",
-			SessionID:      "seed-session-001",
-		},
-		{
-			Metric:         store.WatchMetricP95Response,
-			Operator:       store.WatchOpGreaterThan,
-			Threshold:      1200,
-			Service:        "order-service",
-			Endpoint:       "/api/v1/orders",
-			Duration:       "1h",
-			Urgency:        store.WatchUrgencyNormal,
-			CheckInterval:  "5m",
-			BaselineWindow: "1h",
-			MinConsecutive: 2,
-			CreatedBy:      "claude-code",
-			SessionID:      "seed-session-002",
-		},
-		{
-			Metric:         store.WatchMetricErrorCount,
-			Operator:       store.WatchOpGreaterThan,
-			Threshold:      50,
-			Service:        "notification-service",
-			Duration:       "6h",
-			Urgency:        store.WatchUrgencyNormal,
-			CheckInterval:  "5m",
-			BaselineWindow: "1h",
-			MinConsecutive: 1,
-			CreatedBy:      "claude-code",
-			SessionID:      "seed-session-002",
-		},
-		{
-			Metric:         store.WatchMetricHeartbeat,
-			Operator:       store.WatchOpLessThan,
-			Threshold:      1,
-			Service:        "payment-api",
-			Duration:       "8h",
-			Urgency:        store.WatchUrgencyCritical,
-			CheckInterval:  "1m",
-			BaselineWindow: "5m",
-			MinConsecutive: 3,
-			CreatedBy:      "claude-code",
-			SessionID:      "seed-session-001",
-		},
-		{
-			Metric:         store.WatchMetricLogCount,
-			Operator:       store.WatchOpGreaterThan,
-			Threshold:      1000,
-			Service:        "user-service",
-			Environment:    "production",
-			Duration:       "3h",
-			Urgency:        store.WatchUrgencyLow,
-			CheckInterval:  "10m",
-			BaselineWindow: "1h",
-			MinConsecutive: 2,
-			CreatedBy:      "claude-code",
-			SessionID:      "seed-session-003",
-		},
-		{
-			Metric:         store.WatchMetricErrorRate,
-			Operator:       store.WatchOpGreaterThan,
-			Threshold:      0.10,
-			Service:        "gateway",
-			CommitHash:     "a1b2c3d",
-			Duration:       "30m",
-			Urgency:        store.WatchUrgencyHigh,
-			CheckInterval:  "30s",
-			BaselineWindow: "15m",
-			MinConsecutive: 2,
-			CreatedBy:      "claude-code",
-			SessionID:      "seed-session-003",
-		},
-		{
-			Metric:         store.WatchMetricResponseTime,
-			Operator:       store.WatchOpGreaterThan,
-			Threshold:      800,
-			Service:        "payment-api",
-			Endpoint:       "/api/v1/checkout",
-			Duration:       "2h",
-			Urgency:        store.WatchUrgencyCritical,
-			CheckInterval:  "1m",
-			BaselineWindow: "30m",
-			MinConsecutive: 3,
-			CreatedBy:      "claude-code",
-			SessionID:      "seed-session-001",
-		},
+		{Metric: store.WatchMetricErrorRate, Operator: store.WatchOpGreaterThan, Threshold: 0.05, Service: "payment-api", Duration: "2h", Urgency: store.WatchUrgencyCritical, CheckInterval: "1m", BaselineWindow: "1h", MinConsecutive: 3, CreatedBy: "claude-code", SessionID: "seed-session-001"},
+		{Metric: store.WatchMetricResponseTime, Operator: store.WatchOpGreaterThan, Threshold: 500, Service: "gateway", Duration: "4h", Urgency: store.WatchUrgencyHigh, CheckInterval: "2m", BaselineWindow: "30m", MinConsecutive: 2, CreatedBy: "claude-code", SessionID: "seed-session-001"},
+		{Metric: store.WatchMetricP95Response, Operator: store.WatchOpGreaterThan, Threshold: 1200, Service: "order-service", Endpoint: "/api/v1/orders", Duration: "1h", Urgency: store.WatchUrgencyNormal, CheckInterval: "5m", BaselineWindow: "1h", MinConsecutive: 2, CreatedBy: "claude-code", SessionID: "seed-session-002"},
+		{Metric: store.WatchMetricErrorCount, Operator: store.WatchOpGreaterThan, Threshold: 50, Service: "notification-service", Duration: "6h", Urgency: store.WatchUrgencyNormal, CheckInterval: "5m", BaselineWindow: "1h", MinConsecutive: 1, CreatedBy: "claude-code", SessionID: "seed-session-002"},
+		{Metric: store.WatchMetricHeartbeat, Operator: store.WatchOpLessThan, Threshold: 1, Service: "payment-api", Duration: "8h", Urgency: store.WatchUrgencyCritical, CheckInterval: "1m", BaselineWindow: "5m", MinConsecutive: 3, CreatedBy: "claude-code", SessionID: "seed-session-001"},
+		{Metric: store.WatchMetricResponseTime, Operator: store.WatchOpGreaterThan, Threshold: 800, Service: "payment-api", Endpoint: "/api/v1/checkout", Duration: "2h", Urgency: store.WatchUrgencyCritical, CheckInterval: "1m", BaselineWindow: "30m", MinConsecutive: 3, CreatedBy: "claude-code", SessionID: "seed-session-001"},
 	}
 
 	var watchIDs []string
 	for _, p := range watchDefs {
 		w, err := watchStore.Create(ctx, p)
 		if err != nil {
-			return fmt.Errorf("creating watch (metric=%s, service=%s): %w", p.Metric, p.Service, err)
+			return fmt.Errorf("creating watch: %w", err)
 		}
 		watchIDs = append(watchIDs, w.ID)
-		slog.Info("seeded watch", "metric", p.Metric, "service", p.Service, "id", w.ID)
 	}
+	slog.Info("seeded watches", "count", len(watchIDs))
 
-	// Set some watches to different statuses for variety
-	// [2] triggered — p95 breached
+	// Set statuses.
 	watchStore.UpdateStatus(ctx, watchIDs[2], store.WatchStatusTriggered)
 	watchStore.UpdateAfterCheck(ctx, watchIDs[2], 1450, 3, now.Add(5*time.Minute))
-
-	// [6] expired — short-lived deploy watch
-	watchStore.UpdateStatus(ctx, watchIDs[6], store.WatchStatusExpired)
-
-	// [4] triggered — heartbeat missing
 	watchStore.UpdateStatus(ctx, watchIDs[4], store.WatchStatusTriggered)
 	watchStore.UpdateAfterCheck(ctx, watchIDs[4], 0, 4, now.Add(time.Minute))
 
-	slog.Info("seeded watch statuses")
-
-	// --- Watch Runs ---
-	type runDef struct {
+	// Watch runs.
+	runs := []struct {
 		idx     int
 		value   float64
 		breach  bool
 		summary string
-		fail    string
+	}{
+		{0, 0.02, false, "error_rate=0.02 (threshold 0.05): OK"},
+		{0, 0.08, true, "error_rate=0.08 (threshold 0.05): BREACH"},
+		{1, 180, false, "response_time=180ms (threshold 500ms): OK"},
+		{1, 220, false, "response_time=220ms (threshold 500ms): OK"},
+		{2, 800, false, "p95_response=800ms (threshold 1200ms): OK"},
+		{2, 1350, true, "p95_response=1350ms (threshold 1200ms): BREACH"},
+		{2, 1500, true, "p95_response=1500ms (threshold 1200ms): BREACH"},
+		{3, 12, false, "error_count=12 (threshold 50): OK"},
+		{4, 5, false, "heartbeat: 5 events (threshold 1): OK"},
+		{4, 0, true, "heartbeat: 0 events (threshold 1): BREACH"},
+		{4, 0, true, "heartbeat: 0 events (threshold 1): BREACH"},
+		{5, 350, false, "response_time=350ms (threshold 800ms): OK"},
+		{5, 920, true, "response_time=920ms (threshold 800ms): BREACH"},
 	}
-	runs := []runDef{
-		// [0] payment-api error_rate — mostly clean, recent breach
-		{0, 0.02, false, "error_rate=0.02 (threshold 0.05): OK", ""},
-		{0, 0.03, false, "error_rate=0.03 (threshold 0.05): OK", ""},
-		{0, 0.04, false, "error_rate=0.04 (threshold 0.05): OK", ""},
-		{0, 0.08, true, "error_rate=0.08 (threshold 0.05): BREACH", ""},
-		{0, 0.06, true, "error_rate=0.06 (threshold 0.05): BREACH", ""},
-		// [1] gateway response_time — clean
-		{1, 180, false, "response_time=180ms (threshold 500ms): OK", ""},
-		{1, 220, false, "response_time=220ms (threshold 500ms): OK", ""},
-		{1, 310, false, "response_time=310ms (threshold 500ms): OK", ""},
-		// [2] order-service p95 — triggered
-		{2, 800, false, "p95_response=800ms (threshold 1200ms): OK", ""},
-		{2, 1100, false, "p95_response=1100ms (threshold 1200ms): OK", ""},
-		{2, 1350, true, "p95_response=1350ms (threshold 1200ms): BREACH", ""},
-		{2, 1450, true, "p95_response=1450ms (threshold 1200ms): BREACH", ""},
-		{2, 1500, true, "p95_response=1500ms (threshold 1200ms): BREACH", ""},
-		// [3] notification error_count — clean
-		{3, 12, false, "error_count=12 (threshold 50): OK", ""},
-		{3, 8, false, "error_count=8 (threshold 50): OK", ""},
-		// [4] payment-api heartbeat — triggered
-		{4, 5, false, "heartbeat: 5 events in window (threshold 1): OK", ""},
-		{4, 3, false, "heartbeat: 3 events in window (threshold 1): OK", ""},
-		{4, 0, true, "heartbeat: 0 events in window (threshold 1): BREACH", ""},
-		{4, 0, true, "heartbeat: 0 events in window (threshold 1): BREACH", ""},
-		{4, 0, true, "heartbeat: 0 events in window (threshold 1): BREACH", ""},
-		// [5] user-service log_count — one failure
-		{5, 450, false, "log_count=450 (threshold 1000): OK", ""},
-		{5, 0, false, "", "failed to query log store: context deadline exceeded"},
-		{5, 520, false, "log_count=520 (threshold 1000): OK", ""},
-		// [7] payment-api checkout response_time — escalating
-		{7, 350, false, "response_time=350ms (threshold 800ms): OK", ""},
-		{7, 600, false, "response_time=600ms (threshold 800ms): OK", ""},
-		{7, 850, true, "response_time=850ms (threshold 800ms): BREACH", ""},
-		{7, 920, true, "response_time=920ms (threshold 800ms): BREACH", ""},
-	}
-
 	for _, r := range runs {
 		run, err := watchStore.CreateRun(ctx, watchIDs[r.idx])
 		if err != nil {
 			continue
 		}
-		if r.fail != "" {
-			watchStore.FailRun(ctx, run.ID, r.fail)
-		} else {
-			watchStore.CompleteRun(ctx, run.ID, r.value, r.breach, r.summary)
-		}
+		watchStore.CompleteRun(ctx, run.ID, r.value, r.breach, r.summary)
 	}
 	slog.Info("seeded watch runs", "count", len(runs))
 
-	// --- Watch Alerts ---
-	watchAlertDefs := []store.CreateWatchAlertParams{
-		{
-			WatchID:        watchIDs[2],
-			Urgency:        store.WatchUrgencyNormal,
-			Summary:        "p95 response time for order-service /api/v1/orders has exceeded 1200ms for 3 consecutive checks. Current value: 1500ms. Likely caused by missing index on orders.customer_id — recent EXPLAIN shows sequential scan.",
-			TriggerMetric:  "p95_response",
-			TriggerValue:   1500,
-			ThresholdValue: 1200,
-		},
-		{
-			WatchID:        watchIDs[4],
-			Urgency:        store.WatchUrgencyCritical,
-			Summary:        "payment-api heartbeat missing. Zero events detected in the last 5 minutes across 4 consecutive checks. The service may be down or experiencing a complete outage. Last known activity was 22 minutes ago.",
-			TriggerMetric:  "heartbeat",
-			TriggerValue:   0,
-			ThresholdValue: 1,
-		},
-		{
-			WatchID:        watchIDs[0],
-			Urgency:        store.WatchUrgencyCritical,
-			Summary:        "Error rate for payment-api spiked to 8% (threshold 5%). 2 consecutive breaches detected. Top errors: CardDeclinedException (62%), TimeoutException (28%). Correlates with deployment a1b2c3d rolled out 18 minutes ago.",
-			TriggerMetric:  "error_rate",
-			TriggerValue:   0.08,
-			ThresholdValue: 0.05,
-		},
-		{
-			WatchID:        watchIDs[7],
-			Urgency:        store.WatchUrgencyHigh,
-			Summary:        "Checkout endpoint response time at 920ms (threshold 800ms). 2 consecutive breaches. Slow queries on payment_transactions table detected. Consider checking database connection pool saturation.",
-			TriggerMetric:  "response_time",
-			TriggerValue:   920,
-			ThresholdValue: 800,
-		},
+	// Watch alerts.
+	alertDefs := []store.CreateWatchAlertParams{
+		{WatchID: watchIDs[2], Urgency: store.WatchUrgencyNormal, Summary: "p95 response time for order-service exceeded 1200ms for 3 checks. Current: 1500ms.", TriggerMetric: "p95_response", TriggerValue: 1500, ThresholdValue: 1200},
+		{WatchID: watchIDs[4], Urgency: store.WatchUrgencyCritical, Summary: "payment-api heartbeat missing. Zero events for 5+ minutes. Service may be down.", TriggerMetric: "heartbeat", TriggerValue: 0, ThresholdValue: 1},
+		{WatchID: watchIDs[0], Urgency: store.WatchUrgencyCritical, Summary: "Error rate for payment-api spiked to 8% (threshold 5%).", TriggerMetric: "error_rate", TriggerValue: 0.08, ThresholdValue: 0.05},
+		{WatchID: watchIDs[5], Urgency: store.WatchUrgencyHigh, Summary: "Checkout endpoint response time 920ms (threshold 800ms).", TriggerMetric: "response_time", TriggerValue: 920, ThresholdValue: 800},
 	}
-
-	for _, p := range watchAlertDefs {
-		a, err := watchStore.CreateAlert(ctx, p)
-		if err != nil {
-			return fmt.Errorf("creating watch alert: %w", err)
-		}
-		slog.Info("seeded watch alert", "id", a.ID, "urgency", p.Urgency)
+	for _, p := range alertDefs {
+		watchStore.CreateAlert(ctx, p)
 	}
+	slog.Info("seeded watch alerts", "count", len(alertDefs))
 
-	// Acknowledge one alert for variety
-	alerts, _ := watchStore.ListAlerts(ctx, watchIDs[0], "", 10)
-	if len(alerts) > 0 {
-		watchStore.AcknowledgeAlert(ctx, alerts[0].ID)
-	}
-
-	slog.Info("seeded watch alerts")
-
-	// --- Data Sources (connectors) ---
+	// --- Data Sources ---
 	dsStore := deps.DSStore
 	dsDefs := []store.CreateDataSourceParams{
 		{Type: store.ConnectorLogs, Name: "Production Logs", Config: map[string]any{}},
@@ -460,14 +438,22 @@ func runSeed() error {
 	for _, p := range dsDefs {
 		ds, err := dsStore.Create(ctx, p)
 		if err != nil {
-			return fmt.Errorf("creating data source %q: %w", p.Name, err)
+			slog.Warn("failed to create connector", "name", p.Name, "error", err)
+			continue
 		}
-		// Mark as connected
 		status := store.StatusConnected
 		dsStore.Update(ctx, ds.ID, store.UpdateDataSourceParams{Status: &status})
-		slog.Info("seeded connector", "name", p.Name)
 	}
+	slog.Info("seeded connectors", "count", len(dsDefs))
 
-	slog.Info("seed complete")
+	slog.Info("seed complete",
+		"logs", len(logEntries),
+		"servers", len(serverIDs),
+		"watches", len(watchIDs),
+		"deploys", len(deployDefs),
+		"request_summaries", reqCount,
+	)
 	return nil
 }
+
+func ptr(f float64) *float64 { return &f }

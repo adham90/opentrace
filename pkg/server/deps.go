@@ -65,7 +65,4 @@ type Deps struct {
 
 	// LoginLimiter is rate-limiting middleware for login/register endpoints.
 	LoginLimiter func(http.Handler) http.Handler
-
-	// SecureCookies indicates whether cookies should have the Secure flag.
-	SecureCookies bool
 }

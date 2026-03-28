@@ -122,7 +122,7 @@ func handleTraffic(ctx context.Context, d AnalyticsDeps, args map[string]any) (*
 			"action": "trends",
 			"metric": "error_rate", "since": sinceStr,
 		}),
-		Suggest("error_groups", "See current application errors", nil),
+		Suggest("errors", "See current application errors", map[string]any{"action": "list"}),
 	)
 
 	data, _ := json.Marshal(resp)
@@ -213,7 +213,8 @@ func handleEndpoints(ctx context.Context, d AnalyticsDeps, args map[string]any) 
 	}
 
 	resp = WithSuggestions(resp,
-		Suggest("request_performance", "Drill into a specific endpoint's performance", map[string]any{
+		Suggest("logs", "Drill into a specific endpoint's performance", map[string]any{
+			"action":     "performance",
 			"time_range": sinceStr,
 		}),
 		Suggest("analytics", "View trend over time for a metric", map[string]any{
@@ -428,7 +429,8 @@ func handleTrends(ctx context.Context, d AnalyticsDeps, args map[string]any) (*m
 			"action": "movers",
 			"metric": metric, "since": sinceStr,
 		}),
-		Suggest("request_performance", "Drill into request-level performance", map[string]any{
+		Suggest("logs", "Drill into request-level performance", map[string]any{
+			"action":     "performance",
 			"time_range": sinceStr,
 		}),
 	)

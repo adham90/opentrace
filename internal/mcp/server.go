@@ -13,42 +13,42 @@ import (
 )
 
 // mcpInstructions is sent to the client during the MCP initialize handshake.
-// It tells the agent which tools to call first and how to follow suggestion chains.
-const mcpInstructions = `OpenTrace is a self-hosted application monitoring server. You have tools for logs, errors, database stats, health checks, watches (alerts), and agent memory.
+// It tells the agent how to use OpenTrace tools effectively.
+const mcpInstructions = `OpenTrace is a self-hosted observability engine. You have tools for logs, errors, database introspection, alerts, code intelligence, deploys, analytics, and more.
 
 ## Where to start
 
-- "What's wrong?" / investigating issues → call diagnose (returns errors, logs, performance, watches, healthchecks in one call)
-- "System health" / status check → call system_overview
-- "What needs attention?" → call triage_alerts (prioritized inbox)
-- "Why are queries slow?" → call db_query_stats then follow suggested_tools to explain_query
-- Run a full investigation playbook → call runbook with a playbook name (slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike)
+- Investigating issues → overview(action: "diagnose")
+- System health → overview(action: "status")
+- What needs attention → overview(action: "triage")
+- Search logs → logs(action: "search", query: "...")
+- Check errors → errors(action: "list")
+- Before modifying a file → code(action: "annotate_file", path: "the/file.rb")
+- Set up SDK for a project → setup(action: "detect") then setup(action: "guide")
+
+## Tools
+
+- overview: status, triage, diagnose, timeline, investigate, changes, settings, notes, delete_note, session_summary
+- logs: search, context, attributes, stats, summary, performance, trace, compare
+- errors: list, detail, investigate, impact, user_errors, ranking, resolve, ignore
+- database: queries, explain, tables, activity, locks, indexes, schema, runbook
+- watches: status, create, delete, alerts, dismiss, acknowledge, investigate
+- analytics: traffic, endpoints, heatmap, trends, movers
+- code: risk, fragile, context, test_gaps, test_priority, annotate_file, annotate_function, hotspots, gen_context, gen_suggest, gen_coverage, deps_service, deps_blast, deps_risk
+- deploys: history, impact, record
+- healthchecks: list, uptime, create, delete
+- connectors: list, get, create, test, update, delete
+- servers: list, query, health
+- setup: status, detect, guide, verify
+- admin: update_retention, users, audit (admin only)
 
 ## Follow suggested_tools
 
 Most tool responses include a "suggested_tools" array with pre-filled arguments for the next step. Always prefer following these suggestions over manually constructing the next call — the args are already filled in from the response data.
 
-Example chains:
-- diagnose → error_detail(fingerprint: "abc") → log_search(exception_class: "NoMethodError") → log_context(log_id: 42)
-- log_search(level: "error") → investigate_error(log_id: 42) — one-call deep dive with exception, backtrace, params, SQL, context
-
 ## Agent memory
 
-Use add_note / get_notes to save and recall persistent context about services, queries, endpoints, errors, and health checks across sessions. Call get_notes at the start of a session to recall previous context.
-
-## Key tool categories
-
-- Overview: diagnose, system_overview, triage_alerts
-- Logs: log_search, log_context, log_stats, log_summary, list_log_attributes
-- Errors: error_groups, error_detail, investigate_error, resolve_error, ignore_error
-- Database: db_query_stats, explain_query, db_table_stats, db_activity, db_locks, db_index_analysis, schema_overview
-- Performance: request_performance, compare_periods, trace_lookup
-- Uptime: uptime_status, list_healthchecks, create_healthcheck
-- Watches: watch_status, watch, investigate, dismiss_watch
-- Runbooks: runbook (composite playbooks that run multiple diagnostics at once)
-- Code Intelligence: code_context, whats_fragile, code_risk (source code risk tracking)
-- Deploys: deploy_history, deploy_impact, record_deploy (deploy lifecycle + impact measurement)
-- Agent Assistant: context (task-specific production context), check_alerts (unified alert view), test_gaps (uncovered error paths), test_priority (error detail for writing tests)
+Use overview(action: "notes") to save and recall persistent context about services, queries, endpoints, errors, and health checks across sessions. Call overview(action: "notes") at the start of a session to recall previous context. Use overview(action: "session_summary") to save investigation findings for future reference.
 `
 
 // Deps holds the dependencies for the MCP server.
@@ -103,14 +103,24 @@ func NewConfiguredServer(deps Deps, isAdmin bool, hooks *server.Hooks) *server.M
 	)
 
 	b := &CatalogBuilder{}
-	addReadOnlyTools(s, deps, b)
 
-	if isAdmin {
-		addWriteTools(s, deps, b)
-	}
+	// Build the gateway and register the single "opentrace" tool.
+	gw := buildGateway(deps, isAdmin, b)
+	gatewayTool := gw.Tool()
+	gatewayHandler := gw.Handler()
+
+	// Wrap the gateway handler with metrics (tool name = "opentrace").
+	gatewayHandler = wrapWithMetrics("opentrace", gatewayHandler)
+	s.AddTool(gatewayTool, gatewayHandler)
+
+	// Wire elicitation support (Item 14).
+	gw.SetServer(s)
 
 	// Register MCP resources
 	addResources(s, deps)
+
+	// Register MCP prompts
+	addPrompts(s)
 
 	// Clear the package-level store after registration.
 	activityStoreForLogging = nil

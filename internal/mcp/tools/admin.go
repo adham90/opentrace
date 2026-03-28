@@ -14,14 +14,19 @@ import (
 	"github.com/adham90/opentrace/pkg/store"
 )
 
+// SessionSummaryHandler is a callback for handling session summary updates.
+// This avoids the tools package depending on the mcp package's sessionTracker.
+type SessionSummaryHandler func(ctx context.Context, args map[string]any) (*mcp.CallToolResult, error)
+
 // AdminDeps holds the stores needed by the admin tool.
 type AdminDeps struct {
-	SettingsStore    store.SettingsStore
-	UserStore        store.UserStore
-	AuditStore       store.AuditStore
-	AgentNoteStore   store.AgentNoteStore
-	MCPActivityStore store.MCPActivityStore
-	Registry         *connector.Registry
+	SettingsStore          store.SettingsStore
+	UserStore              store.UserStore
+	AuditStore             store.AuditStore
+	AgentNoteStore         store.AgentNoteStore
+	MCPActivityStore       store.MCPActivityStore
+	Registry               *connector.Registry
+	SessionSummaryCallback SessionSummaryHandler // optional, nil-safe
 }
 
 // AdminTool returns the consolidated tool definition for admin operations.
@@ -39,8 +44,9 @@ Actions:
 - audit: View recent admin actions for security review
 - notes: Get or set agent notes (persistent memory for entities)
 - delete_note: Delete an agent note
-- activity: Database connection activity (pg_stat_activity)`),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: settings, update_retention, users, update_role, toggle_active, delete_user, audit, notes, delete_note, activity")),
+- activity: Database connection activity (pg_stat_activity)
+- session_summary: Save investigation summary for future reference`),
+		mcp.WithString("action", mcp.Required(), mcp.Description("Action: settings, update_retention, users, update_role, toggle_active, delete_user, audit, notes, delete_note, activity, session_summary")),
 		// update_retention params
 		mcp.WithNumber("retention_days", mcp.Description("Retention period in days (1-365)")),
 		// user management params
@@ -53,6 +59,12 @@ Actions:
 		mcp.WithString("entity_type", mcp.Description("Entity type: query, endpoint, service, healthcheck, error")),
 		mcp.WithString("entity_id", mcp.Description("Entity identifier")),
 		mcp.WithString("note", mcp.Description("Note text (for setting a note)")),
+		// session_summary params
+		mcp.WithString("summary", mcp.Description("(session_summary) One sentence describing what was investigated and found")),
+		mcp.WithString("root_cause", mcp.Description("(session_summary) Root cause if identified")),
+		mcp.WithString("fix_applied", mcp.Description("(session_summary) What fix was applied, if any")),
+		mcp.WithString("outcome", mcp.Description("(session_summary) Outcome: resolved, unresolved, or partial")),
+		mcp.WithString("primary_service", mcp.Description("(session_summary) Primary service investigated")),
 	)
 }
 
@@ -83,8 +95,13 @@ func AdminHandler(d AdminDeps) server.ToolHandlerFunc {
 			return handleDeleteNote(ctx, d, args)
 		case "activity":
 			return handleActivity(ctx, d)
+		case "session_summary":
+			if d.SessionSummaryCallback == nil {
+				return mcp.NewToolResultError("session tracking is not enabled"), nil
+			}
+			return d.SessionSummaryCallback(ctx, args)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s (use settings, update_retention, users, update_role, toggle_active, delete_user, audit, notes, delete_note, activity)", action)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s (use settings, update_retention, users, update_role, toggle_active, delete_user, audit, notes, delete_note, activity, session_summary)", action)), nil
 		}
 	}
 }

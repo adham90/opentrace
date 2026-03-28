@@ -30,9 +30,11 @@ type SessionTracking interface {
 
 // DatabaseDeps holds all dependencies needed by the database consolidated tool.
 type DatabaseDeps struct {
-	Registry         *connector.Registry
-	QueryMemoryStore store.QueryMemoryStore
-	SessionTracking  SessionTracking // optional
+	Registry                 *connector.Registry
+	QueryMemoryStore         store.QueryMemoryStore
+	LogStore                 store.LogStore                 // for runbook error_spike
+	RunbookEffectivenessStore store.RunbookEffectivenessStore // for runbook tracking
+	SessionTracking          SessionTracking                // optional
 }
 
 // RunbookDeps holds all dependencies needed by the runbook tool.
@@ -51,12 +53,11 @@ type RunbookDeps struct {
 func DatabaseTool() mcp.Tool {
 	return mcp.NewTool("database",
 		mcp.WithDescription(
-			"Consolidated database introspection and management tool. "+
-				"Supports multiple actions: queries, explain, tables, activity, locks, "+
-				"connections, indexes, schema, storage, kill_query, long_transactions. "+
-				"Use the 'action' parameter to select the operation."),
+			"Database introspection, management, and investigation runbooks. "+
+				"Actions: queries, explain, tables, activity, locks, connections, indexes, "+
+				"schema, storage, kill_query, long_transactions, runbook."),
 		mcp.WithString("action", mcp.Required(),
-			mcp.Description("Action to perform: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions"),
+			mcp.Description("Action: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions, runbook"),
 		),
 		// queries action params
 		mcp.WithString("order_by",
@@ -111,6 +112,10 @@ func DatabaseTool() mcp.Tool {
 		mcp.WithNumber("min_duration_seconds",
 			mcp.Description("(long_transactions) Minimum transaction duration in seconds (default: 30)"),
 		),
+		// runbook action params
+		mcp.WithString("playbook",
+			mcp.Description("(runbook) Playbook: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike"),
+		),
 	)
 }
 
@@ -147,8 +152,25 @@ func DatabaseHandler(deps DatabaseDeps) server.ToolHandlerFunc {
 			return handleKillQuery(ctx, deps, args)
 		case "long_transactions":
 			return handleLongTransactions(ctx, deps, args)
+		case "runbook":
+			return handleRunbookAction(ctx, deps, args)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown action %q. Available: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions", action)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("unknown action %q. Available: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions, runbook", action)), nil
 		}
 	}
+}
+
+// handleRunbookAction delegates to the existing runbook handler via RunbookDeps.
+func handleRunbookAction(ctx context.Context, deps DatabaseDeps, args map[string]any) (*mcp.CallToolResult, error) {
+	rbDeps := RunbookDeps{
+		Registry:                  deps.Registry,
+		LogStore:                  deps.LogStore,
+		RunbookEffectivenessStore: deps.RunbookEffectivenessStore,
+		SessionTracking:           deps.SessionTracking,
+	}
+	handler := RunbookHandler(rbDeps)
+	// Rewrite args: runbook handler expects "playbook" param directly (no "action").
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = args
+	return handler(ctx, req)
 }

@@ -10,7 +10,7 @@ import (
 
 	"github.com/adham90/opentrace/internal/connector"
 	dbstore "github.com/adham90/opentrace/internal/db"
-	"github.com/adham90/opentrace/internal/web"
+	"github.com/adham90/opentrace/internal/api"
 )
 
 func TestAppStartup(t *testing.T) {
@@ -27,7 +27,7 @@ func TestAppStartup(t *testing.T) {
 	dsStore := dbstore.NewDataSourceStore(bunDB)
 	logStore := dbstore.NewLogStore(bunDB)
 	registry := connector.NewRegistry()
-	srv := web.NewServer(dsStore, logStore, registry, nil)
+	srv := api.NewServer(dsStore, logStore, registry, nil)
 
 	// Find a free port
 	listener, err := net.Listen("tcp", ":0")

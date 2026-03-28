@@ -12,13 +12,10 @@ var Module = server.Module{
 	Mount: mount,
 }
 
-func mount(r chi.Router, deps *server.Deps) {
+func mount(_ chi.Router, deps *server.Deps) {
 	h := &handler{
 		store: deps.DeployStore,
 	}
-
-	// Read routes (session auth, applied by caller)
-	r.Get("/deploys", h.list)
 
 	// Webhook route (API key auth, registered on the API router directly)
 	if deps.APIRouter != nil && deps.APIKeyAuth != nil && deps.APIRateLimiter != nil {

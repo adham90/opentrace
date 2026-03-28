@@ -129,11 +129,11 @@ func (b *CatalogBuilder) Build() *ToolCatalog {
 	return &ToolCatalog{categories: categories}
 }
 
-// BuildCatalog creates a ToolCatalog by running the same registration logic
-// as Serve() but with a nil MCP server (tools are only cataloged, not registered).
+// BuildCatalog creates a ToolCatalog by running the gateway registration logic
+// (catalog-only mode — no MCP server, tools are only cataloged).
 func BuildCatalog(deps Deps) *ToolCatalog {
 	b := &CatalogBuilder{}
-	addReadOnlyTools(nil, deps, b)
-	addWriteTools(nil, deps, b)
+	// Use the gateway builder which populates the CatalogBuilder.
+	_ = buildGateway(deps, true, b)
 	return b.Build()
 }

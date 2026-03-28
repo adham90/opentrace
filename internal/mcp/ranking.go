@@ -5,20 +5,60 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
 
+// rankingCache provides a per-session TTL cache for ranked suggestions
+// to avoid redundant DB queries within the same session.
+type rankingCache struct {
+	mu      sync.RWMutex
+	entries map[string]rankingCacheEntry
+}
+
+type rankingCacheEntry struct {
+	suggestions []ToolSuggestion
+	cachedAt    time.Time
+}
+
+const rankingCacheTTL = 5 * time.Minute
+
+func newRankingCache() *rankingCache {
+	return &rankingCache{entries: make(map[string]rankingCacheEntry)}
+}
+
+func (c *rankingCache) get(key string) ([]ToolSuggestion, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	e, ok := c.entries[key]
+	if !ok || time.Since(e.cachedAt) > rankingCacheTTL {
+		return nil, false
+	}
+	return e.suggestions, true
+}
+
+func (c *rankingCache) set(key string, suggestions []ToolSuggestion) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries[key] = rankingCacheEntry{suggestions: suggestions, cachedAt: time.Now()}
+}
+
 // RankingService replaces static tool suggestions with data-driven rankings.
 type RankingService struct {
 	transitionStore store.ToolTransitionStore
 	templateStore   store.WorkflowTemplateStore
+	cache           *rankingCache
 }
 
 // NewRankingService creates a new RankingService.
 func NewRankingService(ts store.ToolTransitionStore, ws store.WorkflowTemplateStore) *RankingService {
-	return &RankingService{transitionStore: ts, templateStore: ws}
+	return &RankingService{
+		transitionStore: ts,
+		templateStore:   ws,
+		cache:           newRankingCache(),
+	}
 }
 
 // RankingRequest describes the current session state for ranking.
@@ -44,6 +84,12 @@ func (r *RankingService) RankSuggestions(ctx context.Context, req RankingRequest
 		return req.FallbackSuggestions
 	}
 
+	// Check cache first
+	cacheKey := fmt.Sprintf("%s:%s:%d", req.CurrentTool, req.Intent, req.StepIndex)
+	if cached, ok := r.cache.get(cacheKey); ok {
+		return cached
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
@@ -58,7 +104,9 @@ func (r *RankingService) RankSuggestions(ctx context.Context, req RankingRequest
 		if err != nil {
 			slog.Debug("ranking: transition query failed", "error", err)
 		} else if len(transitions) > 0 {
-			return r.transitionsToSuggestions(transitions, req)
+			result := r.transitionsToSuggestions(transitions, req)
+			r.cache.set(cacheKey, result)
+			return result
 		}
 	}
 
@@ -68,11 +116,14 @@ func (r *RankingService) RankSuggestions(ctx context.Context, req RankingRequest
 		if err != nil {
 			slog.Debug("ranking: template query failed", "error", err)
 		} else if len(templates) > 0 {
-			return r.templatesToSuggestions(templates)
+			result := r.templatesToSuggestions(templates)
+			r.cache.set(cacheKey, result)
+			return result
 		}
 	}
 
-	// 3. Final fallback: static suggestions
+	// 3. Final fallback: static suggestions (also cache to avoid re-querying)
+	r.cache.set(cacheKey, req.FallbackSuggestions)
 	return req.FallbackSuggestions
 }
 

@@ -168,7 +168,8 @@ func handleWatchStatus(ctx context.Context, d WatchesDeps, args map[string]any) 
 	}
 	for _, w := range watches {
 		if w.Status == store.WatchStatusTriggered {
-			suggestions = append(suggestions, Suggest("log_search", "Search error logs for triggered service", map[string]any{
+			suggestions = append(suggestions, Suggest("logs", "Search error logs for triggered service", map[string]any{
+				"action":  "search",
 				"level":   "error",
 				"service": w.Service,
 			}))
@@ -315,7 +316,8 @@ func handleWatchInvestigate(ctx context.Context, d WatchesDeps, args map[string]
 		var suggestions []ToolSuggestion
 
 		if w, err := d.WatchStore.GetByID(ctx, alert.WatchID); err == nil && w.Service != "" {
-			suggestions = append(suggestions, Suggest("log_search", "Search error logs for this service", map[string]any{
+			suggestions = append(suggestions, Suggest("logs", "Search error logs for this service", map[string]any{
+				"action":  "search",
 				"level":   "error",
 				"service": w.Service,
 			}))
@@ -431,13 +433,15 @@ func handleWatchInvestigate(ctx context.Context, d WatchesDeps, args map[string]
 	resp := map[string]any{"investigation": inv}
 	var suggestions []ToolSuggestion
 	if inv.ErrorCount > 0 {
-		suggestions = append(suggestions, Suggest("log_search", "View error logs for this service", map[string]any{
+		suggestions = append(suggestions, Suggest("logs", "View error logs for this service", map[string]any{
+			"action":  "search",
 			"level":   "error",
 			"service": service,
 		}))
 	}
 	if len(inv.RecentErrors) > 0 && inv.RecentErrors[0].ExceptionClass != "" && inv.RecentErrors[0].ExceptionClass != "Unknown" {
-		suggestions = append(suggestions, Suggest("log_search", "Search by exception class", map[string]any{
+		suggestions = append(suggestions, Suggest("logs", "Search by exception class", map[string]any{
+			"action":          "search",
 			"exception_class": inv.RecentErrors[0].ExceptionClass,
 			"service":         service,
 		}))

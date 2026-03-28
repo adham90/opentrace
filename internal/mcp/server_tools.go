@@ -2,8 +2,9 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 
-	"github.com/mark3labs/mcp-go/mcp"
+	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/internal/connector"
@@ -11,45 +12,65 @@ import (
 	"github.com/adham90/opentrace/pkg/store"
 )
 
-// addReadOnlyTools registers read-only tools available to all users.
-// When s is nil (catalog-only mode), tools are only cataloged via b.
-func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
-	// -----------------------------------------------------------------------
-	// Consolidated: connectors (read-only actions: list, get)
-	// -----------------------------------------------------------------------
-	maybeAddTool(s, tools.ConnectorsTool(), tools.ConnectorsHandler(tools.ConnectorsDeps{
-		DSStore:       deps.DSStore,
-		Registry:      deps.Registry,
-		LogStore:      deps.LogStore,
-		Config:        deps.Config,
-		SettingsStore: deps.SettingsStore,
-	}))
-	b.Add("connectors", "Connector management: list, get, create, test, update, delete", "Connectors", "read", "")
+// ---------------------------------------------------------------------------
+// Gateway-based tool registration
+// ---------------------------------------------------------------------------
 
-	// -----------------------------------------------------------------------
-	// Consolidated: database (read-only actions: queries, tables, activity, locks, connections, indexes, schema, storage, long_transactions)
-	// -----------------------------------------------------------------------
-	maybeAddTool(s, tools.DatabaseTool(), tools.DatabaseHandler(tools.DatabaseDeps{
-		Registry:         deps.Registry,
-		QueryMemoryStore: deps.QueryMemoryStore,
-	}))
-	b.Add("database", "Database introspection and management: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions", "Database Introspection", "read", "database connector")
+// buildGateway creates the Gateway with all tools registered.
+// The CatalogBuilder is populated in parallel for the web UI.
+func buildGateway(deps Deps, isAdmin bool, b *CatalogBuilder) *Gateway {
+	gw := NewGateway()
 
-	// -----------------------------------------------------------------------
-	// Consolidated: runbook
-	// -----------------------------------------------------------------------
-	if deps.Registry != nil {
-		maybeAddTool(s, tools.RunbookTool(), tools.RunbookHandler(tools.RunbookDeps{
-			Registry:                  deps.Registry,
-			LogStore:                  deps.LogStore,
-			RunbookEffectivenessStore: deps.RunbookEffectivenessStore,
-		}))
-		b.Add("runbook", "Run a composite investigation playbook (slow_database, connection_exhaustion, etc.)", "Database Introspection", "read", "database connector")
+	registerReadOnlyTools(gw, deps, b)
+	if isAdmin {
+		registerWriteTools(gw, deps, b)
 	}
 
-	// -----------------------------------------------------------------------
-	// Consolidated: logs
-	// -----------------------------------------------------------------------
+	return gw
+}
+
+// registerReadOnlyTools adds read-only tools to the gateway.
+func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
+	// --- connectors ---
+	gw.Register("connectors",
+		wrapHandler("connectors", tools.ConnectorsHandler(tools.ConnectorsDeps{
+			DSStore:       deps.DSStore,
+			Registry:      deps.Registry,
+			LogStore:      deps.LogStore,
+			Config:        deps.Config,
+			SettingsStore: deps.SettingsStore,
+		})),
+		GatewayEntry{
+			Description: "Connector management: list, get, create, test, update, delete",
+			Actions:     []string{"list", "get", "create", "test", "update", "delete"},
+			Category:    "Connectors",
+			Access:      "read",
+			ReadOnly:    false,
+			Destructive: true,
+			Params:      map[string]string{"type": "Filter by connector type", "id": "Connector ID for get/update/delete"},
+		})
+	b.Add("connectors", "Connector management: list, get, create, test, update, delete", "Connectors", "read", "")
+
+	// --- database (now includes runbook) ---
+	gw.Register("database",
+		wrapHandler("database", tools.DatabaseHandler(tools.DatabaseDeps{
+			Registry:                  deps.Registry,
+			QueryMemoryStore:          deps.QueryMemoryStore,
+			LogStore:                  deps.LogStore,
+			RunbookEffectivenessStore: deps.RunbookEffectivenessStore,
+		})),
+		GatewayEntry{
+			Description: "Database introspection, management, and investigation runbooks",
+			Actions:     []string{"queries", "explain", "tables", "activity", "locks", "connections", "indexes", "schema", "storage", "kill_query", "long_transactions", "runbook"},
+			Category:    "Database",
+			Access:      "read",
+			ReadOnly:    false,
+			Destructive: true,
+			Params:      map[string]string{"order_by": "Sort: calls, total_exec_time, mean_exec_time", "query": "SQL query (explain)", "playbook": "Runbook: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike", "pid": "PID to kill (kill_query)"},
+		})
+	b.Add("database", "Database introspection and management: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions, runbook", "Database Introspection", "read", "database connector")
+
+	// --- logs ---
 	if deps.LogStore != nil {
 		var traceRecorder tools.TraceSessionRecorder
 		if sessionTracker != nil {
@@ -63,18 +84,26 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 				}
 			}
 		}
-		maybeAddTool(s, tools.LogsTool(), tools.LogsHandler(tools.LogsDeps{
-			LogStore:             deps.LogStore,
-			ErrorGroupStore:      deps.ErrorGroupStore,
-			TraceSessionRecorder: traceRecorder,
-			Ranker:               rankingServiceAdapter(),
-		}))
+		gw.Register("logs",
+			wrapHandler("logs", tools.LogsHandler(tools.LogsDeps{
+				LogStore:             deps.LogStore,
+				ErrorGroupStore:      deps.ErrorGroupStore,
+				TraceSessionRecorder: traceRecorder,
+				Ranker:               rankingServiceAdapter(),
+			})),
+			GatewayEntry{
+				Description: "Log intelligence: search, context, attributes, stats, summary, performance, trace, compare",
+				Actions:     []string{"search", "context", "attributes", "stats", "summary", "performance", "trace", "compare"},
+				Category:    "Log Intelligence",
+				Access:      "read",
+				ReadOnly:    true,
+				Idempotent:  true,
+				Params:      map[string]string{"query": "Full-text search query", "service": "Filter by service", "level": "debug/info/warn/error/fatal", "time_range": "15m/1h/6h/24h/7d", "trace_id": "Trace/correlation ID", "limit": "Max results (default 50)"},
+			})
 		b.Add("logs", "Unified log intelligence: search, context, attributes, stats, summary, performance, trace, compare", "Log Intelligence", "read", "")
 	}
 
-	// -----------------------------------------------------------------------
-	// Consolidated: errors (read-only actions: list, detail, investigate, impact, user_errors, ranking)
-	// -----------------------------------------------------------------------
+	// --- errors ---
 	if deps.ErrorGroupStore != nil || deps.LogStore != nil || deps.ErrorImpactStore != nil {
 		var sess tools.SessionInfo
 		var rec tools.RecurrenceLinker
@@ -84,217 +113,343 @@ func addReadOnlyTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
 		if recurrenceDetector != nil {
 			rec = recurrenceDetector
 		}
-		maybeAddTool(s, tools.ErrorsTool(), tools.ErrorsHandler(tools.ErrorsDeps{
-			ErrorGroupStore:  deps.ErrorGroupStore,
-			LogStore:         deps.LogStore,
-			ErrorImpactStore: deps.ErrorImpactStore,
-			Session:          sess,
-			Recurrence:       rec,
-			Ranker:           rankingServiceAdapter(),
-		}))
-		b.Add("errors", "Manage and investigate errors: list, detail, investigate, impact, user_errors, ranking, resolve, ignore", "Errors", "read", "")
+		gw.Register("errors",
+			wrapHandler("errors", tools.ErrorsHandler(tools.ErrorsDeps{
+				ErrorGroupStore:  deps.ErrorGroupStore,
+				LogStore:         deps.LogStore,
+				ErrorImpactStore: deps.ErrorImpactStore,
+				Session:          sess,
+				Recurrence:       rec,
+				Ranker:           rankingServiceAdapter(),
+			})),
+			GatewayEntry{
+				Description: "Error management: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, new",
+				Actions:     []string{"list", "detail", "investigate", "impact", "user_errors", "ranking", "resolve", "ignore", "new"},
+				Category:    "Errors",
+				Access:      "read",
+				ReadOnly:    false,
+				Params:      map[string]string{"fingerprint": "Error fingerprint", "service": "Filter by service", "status": "unresolved/resolved/ignored", "limit": "Max results"},
+			})
+		b.Add("errors", "Manage and investigate errors: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, new", "Errors", "read", "")
 	}
 
-	// -----------------------------------------------------------------------
-	// Consolidated: healthchecks (read-only actions: list, uptime)
-	// -----------------------------------------------------------------------
+	// --- healthchecks ---
 	if deps.HealthCheckStore != nil {
-		maybeAddTool(s, tools.HealthchecksTool(), tools.HealthchecksHandler(tools.HealthchecksDeps{
-			HealthCheckStore: deps.HealthCheckStore,
-		}))
+		gw.Register("healthchecks",
+			wrapHandler("healthchecks", tools.HealthchecksHandler(tools.HealthchecksDeps{
+				HealthCheckStore: deps.HealthCheckStore,
+			})),
+			GatewayEntry{
+				Description: "Health check management: list, uptime, create, delete",
+				Actions:     []string{"list", "uptime", "create", "delete"},
+				Category:    "Uptime",
+				Access:      "read",
+				ReadOnly:    false,
+				Destructive: true,
+				Params:      map[string]string{"url": "Health check URL (create)", "id": "Health check ID (delete/uptime)"},
+			})
 		b.Add("healthchecks", "Health check management: list, uptime, create, delete", "Uptime", "read", "")
 	}
 
-	// -----------------------------------------------------------------------
-	// Consolidated: overview (status, triage, diagnose, timeline)
-	// -----------------------------------------------------------------------
-	maybeAddTool(s, tools.OverviewTool(), tools.OverviewHandler(tools.OverviewDeps{
-		LogStore:         deps.LogStore,
-		DSStore:          deps.DSStore,
-		ServerStore:      deps.ServerStore,
-		ErrorGroupStore:  deps.ErrorGroupStore,
-		WatchStore:       deps.WatchStore,
-		HealthCheckStore: deps.HealthCheckStore,
-	}))
-	b.Add("overview", "System overview, triage, diagnosis, and incident timeline", "Overview", "read", "")
+	// --- overview (includes agent memory: notes + session_summary) ---
+	var overviewSessionCallback tools.SessionSummaryCallback
+	if deps.InvestigationSessionStore != nil && sessionTracker != nil {
+		overviewSessionCallback = func(ctx context.Context, args map[string]any) (*mcplib.CallToolResult, error) {
+			return handleSessionSummaryFromArgs(args)
+		}
+	}
+	gw.Register("overview",
+		wrapHandler("overview", tools.OverviewHandler(tools.OverviewDeps{
+			LogStore:         deps.LogStore,
+			DSStore:          deps.DSStore,
+			ServerStore:      deps.ServerStore,
+			ErrorGroupStore:  deps.ErrorGroupStore,
+			WatchStore:       deps.WatchStore,
+			HealthCheckStore: deps.HealthCheckStore,
+			SettingsStore:    deps.SettingsStore,
+			AgentNoteStore:   deps.AgentNoteStore,
+			SessionSummary:   overviewSessionCallback,
+		})),
+		GatewayEntry{
+			Description: "System overview, triage, diagnosis, incident timeline, agent memory, and session summary",
+			Actions:     []string{"status", "triage", "diagnose", "timeline", "investigate", "changes", "settings", "notes", "delete_note", "session_summary"},
+			Category:    "Overview",
+			Access:      "read",
+			ReadOnly:    true,
+			Idempotent:  true,
+			Params:      map[string]string{"service": "Scope to service", "timeframe": "Window: 30m/2h/24h/7d"},
+		})
+	b.Add("overview", "System overview, triage, diagnosis, incident timeline, service investigation, and changes", "Overview", "read", "")
 
-	// -----------------------------------------------------------------------
-	// Consolidated: watches (read-only actions: status, alerts, investigate)
-	// -----------------------------------------------------------------------
+	// --- watches ---
 	if deps.WatchStore != nil {
-		maybeAddTool(s, tools.WatchesTool(), tools.WatchesHandler(tools.WatchesDeps{
-			WatchStore:   deps.WatchStore,
-			LogStore:     deps.LogStore,
-			WatchMetrics: deps.WatchMetrics,
-		}))
+		gw.Register("watches",
+			wrapHandler("watches", tools.WatchesHandler(tools.WatchesDeps{
+				WatchStore:   deps.WatchStore,
+				LogStore:     deps.LogStore,
+				WatchMetrics: deps.WatchMetrics,
+			})),
+			GatewayEntry{
+				Description: "Watch management: status, create, delete, alerts, dismiss, acknowledge, investigate",
+				Actions:     []string{"status", "create", "delete", "alerts", "dismiss", "acknowledge", "investigate"},
+				Category:    "Watches",
+				Access:      "read",
+				ReadOnly:    false,
+				Destructive: true,
+				Params:      map[string]string{"name": "Watch name (create)", "id": "Watch ID", "service": "Filter by service"},
+			})
 		b.Add("watches", "Watch management: status, create, delete, alerts, dismiss, acknowledge, investigate", "Watches", "read", "")
 	}
 
-	// -----------------------------------------------------------------------
-	// Consolidated: analytics (traffic, endpoints, heatmap, trends, movers)
-	// -----------------------------------------------------------------------
+	// --- analytics ---
 	if deps.AnalyticsStore != nil || deps.TrendStore != nil {
-		maybeAddTool(s, tools.AnalyticsTool(), tools.AnalyticsHandler(tools.AnalyticsDeps{
-			AnalyticsStore: deps.AnalyticsStore,
-			TrendStore:     deps.TrendStore,
-		}))
+		gw.Register("analytics",
+			wrapHandler("analytics", tools.AnalyticsHandler(tools.AnalyticsDeps{
+				AnalyticsStore: deps.AnalyticsStore,
+				TrendStore:     deps.TrendStore,
+			})),
+			GatewayEntry{
+				Description: "Web analytics and trends: traffic, endpoints, heatmap, trends, movers",
+				Actions:     []string{"traffic", "endpoints", "heatmap", "trends", "movers"},
+				Category:    "Analytics",
+				Access:      "read",
+				ReadOnly:    true,
+				Idempotent:  true,
+				Params:      map[string]string{"service": "Filter by service", "time_range": "15m/1h/6h/24h/7d", "limit": "Max results"},
+			})
 		b.Add("analytics", "Web analytics and trends: traffic, endpoints, heatmap, trends, movers", "Analytics", "read", "")
 	}
 
-	// -----------------------------------------------------------------------
-	// Consolidated: journeys (sessions, paths, funnels, timeline, waterfall)
-	// -----------------------------------------------------------------------
-	if deps.JourneyStore != nil {
-		maybeAddTool(s, tools.JourneysTool(), tools.JourneysHandler(tools.JourneysDeps{
-			JourneyStore: deps.JourneyStore,
-		}))
-		b.Add("journeys", "User journey analysis: sessions, paths, funnels, timeline, waterfall", "Journey", "read", "")
+	// --- code (unified: code_intel + annotations + test_gen + dependencies) ---
+	if deps.CodeEntityStore != nil || deps.TestCorrelationStore != nil ||
+		deps.AnalyticsStore != nil || deps.ErrorGroupStore != nil {
+		gw.Register("code",
+			wrapHandler("code", tools.CodeHandler(tools.CodeDeps{
+				CodeEntityStore:           deps.CodeEntityStore,
+				ErrorGroupStore:           deps.ErrorGroupStore,
+				ErrorImpactStore:          deps.ErrorImpactStore,
+				TestCorrelationStore:      deps.TestCorrelationStore,
+				DeployStore:               deps.DeployStore,
+				AgentNoteStore:            deps.AgentNoteStore,
+				InvestigationSessionStore: deps.InvestigationSessionStore,
+				AnalyticsStore:            deps.AnalyticsStore,
+				LogStore:                  deps.LogStore,
+			})),
+			GatewayEntry{
+				Description: "Code intelligence, annotations, test generation, and dependency analysis",
+				Actions: []string{
+					"risk", "fragile", "context", "test_gaps", "test_priority",
+					"annotate_file", "annotate_function", "hotspots",
+					"gen_context", "gen_suggest", "gen_coverage",
+					"deps_service", "deps_blast", "deps_risk",
+				},
+				Category: "Code Intelligence",
+				Access:   "read",
+				ReadOnly: true,
+				Idempotent: true,
+				Params:   map[string]string{"service": "Filter by service", "fingerprint": "Error fingerprint", "path": "Source file path", "files": "Array of file paths (risk)"},
+			})
+		b.Add("code", "Code intelligence, annotations, test generation, and dependency analysis", "Code Intelligence", "read", "")
 	}
 
-	// -----------------------------------------------------------------------
-	// Consolidated: code_intel (risk, fragile, context, test_gaps, test_priority)
-	// -----------------------------------------------------------------------
-	if deps.CodeEntityStore != nil || deps.TestCorrelationStore != nil {
-		maybeAddTool(s, tools.CodeIntelTool(), tools.CodeIntelHandler(tools.CodeIntelDeps{
-			CodeEntityStore:          deps.CodeEntityStore,
-			ErrorGroupStore:          deps.ErrorGroupStore,
-			TestCorrelationStore:     deps.TestCorrelationStore,
-			DeployStore:              deps.DeployStore,
-			AgentNoteStore:           deps.AgentNoteStore,
-			InvestigationSessionStore: deps.InvestigationSessionStore,
-		}))
-		b.Add("code_intel", "Code intelligence: risk scores, fragile code, error context, test gaps", "Code Intelligence", "read", "")
-	}
-
-	// -----------------------------------------------------------------------
-	// Consolidated: deploys (read-only actions: history, impact)
-	// -----------------------------------------------------------------------
+	// --- deploys ---
 	if deps.DeployStore != nil {
-		maybeAddTool(s, tools.DeploysTool(), tools.DeploysHandler(tools.DeploysDeps{
-			DeployStore: deps.DeployStore,
-		}))
+		gw.Register("deploys",
+			wrapHandler("deploys", tools.DeploysHandler(tools.DeploysDeps{
+				DeployStore: deps.DeployStore,
+			})),
+			GatewayEntry{
+				Description: "Deploy management: history, impact, record",
+				Actions:     []string{"history", "impact", "record"},
+				Category:    "Deploys",
+				Access:      "read",
+				ReadOnly:    false,
+				Params:      map[string]string{"service": "Filter by service", "commit_hash": "Git commit hash (record)", "environment": "Deployment environment"},
+			})
 		b.Add("deploys", "Deploy management: history, impact, record", "Deploys", "read", "")
 	}
 
-	// -----------------------------------------------------------------------
-	// Server metrics (not consolidated — kept as individual tools)
-	// -----------------------------------------------------------------------
+	// --- servers (unified: list_servers + query_metrics + server_health) ---
 	if deps.ServerStore != nil && deps.MetricStore != nil {
-		maybeAddTool(s,
-			mcp.NewTool("list_servers",
-				mcp.WithDescription("List all monitored servers with their status (online/offline/unknown)"),
-			),
-			listServersHandler(deps.ServerStore),
-		)
-		b.Add("list_servers", "List all monitored servers with their status", "Server Metrics", "read", "")
-
-		maybeAddTool(s,
-			mcp.NewTool("query_metrics",
-				mcp.WithDescription("Query time-series metrics for a server (CPU, memory, disk, network, load)"),
-				mcp.WithString("server_id", mcp.Required(), mcp.Description("Server UUID (from list_servers)")),
-				mcp.WithString("metric_name", mcp.Description("Metric name filter (e.g. cpu.usage_percent, memory.usage_percent)")),
-				mcp.WithString("start", mcp.Description("Start time in ISO 8601 format")),
-				mcp.WithString("end", mcp.Description("End time in ISO 8601 format")),
-				mcp.WithNumber("limit", mcp.Description("Max results (default: 100)")),
-			),
-			queryMetricsHandler(deps.ServerStore, deps.MetricStore),
-		)
-		b.Add("query_metrics", "Query time-series metrics for a server (CPU, memory, disk, network, load)", "Server Metrics", "read", "")
-
-		maybeAddTool(s,
-			mcp.NewTool("server_health",
-				mcp.WithDescription("Get current health snapshot for a server — latest value for every metric"),
-				mcp.WithString("server_id", mcp.Required(), mcp.Description("Server UUID (from list_servers)")),
-			),
-			serverHealthHandler(deps.ServerStore, deps.MetricStore),
-		)
-		b.Add("server_health", "Get current health snapshot for a server", "Server Metrics", "read", "")
+		gw.Register("servers",
+			wrapHandler("servers", tools.ServersHandler(tools.ServersDeps{
+				ServerStore: deps.ServerStore,
+				MetricStore: deps.MetricStore,
+			})),
+			GatewayEntry{
+				Description: "Server infrastructure monitoring: list, query metrics, health snapshots",
+				Actions:     []string{"list", "query", "health"},
+				Category:    "Server Metrics",
+				Access:      "read",
+				ReadOnly:    true,
+				Idempotent:  true,
+				Params:      map[string]string{"server_id": "Server UUID", "metric_name": "e.g. cpu.usage_percent", "start": "ISO 8601 start time", "end": "ISO 8601 end time"},
+			})
+		b.Add("servers", "Server infrastructure monitoring: list, query metrics, health snapshots", "Server Metrics", "read", "")
 	}
+
+	// --- setup ---
+	gw.Register("setup",
+		wrapHandler("setup", tools.SetupHandler(tools.SetupDeps{
+			LogStore:      deps.LogStore,
+			UserStore:     deps.UserStore,
+			SettingsStore: deps.SettingsStore,
+			DSStore:       deps.DSStore,
+		})),
+		GatewayEntry{
+			Description: "Onboarding assistant: check status, detect framework, get SDK guide, verify data flow",
+			Actions:     []string{"status", "detect", "guide", "verify"},
+			Category:    "Setup",
+			Access:      "read",
+			ReadOnly:    true,
+			Idempotent:  true,
+		})
+	b.Add("setup", "Onboarding assistant: check status, detect framework, get SDK guide, verify data flow", "Setup", "read", "")
 }
 
-// addWriteTools registers write/admin tools (connector tools, create_watcher, preview_watcher).
-// When s is nil (catalog-only mode), tools are only cataloged via b.
-func addWriteTools(s *server.MCPServer, deps Deps, b *CatalogBuilder) {
-	// Dynamic connector tools (run queries, etc.) — NOT consolidated.
-	// Note: dynamic connector tools are not cataloged here — the web handler
-	// merges them at request time from s.registry.AllTools().
+// registerWriteTools adds write/admin tools to the gateway.
+func registerWriteTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
+	// Dynamic connector tools — registered individually (not through gateway).
+	// These are still added to the gateway as pass-through handlers.
 	for _, t := range deps.Registry.AllTools() {
-		maybeAddTool(s, convertTool(t), bridgeHandler(t))
+		handler := bridgeHandler(t)
+		gw.Register(t.Name,
+			wrapHandler(t.Name, handler),
+			GatewayEntry{
+				Description: t.Description,
+				Category:    "Connector Queries",
+				Access:      "admin",
+			})
 	}
 
-	// -----------------------------------------------------------------------
-	// Consolidated: admin (settings, users, audit, notes, retention)
-	// -----------------------------------------------------------------------
-	maybeAddTool(s, tools.AdminTool(), tools.AdminHandler(tools.AdminDeps{
-		SettingsStore:    deps.SettingsStore,
-		UserStore:        deps.UserStore,
-		AuditStore:       deps.AuditStore,
-		AgentNoteStore:   deps.AgentNoteStore,
-		MCPActivityStore: deps.MCPActivityStore,
-		Registry:         deps.Registry,
-	}))
-	b.Add("admin", "Admin operations: settings, users, audit, notes, retention, activity", "Admin", "admin", "")
-
-	// -----------------------------------------------------------------------
-	// Investigation session summary (not consolidated — kept as individual tool)
-	// -----------------------------------------------------------------------
-	if deps.InvestigationSessionStore != nil {
-		maybeAddTool(s,
-			mcp.NewTool("set_session_summary",
-				mcp.WithDescription(
-					"Provide a summary of the current investigation session. "+
-						"Call this when you've completed an investigation or identified a root cause. "+
-						"This helps future investigations of similar issues.",
-				),
-				mcp.WithString("summary", mcp.Required(),
-					mcp.Description("One sentence describing what was investigated and found")),
-				mcp.WithString("root_cause",
-					mcp.Description("The root cause if identified")),
-				mcp.WithString("fix_applied",
-					mcp.Description("What fix was applied, if any")),
-				mcp.WithString("outcome",
-					mcp.Description("Session outcome: resolved, unresolved, or partial")),
-				mcp.WithString("primary_service",
-					mcp.Description("The primary service investigated (e.g., 'payments', 'auth')")),
-			),
-			setSessionSummaryHandler(),
-		)
-		b.Add("set_session_summary", "Save a summary of the current investigation for future reference", "Investigation Memory", "admin", "")
-	}
+	// --- admin (settings, users, audit — no notes/session_summary, those are in overview for all users) ---
+	gw.Register("admin",
+		wrapHandler("admin", tools.AdminHandler(tools.AdminDeps{
+			SettingsStore:    deps.SettingsStore,
+			UserStore:        deps.UserStore,
+			AuditStore:       deps.AuditStore,
+			MCPActivityStore: deps.MCPActivityStore,
+			Registry:         deps.Registry,
+		})),
+		GatewayEntry{
+			Description: "Admin operations: settings, users, audit, retention",
+			Actions:     []string{"update_retention", "users", "update_role", "toggle_active", "delete_user", "audit"},
+			Category:    "Admin",
+			Access:      "admin",
+			ReadOnly:    false,
+			Destructive: true,
+			Params:      map[string]string{"user_id": "User ID", "role": "admin/member", "entity_type": "query/endpoint/service/healthcheck/error", "summary": "Investigation summary (session_summary)"},
+		})
+	b.Add("admin", "Admin operations: settings, users, audit, notes, retention, activity, session_summary", "Admin", "admin", "")
 }
+
+// handleSessionSummaryFromArgs handles the session_summary action using the
+// package-level sessionTracker. This bridges the tools package (which can't
+// access the mcp package's sessionTracker) with the actual implementation.
+func handleSessionSummaryFromArgs(args map[string]any) (*mcplib.CallToolResult, error) {
+	summary, _ := args["summary"].(string)
+	rootCause, _ := args["root_cause"].(string)
+	fixApplied, _ := args["fix_applied"].(string)
+	outcome, _ := args["outcome"].(string)
+	primaryService, _ := args["primary_service"].(string)
+
+	if summary == "" {
+		return mcplib.NewToolResultError("summary is required"), nil
+	}
+
+	if sessionTracker == nil {
+		return mcplib.NewToolResultError("session tracking is not enabled"), nil
+	}
+
+	var status *store.InvestigationSessionStatus
+	if outcome != "" {
+		switch outcome {
+		case "resolved":
+			s := store.InvestigationStatusResolved
+			status = &s
+		case "unresolved", "partial":
+			s := store.InvestigationStatusUnresolved
+			status = &s
+		default:
+			s := store.InvestigationSessionStatus(outcome)
+			status = &s
+		}
+	}
+
+	params := store.UpdateInvestigationSessionParams{
+		Summary: &summary,
+	}
+	if rootCause != "" {
+		params.RootCause = &rootCause
+	}
+	if fixApplied != "" {
+		params.FixDescription = &fixApplied
+	}
+	if status != nil {
+		params.Status = status
+	}
+	if primaryService != "" {
+		params.PrimaryService = &primaryService
+	}
+
+	sessionTracker.UpdateSession(params)
+
+	resp := map[string]any{
+		"status":  "saved",
+		"message": "Session summary recorded. This will help future investigations of similar issues.",
+	}
+	if sessID := sessionTracker.CurrentSessionID(); sessID != "" {
+		resp["session_id"] = sessID
+	}
+
+	data, _ := json.Marshal(resp)
+	return mcplib.NewToolResultText(string(data)), nil
+}
+
+// wrapHandler applies activity logging and metrics to a handler.
+func wrapHandler(toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
+	handler = wrapWithMetrics(toolName, handler)
+	if activityStoreForLogging != nil {
+		handler = wrapWithActivityLog(activityStoreForLogging, toolName, handler)
+	}
+	return handler
+}
+
+// ---------------------------------------------------------------------------
+// Legacy helpers (still needed for dynamic connector tools)
+// ---------------------------------------------------------------------------
 
 // convertTool maps a connector.Tool to an mcp.Tool with the appropriate
 // JSON Schema properties derived from the tool's parameter definitions.
-func convertTool(t connector.Tool) mcp.Tool {
-	opts := []mcp.ToolOption{
-		mcp.WithDescription(t.Description),
+func convertTool(t connector.Tool) mcplib.Tool {
+	opts := []mcplib.ToolOption{
+		mcplib.WithDescription(t.Description),
 	}
 
 	for _, p := range t.Params {
-		var propOpts []mcp.PropertyOption
+		var propOpts []mcplib.PropertyOption
 		if p.Required {
-			propOpts = append(propOpts, mcp.Required())
+			propOpts = append(propOpts, mcplib.Required())
 		}
 
 		switch p.Type {
 		case "string":
-			opts = append(opts, mcp.WithString(p.Name, propOpts...))
+			opts = append(opts, mcplib.WithString(p.Name, propOpts...))
 		case "int":
-			opts = append(opts, mcp.WithNumber(p.Name, propOpts...))
+			opts = append(opts, mcplib.WithNumber(p.Name, propOpts...))
 		case "bool":
-			opts = append(opts, mcp.WithBoolean(p.Name, propOpts...))
+			opts = append(opts, mcplib.WithBoolean(p.Name, propOpts...))
 		default:
-			opts = append(opts, mcp.WithString(p.Name, propOpts...))
+			opts = append(opts, mcplib.WithString(p.Name, propOpts...))
 		}
 	}
 
-	return mcp.NewTool(t.Name, opts...)
+	return mcplib.NewTool(t.Name, opts...)
 }
 
 // bridgeHandler wraps a connector.Tool handler as an MCP ToolHandlerFunc.
-// Tool-level errors are returned as MCP error results (not transport errors).
 func bridgeHandler(t connector.Tool) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, request mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 		args := request.GetArguments()
 		if args == nil {
 			args = make(map[string]any)
@@ -302,9 +457,10 @@ func bridgeHandler(t connector.Tool) server.ToolHandlerFunc {
 
 		result, err := t.Handler(ctx, args)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return mcplib.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(result), nil
+		return mcplib.NewToolResultText(result), nil
 	}
 }
+

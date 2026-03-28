@@ -332,13 +332,13 @@ func (st *SessionTracker) classifyIntentFromTool(toolName string) {
 }
 
 // CloseSession closes the current session if open. Called on shutdown/disconnect.
-// It first infers the outcome if no summary was provided, then closes the session.
+// Non-critical lifecycle hooks (notes, runbook tracking, entity linking) run
+// asynchronously to avoid blocking the response path.
 func (st *SessionTracker) CloseSession() {
 	if st.store == nil {
 		return
 	}
 
-	// Re-read the latest session state before finalizing.
 	st.mu.RLock()
 	sess := st.session
 	st.mu.RUnlock()
@@ -361,26 +361,7 @@ func (st *SessionTracker) CloseSession() {
 		finalizeSessionOutcome(st)
 	}
 
-	// Finalize transitions with outcome (for ranking score)
-	if st.transitionStore != nil && sess != nil && sess.TotalSteps > 1 {
-		outcome := string(sess.Status)
-		for i := 0; i < len(sess.ToolSequence)-1; i++ {
-			if err := st.transitionStore.IncrementWithOutcome(ctx, sess.ToolSequence[i], sess.ToolSequence[i+1], sess.Intent, outcome); err != nil {
-				slog.Debug("failed to finalize transition outcome", "error", err)
-			}
-		}
-	}
-
-	// Stage 4: lifecycle hooks on close
-	st.createAutoNotes(ctx, sess)
-	st.updateRunbookEffectiveness(ctx, sess)
-	st.updateQueryMemory(ctx, sess)
-	st.recordAuditEntry(ctx, sess)
-
-	// Stage 5: link code entities from investigated errors
-	LinkInvestigationToEntities(ctx, st.codeEntityStore, st.errorGroupStore, sess)
-
-	// Clear session reference.
+	// Clear session reference early so new sessions can start.
 	st.mu.Lock()
 	sess = st.session
 	st.session = nil
@@ -390,6 +371,7 @@ func (st *SessionTracker) CloseSession() {
 		return
 	}
 
+	// Critical path: close the session in DB (must complete).
 	if closeErr := st.store.Close(ctx, sess.ID); closeErr != nil {
 		slog.Warn("failed to close investigation session",
 			"error", closeErr,
@@ -403,6 +385,34 @@ func (st *SessionTracker) CloseSession() {
 			"status", sess.Status,
 		)
 	}
+
+	// Non-critical path: lifecycle hooks run async to avoid blocking.
+	go st.runCloseHooksAsync(sess)
+}
+
+// runCloseHooksAsync runs non-critical lifecycle hooks in a background goroutine.
+func (st *SessionTracker) runCloseHooksAsync(sess *store.InvestigationSession) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Finalize transitions with outcome (for ranking score)
+	if st.transitionStore != nil && sess.TotalSteps > 1 {
+		outcome := string(sess.Status)
+		for i := 0; i < len(sess.ToolSequence)-1; i++ {
+			if err := st.transitionStore.IncrementWithOutcome(ctx, sess.ToolSequence[i], sess.ToolSequence[i+1], sess.Intent, outcome); err != nil {
+				slog.Debug("failed to finalize transition outcome", "error", err)
+			}
+		}
+	}
+
+	// Lifecycle hooks
+	st.createAutoNotes(ctx, sess)
+	st.updateRunbookEffectiveness(ctx, sess)
+	st.updateQueryMemory(ctx, sess)
+	st.recordAuditEntry(ctx, sess)
+
+	// Link code entities from investigated errors
+	LinkInvestigationToEntities(ctx, st.codeEntityStore, st.errorGroupStore, sess)
 }
 
 // UpdateSession applies updates to the current session.

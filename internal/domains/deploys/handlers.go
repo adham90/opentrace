@@ -3,7 +3,6 @@ package deploys
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/adham90/opentrace/pkg/server"
@@ -68,34 +67,5 @@ func (h *handler) webhook(w http.ResponseWriter, r *http.Request) {
 		"commit_hash": d.CommitHash,
 		"status":      d.Status,
 		"deployed_at": d.DeployedAt.Format(time.RFC3339),
-	})
-}
-
-func (h *handler) list(w http.ResponseWriter, r *http.Request) {
-	if h.store == nil {
-		server.WriteError(w, http.StatusServiceUnavailable, "deploy tracking not available")
-		return
-	}
-
-	service := r.URL.Query().Get("service")
-	limit := 20
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil && n > 0 {
-			limit = n
-		}
-	}
-	if limit > 100 {
-		limit = 100
-	}
-
-	deploys, err := h.store.GetRecent(r.Context(), service, limit)
-	if err != nil {
-		server.WriteError(w, http.StatusInternalServerError, "failed to list deploys")
-		return
-	}
-
-	server.WriteJSON(w, http.StatusOK, map[string]any{
-		"count":   len(deploys),
-		"deploys": deploys,
 	})
 }

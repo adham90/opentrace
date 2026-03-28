@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
+	"golang.org/x/sync/errgroup"
 )
 
 // ContextInjector enriches tool responses with investigation memory.
@@ -54,17 +56,18 @@ func NewContextInjector(ss store.InvestigationSessionStore, ts store.ToolTransit
 
 // InvestigationContext holds contextual investigation memory.
 type InvestigationContext struct {
-	SimilarPastSessions    []SessionSummary           `json:"similar_past_sessions,omitempty"`
-	DeadEnds               []DeadEndWarning           `json:"dead_ends,omitempty"`
-	ParallelInvestigations []ParallelInfo             `json:"parallel_investigations,omitempty"`
-	RelevantNotes          []NoteContext              `json:"relevant_notes,omitempty"`
-	RunbookSuggestion      *RunbookSuggestionContext  `json:"runbook_suggestion,omitempty"`
-	QueryMemory            []QueryMemoryContext       `json:"query_memory,omitempty"`
-	DeployCorrelation      *DeployCorrelationContext  `json:"deploy_correlation,omitempty"`
-	TrafficContext         *TrafficContext             `json:"traffic_context,omitempty"`
-	RecentAdminActions     []AdminActionContext        `json:"recent_admin_actions,omitempty"`
-	CodeRiskContext        []CodeRiskEntry             `json:"code_risk_context,omitempty"`
-	DeployImpactContext    []DeployImpactEntry         `json:"deploy_impact_context,omitempty"`
+	SimilarPastSessions    []SessionSummary          `json:"similar_past_sessions,omitempty"`
+	DeadEnds               []DeadEndWarning          `json:"dead_ends,omitempty"`
+	ParallelInvestigations []ParallelInfo            `json:"parallel_investigations,omitempty"`
+	RelevantNotes          []NoteContext             `json:"relevant_notes,omitempty"`
+	RunbookSuggestion      *RunbookSuggestionContext `json:"runbook_suggestion,omitempty"`
+	QueryMemory            []QueryMemoryContext      `json:"query_memory,omitempty"`
+	DeployCorrelation      *DeployCorrelationContext `json:"deploy_correlation,omitempty"`
+	TrafficContext         *TrafficContext            `json:"traffic_context,omitempty"`
+	RecentAdminActions     []AdminActionContext       `json:"recent_admin_actions,omitempty"`
+	CodeRiskContext        []CodeRiskEntry            `json:"code_risk_context,omitempty"`
+	DeployImpactContext    []DeployImpactEntry        `json:"deploy_impact_context,omitempty"`
+	ContextComplete        bool                       `json:"context_complete"`
 }
 
 // CodeRiskEntry is a risky code entity included in investigation context.
@@ -87,13 +90,13 @@ type DeployImpactEntry struct {
 
 // SessionSummary is a compact representation of a past session.
 type SessionSummary struct {
-	SessionID   string `json:"session_id"`
-	Intent      string `json:"intent"`
-	Status      string `json:"status"`
-	Summary     string `json:"summary,omitempty"`
-	RootCause   string `json:"root_cause,omitempty"`
-	TotalSteps  int    `json:"total_steps"`
-	Service     string `json:"service,omitempty"`
+	SessionID  string `json:"session_id"`
+	Intent     string `json:"intent"`
+	Status     string `json:"status"`
+	Summary    string `json:"summary,omitempty"`
+	RootCause  string `json:"root_cause,omitempty"`
+	TotalSteps int    `json:"total_steps"`
+	Service    string `json:"service,omitempty"`
 }
 
 // ParallelInfo describes another active investigation on the same service.
@@ -151,6 +154,7 @@ type AdminActionContext struct {
 
 // BuildContext constructs investigation context for the current session.
 // Returns nil for non-investigation intents or when no context is available.
+// All independent DB queries run concurrently via errgroup for lower latency.
 func (ci *ContextInjector) BuildContext(ctx context.Context, sess *store.InvestigationSession, toolName string) *InvestigationContext {
 	if sess == nil || sess.Intent != IntentInvestigation {
 		return nil
@@ -160,39 +164,50 @@ func (ci *ContextInjector) BuildContext(ctx context.Context, sess *store.Investi
 	defer cancel()
 
 	ic := &InvestigationContext{}
+	g, ctx := errgroup.WithContext(ctx)
+
+	// Track how many queries encountered errors for degradation indicator.
+	var errCount atomic.Int32
 
 	// 1. Similar past sessions
-	similar, err := ci.sessionStore.FindSimilar(ctx, store.FindSimilarParams{
-		Service:          sess.PrimaryService,
-		Intent:           sess.Intent,
-		ToolFingerprint:  sess.ToolFingerprint,
-		ExcludeSessionID: sess.ID,
-		MaxResults:       3,
-		MinSteps:         3,
-		OnlyResolved:     true,
-	})
-	if err != nil {
-		slog.Debug("context_injector: FindSimilar failed", "error", err)
-	} else {
-		for _, s := range similar {
-			summary := SessionSummary{
-				SessionID:  s.ID,
-				Intent:     s.Intent,
-				Status:     string(s.Status),
-				Summary:    truncate(s.Summary, 200),
-				RootCause:  truncate(s.RootCause, 200),
-				TotalSteps: s.TotalSteps,
-				Service:    s.PrimaryService,
+	g.Go(func() error {
+		similar, err := ci.sessionStore.FindSimilar(ctx, store.FindSimilarParams{
+			Service:          sess.PrimaryService,
+			Intent:           sess.Intent,
+			ToolFingerprint:  sess.ToolFingerprint,
+			ExcludeSessionID: sess.ID,
+			MaxResults:       3,
+			MinSteps:         3,
+			OnlyResolved:     true,
+		})
+		if err != nil {
+			slog.Debug("context_injector: FindSimilar failed", "error", err)
+			errCount.Add(1)
+		} else {
+			for _, s := range similar {
+				ic.SimilarPastSessions = append(ic.SimilarPastSessions, SessionSummary{
+					SessionID:  s.ID,
+					Intent:     s.Intent,
+					Status:     string(s.Status),
+					Summary:    truncate(s.Summary, 200),
+					RootCause:  truncate(s.RootCause, 200),
+					TotalSteps: s.TotalSteps,
+					Service:    s.PrimaryService,
+				})
 			}
-			ic.SimilarPastSessions = append(ic.SimilarPastSessions, summary)
 		}
-	}
+		return nil
+	})
 
 	// 2. Dead-ends from transition data
-	if ci.transitionStore != nil {
+	g.Go(func() error {
+		if ci.transitionStore == nil {
+			return nil
+		}
 		transitions, err := ci.transitionStore.GetDeadEnds(ctx, sess.Intent)
 		if err != nil {
 			slog.Debug("context_injector: dead-end query failed", "error", err)
+			errCount.Add(1)
 		} else if len(transitions) > 0 {
 			if len(transitions) > 3 {
 				transitions = transitions[:3]
@@ -205,10 +220,14 @@ func (ci *ContextInjector) BuildContext(ctx context.Context, sess *store.Investi
 				})
 			}
 		}
-	}
+		return nil
+	})
 
 	// 3. Parallel investigations (same service, currently open, different session)
-	if sess.PrimaryService != "" {
+	g.Go(func() error {
+		if sess.PrimaryService == "" {
+			return nil
+		}
 		recent, err := ci.sessionStore.List(ctx, store.ListInvestigationSessionParams{
 			Status:  store.InvestigationStatusOpen,
 			Service: sess.PrimaryService,
@@ -216,6 +235,7 @@ func (ci *ContextInjector) BuildContext(ctx context.Context, sess *store.Investi
 		})
 		if err != nil {
 			slog.Debug("context_injector: parallel investigation query failed", "error", err)
+			errCount.Add(1)
 		} else {
 			for _, s := range recent {
 				if s.ID == sess.ID {
@@ -229,33 +249,63 @@ func (ci *ContextInjector) BuildContext(ctx context.Context, sess *store.Investi
 				})
 			}
 		}
-	}
+		return nil
+	})
 
 	// 4. Relevant notes
-	ci.getRelevantNotes(ctx, sess, ic)
+	g.Go(func() error {
+		ci.getRelevantNotes(ctx, sess, ic)
+		return nil
+	})
 
 	// 5. Runbook suggestion (only at step 0)
-	if sess.TotalSteps == 0 {
-		ci.suggestRunbook(ctx, ic)
-	}
+	g.Go(func() error {
+		if sess.TotalSteps == 0 {
+			ci.suggestRunbook(ctx, ic)
+		}
+		return nil
+	})
 
 	// 6. Query memory
-	ci.getQueryMemory(ctx, sess, ic)
+	g.Go(func() error {
+		ci.getQueryMemory(ctx, sess, ic)
+		return nil
+	})
 
 	// 7. Deploy correlation
-	ci.getDeployCorrelation(ctx, sess, ic)
+	g.Go(func() error {
+		ci.getDeployCorrelation(ctx, sess, ic)
+		return nil
+	})
 
 	// 8. Traffic context
-	ci.getTrafficContext(ctx, sess, ic)
+	g.Go(func() error {
+		ci.getTrafficContext(ctx, sess, ic)
+		return nil
+	})
 
 	// 9. Recent admin actions
-	ci.getRecentAdminActions(ctx, sess, ic)
+	g.Go(func() error {
+		ci.getRecentAdminActions(ctx, sess, ic)
+		return nil
+	})
 
-	// 10. Code risk context (Stage 5)
-	ci.getCodeRiskContext(ctx, sess, ic)
+	// 10. Code risk context
+	g.Go(func() error {
+		ci.getCodeRiskContext(ctx, sess, ic)
+		return nil
+	})
 
-	// 11. Deploy impact context (Stage 5)
-	ci.getDeployImpactContext(ctx, sess, ic)
+	// 11. Deploy impact context
+	g.Go(func() error {
+		ci.getDeployImpactContext(ctx, sess, ic)
+		return nil
+	})
+
+	_ = g.Wait() // ignore aggregate error — all goroutines return nil
+
+	// Degradation indicator: mark whether all queries succeeded
+	ic.ContextComplete = errCount.Load() == 0
 
 	// Return nil if nothing useful was found
 	if ci.isContextEmpty(ic) {

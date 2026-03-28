@@ -12,13 +12,6 @@ var Module = server.Module{
 	Mount: mount,
 }
 
-func mount(r chi.Router, deps *server.Deps) {
-	h := &handler{
-		store: deps.ErrorImpactStore,
-	}
-
-	r.Get("/errors/{fingerprint}/impact", h.getImpact)
-	r.Get("/errors/{fingerprint}/affected-users", h.affectedUsers)
-	r.Get("/users/{userID}/errors", h.userErrors)
-	r.Get("/errors/top-by-impact", h.topByImpact)
+func mount(_ chi.Router, _ *server.Deps) {
+	// All REST routes removed — error impact data is accessed via MCP tools.
 }

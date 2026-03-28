@@ -170,13 +170,13 @@ func logsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*
 	// Suggested next tools based on findings.
 	var suggestions []ToolSuggestion
 	if nPlusOneCount > 0 {
-		suggestions = append(suggestions, Suggest("log_search", "N+1 queries detected — search for SQL details", map[string]any{"level": "debug"}))
+		suggestions = append(suggestions, Suggest("logs", "N+1 queries detected — search for SQL details", map[string]any{"action": "search", "level": "debug"}))
 	}
 	if avgSQL > 20 {
-		suggestions = append(suggestions, Suggest("query_stats", "High SQL count — check query performance", nil))
+		suggestions = append(suggestions, Suggest("database", "High SQL count — check query performance", map[string]any{"action": "queries"}))
 	}
 	if len(perfEntries) > 0 {
-		suggestions = append(suggestions, Suggest("diagnose", "Get full system overview", nil))
+		suggestions = append(suggestions, Suggest("overview", "Get full system overview", map[string]any{"action": "diagnose"}))
 	}
 	withSuggestionsRanked(resp, deps.Ranker, suggestions...)
 

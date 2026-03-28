@@ -14,6 +14,10 @@ import (
 	"github.com/adham90/opentrace/pkg/store"
 )
 
+// SessionSummaryCallback is a callback for handling session summary updates.
+// Defined here so overview (read-only) can call it without importing admin.
+type SessionSummaryCallback func(ctx context.Context, args map[string]any) (*mcp.CallToolResult, error)
+
 // OverviewDeps holds the stores needed by the overview tool.
 type OverviewDeps struct {
 	LogStore         store.LogStore
@@ -22,24 +26,43 @@ type OverviewDeps struct {
 	ErrorGroupStore  store.ErrorGroupStore
 	WatchStore       store.WatchStore
 	HealthCheckStore store.HealthCheckStore
+	SettingsStore    store.SettingsStore
+	AgentNoteStore   store.AgentNoteStore
+	SessionSummary   SessionSummaryCallback
 }
 
 // OverviewTool returns the consolidated tool definition for system overview,
 // triage, diagnose, and incident timeline.
 func OverviewTool() mcp.Tool {
 	return mcp.NewTool("overview",
-		mcp.WithDescription(`System overview, triage, diagnosis, and incident timeline.
+		mcp.WithDescription(`System overview, triage, diagnosis, incident timeline, and agent memory.
 
 Actions:
 - status: High-level system health dashboard (error groups, watch alerts, healthchecks, connectors, servers)
 - triage: Prioritized list of items needing attention, sorted by severity then recency
 - diagnose: All-in-one investigation with error summary, log volume, request performance, watch alerts, and healthchecks
-- timeline: Chronological incident timeline from multiple data sources`),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, triage, diagnose, timeline")),
+- timeline: Chronological incident timeline from multiple data sources
+- investigate: Comprehensive single-call service investigation (errors, logs, alerts, volume)
+- changes: Correlation/changes timeline showing new errors and volume shifts
+- settings: Read current server settings (retention, query limits, API key)
+- notes: Get or set agent notes (persistent memory for entities across sessions)
+- delete_note: Delete a saved note
+- session_summary: Save investigation summary for future reference`),
+		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, triage, diagnose, timeline, investigate, changes, settings, notes, delete_note, session_summary")),
 		mcp.WithString("service", mcp.Description("Service name to scope investigation")),
 		mcp.WithString("timeframe", mcp.Description("Time window for diagnose (default: 1h). Examples: 30m, 2h, 24h, 7d")),
 		mcp.WithString("start", mcp.Description("Start time for timeline (ISO 8601 / RFC3339)")),
 		mcp.WithString("end", mcp.Description("End time for timeline (ISO 8601 / RFC3339)")),
+		// notes params
+		mcp.WithString("entity_type", mcp.Description("(notes) Entity type: query, endpoint, service, healthcheck, error")),
+		mcp.WithString("entity_id", mcp.Description("(notes) Entity identifier")),
+		mcp.WithString("note", mcp.Description("(notes) Note text to save. Omit to read existing notes")),
+		// session_summary params
+		mcp.WithString("summary", mcp.Description("(session_summary) What was investigated and found")),
+		mcp.WithString("root_cause", mcp.Description("(session_summary) Root cause if identified")),
+		mcp.WithString("fix_applied", mcp.Description("(session_summary) What fix was applied, if any")),
+		mcp.WithString("outcome", mcp.Description("(session_summary) Outcome: resolved, unresolved, or partial")),
+		mcp.WithString("primary_service", mcp.Description("(session_summary) Primary service investigated")),
 	)
 }
 
@@ -58,8 +81,23 @@ func OverviewHandler(d OverviewDeps) server.ToolHandlerFunc {
 			return handleDiagnose(ctx, d, args)
 		case "timeline":
 			return handleTimeline(ctx, d, args)
+		case "investigate":
+			return handleInvestigate(ctx, d, args)
+		case "changes":
+			return handleChanges(ctx, d, args)
+		case "settings":
+			return handleOverviewSettings(ctx, d)
+		case "notes":
+			return handleOverviewNotes(ctx, d, args)
+		case "delete_note":
+			return handleOverviewDeleteNote(ctx, d, args)
+		case "session_summary":
+			if d.SessionSummary == nil {
+				return mcp.NewToolResultError("session tracking is not enabled"), nil
+			}
+			return d.SessionSummary(ctx, args)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s (use status, triage, diagnose, timeline)", action)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s (use status, triage, diagnose, timeline, investigate, changes, settings, notes, delete_note, session_summary)", action)), nil
 		}
 	}
 }
@@ -173,17 +211,17 @@ func handleStatus(ctx context.Context, d OverviewDeps) (*mcp.CallToolResult, err
 	var suggestions []ToolSuggestion
 	if eg, ok := overview["error_groups"].(map[string]any); ok {
 		if u, _ := eg["unresolved"].(int); u > 0 {
-			suggestions = append(suggestions, Suggest("error_groups", fmt.Sprintf("%d unresolved errors", u), map[string]any{"status": "unresolved"}))
+			suggestions = append(suggestions, Suggest("errors", fmt.Sprintf("%d unresolved errors", u), map[string]any{"action": "list", "status": "unresolved"}))
 		}
 	}
 	if logs, ok := overview["logs"].(map[string]int); ok {
 		if logs["errors_last_hour"] > 0 {
-			suggestions = append(suggestions, Suggest("log_summary", "Investigate errors in last hour", nil))
+			suggestions = append(suggestions, Suggest("logs", "Investigate errors in last hour", map[string]any{"action": "summary"}))
 		}
 	}
 	if hc, ok := overview["healthchecks"].(map[string]int); ok {
 		if hc["down"] > 0 {
-			suggestions = append(suggestions, Suggest("uptime_status", fmt.Sprintf("%d endpoints down", hc["down"]), nil))
+			suggestions = append(suggestions, Suggest("healthchecks", fmt.Sprintf("%d endpoints down", hc["down"]), map[string]any{"action": "uptime"}))
 		}
 	}
 	suggestions = append(suggestions, Suggest("overview", "Deep dive into a specific service", map[string]any{"action": "diagnose"}))
@@ -351,7 +389,8 @@ func handleTriage(ctx context.Context, d OverviewDeps) (*mcp.CallToolResult, err
 	top := items[0]
 	switch top.Type {
 	case "error_group":
-		suggestions = append(suggestions, Suggest("error_detail", "Investigate top error", map[string]any{
+		suggestions = append(suggestions, Suggest("errors", "Investigate top error", map[string]any{
+			"action":      "detail",
 			"fingerprint": top.ID,
 		}))
 	case "watch_alert":
@@ -708,8 +747,8 @@ func buildDiagnoseSuggestions(resp map[string]any, service string) []map[string]
 		if topErrors, ok := es["top_errors"].([]map[string]any); ok && len(topErrors) > 0 {
 			if fp, ok := topErrors[0]["fingerprint"].(string); ok && fp != "" {
 				suggestions = append(suggestions, map[string]any{
-					"tool": "error_detail",
-					"args": map[string]any{"fingerprint": fp},
+					"tool": "errors",
+					"args": map[string]any{"action": "detail", "fingerprint": fp},
 				})
 			}
 		}
@@ -717,12 +756,12 @@ func buildDiagnoseSuggestions(resp map[string]any, service string) []map[string]
 
 	if lv, ok := resp["log_volume"].(map[string]any); ok {
 		if ec, ok := lv["error_count"].(int); ok && ec > 0 {
-			args := map[string]any{"level": "error", "limit": float64(10)}
+			args := map[string]any{"action": "search", "level": "error", "limit": float64(10)}
 			if service != "" {
 				args["service"] = service
 			}
 			suggestions = append(suggestions, map[string]any{
-				"tool": "log_search",
+				"tool": "logs",
 				"args": args,
 			})
 		}
@@ -1014,7 +1053,7 @@ func handleTimeline(ctx context.Context, d OverviewDeps, args map[string]any) (*
 		suggestions = append(suggestions, Suggest("overview", "Deep dive into root cause", map[string]any{"action": "diagnose"}))
 	}
 	if typeCounts["error"] > 5 {
-		suggestions = append(suggestions, Suggest("error_groups", "Review aggregated errors", map[string]any{"status": "unresolved"}))
+		suggestions = append(suggestions, Suggest("errors", "Review aggregated errors", map[string]any{"action": "list", "status": "unresolved"}))
 	}
 	WithSuggestions(resp, suggestions...)
 
@@ -1061,4 +1100,435 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// --- investigate action ---
+
+func handleInvestigate(ctx context.Context, d OverviewDeps, args map[string]any) (*mcp.CallToolResult, error) {
+	service, _ := args["service"].(string)
+	if service == "" {
+		return mcp.NewToolResultError("service is required for the investigate action"), nil
+	}
+
+	since := GetSinceParam(args, 1*time.Hour)
+	now := time.Now().UTC()
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	resp := map[string]any{
+		"service": service,
+		"since":   since.Format(time.RFC3339),
+		"until":   now.Format(time.RFC3339),
+	}
+
+	var unresolvedCount int
+	var topErrorsList []map[string]any
+	var recentErrorLogs []map[string]any
+	var alertsList []map[string]any
+	var logVolume map[string]any
+
+	// 1. Top errors by occurrence count.
+	if d.ErrorGroupStore != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			groups, err := d.ErrorGroupStore.List(ctx, store.ListErrorGroupParams{
+				Service: service,
+				Limit:   5,
+				SortBy:  "occurrence_count",
+			})
+			if err != nil {
+				return
+			}
+			uc, _ := d.ErrorGroupStore.Count(ctx, store.ErrorGroupUnresolved)
+
+			mu.Lock()
+			unresolvedCount = uc
+			for _, g := range groups {
+				topErrorsList = append(topErrorsList, map[string]any{
+					"fingerprint":      g.Fingerprint,
+					"exception_class":  g.ExceptionClass,
+					"message":          truncateMsg(g.Message, 100),
+					"occurrence_count": g.OccurrenceCount,
+					"last_seen_at":     g.LastSeenAt.Format(time.RFC3339),
+					"status":           string(g.Status),
+				})
+			}
+			mu.Unlock()
+		}()
+	}
+
+	// 2. Recent error logs.
+	if d.LogStore != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sinceTime := since
+			logs, err := d.LogStore.Search(ctx, store.LogSearchParams{
+				Service: service,
+				Level:   "error",
+				Start:   &sinceTime,
+				Limit:   10,
+			})
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			for _, l := range logs {
+				recentErrorLogs = append(recentErrorLogs, map[string]any{
+					"id":        l.ID,
+					"timestamp": l.Timestamp.Format(time.RFC3339),
+					"level":     l.Level,
+					"message":   truncateMsg(l.Message, 150),
+				})
+			}
+			mu.Unlock()
+		}()
+	}
+
+	// 3. Active watch alerts.
+	if d.WatchStore != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			alerts, err := d.WatchStore.ListAlerts(ctx, "", "pending", 20)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			for _, a := range alerts {
+				// Alert doesn't have service directly; include all and let
+				// the summary note them. Filter via watch if possible.
+				alertsList = append(alertsList, map[string]any{
+					"id":              a.ID,
+					"summary":         a.Summary,
+					"urgency":         string(a.Urgency),
+					"trigger_metric":  a.TriggerMetric,
+					"trigger_value":   a.TriggerValue,
+					"threshold_value": a.ThresholdValue,
+					"created_at":      a.CreatedAt.Format(time.RFC3339),
+				})
+			}
+			mu.Unlock()
+		}()
+	}
+
+	// 4. Log volume by level.
+	if d.LogStore != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			byLevel, err := d.LogStore.CountByLevel(ctx, store.LogCountParams{
+				Since:   since,
+				Until:   now,
+				Service: service,
+			})
+			if err != nil {
+				return
+			}
+			total := 0
+			for _, c := range byLevel {
+				total += c
+			}
+			mu.Lock()
+			logVolume = map[string]any{
+				"total":    total,
+				"by_level": byLevel,
+			}
+			mu.Unlock()
+		}()
+	}
+
+	wg.Wait()
+
+	resp["errors"] = map[string]any{
+		"unresolved_count": unresolvedCount,
+		"top_errors":       topErrorsList,
+	}
+	resp["recent_logs"] = recentErrorLogs
+	resp["alerts"] = alertsList
+	if logVolume != nil {
+		resp["log_volume"] = logVolume
+	}
+
+	// Build summary.
+	errorLogCount := len(recentErrorLogs)
+	alertCount := len(alertsList)
+	resp["summary"] = fmt.Sprintf("%d unresolved errors, %d error logs in last hour, %d active alerts",
+		unresolvedCount, errorLogCount, alertCount)
+
+	// Suggestions.
+	var suggestions []ToolSuggestion
+	if len(topErrorsList) > 0 {
+		if fp, ok := topErrorsList[0]["fingerprint"].(string); ok && fp != "" {
+			suggestions = append(suggestions, Suggest("errors", "Investigate the top error", map[string]any{
+				"action":      "detail",
+				"fingerprint": fp,
+			}))
+		}
+	}
+	if errorLogCount > 0 {
+		suggestions = append(suggestions, Suggest("logs", "Search error logs for this service", map[string]any{
+			"action":  "search",
+			"service": service,
+			"level":   "error",
+		}))
+	}
+	WithSuggestions(resp, suggestions...)
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal investigate: %v", err)), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// --- changes action ---
+
+func handleChanges(ctx context.Context, d OverviewDeps, args map[string]any) (*mcp.CallToolResult, error) {
+	since := GetSinceParam(args, 2*time.Hour)
+	now := time.Now().UTC()
+	windowDuration := now.Sub(since)
+	service, _ := args["service"].(string)
+
+	resp := map[string]any{
+		"since": since.Format(time.RFC3339),
+		"until": now.Format(time.RFC3339),
+	}
+	if service != "" {
+		resp["service"] = service
+	}
+
+	// 1. New error fingerprints (first seen after since).
+	var newErrors []map[string]any
+	if d.ErrorGroupStore != nil {
+		groups, err := d.ErrorGroupStore.List(ctx, store.ListErrorGroupParams{
+			Service: service,
+			Limit:   20,
+			SortBy:  "first_seen_at",
+		})
+		if err == nil {
+			for _, g := range groups {
+				if g.FirstSeenAt.After(since) {
+					newErrors = append(newErrors, map[string]any{
+						"fingerprint":      g.Fingerprint,
+						"exception_class":  g.ExceptionClass,
+						"message":          truncateMsg(g.Message, 100),
+						"service":          g.Service,
+						"occurrence_count": g.OccurrenceCount,
+						"first_seen_at":    g.FirstSeenAt.Format(time.RFC3339),
+					})
+				}
+			}
+		}
+	}
+	resp["new_errors"] = newErrors
+
+	// 2. Recent error/fatal log entries.
+	var recentErrorLogs []map[string]any
+	if d.LogStore != nil {
+		sinceTime := since
+		logs, err := d.LogStore.Search(ctx, store.LogSearchParams{
+			Service: service,
+			Level:   "error",
+			Start:   &sinceTime,
+			Limit:   10,
+		})
+		if err == nil {
+			for _, l := range logs {
+				recentErrorLogs = append(recentErrorLogs, map[string]any{
+					"id":        l.ID,
+					"timestamp": l.Timestamp.Format(time.RFC3339),
+					"level":     l.Level,
+					"message":   truncateMsg(l.Message, 150),
+					"service":   l.Service,
+				})
+			}
+		}
+	}
+	resp["recent_error_logs"] = recentErrorLogs
+
+	// 3. Volume comparison: current window vs previous window of same duration.
+	if d.LogStore != nil {
+		prevStart := since.Add(-windowDuration)
+
+		currentCounts, currErr := d.LogStore.CountByLevel(ctx, store.LogCountParams{
+			Since:   since,
+			Until:   now,
+			Service: service,
+		})
+		prevCounts, prevErr := d.LogStore.CountByLevel(ctx, store.LogCountParams{
+			Since:   prevStart,
+			Until:   since,
+			Service: service,
+		})
+
+		currentErrors := 0
+		previousErrors := 0
+		if currErr == nil {
+			currentErrors = currentCounts["ERROR"] + currentCounts["FATAL"] +
+				currentCounts["error"] + currentCounts["fatal"]
+		}
+		if prevErr == nil {
+			previousErrors = prevCounts["ERROR"] + prevCounts["FATAL"] +
+				prevCounts["error"] + prevCounts["fatal"]
+		}
+
+		var changePct float64
+		if previousErrors > 0 {
+			changePct = float64(currentErrors-previousErrors) / float64(previousErrors) * 100
+		} else if currentErrors > 0 {
+			changePct = 100.0 // went from 0 to some errors
+		}
+
+		resp["volume_comparison"] = map[string]any{
+			"current_errors":  currentErrors,
+			"previous_errors": previousErrors,
+			"change_pct":      fmt.Sprintf("%.1f", changePct),
+		}
+	}
+
+	// Suggestions.
+	var suggestions []ToolSuggestion
+	if len(newErrors) > 0 {
+		if fp, ok := newErrors[0]["fingerprint"].(string); ok && fp != "" {
+			suggestions = append(suggestions, Suggest("errors", "Investigate the newest error", map[string]any{
+				"action":      "detail",
+				"fingerprint": fp,
+			}))
+		}
+	}
+	if len(recentErrorLogs) > 0 {
+		suggestions = append(suggestions, Suggest("overview", "Full service investigation", map[string]any{
+			"action":  "investigate",
+			"service": service,
+		}))
+	}
+	WithSuggestions(resp, suggestions...)
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal changes: %v", err)), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// --- notes action (agent memory) ---
+
+func handleOverviewNotes(ctx context.Context, d OverviewDeps, args map[string]any) (*mcp.CallToolResult, error) {
+	if d.AgentNoteStore == nil {
+		return mcp.NewToolResultError("AgentNoteStore not configured"), nil
+	}
+
+	entityType, _ := args["entity_type"].(string)
+	entityID, _ := args["entity_id"].(string)
+	noteText, _ := args["note"].(string)
+
+	// If note text is provided, this is an upsert
+	if noteText != "" {
+		if entityType == "" {
+			return mcp.NewToolResultError("entity_type is required (query, endpoint, service, healthcheck, error)"), nil
+		}
+		if entityID == "" {
+			return mcp.NewToolResultError("entity_id is required"), nil
+		}
+
+		result, err := d.AgentNoteStore.Upsert(ctx, entityType, entityID, noteText)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to save note: %v", err)), nil
+		}
+
+		resp := map[string]any{
+			"entity_type": result.EntityType,
+			"entity_id":   result.EntityID,
+			"note":        result.Note,
+			"updated_at":  result.UpdatedAt.Format(time.RFC3339),
+			"message":     fmt.Sprintf("Note saved for %s '%s'. This will be included in future tool responses.", entityType, entityID),
+		}
+		data, _ := json.Marshal(resp)
+		return mcp.NewToolResultText(string(data)), nil
+	}
+
+	// If both type and ID given, get a specific note
+	if entityType != "" && entityID != "" {
+		note, err := d.AgentNoteStore.Get(ctx, entityType, entityID)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("note not found: %v", err)), nil
+		}
+		data, _ := json.Marshal(note)
+		return mcp.NewToolResultText(string(data)), nil
+	}
+
+	// Otherwise, list (optionally filtered by entity_type)
+	notes, err := d.AgentNoteStore.List(ctx, entityType)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to list notes: %v", err)), nil
+	}
+
+	if len(notes) == 0 {
+		return mcp.NewToolResultText("No agent notes found. Use overview with action=notes and a note parameter to save context for future sessions."), nil
+	}
+
+	resp := map[string]any{
+		"count": len(notes),
+		"notes": notes,
+	}
+	data, _ := json.Marshal(resp)
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func handleOverviewDeleteNote(ctx context.Context, d OverviewDeps, args map[string]any) (*mcp.CallToolResult, error) {
+	if d.AgentNoteStore == nil {
+		return mcp.NewToolResultError("AgentNoteStore not configured"), nil
+	}
+
+	entityType, _ := args["entity_type"].(string)
+	if entityType == "" {
+		return mcp.NewToolResultError("entity_type is required"), nil
+	}
+	entityID, _ := args["entity_id"].(string)
+	if entityID == "" {
+		return mcp.NewToolResultError("entity_id is required"), nil
+	}
+
+	if err := d.AgentNoteStore.Delete(ctx, entityType, entityID); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to delete note: %v", err)), nil
+	}
+
+	resp := map[string]any{
+		"status":  "deleted",
+		"message": fmt.Sprintf("Note for %s '%s' deleted.", entityType, entityID),
+	}
+	data, _ := json.Marshal(resp)
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// --- settings action (read-only) ---
+
+func handleOverviewSettings(ctx context.Context, d OverviewDeps) (*mcp.CallToolResult, error) {
+	if d.SettingsStore == nil {
+		return mcp.NewToolResultError("SettingsStore not configured"), nil
+	}
+
+	resp := map[string]any{}
+
+	if retention, err := d.SettingsStore.GetRetention(ctx); err == nil {
+		resp["retention_days"] = retention.RetentionDays
+		resp["metric_retention_days"] = retention.MetricRetentionDays
+	}
+	if v, err := d.SettingsStore.GetAPIKey(ctx); err == nil && v != "" {
+		resp["api_key"] = v
+	}
+	if v, err := d.SettingsStore.GetMaxQueryRows(ctx); err == nil && v > 0 {
+		resp["max_query_rows"] = v
+	}
+	if v, err := d.SettingsStore.GetStatementTimeout(ctx); err == nil && v > 0 {
+		resp["statement_timeout_ms"] = v
+	}
+	if v, err := d.SettingsStore.GetMCPName(ctx); err == nil && v != "" {
+		resp["mcp_name"] = v
+	}
+
+	data, _ := json.Marshal(resp)
+	return mcp.NewToolResultText(string(data)), nil
 }

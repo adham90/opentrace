@@ -41,19 +41,19 @@ func TestClassifyIntent_ToolFallback(t *testing.T) {
 		tool       string
 		wantIntent string
 	}{
-		{"diagnose", IntentInvestigation},
-		{"triage_alerts", IntentInvestigation},
-		{"error_groups", IntentInvestigation},
-		{"error_detail", IntentInvestigation},
-		{"runbook", IntentInvestigation},
-		{"log_search", IntentInvestigation},
-		{"explain_query", IntentInvestigation},
-		{"watch", IntentConfiguration},
-		{"create_healthcheck", IntentConfiguration},
-		{"system_overview", IntentQuery},
-		{"web_analytics", IntentQuery},
-		{"uptime_status", IntentQuery},
-		{"db_query_stats", IntentQuery},
+		{"overview", IntentInvestigation},
+		{"errors", IntentInvestigation},
+		{"logs", IntentInvestigation},
+		{"database", IntentInvestigation},
+		{"watches", IntentConfiguration},
+		{"healthchecks", IntentConfiguration},
+		{"connectors", IntentConfiguration},
+		{"admin", IntentConfiguration},
+		{"analytics", IntentQuery},
+		{"servers", IntentQuery},
+		{"deploys", IntentDeployment},
+		{"code", IntentDevelopment},
+		{"setup", IntentExploration},
 		{"some_unknown_tool", IntentExploration},
 	}
 
@@ -68,8 +68,8 @@ func TestClassifyIntent_ToolFallback(t *testing.T) {
 }
 
 func TestClassifyIntent_ContextOverridesTool(t *testing.T) {
-	// Even if tool is "system_overview" (query), context about a bug takes priority.
-	intent, _ := ClassifyIntent("investigating a bug in the payment service", "system_overview")
+	// Even if tool is "analytics" (query), context about a bug takes priority.
+	intent, _ := ClassifyIntent("investigating a bug in the payment service", "analytics")
 	if intent != IntentInvestigation {
 		t.Errorf("context should override tool, got %q want %q", intent, IntentInvestigation)
 	}

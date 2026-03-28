@@ -12,11 +12,6 @@ var Module = server.Module{
 	Mount: mount,
 }
 
-func mount(r chi.Router, deps *server.Deps) {
-	h := &handler{
-		store: deps.MCPActivityStore,
-	}
-
-	r.Get("/mcp/activity/stats", h.stats)
-	r.Get("/mcp/activity", h.list)
+func mount(_ chi.Router, _ *server.Deps) {
+	// All REST routes removed — MCP activity is accessed via MCP tools.
 }

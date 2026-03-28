@@ -164,14 +164,6 @@ func aggregationHandler(deps *server.Deps) jobs.HandlerFunc {
 				return nil
 			})
 		}
-		if deps.JourneyStore != nil {
-			g.Go(func() error {
-				if err := deps.JourneyStore.BuildSessions(gctx, since); err != nil {
-					slog.Warn("session building failed", "error", err)
-				}
-				return nil
-			})
-		}
 		if deps.ErrorImpactStore != nil {
 			g.Go(func() error {
 				if err := deps.ErrorImpactStore.ComputeImpactScores(gctx); err != nil {

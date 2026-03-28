@@ -53,6 +53,58 @@ func addResources(s *server.MCPServer, deps Deps) {
 			activeInvestigationsHandler(deps.InvestigationSessionStore),
 		)
 	}
+
+	// 4. Current configuration: opentrace://config/current
+	if deps.SettingsStore != nil {
+		s.AddResource(
+			mcp.NewResource(
+				"opentrace://config/current",
+				"Current Configuration",
+				mcp.WithResourceDescription("Current configuration (retention settings, MCP name, limits)"),
+				mcp.WithMIMEType("application/json"),
+			),
+			configCurrentHandler(deps.SettingsStore),
+		)
+	}
+
+	// 5. Service list: opentrace://services/list
+	if deps.LogStore != nil {
+		s.AddResource(
+			mcp.NewResource(
+				"opentrace://services/list",
+				"Service List",
+				mcp.WithResourceDescription("List all known service names from logs"),
+				mcp.WithMIMEType("application/json"),
+			),
+			servicesListHandler(deps.LogStore),
+		)
+	}
+
+	// 6. Connector status: opentrace://connectors/status
+	if deps.DSStore != nil {
+		s.AddResource(
+			mcp.NewResource(
+				"opentrace://connectors/status",
+				"Connector Status",
+				mcp.WithResourceDescription("Active connector status"),
+				mcp.WithMIMEType("application/json"),
+			),
+			connectorsStatusHandler(deps.DSStore),
+		)
+	}
+
+	// 7. Health check summary: opentrace://healthchecks/summary
+	if deps.HealthCheckStore != nil {
+		s.AddResource(
+			mcp.NewResource(
+				"opentrace://healthchecks/summary",
+				"Health Check Summary",
+				mcp.WithResourceDescription("Current health check status"),
+				mcp.WithMIMEType("application/json"),
+			),
+			healthchecksSummaryHandler(deps.HealthCheckStore),
+		)
+	}
 }
 
 func serviceStatusHandler(deps Deps) server.ResourceTemplateHandlerFunc {
@@ -192,6 +244,142 @@ func activeInvestigationsHandler(iss store.InvestigationSessionStore) server.Res
 		return []mcp.ResourceContents{
 			mcp.TextResourceContents{
 				URI:      "opentrace://investigations/active",
+				MIMEType: "application/json",
+				Text:     string(data),
+			},
+		}, nil
+	}
+}
+
+func configCurrentHandler(ss store.SettingsStore) server.ResourceHandlerFunc {
+	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+		result := map[string]any{}
+
+		retention, err := ss.GetRetention(ctx)
+		if err == nil && retention != nil {
+			result["retention_days"] = retention.RetentionDays
+			result["metric_retention_days"] = retention.MetricRetentionDays
+		}
+
+		maxRows, err := ss.GetMaxQueryRows(ctx)
+		if err == nil {
+			result["max_query_rows"] = maxRows
+		}
+
+		timeout, err := ss.GetStatementTimeout(ctx)
+		if err == nil {
+			result["statement_timeout_ms"] = timeout
+		}
+
+		mcpName, err := ss.GetMCPName(ctx)
+		if err == nil {
+			result["mcp_name"] = mcpName
+		}
+
+		data, _ := json.Marshal(result)
+		return []mcp.ResourceContents{
+			mcp.TextResourceContents{
+				URI:      "opentrace://config/current",
+				MIMEType: "application/json",
+				Text:     string(data),
+			},
+		}, nil
+	}
+}
+
+func servicesListHandler(ls store.LogStore) server.ResourceHandlerFunc {
+	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+		now := time.Now().UTC()
+		services, err := ls.DistinctValues(ctx, "service", store.LogCountParams{
+			Since: now.Add(-30 * 24 * time.Hour),
+			Until: now,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("listing services: %w", err)
+		}
+
+		result := map[string]any{
+			"services": services,
+			"count":    len(services),
+		}
+
+		data, _ := json.Marshal(result)
+		return []mcp.ResourceContents{
+			mcp.TextResourceContents{
+				URI:      "opentrace://services/list",
+				MIMEType: "application/json",
+				Text:     string(data),
+			},
+		}, nil
+	}
+}
+
+func connectorsStatusHandler(ds store.DataSourceStore) server.ResourceHandlerFunc {
+	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+		sources, err := ds.List(ctx, store.ListDataSourceParams{})
+		if err != nil {
+			return nil, fmt.Errorf("listing connectors: %w", err)
+		}
+
+		connectors := make([]map[string]any, 0, len(sources))
+		for _, src := range sources {
+			entry := map[string]any{
+				"id":     src.ID.String(),
+				"name":   src.Name,
+				"type":   string(src.Type),
+				"status": string(src.Status),
+			}
+			if src.LastTestedAt != nil {
+				entry["last_tested_at"] = src.LastTestedAt.Format(time.RFC3339)
+			}
+			connectors = append(connectors, entry)
+		}
+
+		result := map[string]any{
+			"connectors": connectors,
+			"count":      len(connectors),
+		}
+
+		data, _ := json.Marshal(result)
+		return []mcp.ResourceContents{
+			mcp.TextResourceContents{
+				URI:      "opentrace://connectors/status",
+				MIMEType: "application/json",
+				Text:     string(data),
+			},
+		}, nil
+	}
+}
+
+func healthchecksSummaryHandler(hcs store.HealthCheckStore) server.ResourceHandlerFunc {
+	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+		summaries, err := hcs.UptimeSummaries(ctx, time.Now().Add(-24*time.Hour))
+		if err != nil {
+			return nil, fmt.Errorf("listing health checks: %w", err)
+		}
+
+		checks := make([]map[string]any, 0, len(summaries))
+		for _, s := range summaries {
+			checks = append(checks, map[string]any{
+				"id":             s.HealthCheckID,
+				"name":           s.Name,
+				"url":            s.URL,
+				"status":         s.CurrentStatus,
+				"uptime_percent": s.UptimePct,
+				"total_checks":   s.TotalChecks,
+				"down_checks":    s.DownChecks,
+			})
+		}
+
+		result := map[string]any{
+			"healthchecks": checks,
+			"count":        len(checks),
+		}
+
+		data, _ := json.Marshal(result)
+		return []mcp.ResourceContents{
+			mcp.TextResourceContents{
+				URI:      "opentrace://healthchecks/summary",
 				MIMEType: "application/json",
 				Text:     string(data),
 			},

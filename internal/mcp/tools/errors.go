@@ -60,15 +60,15 @@ type ErrorsDeps struct {
 // ErrorsCatalogInfo returns the category, description, and access level for catalog registration.
 func ErrorsCatalogInfo() (category, description, access string) {
 	return "Errors",
-		"Manage and investigate application errors. Actions: list, detail, investigate, impact, user_errors, ranking, resolve, ignore",
+		"Manage and investigate application errors. Actions: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, new",
 		"read"
 }
 
 // ErrorsTool returns the MCP tool definition for the consolidated errors tool.
 func ErrorsTool() mcp.Tool {
 	return mcp.NewTool("errors",
-		mcp.WithDescription("Manage and investigate application errors. Actions: list, detail, investigate, impact, user_errors, ranking, resolve, ignore"),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action to perform: list, detail, investigate, impact, user_errors, ranking, resolve, ignore")),
+		mcp.WithDescription("Manage and investigate application errors. Actions: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, new"),
+		mcp.WithString("action", mcp.Required(), mcp.Description("Action to perform: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, new")),
 		// Shared parameters.
 		mcp.WithString("fingerprint", mcp.Description("Error fingerprint (required for detail, investigate, impact, resolve, ignore)")),
 		mcp.WithString("status", mcp.Description("Filter by status: unresolved, resolved, ignored (for list, ranking)")),
@@ -111,8 +111,10 @@ func ErrorsHandler(deps ErrorsDeps) server.ToolHandlerFunc {
 			return errorsResolve(ctx, deps, args)
 		case "ignore":
 			return errorsIgnore(ctx, deps, args)
+		case "new":
+			return handleNewErrors(ctx, deps, args)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %q — valid actions: list, detail, investigate, impact, user_errors, ranking, resolve, ignore", action)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %q — valid actions: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, new", action)), nil
 		}
 	}
 }
@@ -198,10 +200,10 @@ func errorsList(ctx context.Context, deps ErrorsDeps, args map[string]any) (*mcp
 	// Suggest investigating the top error.
 	var suggestions []ToolSuggestion
 	if len(summaries) > 0 {
-		suggestions = append(suggestions, Suggest("error_detail", "Investigate the most frequent error", map[string]any{"fingerprint": summaries[0].Fingerprint}))
+		suggestions = append(suggestions, Suggest("errors", "Investigate the most frequent error", map[string]any{"action": "detail", "fingerprint": summaries[0].Fingerprint}))
 	}
 	if unresolvedCount > 5 {
-		suggestions = append(suggestions, Suggest("diagnose", "Get full system health overview", nil))
+		suggestions = append(suggestions, Suggest("overview", "Get full system health overview", map[string]any{"action": "diagnose"}))
 	}
 	withSuggestionsRanked(resp, deps.Ranker, suggestions...)
 
@@ -318,10 +320,12 @@ func errorsDetail(ctx context.Context, deps ErrorsDeps, args map[string]any) (*m
 		if eg.Service != "" {
 			sArgs["service"] = eg.Service
 		}
-		suggestions = append(suggestions, Suggest("log_search", "Find all occurrences of this exception", sArgs))
+		sArgs["action"] = "search"
+		suggestions = append(suggestions, Suggest("logs", "Find all occurrences of this exception", sArgs))
 	}
 	if eg.Status == store.ErrorGroupUnresolved {
-		suggestions = append(suggestions, Suggest("resolve_error", "Mark as resolved after fixing", map[string]any{
+		suggestions = append(suggestions, Suggest("errors", "Mark as resolved after fixing", map[string]any{
+			"action":      "resolve",
 			"fingerprint": eg.Fingerprint,
 		}))
 	}
@@ -568,20 +572,24 @@ func errorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 	// Suggested next steps.
 	var suggestions []ToolSuggestion
 	if anchor.ErrorFingerprint != "" {
-		suggestions = append(suggestions, Suggest("error_detail", "Full error group history and lifecycle", map[string]any{
+		suggestions = append(suggestions, Suggest("errors", "Full error group history and lifecycle", map[string]any{
+			"action":      "detail",
 			"fingerprint": anchor.ErrorFingerprint,
 		}))
-		suggestions = append(suggestions, Suggest("log_search", "Find all occurrences of this error", map[string]any{
+		suggestions = append(suggestions, Suggest("logs", "Find all occurrences of this error", map[string]any{
+			"action":            "search",
 			"error_fingerprint": anchor.ErrorFingerprint,
 		}))
 	}
 	if anchor.ExceptionClass != "" {
-		suggestions = append(suggestions, Suggest("log_search", "Find all logs with this exception class", map[string]any{
+		suggestions = append(suggestions, Suggest("logs", "Find all logs with this exception class", map[string]any{
+			"action":          "search",
 			"exception_class": anchor.ExceptionClass,
 		}))
 	}
 	if anchor.ErrorFingerprint != "" {
-		suggestions = append(suggestions, Suggest("resolve_error", "Mark as resolved after fixing", map[string]any{
+		suggestions = append(suggestions, Suggest("errors", "Mark as resolved after fixing", map[string]any{
+			"action":      "resolve",
 			"fingerprint": anchor.ErrorFingerprint,
 		}))
 	}
@@ -663,11 +671,12 @@ func errorsImpact(ctx context.Context, deps ErrorsDeps, args map[string]any) (*m
 
 	// Suggestions.
 	var suggestions []ToolSuggestion
-	suggestions = append(suggestions, Suggest("error_detail", "View full error details and lifecycle", map[string]any{
+	suggestions = append(suggestions, Suggest("errors", "View full error details and lifecycle", map[string]any{
+		"action":      "detail",
 		"fingerprint": fingerprint,
 	}))
 	if impact.UniqueUsers > 0 {
-		suggestions = append(suggestions, Suggest("top_errors_by_impact", "See all errors ranked by user impact", nil))
+		suggestions = append(suggestions, Suggest("errors", "See all errors ranked by user impact", map[string]any{"action": "ranking"}))
 	}
 	withSuggestionsRanked(resp, deps.Ranker, suggestions...)
 
@@ -744,10 +753,12 @@ func errorsUserErrors(ctx context.Context, deps ErrorsDeps, args map[string]any)
 
 	// Suggest investigating the most recent error.
 	var suggestions []ToolSuggestion
-	suggestions = append(suggestions, Suggest("error_impact", "See impact details for the top error", map[string]any{
+	suggestions = append(suggestions, Suggest("errors", "See impact details for the top error", map[string]any{
+		"action":      "impact",
 		"fingerprint": entries[0].Fingerprint,
 	}))
-	suggestions = append(suggestions, Suggest("user_journey", "See what this user was doing", map[string]any{
+	suggestions = append(suggestions, Suggest("errors", "See what this user was doing", map[string]any{
+		"action":  "user_errors",
 		"user_id": userID,
 	}))
 	withSuggestionsRanked(resp, deps.Ranker, suggestions...)
@@ -845,7 +856,8 @@ func errorsRanking(ctx context.Context, deps ErrorsDeps, args map[string]any) (*
 
 	// Suggest investigating the top error.
 	var suggestions []ToolSuggestion
-	suggestions = append(suggestions, Suggest("error_impact", "See detailed impact for the top error", map[string]any{
+	suggestions = append(suggestions, Suggest("errors", "See detailed impact for the top error", map[string]any{
+		"action":      "impact",
 		"fingerprint": entries[0].Fingerprint,
 	}))
 	withSuggestionsRanked(resp, deps.Ranker, suggestions...)
@@ -930,6 +942,73 @@ func errorsIgnore(ctx context.Context, deps ErrorsDeps, args map[string]any) (*m
 		"reason":      reason,
 		"message":     "Error group permanently ignored. New occurrences will still be counted but won't reopen the group.",
 	}
+	data, _ := json.Marshal(resp)
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// ---------------------------------------------------------------------------
+// Action: new — errors first seen within the given time window
+// ---------------------------------------------------------------------------
+
+func handleNewErrors(ctx context.Context, deps ErrorsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+	if deps.ErrorGroupStore == nil {
+		return mcp.NewToolResultError("ErrorGroupStore not configured"), nil
+	}
+
+	since := GetSinceParam(args, 24*time.Hour)
+	service, _ := args["service"].(string)
+
+	groups, err := deps.ErrorGroupStore.List(ctx, store.ListErrorGroupParams{
+		Service: service,
+		Limit:   20,
+		SortBy:  "first_seen_at",
+	})
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to list error groups: %v", err)), nil
+	}
+
+	// Filter to only errors first seen after the since cutoff.
+	type newError struct {
+		Fingerprint     string `json:"fingerprint"`
+		ExceptionClass  string `json:"exception_class,omitempty"`
+		Message         string `json:"message"`
+		Service         string `json:"service"`
+		OccurrenceCount int    `json:"occurrence_count"`
+		FirstSeenAt     string `json:"first_seen_at"`
+	}
+
+	var newErrors []newError
+	for _, g := range groups {
+		if g.FirstSeenAt.After(since) {
+			newErrors = append(newErrors, newError{
+				Fingerprint:     g.Fingerprint,
+				ExceptionClass:  g.ExceptionClass,
+				Message:         truncate(g.Message, 100),
+				Service:         g.Service,
+				OccurrenceCount: g.OccurrenceCount,
+				FirstSeenAt:     g.FirstSeenAt.Format(time.RFC3339),
+			})
+		}
+	}
+
+	if len(newErrors) == 0 {
+		return mcp.NewToolResultText("No new errors found in the given time window."), nil
+	}
+
+	resp := map[string]any{
+		"since":      since.Format(time.RFC3339),
+		"count":      len(newErrors),
+		"new_errors": newErrors,
+	}
+
+	// Suggest investigating the top new error.
+	var suggestions []ToolSuggestion
+	suggestions = append(suggestions, Suggest("errors", "Investigate the newest error", map[string]any{
+		"action":      "detail",
+		"fingerprint": newErrors[0].Fingerprint,
+	}))
+	withSuggestionsRanked(resp, deps.Ranker, suggestions...)
+
 	data, _ := json.Marshal(resp)
 	return mcp.NewToolResultText(string(data)), nil
 }

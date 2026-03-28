@@ -50,9 +50,9 @@ func (s *analyticsStore) AggregateEndpointStats(ctx context.Context, period stri
 			       COUNT(*) as request_count,
 			       SUM(CASE WHEN rs.status >= 500 THEN 1 ELSE 0 END) as error_count,
 			       SUM(CASE WHEN rs.status >= 400 AND rs.status < 500 THEN 1 ELSE 0 END) as client_error_count,
-			       AVG(rs.duration_ms) as avg_duration,
+			       COALESCE(AVG(rs.duration_ms), 0) as avg_duration,
 			       MAX(rs.duration_ms) as max_duration,
-			       AVG(rs.sql_count) as avg_sql,
+			       COALESCE(AVG(rs.sql_count), 0) as avg_sql,
 			       SUM(CASE WHEN rs.status >= 200 AND rs.status < 300 THEN 1 ELSE 0 END) as s2xx,
 			       SUM(CASE WHEN rs.status >= 300 AND rs.status < 400 THEN 1 ELSE 0 END) as s3xx,
 			       SUM(CASE WHEN rs.status >= 400 AND rs.status < 500 THEN 1 ELSE 0 END) as s4xx,
@@ -146,7 +146,7 @@ func (s *analyticsStore) UpdateTrafficHeatmap(ctx context.Context, since time.Ti
 		       CAST(strftime('%H', l.timestamp) AS INTEGER) as hod,
 		       COUNT(*) as cnt,
 		       SUM(CASE WHEN rs.status >= 500 THEN 1 ELSE 0 END) as errs,
-		       AVG(rs.duration_ms) as avg_dur
+		       COALESCE(AVG(rs.duration_ms), 0) as avg_dur
 		FROM request_summaries rs
 		JOIN logs l ON rs.log_id = l.id
 		WHERE l.timestamp >= ?
@@ -223,10 +223,10 @@ func (s *analyticsStore) TopEndpoints(ctx context.Context, params store.TopEndpo
 		       SUM(request_count) as total_requests,
 		       SUM(error_count) as total_errors,
 		       SUM(client_error_count) as total_client_errors,
-		       AVG(avg_duration_ms) as avg_dur,
+		       COALESCE(AVG(avg_duration_ms), 0) as avg_dur,
 		       MAX(p95_duration_ms) as p95_dur,
 		       MAX(max_duration_ms) as max_dur,
-		       AVG(avg_sql_count) as avg_sql,
+		       COALESCE(AVG(avg_sql_count), 0) as avg_sql,
 		       SUM(status_2xx) as s2xx,
 		       SUM(status_3xx) as s3xx,
 		       SUM(status_4xx) as s4xx,
@@ -298,8 +298,8 @@ func (s *analyticsStore) TrafficSummary(ctx context.Context, params store.Analyt
 	row := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) as total,
 		       COUNT(DISTINCT rs.controller || '#' || rs.action) as endpoints,
-		       AVG(rs.duration_ms) as avg_dur,
-		       SUM(CASE WHEN rs.status >= 500 THEN 1 ELSE 0 END) as errors
+		       COALESCE(AVG(rs.duration_ms), 0) as avg_dur,
+		       COALESCE(SUM(CASE WHEN rs.status >= 500 THEN 1 ELSE 0 END), 0) as errors
 		FROM request_summaries rs
 		JOIN logs l ON rs.log_id = l.id
 		WHERE `+where, args...)

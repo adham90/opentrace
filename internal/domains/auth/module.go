@@ -14,47 +14,29 @@ var Module = server.Module{
 
 func mount(r chi.Router, deps *server.Deps) {
 	h := &handler{
-		userStore:    deps.UserStore,
-		sessionStore: deps.SessionStore,
-		cfg:          deps.Cfg,
-		auditStore:   deps.AuditStore,
+		userStore:  deps.UserStore,
+		cfg:        deps.Cfg,
+		auditStore: deps.AuditStore,
 	}
 	h.loginTracker = newLoginTracker()
-	h.secureCookies = deps.SecureCookies
 
 	// --- Unauthenticated routes (on the root router) ---
 	if deps.RootRouter != nil {
 		root := deps.RootRouter
 
-		root.Get("/login", h.handleLoginPage)
+		// Connect script — served at /connect for easy curl:
+		//   curl -s https://server:8080/connect | bash
+		root.Get("/connect", h.handleConnectScript)
+	}
+
+	// --- Connect API (unauthenticated — for `npx opentrace connect`) ---
+	if deps.APIRouter != nil {
+		api := deps.APIRouter
 		if deps.LoginLimiter != nil {
-			root.With(deps.LoginLimiter).Post("/login", h.handleLoginSubmit)
-			root.With(deps.LoginLimiter).Post("/register", h.handleRegisterSubmit)
+			api.With(deps.LoginLimiter).Post("/auth/connect", h.handleConnect)
 		} else {
-			root.Post("/login", h.handleLoginSubmit)
-			root.Post("/register", h.handleRegisterSubmit)
+			api.Post("/auth/connect", h.handleConnect)
 		}
-		root.Get("/register", h.handleRegisterPage)
-		root.Post("/logout", h.handleLogout)
+		api.Get("/auth/connect", h.handleConnectCheck)
 	}
-
-	// --- Authenticated page routes ---
-	if deps.PageRouter != nil {
-		deps.PageRouter.Get("/profile", h.handleProfilePage)
-	}
-
-	// --- API routes (on the auth-protected API router) ---
-	// Profile API (auth required)
-	r.Post("/profile/password", h.handleChangePassword)
-	r.Get("/profile/mcp-token", h.handleGetOwnMCPToken)
-
-	// User management API (admin only)
-	r.Group(func(r chi.Router) {
-		r.Use(server.RequireAdminAPI)
-		r.Post("/users/{id}/role", h.handleUpdateUserRole)
-		r.Post("/users/{id}/mcp", h.handleToggleMCPAccess)
-		r.Post("/users/{id}/active", h.handleToggleUserActive)
-		r.Post("/users/{id}/mcp-token", h.handleRegenerateMCPToken)
-		r.Delete("/users/{id}", h.handleDeleteUser)
-	})
 }

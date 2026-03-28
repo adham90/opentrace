@@ -1,11 +1,10 @@
-// Package auth provides authentication utilities: token generation,
-// rate limiting, and session helpers.
+// Package auth provides authentication utilities: token generation
+// and rate limiting.
 package auth
 
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"net/http"
 )
 
 // GenerateSessionToken creates a cryptographically random 64-character hex token.
@@ -33,25 +32,4 @@ func GenerateAPIKey() (string, error) {
 		return "", err
 	}
 	return "ot_" + hex.EncodeToString(b), nil
-}
-
-// SessionCookieName is the name of the session cookie.
-const SessionCookieName = "opentrace_session"
-
-// SetSessionCookie sets the session cookie on the response.
-func SetSessionCookie(w http.ResponseWriter, token string, maxAge int, secure bool) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     SessionCookieName,
-		Value:    token,
-		Path:     "/",
-		MaxAge:   maxAge,
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteStrictMode,
-	})
-}
-
-// ClearSessionCookie clears the session cookie on the response.
-func ClearSessionCookie(w http.ResponseWriter) {
-	SetSessionCookie(w, "", -1, true)
 }

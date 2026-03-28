@@ -124,43 +124,38 @@ func classifyFromContext(ctx string) (string, string) {
 }
 
 // classifyFromTool infers intent from the tool name when no context is provided.
+// Tool names use the consolidated names (logs, database, errors, etc.).
 func classifyFromTool(toolName string) (string, string) {
 	switch toolName {
 	// Investigation tools
-	case "diagnose", "triage_alerts", "investigate_error", "investigate":
+	case "overview", "errors", "logs":
 		return IntentInvestigation, ""
-	case "error_groups", "error_detail", "error_impact", "resolve_error", "ignore_error":
-		return IntentInvestigation, ""
-	case "runbook":
-		return IntentInvestigation, ""
-	case "log_search", "log_context":
-		return IntentInvestigation, ""
-	case "explain_query", "kill_query":
-		return IntentInvestigation, ""
-	case "trace_lookup":
+	case "database":
 		return IntentInvestigation, ""
 
 	// Deployment tools
-	case "record_deploy", "deploy_history", "deploy_impact":
+	case "deploys":
 		return IntentDeployment, ""
 
 	// Development/code tools
-	case "code_context", "whats_fragile", "code_risk", "test_gaps", "test_priority":
+	case "code":
 		return IntentDevelopment, ""
 
 	// Configuration tools
-	case "watch", "create_healthcheck", "set_note", "configure_connector":
+	case "watches", "healthchecks", "connectors":
 		return IntentConfiguration, ""
 
 	// Query/reporting tools
-	case "log_stats", "system_overview", "web_analytics", "compare_periods":
+	case "analytics", "servers":
 		return IntentQuery, ""
-	case "uptime_status", "list_healthchecks", "watch_status":
-		return IntentQuery, ""
-	case "db_query_stats", "request_performance":
-		return IntentQuery, ""
-	case "list_connectors", "list_data_sources":
-		return IntentQuery, ""
+
+	// Setup
+	case "setup":
+		return IntentExploration, ""
+
+	// Admin
+	case "admin":
+		return IntentConfiguration, ""
 
 	default:
 		return IntentExploration, ""

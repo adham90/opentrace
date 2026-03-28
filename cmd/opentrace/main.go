@@ -20,19 +20,20 @@ import (
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
 	"github.com/adham90/opentrace/internal/version"
-	"github.com/adham90/opentrace/internal/vmagent"
 	"github.com/adham90/opentrace/internal/watcher"
-	"github.com/adham90/opentrace/internal/web"
+	"github.com/adham90/opentrace/internal/api"
 )
 
 func main() {
 	var err error
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "init":
+			err = runInit()
+		case "serve":
+			err = run()
 		case "mcp":
 			err = runMCP()
-		case "agent":
-			err = runAgent()
 		case "seed":
 			err = runSeed()
 		case "backup":
@@ -46,12 +47,13 @@ func main() {
 			fmt.Println("Usage: opentrace [command]")
 			fmt.Println()
 			fmt.Println("Commands:")
-			fmt.Println("  (none)    Start the web server")
-			fmt.Println("  agent     Run the metrics collection agent")
-			fmt.Println("  backup    Create a database backup")
+			fmt.Println("  (none)    Start the server")
+			fmt.Println("  init      Initialize database (first-time setup)")
+			fmt.Println("  serve     Start the server (same as no command)")
 			fmt.Println("  mcp       Start the MCP stdio server")
-			fmt.Println("  restore   Restore database from a backup")
 			fmt.Println("  seed      Initialize sample data")
+			fmt.Println("  backup    Create a database backup")
+			fmt.Println("  restore   Restore database from a backup")
 			fmt.Println("  version   Print version information")
 			fmt.Println()
 			fmt.Println("Backup options:")
@@ -159,29 +161,7 @@ func runMCP() error {
 	})
 }
 
-// runAgent starts the VM metrics collection agent.
-func runAgent() error {
-	config.LoadEnvFile(".env")
 
-	cfg, err := vmagent.LoadConfig()
-	if err != nil {
-		return err
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Graceful shutdown
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-done
-		cancel()
-	}()
-
-	a := vmagent.New(cfg)
-	return a.Run(ctx)
-}
 
 func run() error {
 	slog.Info("starting", "version", version.Full())
@@ -222,12 +202,11 @@ func run() error {
 	deps.Queue = jobQueue
 
 	// Create server
-	srv := web.NewServerWithDeps(web.ServerDeps{
+	srv := api.NewServerWithDeps(api.ServerDeps{
 		Ctx:                  ctx,
 		DB:                   deps.DB,
 		Stores:               deps.Stores,
 		Registry:             deps.Registry,
-		ToolCatalog:          toolCatalog,
 		Cfg:                  deps.Cfg,
 		WatchStreamEvaluator: watchStream,
 		WatchMetrics:         watchMetrics,
@@ -279,29 +258,33 @@ func run() error {
 	jobWorker.Start(ctx)
 	jobScheduler.Start(ctx)
 
-	// Validate TLS certificate and key files exist if configured
-	if deps.Cfg.TLSCert != "" && deps.Cfg.TLSKey != "" {
-		if _, err := os.Stat(deps.Cfg.TLSCert); err != nil {
-			return fmt.Errorf("TLS certificate file: %w", err)
-		}
-		if _, err := os.Stat(deps.Cfg.TLSKey); err != nil {
-			return fmt.Errorf("TLS key file: %w", err)
-		}
-	}
-
 	go func() {
-		if deps.Cfg.TLSCert != "" && deps.Cfg.TLSKey != "" {
-			slog.Info("listening (HTTPS)", "addr", deps.Cfg.ListenAddr)
-			if err := httpServer.ListenAndServeTLS(deps.Cfg.TLSCert, deps.Cfg.TLSKey); err != nil && err != http.ErrServerClosed {
-				slog.Error("listen error", "error", err)
-				os.Exit(1)
+		slog.Info("listening", "addr", deps.Cfg.ListenAddr)
+
+		// Print connect command for easy copy-paste
+		userCount := 0
+		if deps.Stores.UserStore != nil {
+			if c, err := deps.Stores.UserStore.Count(ctx); err == nil {
+				userCount = c
 			}
+		}
+		addr := deps.Cfg.ListenAddr
+		if addr == "127.0.0.1:8080" || addr == "0.0.0.0:8080" || addr == ":8080" {
+			addr = "YOUR_SERVER:8080"
+		}
+		fmt.Println()
+		if userCount == 0 {
+			fmt.Printf("  Connect: curl -s http://%s/connect | bash\n", addr)
+			fmt.Println("  (first connection creates admin)")
 		} else {
-			slog.Info("listening", "addr", deps.Cfg.ListenAddr)
-			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				slog.Error("listen error", "error", err)
-				os.Exit(1)
-			}
+			fmt.Printf("  Connect: curl -s http://%s/connect | bash\n", addr)
+			fmt.Printf("  Users:   %d\n", userCount)
+		}
+		fmt.Println()
+
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("listen error", "error", err)
+			os.Exit(1)
 		}
 	}()
 

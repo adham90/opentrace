@@ -323,15 +323,16 @@ func logsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.
 		if serviceFilter != "" {
 			sugArgs["service"] = serviceFilter
 		}
-		suggestions = append(suggestions, Suggest("error_groups", "High error rate — check unresolved errors", sugArgs))
+		sugArgs["action"] = "list"
+		suggestions = append(suggestions, Suggest("errors", "High error rate — check unresolved errors", sugArgs))
 	}
 	if len(uniqueErrors) > 0 {
 		if fp, ok := uniqueErrors[0]["fingerprint"].(string); ok && fp != "" {
-			suggestions = append(suggestions, Suggest("error_detail", "Investigate the most frequent error", map[string]any{"fingerprint": fp}))
+			suggestions = append(suggestions, Suggest("errors", "Investigate the most frequent error", map[string]any{"action": "detail", "fingerprint": fp}))
 		}
 	}
 	if len(slowestEndpoints) > 0 {
-		suggestions = append(suggestions, Suggest("request_performance", "Investigate slow endpoints", map[string]any{"sort_by": "duration_ms"}))
+		suggestions = append(suggestions, Suggest("logs", "Investigate slow endpoints", map[string]any{"action": "performance", "sort_by": "duration_ms"}))
 	}
 	withSuggestionsRanked(resp, deps.Ranker, suggestions...)
 

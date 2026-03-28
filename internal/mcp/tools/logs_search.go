@@ -298,7 +298,8 @@ func logsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.C
 		// For error entries, suggest investigate_error for one-call deep dive.
 		for _, e := range entries {
 			if e.Level == "ERROR" || e.Level == "FATAL" {
-				suggestions = append(suggestions, Suggest("investigate_error", "Deep-dive into this error: exception, backtrace, params, SQL, context", map[string]any{
+				suggestions = append(suggestions, Suggest("errors", "Deep-dive into this error: exception, backtrace, params, SQL, context", map[string]any{
+					"action": "investigate",
 					"log_id": e.ID,
 				}))
 				break
@@ -306,14 +307,16 @@ func logsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.C
 		}
 		// Suggest log_context for the first result that has an ID.
 		if entries[0].ID > 0 {
-			suggestions = append(suggestions, Suggest("log_context", "See surrounding logs for this entry", map[string]any{
+			suggestions = append(suggestions, Suggest("logs", "See surrounding logs for this entry", map[string]any{
+				"action": "context",
 				"log_id": entries[0].ID,
 			}))
 		}
 		// If there's an error fingerprint, suggest error_detail.
 		for _, e := range entries {
 			if e.ErrorFingerprint != "" {
-				suggestions = append(suggestions, Suggest("error_detail", "Investigate this error group", map[string]any{
+				suggestions = append(suggestions, Suggest("errors", "Investigate this error group", map[string]any{
+					"action":      "detail",
 					"fingerprint": e.ErrorFingerprint,
 				}))
 				break
@@ -322,7 +325,8 @@ func logsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.C
 		// If there's a trace ID, suggest trace_lookup.
 		for _, e := range entries {
 			if e.TraceID != "" {
-				suggestions = append(suggestions, Suggest("trace_lookup", "Follow distributed trace", map[string]any{
+				suggestions = append(suggestions, Suggest("logs", "Follow distributed trace", map[string]any{
+					"action":   "trace",
 					"trace_id": e.TraceID,
 				}))
 				break
