@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/adham90/opentrace/internal/connector"
 )
@@ -15,7 +14,7 @@ import (
 // Action: indexes — index analysis + bloat
 // ---------------------------------------------------------------------------
 
-func handleIndexes(ctx context.Context, deps DatabaseDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleIndexes(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil
@@ -33,25 +32,25 @@ func handleIndexes(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 
 	unused, err := fetchUnusedIndexes(ctx, qe, tableName, includeSuggestions)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query unused indexes: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query unused indexes: %v", err)), nil
 	}
 	resp["unused_indexes"] = unused
 
 	missing, err := fetchMissingIndexes(ctx, qe, tableName, includeSuggestions)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query missing indexes: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query missing indexes: %v", err)), nil
 	}
 	resp["missing_indexes"] = missing
 
 	duplicates, err := fetchDuplicateIndexes(ctx, qe, tableName, includeSuggestions)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query duplicate indexes: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query duplicate indexes: %v", err)), nil
 	}
 	resp["duplicate_indexes"] = duplicates
 
 	bloatedIdx, err := fetchBloatedIndexes(ctx, qe, tableName, includeSuggestions)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query bloated indexes: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query bloated indexes: %v", err)), nil
 	}
 	resp["bloated_indexes"] = bloatedIdx
 
@@ -149,7 +148,7 @@ func handleIndexes(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 func fetchUnusedIndexes(ctx context.Context, qe connector.QueryExecutor, tableName string, includeSuggestions bool) ([]map[string]any, error) {

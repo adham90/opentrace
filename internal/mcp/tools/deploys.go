@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -17,37 +15,14 @@ type DeploysDeps struct {
 	DeployStore store.DeployStore
 }
 
-// DeploysTool returns the consolidated tool definition for deploy management.
-func DeploysTool() mcp.Tool {
-	return mcp.NewTool("deploys",
-		mcp.WithDescription(`Deploy management: view history and impact metrics.
-
-Actions:
-- history: List recent deploys with error rate changes
-- impact: Get detailed impact metrics for a specific deploy by commit hash
-- record: Record a new deploy event`),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: history, impact, record")),
-		mcp.WithString("service", mcp.Description("Service name filter")),
-		mcp.WithNumber("limit", mcp.Description("Max results for history (default: 10, max: 50)")),
-		// impact params
-		mcp.WithString("commit_hash", mcp.Description("Commit hash (required for impact)")),
-		// record params
-		mcp.WithString("commit", mcp.Description("Commit hash (required for record)")),
-		mcp.WithString("author", mcp.Description("Deploy author")),
-		mcp.WithString("branch", mcp.Description("Git branch")),
-		mcp.WithString("environment", mcp.Description("Deployment environment")),
-		mcp.WithObject("files", mcp.Description("Array of changed file paths")),
-	)
-}
-
 // DeploysHandler returns a handler for the consolidated deploys tool.
-func DeploysHandler(d DeploysDeps) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func DeploysHandler(d DeploysDeps) ToolHandlerFunc {
+	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
 		if d.DeployStore == nil {
-			return mcp.NewToolResultError("DeployStore not configured"), nil
+			return NewToolResultError("DeployStore not configured"), nil
 		}
 
-		args := request.GetArguments()
+		args := GetArguments(request)
 		action, _ := args["action"].(string)
 
 		switch action {
@@ -58,12 +33,12 @@ func DeploysHandler(d DeploysDeps) server.ToolHandlerFunc {
 		case "record":
 			return handleDeployRecord(ctx, d, args)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s (use history, impact, record)", action)), nil
+			return NewToolResultError(fmt.Sprintf("unknown action: %s (use history, impact, record)", action)), nil
 		}
 	}
 }
 
-func handleDeployHistory(ctx context.Context, d DeploysDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleDeployHistory(ctx context.Context, d DeploysDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 	limit := 10
 	if l, ok := args["limit"].(float64); ok && l > 0 {
@@ -75,11 +50,11 @@ func handleDeployHistory(ctx context.Context, d DeploysDeps, args map[string]any
 
 	deploys, err := d.DeployStore.GetRecent(ctx, service, limit)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query deploys: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query deploys: %v", err)), nil
 	}
 
 	if len(deploys) == 0 {
-		return mcp.NewToolResultText(`{"message":"No deploys recorded","deploys":[]}`), nil
+		return NewToolResultText(`{"message":"No deploys recorded","deploys":[]}`), nil
 	}
 
 	items := make([]map[string]any, 0, len(deploys))
@@ -110,18 +85,18 @@ func handleDeployHistory(ctx context.Context, d DeploysDeps, args map[string]any
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleDeployImpact(ctx context.Context, d DeploysDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleDeployImpact(ctx context.Context, d DeploysDeps, args map[string]any) (*CallToolResult, error) {
 	commitHash, _ := args["commit_hash"].(string)
 	if commitHash == "" {
-		return mcp.NewToolResultError("commit_hash is required"), nil
+		return NewToolResultError("commit_hash is required"), nil
 	}
 
 	dep, err := d.DeployStore.GetByCommit(ctx, commitHash)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("deploy not found for commit %q: %v", commitHash, err)), nil
+		return NewToolResultError(fmt.Sprintf("deploy not found for commit %q: %v", commitHash, err)), nil
 	}
 
 	resp := map[string]any{
@@ -170,17 +145,17 @@ func handleDeployImpact(ctx context.Context, d DeploysDeps, args map[string]any)
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleDeployRecord(ctx context.Context, d DeploysDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleDeployRecord(ctx context.Context, d DeploysDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 	if service == "" {
-		return mcp.NewToolResultError("service is required"), nil
+		return NewToolResultError("service is required"), nil
 	}
 	commit, _ := args["commit"].(string)
 	if commit == "" {
-		return mcp.NewToolResultError("commit is required"), nil
+		return NewToolResultError("commit is required"), nil
 	}
 
 	author, _ := args["author"].(string)
@@ -208,7 +183,7 @@ func handleDeployRecord(ctx context.Context, d DeploysDeps, args map[string]any)
 		DeploySource: store.DeploySourceManual,
 	})
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to record deploy: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to record deploy: %v", err)), nil
 	}
 
 	resp := map[string]any{
@@ -221,5 +196,5 @@ func handleDeployRecord(ctx context.Context, d DeploysDeps, args map[string]any)
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }

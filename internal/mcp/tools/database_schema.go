@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/adham90/opentrace/internal/connector"
 )
@@ -16,7 +15,7 @@ import (
 // Action: tables — table stats
 // ---------------------------------------------------------------------------
 
-func handleTables(ctx context.Context, deps DatabaseDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleTables(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil
@@ -52,14 +51,14 @@ LEFT JOIN pg_statio_user_tables io
 
 	result, err := qe.ExecuteReadQuery(ctx, query)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query table stats: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query table stats: %v", err)), nil
 	}
 
 	if result.RowCount == 0 {
 		if tableName != "" {
-			return mcp.NewToolResultText(fmt.Sprintf("No statistics found for table %q. Verify the table name exists.", tableName)), nil
+			return NewToolResultText(fmt.Sprintf("No statistics found for table %q. Verify the table name exists.", tableName)), nil
 		}
-		return mcp.NewToolResultText("No user tables found in the database."), nil
+		return NewToolResultText("No user tables found in the database."), nil
 	}
 
 	type tableStats struct {
@@ -153,16 +152,16 @@ LEFT JOIN pg_statio_user_tables io
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ---------------------------------------------------------------------------
 // Action: activity — current connections/activity
 // ---------------------------------------------------------------------------
 
-func handleDatabaseActivity(ctx context.Context, deps DatabaseDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleDatabaseActivity(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil
@@ -180,7 +179,7 @@ ORDER BY count DESC`
 
 	summaryResult, err := qe.ExecuteReadQuery(ctx, summaryQuery)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query connection summary: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query connection summary: %v", err)), nil
 	}
 
 	type connSummary struct {
@@ -216,7 +215,7 @@ LIMIT 20`
 
 	longResult, err := qe.ExecuteReadQuery(ctx, longRunningQuery)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query long-running queries: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query long-running queries: %v", err)), nil
 	}
 
 	type longQuery struct {
@@ -255,7 +254,7 @@ LIMIT 20`
 
 	idleResult, err := qe.ExecuteReadQuery(ctx, idleQuery)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query idle-in-transaction sessions: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query idle-in-transaction sessions: %v", err)), nil
 	}
 
 	type idleSession struct {
@@ -322,16 +321,16 @@ LIMIT 20`
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ---------------------------------------------------------------------------
 // Action: schema — schema overview + config check + sequences
 // ---------------------------------------------------------------------------
 
-func handleSchema(ctx context.Context, deps DatabaseDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleSchema(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil
@@ -370,11 +369,11 @@ func handleSchema(ctx context.Context, deps DatabaseDeps, args map[string]any) (
 
 	tableResult, err := qe.ExecuteReadQuery(ctx, tableQuery)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("schema query failed: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("schema query failed: %v", err)), nil
 	}
 
 	if tableResult.RowCount == 0 {
-		return mcp.NewToolResultText(fmt.Sprintf("No tables found in schema %q.", schema)), nil
+		return NewToolResultText(fmt.Sprintf("No tables found in schema %q.", schema)), nil
 	}
 
 	tables := make([]map[string]any, 0, len(tableResult.Rows))
@@ -576,13 +575,13 @@ func handleSchema(ctx context.Context, deps DatabaseDeps, args map[string]any) (
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // schemaTableDetail returns detailed information for a specific table.
-func schemaTableDetail(ctx context.Context, qe connector.QueryExecutor, schema, tableName string) (*mcp.CallToolResult, error) {
+func schemaTableDetail(ctx context.Context, qe connector.QueryExecutor, schema, tableName string) (*CallToolResult, error) {
 	// Columns query.
 	colQuery := fmt.Sprintf(`SELECT
 		column_name,
@@ -596,11 +595,11 @@ func schemaTableDetail(ctx context.Context, qe connector.QueryExecutor, schema, 
 
 	colResult, err := qe.ExecuteReadQuery(ctx, colQuery)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("columns query failed: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("columns query failed: %v", err)), nil
 	}
 
 	if colResult.RowCount == 0 {
-		return mcp.NewToolResultError(fmt.Sprintf("table %q not found in schema %q", tableName, schema)), nil
+		return NewToolResultError(fmt.Sprintf("table %q not found in schema %q", tableName, schema)), nil
 	}
 
 	columns := make([]map[string]any, 0, len(colResult.Rows))
@@ -684,9 +683,9 @@ func schemaTableDetail(ctx context.Context, qe connector.QueryExecutor, schema, 
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal table detail: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal table detail: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // checkConfigWarning returns warnings for known misconfiguration patterns.
@@ -751,7 +750,7 @@ func checkConfigWarning(name, setting, unit string) []string {
 // Action: storage — disk usage + checkpoint stats + vacuum
 // ---------------------------------------------------------------------------
 
-func handleStorage(ctx context.Context, deps DatabaseDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleStorage(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil
@@ -767,7 +766,7 @@ func handleStorage(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 		pg_database_size(current_database()) AS total_bytes`
 	dbResult, err := qe.ExecuteReadQuery(ctx, dbQuery)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("database size query failed: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("database size query failed: %v", err)), nil
 	}
 
 	tableQuery := `SELECT
@@ -788,7 +787,7 @@ func handleStorage(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 
 	tableResult, err := qe.ExecuteReadQuery(ctx, tableQuery)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("table size query failed: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("table size query failed: %v", err)), nil
 	}
 
 	diskTables := make([]map[string]any, 0, len(tableResult.Rows))
@@ -1003,16 +1002,16 @@ func handleStorage(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ---------------------------------------------------------------------------
 // Action: connections — pool stats + replication
 // ---------------------------------------------------------------------------
 
-func handleConnections(ctx context.Context, deps DatabaseDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleConnections(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil
@@ -1025,7 +1024,7 @@ func handleConnections(ctx context.Context, deps DatabaseDeps, args map[string]a
 	// Get max connections setting.
 	maxConnResult, err := qe.ExecuteReadQuery(ctx, `SELECT current_setting('max_connections')`)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query max_connections: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query max_connections: %v", err)), nil
 	}
 	maxConn := 100
 	if len(maxConnResult.Rows) > 0 && len(maxConnResult.Rows[0]) > 0 {
@@ -1046,7 +1045,7 @@ func handleConnections(ctx context.Context, deps DatabaseDeps, args map[string]a
 
 	summaryResult, err := qe.ExecuteReadQuery(ctx, summaryQuery)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query connection stats: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query connection stats: %v", err)), nil
 	}
 
 	var total, active, idle, idleInTx, waiting int64
@@ -1079,7 +1078,7 @@ func handleConnections(ctx context.Context, deps DatabaseDeps, args map[string]a
 
 	appResult, err := qe.ExecuteReadQuery(ctx, appQuery)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query application stats: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query application stats: %v", err)), nil
 	}
 
 	var byApp []map[string]any
@@ -1137,7 +1136,7 @@ func handleConnections(ctx context.Context, deps DatabaseDeps, args map[string]a
 		// Non-fatal — just skip replication info.
 		resp["replication"] = map[string]any{"error": fmt.Sprintf("failed to check server role: %v", err)}
 		data, _ := json.Marshal(resp)
-		return mcp.NewToolResultText(string(data)), nil
+		return NewToolResultText(string(data)), nil
 	}
 
 	isReplica := false
@@ -1321,19 +1320,19 @@ func handleConnections(ctx context.Context, deps DatabaseDeps, args map[string]a
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ---------------------------------------------------------------------------
 // Action: kill_query — terminate a query (admin action)
 // ---------------------------------------------------------------------------
 
-func handleKillQuery(ctx context.Context, deps DatabaseDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleKillQuery(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	pidFloat, ok := args["pid"].(float64)
 	if !ok || pidFloat <= 0 {
-		return mcp.NewToolResultError("pid is required (positive integer). Use database action=activity to find PIDs of long-running queries."), nil
+		return NewToolResultError("pid is required (positive integer). Use database action=activity to find PIDs of long-running queries."), nil
 	}
 	pid := int(pidFloat)
 
@@ -1355,11 +1354,11 @@ func handleKillQuery(ctx context.Context, deps DatabaseDeps, args map[string]any
 
 	infoResult, err := qe.ExecuteReadQuery(ctx, infoQuery)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to look up PID %d: %v", pid, err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to look up PID %d: %v", pid, err)), nil
 	}
 
 	if infoResult.RowCount == 0 {
-		return mcp.NewToolResultError(fmt.Sprintf("no active backend with PID %d found. The query may have already completed. Use database action=activity to check current queries.", pid)), nil
+		return NewToolResultError(fmt.Sprintf("no active backend with PID %d found. The query may have already completed. Use database action=activity to check current queries.", pid)), nil
 	}
 
 	var state, appName, queryPreview string
@@ -1385,7 +1384,7 @@ func handleKillQuery(ctx context.Context, deps DatabaseDeps, args map[string]any
 
 	result, err := qe.ExecuteReadQuery(ctx, actionQuery)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to %s PID %d: %v", action[:len(action)-2], pid, err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to %s PID %d: %v", action[:len(action)-2], pid, err)), nil
 	}
 
 	success := false
@@ -1420,16 +1419,16 @@ func handleKillQuery(ctx context.Context, deps DatabaseDeps, args map[string]any
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ---------------------------------------------------------------------------
 // Action: long_transactions — find long-running sessions
 // ---------------------------------------------------------------------------
 
-func handleLongTransactions(ctx context.Context, deps DatabaseDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleLongTransactions(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil
@@ -1462,11 +1461,11 @@ func handleLongTransactions(ctx context.Context, deps DatabaseDeps, args map[str
 
 	result, err := qe.ExecuteReadQuery(ctx, query)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("long transactions query failed: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("long transactions query failed: %v", err)), nil
 	}
 
 	if result.RowCount == 0 {
-		return mcp.NewToolResultText(fmt.Sprintf("No transactions running longer than %.0f seconds.", minDurationSec)), nil
+		return NewToolResultText(fmt.Sprintf("No transactions running longer than %.0f seconds.", minDurationSec)), nil
 	}
 
 	transactions := make([]map[string]any, 0, len(result.Rows))
@@ -1550,7 +1549,7 @@ func handleLongTransactions(ctx context.Context, deps DatabaseDeps, args map[str
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }

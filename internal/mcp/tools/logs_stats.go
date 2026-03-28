@@ -7,7 +7,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -16,7 +15,7 @@ import (
 // action: stats — aggregate log statistics (from logStatsHandler)
 // ---------------------------------------------------------------------------
 
-func logsStats(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.CallToolResult, error) {
+func logsStats(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	timeRange := "1h"
 	if v, ok := args["time_range"].(string); ok && v != "" {
 		timeRange = v
@@ -37,12 +36,12 @@ func logsStats(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.Ca
 
 	duration, err := parseTimeRange(timeRange)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid time_range: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("invalid time_range: %v", err)), nil
 	}
 
 	bucketDur, err := parseTimeRange(bucketInterval)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid bucket_interval: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("invalid bucket_interval: %v", err)), nil
 	}
 
 	now := time.Now().UTC()
@@ -63,14 +62,14 @@ func logsStats(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.Ca
 	case "pattern":
 		return logsStatsByPattern(ctx, deps.LogStore, since, now, serviceFilter)
 	default:
-		return mcp.NewToolResultError(fmt.Sprintf("invalid group_by: %q (use level, service, or pattern)", groupBy)), nil
+		return NewToolResultError(fmt.Sprintf("invalid group_by: %q (use level, service, or pattern)", groupBy)), nil
 	}
 }
 
-func logsStatsByLevel(ctx context.Context, ls store.LogStore, params store.LogCountParams, since, until time.Time, bucketDur time.Duration) (*mcp.CallToolResult, error) {
+func logsStatsByLevel(ctx context.Context, ls store.LogStore, params store.LogCountParams, since, until time.Time, bucketDur time.Duration) (*CallToolResult, error) {
 	counts, err := ls.CountByLevel(ctx, params)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to count logs: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to count logs: %v", err)), nil
 	}
 
 	total := 0
@@ -136,13 +135,13 @@ func logsStatsByLevel(ctx context.Context, ls store.LogStore, params store.LogCo
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func logsStatsByService(ctx context.Context, ls store.LogStore, params store.LogCountParams, since, until time.Time) (*mcp.CallToolResult, error) {
+func logsStatsByService(ctx context.Context, ls store.LogStore, params store.LogCountParams, since, until time.Time) (*CallToolResult, error) {
 	services, err := ls.CountByService(ctx, params)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to count logs: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to count logs: %v", err)), nil
 	}
 
 	total := 0
@@ -190,10 +189,10 @@ func logsStatsByService(ctx context.Context, ls store.LogStore, params store.Log
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func logsStatsByPattern(ctx context.Context, ls store.LogStore, since, until time.Time, service string) (*mcp.CallToolResult, error) {
+func logsStatsByPattern(ctx context.Context, ls store.LogStore, since, until time.Time, service string) (*CallToolResult, error) {
 	// Fetch error/fatal logs for pattern clustering.
 	searchParams := store.LogSearchParams{
 		Level:   "error",
@@ -205,7 +204,7 @@ func logsStatsByPattern(ctx context.Context, ls store.LogStore, since, until tim
 
 	errorLogs, err := ls.Search(ctx, searchParams)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to search logs: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to search logs: %v", err)), nil
 	}
 
 	// Also fetch fatal logs.
@@ -315,5 +314,5 @@ func logsStatsByPattern(ctx context.Context, ls store.LogStore, since, until tim
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }

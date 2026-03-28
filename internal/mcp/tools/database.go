@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/pkg/store"
@@ -45,88 +43,14 @@ type RunbookDeps struct {
 	SessionTracking          SessionTracking // optional
 }
 
-// ---------------------------------------------------------------------------
-// database tool definition
-// ---------------------------------------------------------------------------
-
-// DatabaseTool returns the MCP tool definition for the consolidated database tool.
-func DatabaseTool() mcp.Tool {
-	return mcp.NewTool("database",
-		mcp.WithDescription(
-			"Database introspection, management, and investigation runbooks. "+
-				"Actions: queries, explain, tables, activity, locks, connections, indexes, "+
-				"schema, storage, kill_query, long_transactions, runbook."),
-		mcp.WithString("action", mcp.Required(),
-			mcp.Description("Action: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions, runbook"),
-		),
-		// queries action params
-		mcp.WithString("order_by",
-			mcp.Description("(queries) Sort by: calls, total_exec_time (default), mean_exec_time, rows, shared_blks_hit, shared_blks_read"),
-		),
-		mcp.WithNumber("limit",
-			mcp.Description("(queries) Number of queries to return (default: 20, max: 100)"),
-		),
-		mcp.WithString("filter",
-			mcp.Description("(queries) Filter queries containing this text"),
-		),
-		// explain action params
-		mcp.WithString("query",
-			mcp.Description("(explain) The SQL SELECT query to analyze"),
-		),
-		mcp.WithString("format",
-			mcp.Description("(explain) Output format: 'text' (default) or 'json'"),
-		),
-		mcp.WithBoolean("analyze",
-			mcp.Description("(explain) Actually execute the query for real timing (default: false). Set to true for EXPLAIN ANALYZE."),
-		),
-		mcp.WithBoolean("buffers",
-			mcp.Description("(explain) Include buffer usage stats (default: true, only with analyze=true)"),
-		),
-		// tables action params
-		mcp.WithString("table_name",
-			mcp.Description("(tables/indexes) Filter to a specific table name"),
-		),
-		// locks action params
-		mcp.WithBoolean("blocking_only",
-			mcp.Description("(locks) Only show blocking chains (default: true). Set to false to see all held locks."),
-		),
-		// indexes action params
-		mcp.WithBoolean("include_suggestions",
-			mcp.Description("(indexes) Include CREATE/DROP INDEX suggestions (default: true)"),
-		),
-		// schema action params
-		mcp.WithString("schema",
-			mcp.Description("(schema) Schema name (default: public)"),
-		),
-		mcp.WithString("table",
-			mcp.Description("(schema) Get detailed info for a specific table. Omit for overview of all tables."),
-		),
-		// kill_query action params
-		mcp.WithNumber("pid",
-			mcp.Description("(kill_query) Process ID of the backend to cancel"),
-		),
-		mcp.WithBoolean("force",
-			mcp.Description("(kill_query) Use pg_terminate_backend instead of pg_cancel_backend (default: false)"),
-		),
-		// long_transactions action params
-		mcp.WithNumber("min_duration_seconds",
-			mcp.Description("(long_transactions) Minimum transaction duration in seconds (default: 30)"),
-		),
-		// runbook action params
-		mcp.WithString("playbook",
-			mcp.Description("(runbook) Playbook: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike"),
-		),
-	)
-}
-
 // DatabaseHandler returns the handler for the consolidated database tool.
-func DatabaseHandler(deps DatabaseDeps) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
+func DatabaseHandler(deps DatabaseDeps) ToolHandlerFunc {
+	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
+		args := GetArguments(request)
 
 		action, _ := args["action"].(string)
 		if action == "" {
-			return mcp.NewToolResultError("action is required. Available: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions"), nil
+			return NewToolResultError("action is required. Available: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions"), nil
 		}
 
 		switch action {
@@ -155,13 +79,13 @@ func DatabaseHandler(deps DatabaseDeps) server.ToolHandlerFunc {
 		case "runbook":
 			return handleRunbookAction(ctx, deps, args)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown action %q. Available: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions, runbook", action)), nil
+			return NewToolResultError(fmt.Sprintf("unknown action %q. Available: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions, runbook", action)), nil
 		}
 	}
 }
 
 // handleRunbookAction delegates to the existing runbook handler via RunbookDeps.
-func handleRunbookAction(ctx context.Context, deps DatabaseDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleRunbookAction(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	rbDeps := RunbookDeps{
 		Registry:                  deps.Registry,
 		LogStore:                  deps.LogStore,
@@ -170,7 +94,6 @@ func handleRunbookAction(ctx context.Context, deps DatabaseDeps, args map[string
 	}
 	handler := RunbookHandler(rbDeps)
 	// Rewrite args: runbook handler expects "playbook" param directly (no "action").
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = args
+	req := MakeCallToolRequest("database", args)
 	return handler(ctx, req)
 }

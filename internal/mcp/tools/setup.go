@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -20,28 +18,10 @@ type SetupDeps struct {
 	DSStore       store.DataSourceStore
 }
 
-// SetupTool returns the tool definition for onboarding/setup assistance.
-func SetupTool() mcp.Tool {
-	return mcp.NewTool("setup",
-		mcp.WithDescription(`OpenTrace setup and onboarding assistant.
-
-Actions:
-- status: Check server health, data flow, and connection status
-- detect: Detect the project framework (Rails, Node, Python, Go, etc.) based on file patterns the agent can see
-- guide: Get SDK installation instructions for a specific framework
-- db_guide: Get instructions for connecting a database (Postgres, MySQL, Redis) with a read-only user
-- verify: Check if logs are flowing from the application`),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, detect, guide, db_guide, verify")),
-		mcp.WithString("framework", mcp.Description("Framework name for guide action: rails, node, python, go, django, fastapi, express, nextjs")),
-		mcp.WithString("database", mcp.Description("Database type for db_guide action: postgres, mysql, redis")),
-		mcp.WithString("files", mcp.Description("Comma-separated list of files found in the project root (for detect action). Example: Gemfile,config/application.rb,Rakefile")),
-	)
-}
-
 // SetupHandler returns a handler for the setup tool.
-func SetupHandler(d SetupDeps) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
+func SetupHandler(d SetupDeps) ToolHandlerFunc {
+	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
+		args := GetArguments(request)
 		action, _ := args["action"].(string)
 
 		switch action {
@@ -56,12 +36,12 @@ func SetupHandler(d SetupDeps) server.ToolHandlerFunc {
 		case "verify":
 			return handleSetupVerify(ctx, d)
 		default:
-			return mcp.NewToolResultError("unknown action: " + action + ". Use: status, detect, guide, verify"), nil
+			return NewToolResultError("unknown action: " + action + ". Use: status, detect, guide, verify"), nil
 		}
 	}
 }
 
-func handleSetupStatus(ctx context.Context, d SetupDeps) (*mcp.CallToolResult, error) {
+func handleSetupStatus(ctx context.Context, d SetupDeps) (*CallToolResult, error) {
 	status := map[string]any{
 		"server": "ok",
 	}
@@ -121,13 +101,13 @@ func handleSetupStatus(ctx context.Context, d SetupDeps) (*mcp.CallToolResult, e
 	}
 
 	data, _ := json.Marshal(status)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleSetupDetect(_ context.Context, _ SetupDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleSetupDetect(_ context.Context, _ SetupDeps, args map[string]any) (*CallToolResult, error) {
 	filesStr, _ := args["files"].(string)
 	if filesStr == "" {
-		return mcp.NewToolResultText(`To detect the framework, provide a comma-separated list of files in the project root.
+		return NewToolResultText(`To detect the framework, provide a comma-separated list of files in the project root.
 
 Example: setup(action: "detect", files: "Gemfile,config/application.rb,Rakefile")
 
@@ -152,7 +132,7 @@ Or look for these common indicators:
 	}
 
 	data, _ := json.Marshal(result)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 type frameworkDetection struct {
@@ -234,10 +214,10 @@ func trimSpace(s string) string {
 	return s[start:end]
 }
 
-func handleSetupGuide(ctx context.Context, d SetupDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleSetupGuide(ctx context.Context, d SetupDeps, args map[string]any) (*CallToolResult, error) {
 	framework, _ := args["framework"].(string)
 	if framework == "" {
-		return mcp.NewToolResultError("framework is required. Use: rails, node, express, nextjs, django, fastapi, python, go"), nil
+		return NewToolResultError("framework is required. Use: rails, node, express, nextjs, django, fastapi, python, go"), nil
 	}
 
 	// Get the real API key from settings
@@ -250,10 +230,10 @@ func handleSetupGuide(ctx context.Context, d SetupDeps, args map[string]any) (*m
 
 	guide := getFrameworkGuide(framework, apiKey)
 	if guide == "" {
-		return mcp.NewToolResultError("unknown framework: " + framework + ". Supported: rails, node, express, nextjs, django, fastapi, python, go"), nil
+		return NewToolResultError("unknown framework: " + framework + ". Supported: rails, node, express, nextjs, django, fastapi, python, go"), nil
 	}
 
-	return mcp.NewToolResultText(guide), nil
+	return NewToolResultText(guide), nil
 }
 
 func getFrameworkGuide(framework string, apiKey string) string {
@@ -352,9 +332,9 @@ Then restart your app and call setup(action: "verify") to confirm logs are flowi
 	}
 }
 
-func handleSetupVerify(ctx context.Context, d SetupDeps) (*mcp.CallToolResult, error) {
+func handleSetupVerify(ctx context.Context, d SetupDeps) (*CallToolResult, error) {
 	if d.LogStore == nil {
-		return mcp.NewToolResultError("LogStore not configured"), nil
+		return NewToolResultError("LogStore not configured"), nil
 	}
 
 	now := time.Now()
@@ -400,21 +380,21 @@ func handleSetupVerify(ctx context.Context, d SetupDeps) (*mcp.CallToolResult, e
 	}
 
 	data, _ := json.Marshal(result)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleSetupDBGuide(_ context.Context, _ SetupDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleSetupDBGuide(_ context.Context, _ SetupDeps, args map[string]any) (*CallToolResult, error) {
 	dbType, _ := args["database"].(string)
 	if dbType == "" {
-		return mcp.NewToolResultError("database is required. Use: postgres, mysql, redis"), nil
+		return NewToolResultError("database is required. Use: postgres, mysql, redis"), nil
 	}
 
 	guide := getDBGuide(dbType)
 	if guide == "" {
-		return mcp.NewToolResultError("unknown database: " + dbType + ". Supported: postgres, mysql, redis"), nil
+		return NewToolResultError("unknown database: " + dbType + ". Supported: postgres, mysql, redis"), nil
 	}
 
-	return mcp.NewToolResultText(guide), nil
+	return NewToolResultText(guide), nil
 }
 
 func getDBGuide(dbType string) string {

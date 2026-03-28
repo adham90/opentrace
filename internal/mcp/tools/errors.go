@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -64,34 +62,10 @@ func ErrorsCatalogInfo() (category, description, access string) {
 		"read"
 }
 
-// ErrorsTool returns the MCP tool definition for the consolidated errors tool.
-func ErrorsTool() mcp.Tool {
-	return mcp.NewTool("errors",
-		mcp.WithDescription("Manage and investigate application errors. Actions: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, new"),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action to perform: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, new")),
-		// Shared parameters.
-		mcp.WithString("fingerprint", mcp.Description("Error fingerprint (required for detail, investigate, impact, resolve, ignore)")),
-		mcp.WithString("status", mcp.Description("Filter by status: unresolved, resolved, ignored (for list, ranking)")),
-		mcp.WithString("service", mcp.Description("Filter by service name (for list, ranking)")),
-		mcp.WithString("environment", mcp.Description("Filter by environment e.g. production, staging (for list)")),
-		mcp.WithString("sort_by", mcp.Description("Sort field (for list: last_seen_at, occurrence_count, first_seen_at; for ranking: impact_score, unique_users, occurrence_count, last_seen)")),
-		mcp.WithNumber("limit", mcp.Description("Max results (default 20, max 100)")),
-		// investigate-specific.
-		mcp.WithNumber("log_id", mcp.Description("Log entry ID for investigate action (provide this OR trace_id)")),
-		mcp.WithString("trace_id", mcp.Description("Trace/correlation ID for investigate action")),
-		// user_errors-specific.
-		mcp.WithString("user_id", mcp.Description("User ID (required for user_errors action)")),
-		// Time range for user_errors and ranking.
-		mcp.WithString("since", mcp.Description("Lookback window e.g. '1h', '24h', '7d' (for user_errors, ranking)")),
-		// resolve/ignore-specific.
-		mcp.WithString("reason", mcp.Description("Reason for resolve/ignore (required for those actions)")),
-	)
-}
-
 // ErrorsHandler returns the handler for the consolidated errors tool.
-func ErrorsHandler(deps ErrorsDeps) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
+func ErrorsHandler(deps ErrorsDeps) ToolHandlerFunc {
+	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
+		args := GetArguments(request)
 		action, _ := args["action"].(string)
 
 		switch action {
@@ -114,7 +88,7 @@ func ErrorsHandler(deps ErrorsDeps) server.ToolHandlerFunc {
 		case "new":
 			return handleNewErrors(ctx, deps, args)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %q — valid actions: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, new", action)), nil
+			return NewToolResultError(fmt.Sprintf("unknown action: %q — valid actions: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, new", action)), nil
 		}
 	}
 }
@@ -123,9 +97,9 @@ func ErrorsHandler(deps ErrorsDeps) server.ToolHandlerFunc {
 // Action: list — list error groups (from errorGroupsHandler)
 // ---------------------------------------------------------------------------
 
-func errorsList(ctx context.Context, deps ErrorsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func errorsList(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.ErrorGroupStore == nil {
-		return mcp.NewToolResultError("ErrorGroupStore not configured"), nil
+		return NewToolResultError("ErrorGroupStore not configured"), nil
 	}
 
 	params := store.ListErrorGroupParams{
@@ -152,11 +126,11 @@ func errorsList(ctx context.Context, deps ErrorsDeps, args map[string]any) (*mcp
 
 	groups, err := deps.ErrorGroupStore.List(ctx, params)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to list error groups: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to list error groups: %v", err)), nil
 	}
 
 	if len(groups) == 0 {
-		return mcp.NewToolResultText("No error groups found matching the criteria."), nil
+		return NewToolResultText("No error groups found matching the criteria."), nil
 	}
 
 	// Count totals for context.
@@ -208,26 +182,26 @@ func errorsList(ctx context.Context, deps ErrorsDeps, args map[string]any) (*mcp
 	withSuggestionsRanked(resp, deps.Ranker, suggestions...)
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ---------------------------------------------------------------------------
 // Action: detail — get error group details (from errorDetailHandler)
 // ---------------------------------------------------------------------------
 
-func errorsDetail(ctx context.Context, deps ErrorsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func errorsDetail(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.ErrorGroupStore == nil {
-		return mcp.NewToolResultError("ErrorGroupStore not configured"), nil
+		return NewToolResultError("ErrorGroupStore not configured"), nil
 	}
 
 	fingerprint, _ := args["fingerprint"].(string)
 	if fingerprint == "" {
-		return mcp.NewToolResultError("fingerprint is required"), nil
+		return NewToolResultError("fingerprint is required"), nil
 	}
 
 	eg, err := deps.ErrorGroupStore.Get(ctx, fingerprint)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("error group not found: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("error group not found: %v", err)), nil
 	}
 
 	// Link investigated error to investigation session.
@@ -332,16 +306,16 @@ func errorsDetail(ctx context.Context, deps ErrorsDeps, args map[string]any) (*m
 	withSuggestionsRanked(resp, deps.Ranker, suggestions...)
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ---------------------------------------------------------------------------
 // Action: investigate — deep investigate (from investigateErrorHandler)
 // ---------------------------------------------------------------------------
 
-func errorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func errorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.LogStore == nil {
-		return mcp.NewToolResultError("LogStore not configured"), nil
+		return NewToolResultError("LogStore not configured"), nil
 	}
 
 	var anchor *store.LogEntry
@@ -351,7 +325,7 @@ func errorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 	if logID, ok := args["log_id"].(float64); ok && logID > 0 {
 		anchor, err = deps.LogStore.GetByID(ctx, int64(logID))
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("log entry %d not found: %v", int64(logID), err)), nil
+			return NewToolResultError(fmt.Sprintf("log entry %d not found: %v", int64(logID), err)), nil
 		}
 	} else if traceID, ok := args["trace_id"].(string); ok && traceID != "" {
 		// Find the primary error entry in this trace.
@@ -361,7 +335,7 @@ func errorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 			SortAsc: true,
 		})
 		if searchErr != nil || len(traceEntries) == 0 {
-			return mcp.NewToolResultError(fmt.Sprintf("no log entries found for trace_id=%s", traceID)), nil
+			return NewToolResultError(fmt.Sprintf("no log entries found for trace_id=%s", traceID)), nil
 		}
 		// Pick the first error-level entry, or the last entry.
 		picked := &traceEntries[len(traceEntries)-1]
@@ -373,7 +347,7 @@ func errorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 		}
 		anchor = picked
 	} else {
-		return mcp.NewToolResultError("Either log_id (positive integer) or trace_id (string) is required for the investigate action"), nil
+		return NewToolResultError("Either log_id (positive integer) or trace_id (string) is required for the investigate action"), nil
 	}
 
 	// Link investigated error to investigation session.
@@ -597,28 +571,28 @@ func errorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ---------------------------------------------------------------------------
 // Action: impact — error impact analysis (from errorImpactHandler)
 // ---------------------------------------------------------------------------
 
-func errorsImpact(ctx context.Context, deps ErrorsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func errorsImpact(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.ErrorImpactStore == nil {
-		return mcp.NewToolResultError("ErrorImpactStore not configured"), nil
+		return NewToolResultError("ErrorImpactStore not configured"), nil
 	}
 
 	fingerprint, _ := args["fingerprint"].(string)
 	if fingerprint == "" {
-		return mcp.NewToolResultError("fingerprint is required"), nil
+		return NewToolResultError("fingerprint is required"), nil
 	}
 
 	impact, err := deps.ErrorImpactStore.GetImpact(ctx, fingerprint)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to get impact: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to get impact: %v", err)), nil
 	}
 
 	resp := map[string]any{
@@ -681,21 +655,21 @@ func errorsImpact(ctx context.Context, deps ErrorsDeps, args map[string]any) (*m
 	withSuggestionsRanked(resp, deps.Ranker, suggestions...)
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ---------------------------------------------------------------------------
 // Action: user_errors — errors for a user (from userErrorsHandler)
 // ---------------------------------------------------------------------------
 
-func errorsUserErrors(ctx context.Context, deps ErrorsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func errorsUserErrors(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.ErrorImpactStore == nil {
-		return mcp.NewToolResultError("ErrorImpactStore not configured"), nil
+		return NewToolResultError("ErrorImpactStore not configured"), nil
 	}
 
 	userID, _ := args["user_id"].(string)
 	if userID == "" {
-		return mcp.NewToolResultError("user_id is required"), nil
+		return NewToolResultError("user_id is required"), nil
 	}
 
 	sinceStr := "24h"
@@ -704,17 +678,17 @@ func errorsUserErrors(ctx context.Context, deps ErrorsDeps, args map[string]any)
 	}
 	duration, err := parseTimeRange(sinceStr)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid since: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("invalid since: %v", err)), nil
 	}
 	since := time.Now().UTC().Add(-duration)
 
 	errors, err := deps.ErrorImpactStore.GetUserErrors(ctx, userID, since)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to get user errors: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to get user errors: %v", err)), nil
 	}
 
 	if len(errors) == 0 {
-		return mcp.NewToolResultText(fmt.Sprintf("No errors found for user %s in the last %s.", userID, sinceStr)), nil
+		return NewToolResultText(fmt.Sprintf("No errors found for user %s in the last %s.", userID, sinceStr)), nil
 	}
 
 	type errorEntry struct {
@@ -764,16 +738,16 @@ func errorsUserErrors(ctx context.Context, deps ErrorsDeps, args map[string]any)
 	withSuggestionsRanked(resp, deps.Ranker, suggestions...)
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ---------------------------------------------------------------------------
 // Action: ranking — top errors by impact (from topErrorsByImpactHandler)
 // ---------------------------------------------------------------------------
 
-func errorsRanking(ctx context.Context, deps ErrorsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func errorsRanking(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.ErrorImpactStore == nil {
-		return mcp.NewToolResultError("ErrorImpactStore not configured"), nil
+		return NewToolResultError("ErrorImpactStore not configured"), nil
 	}
 
 	params := store.ImpactQueryParams{
@@ -799,17 +773,17 @@ func errorsRanking(ctx context.Context, deps ErrorsDeps, args map[string]any) (*
 	}
 	duration, err := parseTimeRange(sinceStr)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid since: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("invalid since: %v", err)), nil
 	}
 	params.Since = time.Now().UTC().Add(-duration)
 
 	results, err := deps.ErrorImpactStore.TopByImpact(ctx, params)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to get top errors: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to get top errors: %v", err)), nil
 	}
 
 	if len(results) == 0 {
-		return mcp.NewToolResultText("No errors found with impact data."), nil
+		return NewToolResultText("No errors found with impact data."), nil
 	}
 
 	type impactEntry struct {
@@ -863,30 +837,30 @@ func errorsRanking(ctx context.Context, deps ErrorsDeps, args map[string]any) (*
 	withSuggestionsRanked(resp, deps.Ranker, suggestions...)
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ---------------------------------------------------------------------------
 // Action: resolve — resolve error group (from resolveErrorHandler)
 // ---------------------------------------------------------------------------
 
-func errorsResolve(ctx context.Context, deps ErrorsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func errorsResolve(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.ErrorGroupStore == nil {
-		return mcp.NewToolResultError("ErrorGroupStore not configured"), nil
+		return NewToolResultError("ErrorGroupStore not configured"), nil
 	}
 
 	fingerprint, _ := args["fingerprint"].(string)
 	if fingerprint == "" {
-		return mcp.NewToolResultError("fingerprint is required"), nil
+		return NewToolResultError("fingerprint is required"), nil
 	}
 
 	reason, _ := args["reason"].(string)
 	if reason == "" {
-		return mcp.NewToolResultError("reason is required (e.g. 'Fixed in PR #42')"), nil
+		return NewToolResultError("reason is required (e.g. 'Fixed in PR #42')"), nil
 	}
 
 	if err := deps.ErrorGroupStore.Resolve(ctx, fingerprint, reason); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to resolve: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to resolve: %v", err)), nil
 	}
 
 	// Link resolved error to investigation session.
@@ -903,30 +877,30 @@ func errorsResolve(ctx context.Context, deps ErrorsDeps, args map[string]any) (*
 		"message":     "Error group marked as resolved. It will auto-reopen if the error recurs.",
 	}
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ---------------------------------------------------------------------------
 // Action: ignore — ignore error group (from ignoreErrorHandler)
 // ---------------------------------------------------------------------------
 
-func errorsIgnore(ctx context.Context, deps ErrorsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func errorsIgnore(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.ErrorGroupStore == nil {
-		return mcp.NewToolResultError("ErrorGroupStore not configured"), nil
+		return NewToolResultError("ErrorGroupStore not configured"), nil
 	}
 
 	fingerprint, _ := args["fingerprint"].(string)
 	if fingerprint == "" {
-		return mcp.NewToolResultError("fingerprint is required"), nil
+		return NewToolResultError("fingerprint is required"), nil
 	}
 
 	reason, _ := args["reason"].(string)
 	if reason == "" {
-		return mcp.NewToolResultError("reason is required (e.g. 'Known noise from health checks')"), nil
+		return NewToolResultError("reason is required (e.g. 'Known noise from health checks')"), nil
 	}
 
 	if err := deps.ErrorGroupStore.Ignore(ctx, fingerprint, reason); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to ignore: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to ignore: %v", err)), nil
 	}
 
 	// Link resolved (ignored) error to investigation session.
@@ -943,16 +917,16 @@ func errorsIgnore(ctx context.Context, deps ErrorsDeps, args map[string]any) (*m
 		"message":     "Error group permanently ignored. New occurrences will still be counted but won't reopen the group.",
 	}
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ---------------------------------------------------------------------------
 // Action: new — errors first seen within the given time window
 // ---------------------------------------------------------------------------
 
-func handleNewErrors(ctx context.Context, deps ErrorsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleNewErrors(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.ErrorGroupStore == nil {
-		return mcp.NewToolResultError("ErrorGroupStore not configured"), nil
+		return NewToolResultError("ErrorGroupStore not configured"), nil
 	}
 
 	since := GetSinceParam(args, 24*time.Hour)
@@ -964,7 +938,7 @@ func handleNewErrors(ctx context.Context, deps ErrorsDeps, args map[string]any) 
 		SortBy:  "first_seen_at",
 	})
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to list error groups: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to list error groups: %v", err)), nil
 	}
 
 	// Filter to only errors first seen after the since cutoff.
@@ -992,7 +966,7 @@ func handleNewErrors(ctx context.Context, deps ErrorsDeps, args map[string]any) 
 	}
 
 	if len(newErrors) == 0 {
-		return mcp.NewToolResultText("No new errors found in the given time window."), nil
+		return NewToolResultText("No new errors found in the given time window."), nil
 	}
 
 	resp := map[string]any{
@@ -1010,7 +984,7 @@ func handleNewErrors(ctx context.Context, deps ErrorsDeps, args map[string]any) 
 	withSuggestionsRanked(resp, deps.Ranker, suggestions...)
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ---------------------------------------------------------------------------

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -17,7 +16,7 @@ import (
 // action: search — full-text log search with filters (from logSearchHandler)
 // ---------------------------------------------------------------------------
 
-func logsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.CallToolResult, error) {
+func logsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	query, _ := args["query"].(string)
 	service, _ := args["service"].(string)
 	level, _ := args["level"].(string)
@@ -89,7 +88,7 @@ func logsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.C
 	if v, ok := args["time_range"].(string); ok && v != "" {
 		duration, err := parseTimeRange(v)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("invalid time_range: %v. Use formats like '15m', '1h', '6h', '24h', '7d'.", err)), nil
+			return NewToolResultError(fmt.Sprintf("invalid time_range: %v. Use formats like '15m', '1h', '6h', '24h', '7d'.", err)), nil
 		}
 		now := time.Now().UTC()
 		start := now.Add(-duration)
@@ -99,7 +98,7 @@ func logsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.C
 
 	entries, err := deps.LogStore.Search(ctx, params)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to search logs: %v. Verify your query syntax and filters.", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to search logs: %v. Verify your query syntax and filters.", err)), nil
 	}
 
 	// If FTS query returned nothing, try a fallback LIKE search against
@@ -119,7 +118,7 @@ func logsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.C
 		if level != "" {
 			hint += fmt.Sprintf(" Level filter '%s' is active — try removing it.", level)
 		}
-		return mcp.NewToolResultText(hint), nil
+		return NewToolResultText(hint), nil
 	}
 
 	// Pre-fetch error group info for entries with fingerprints.
@@ -337,19 +336,19 @@ func logsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.C
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ---------------------------------------------------------------------------
 // action: context — surrounding log entries around a log ID (from logContextHandler)
 // ---------------------------------------------------------------------------
 
-func logsContext(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.CallToolResult, error) {
+func logsContext(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	logID, ok := args["log_id"].(float64)
 	if !ok || logID <= 0 {
-		return mcp.NewToolResultError("log_id is required (positive integer)"), nil
+		return NewToolResultError("log_id is required (positive integer)"), nil
 	}
 
 	before := 10
@@ -375,7 +374,7 @@ func logsContext(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.
 	// Fetch the anchor log entry.
 	anchor, err := deps.LogStore.GetByID(ctx, int64(logID))
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("log entry %d not found: %v", int64(logID), err)), nil
+		return NewToolResultError(fmt.Sprintf("log entry %d not found: %v", int64(logID), err)), nil
 	}
 
 	// Fetch entries before (older timestamps, i.e. timestamp < anchor, order DESC, take `before`).
@@ -389,7 +388,7 @@ func logsContext(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.
 	}
 	beforeEntries, err := deps.LogStore.Search(ctx, beforeParams)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch context before: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to fetch context before: %v", err)), nil
 	}
 
 	// Filter out the anchor entry itself from before results.
@@ -417,7 +416,7 @@ func logsContext(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.
 	}
 	afterEntries, err := deps.LogStore.Search(ctx, afterParams)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch context after: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to fetch context after: %v", err)), nil
 	}
 
 	// Filter out the anchor entry itself.
@@ -489,17 +488,17 @@ func logsContext(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ---------------------------------------------------------------------------
 // action: attributes — discover distinct values for log fields (from listLogAttributesHandler)
 // ---------------------------------------------------------------------------
 
-func logsAttributes(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.CallToolResult, error) {
+func logsAttributes(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	field, _ := args["field"].(string)
 	if field == "" {
-		return mcp.NewToolResultError("field is required (service, level, event_type, environment, commit_hash, request_id, exception_class, error_fingerprint, source_file, or metadata_key)"), nil
+		return NewToolResultError("field is required (service, level, event_type, environment, commit_hash, request_id, exception_class, error_fingerprint, source_file, or metadata_key)"), nil
 	}
 
 	// Parse time range (default: 24h).
@@ -509,7 +508,7 @@ func logsAttributes(ctx context.Context, args map[string]any, deps LogsDeps) (*m
 	}
 	duration, err := parseTimeRange(timeRange)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid time_range: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("invalid time_range: %v", err)), nil
 	}
 	now := time.Now().UTC()
 	params := store.LogCountParams{
@@ -523,10 +522,10 @@ func logsAttributes(ctx context.Context, args map[string]any, deps LogsDeps) (*m
 	if field == "metadata_key" {
 		keys, err := deps.LogStore.MetadataKeys(ctx, params)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to list metadata keys: %v", err)), nil
+			return NewToolResultError(fmt.Sprintf("failed to list metadata keys: %v", err)), nil
 		}
 		if len(keys) == 0 {
-			return mcp.NewToolResultText("No metadata keys found in the specified time range."), nil
+			return NewToolResultText("No metadata keys found in the specified time range."), nil
 		}
 		resp := map[string]any{
 			"field":  "metadata_key",
@@ -535,16 +534,16 @@ func logsAttributes(ctx context.Context, args map[string]any, deps LogsDeps) (*m
 			"hint":   "Use these keys with the metadata_filter parameter in log_search (e.g. metadata_filter: {\"host\": \"server-01\"}).",
 		}
 		data, _ := json.Marshal(resp)
-		return mcp.NewToolResultText(string(data)), nil
+		return NewToolResultText(string(data)), nil
 	}
 
 	values, err := deps.LogStore.DistinctValues(ctx, field, params)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to list values: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to list values: %v", err)), nil
 	}
 
 	if len(values) == 0 {
-		return mcp.NewToolResultText(fmt.Sprintf("No %s values found in the specified time range.", field)), nil
+		return NewToolResultText(fmt.Sprintf("No %s values found in the specified time range.", field)), nil
 	}
 
 	resp := map[string]any{
@@ -553,5 +552,5 @@ func logsAttributes(ctx context.Context, args map[string]any, deps LogsDeps) (*m
 		"values": values,
 	}
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }

@@ -7,7 +7,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -16,10 +15,10 @@ import (
 // action: trace — distributed trace assembly (from traceLookupHandler)
 // ---------------------------------------------------------------------------
 
-func logsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.CallToolResult, error) {
+func logsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	traceID, _ := args["trace_id"].(string)
 	if traceID == "" {
-		return mcp.NewToolResultError("trace_id is required"), nil
+		return NewToolResultError("trace_id is required"), nil
 	}
 
 	includeContext := false
@@ -33,7 +32,7 @@ func logsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.Ca
 		Limit:   1000,
 	})
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to search logs: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to search logs: %v", err)), nil
 	}
 
 	// Sort by timestamp ascending.
@@ -48,7 +47,7 @@ func logsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.Ca
 			"message":       "No log entries found for this trace ID",
 		}
 		data, _ := json.Marshal(resp)
-		return mcp.NewToolResultText(string(data)), nil
+		return NewToolResultText(string(data)), nil
 	}
 
 	firstTime := entries[0].Timestamp
@@ -204,5 +203,5 @@ func logsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.Ca
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }

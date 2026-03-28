@@ -6,41 +6,22 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
-// ---------------------------------------------------------------------------
-// runbook tool definition
-// ---------------------------------------------------------------------------
-
-// RunbookTool returns the MCP tool definition for the runbook tool.
-func RunbookTool() mcp.Tool {
-	return mcp.NewTool("runbook",
-		mcp.WithDescription(
-			"Run a composite investigation playbook that executes multiple diagnostic queries at once. "+
-				"Available playbooks: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike. "+
-				"Use when you need a comprehensive investigation rather than individual tool calls."),
-		mcp.WithString("playbook", mcp.Required(),
-			mcp.Description("Playbook to run: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike"),
-		),
-	)
-}
-
 // RunbookHandler returns the handler for the runbook tool.
-func RunbookHandler(deps RunbookDeps) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
+func RunbookHandler(deps RunbookDeps) ToolHandlerFunc {
+	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
+		args := GetArguments(request)
 
 		playbook, _ := args["playbook"].(string)
 		if playbook == "" {
-			return mcp.NewToolResultError("playbook is required. Available: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike"), nil
+			return NewToolResultError("playbook is required. Available: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike"), nil
 		}
 
-		var result *mcp.CallToolResult
+		var result *CallToolResult
 		var err error
 
 		switch playbook {
@@ -55,7 +36,7 @@ func RunbookHandler(deps RunbookDeps) server.ToolHandlerFunc {
 		case "error_spike":
 			result, err = runbookErrorSpike(ctx, deps.LogStore)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown playbook %q. Available: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike", playbook)), nil
+			return NewToolResultError(fmt.Sprintf("unknown playbook %q. Available: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike", playbook)), nil
 		}
 
 		// Track runbook execution on session.
@@ -74,7 +55,7 @@ func RunbookHandler(deps RunbookDeps) server.ToolHandlerFunc {
 // Runbook implementations
 // ---------------------------------------------------------------------------
 
-func runbookSlowDB(ctx context.Context, registry *connector.Registry) (*mcp.CallToolResult, error) {
+func runbookSlowDB(ctx context.Context, registry *connector.Registry) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(registry)
 	if errResult != nil {
 		return errResult, nil
@@ -188,10 +169,10 @@ func runbookSlowDB(ctx context.Context, registry *connector.Registry) (*mcp.Call
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func runbookConnExhaustion(ctx context.Context, registry *connector.Registry) (*mcp.CallToolResult, error) {
+func runbookConnExhaustion(ctx context.Context, registry *connector.Registry) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(registry)
 	if errResult != nil {
 		return errResult, nil
@@ -257,10 +238,10 @@ func runbookConnExhaustion(ctx context.Context, registry *connector.Registry) (*
 
 	resp := map[string]any{"playbook": "connection_exhaustion", "sections": sections, "diagnosis": diagnosis}
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func runbookDiskPressure(ctx context.Context, registry *connector.Registry) (*mcp.CallToolResult, error) {
+func runbookDiskPressure(ctx context.Context, registry *connector.Registry) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(registry)
 	if errResult != nil {
 		return errResult, nil
@@ -313,10 +294,10 @@ func runbookDiskPressure(ctx context.Context, registry *connector.Registry) (*mc
 
 	resp := map[string]any{"playbook": "disk_pressure", "sections": sections, "diagnosis": diagnosis}
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func runbookReplicationLag(ctx context.Context, registry *connector.Registry) (*mcp.CallToolResult, error) {
+func runbookReplicationLag(ctx context.Context, registry *connector.Registry) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(registry)
 	if errResult != nil {
 		return errResult, nil
@@ -380,10 +361,10 @@ func runbookReplicationLag(ctx context.Context, registry *connector.Registry) (*
 
 	resp := map[string]any{"playbook": "replication_lag", "sections": sections, "diagnosis": diagnosis}
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func runbookErrorSpike(ctx context.Context, logStore store.LogStore) (*mcp.CallToolResult, error) {
+func runbookErrorSpike(ctx context.Context, logStore store.LogStore) (*CallToolResult, error) {
 	sections := make(map[string]any)
 	var diagnosis []string
 	now := time.Now().UTC()
@@ -443,5 +424,5 @@ func runbookErrorSpike(ctx context.Context, logStore store.LogStore) (*mcp.CallT
 
 	resp := map[string]any{"playbook": "error_spike", "sections": sections, "diagnosis": diagnosis}
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }

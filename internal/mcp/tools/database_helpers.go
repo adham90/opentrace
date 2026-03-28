@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/adham90/opentrace/internal/connector"
 )
@@ -13,14 +12,14 @@ import (
 // Helper: get query executor from registry
 // ---------------------------------------------------------------------------
 
-func getQueryExecutor(registry *connector.Registry) (connector.QueryExecutor, *mcp.CallToolResult) {
+func getQueryExecutor(registry *connector.Registry) (connector.QueryExecutor, *CallToolResult) {
 	ds := registry.Get(connector.ConnectorDatabase)
 	if ds == nil {
-		return nil, mcp.NewToolResultError("No database connector is active. Connect a PostgreSQL data source first.")
+		return nil, NewToolResultError("No database connector is active. Connect a PostgreSQL data source first.")
 	}
 	qe, ok := ds.(connector.QueryExecutor)
 	if !ok {
-		return nil, mcp.NewToolResultError("The active database connector does not support direct queries.")
+		return nil, NewToolResultError("The active database connector does not support direct queries.")
 	}
 	return qe, nil
 }

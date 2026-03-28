@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/adham90/opentrace/internal/connector"
 )
@@ -14,7 +13,7 @@ import (
 // Action: locks — lock contention
 // ---------------------------------------------------------------------------
 
-func handleLocks(ctx context.Context, deps DatabaseDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleLocks(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil
@@ -31,7 +30,7 @@ func handleLocks(ctx context.Context, deps DatabaseDeps, args map[string]any) (*
 	return fetchAllLocks(ctx, qe)
 }
 
-func fetchBlockingChains(ctx context.Context, qe connector.QueryExecutor) (*mcp.CallToolResult, error) {
+func fetchBlockingChains(ctx context.Context, qe connector.QueryExecutor) (*CallToolResult, error) {
 	query := `SELECT
   blocking_activity.pid AS blocking_pid,
   COALESCE(blocking_activity.application_name, '') AS blocking_app,
@@ -68,7 +67,7 @@ LIMIT 50`
 
 	result, err := qe.ExecuteReadQuery(ctx, query)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query lock contention: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query lock contention: %v", err)), nil
 	}
 
 	type lockEntry struct {
@@ -128,12 +127,12 @@ LIMIT 50`
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func fetchAllLocks(ctx context.Context, qe connector.QueryExecutor) (*mcp.CallToolResult, error) {
+func fetchAllLocks(ctx context.Context, qe connector.QueryExecutor) (*CallToolResult, error) {
 	query := `SELECT
   l.locktype,
   COALESCE(l.relation::regclass::text, '') AS relation,
@@ -151,7 +150,7 @@ LIMIT 100`
 
 	result, err := qe.ExecuteReadQuery(ctx, query)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query locks: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query locks: %v", err)), nil
 	}
 
 	type lockInfo struct {
@@ -192,7 +191,7 @@ LIMIT 100`
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }

@@ -9,7 +9,7 @@ import (
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	srvpkg "github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // wrapCompressSkipMCP wraps chi's Compress middleware so that /mcp/ paths
@@ -71,7 +71,7 @@ func (s *Server) MCPTokenAuth(next http.Handler) http.Handler {
 // setupMCPStreamableHTTP creates the Streamable HTTP server backed by an
 // MCPServer with all tools registered. This replaces the deprecated SSE
 // transport per MCP spec 2025-06-18.
-func (s *Server) setupMCPStreamableHTTP() *server.StreamableHTTPServer {
+func (s *Server) setupMCPStreamableHTTP() *mcp.StreamableHTTPHandler {
 	deps := mcpserver.Deps{
 		Ctx:      s.auditCtx,
 		Registry: s.registry,
@@ -99,23 +99,19 @@ func (s *Server) setupMCPStreamableHTTP() *server.StreamableHTTPServer {
 	mcpSrv := mcpserver.NewConfiguredServer(deps, true, nil)
 	s.mcpServer = mcpSrv // store for notification dispatch
 
-	httpServer := server.NewStreamableHTTPServer(mcpSrv,
-		server.WithEndpointPath("/mcp"),
-		server.WithHeartbeatInterval(30*time.Second),
-		server.WithHTTPContextFunc(func(ctx context.Context, r *http.Request) context.Context {
-			if user := srvpkg.UserFromContext(r.Context()); user != nil {
-				return srvpkg.WithUser(ctx, user)
-			}
-			return ctx
-		}),
+	handler := mcp.NewStreamableHTTPHandler(
+		func(r *http.Request) *mcp.Server { return mcpSrv },
+		&mcp.StreamableHTTPOptions{
+			SessionTimeout: 30 * time.Minute,
+		},
 	)
 
-	return httpServer
+	return handler
 }
 
 // setupMCPSSE creates the legacy SSE server for backward compatibility.
 // Deprecated: Use setupMCPStreamableHTTP instead.
-func (s *Server) setupMCPSSE() *server.SSEServer {
+func (s *Server) setupMCPSSE() *mcp.SSEHandler {
 	deps := mcpserver.Deps{
 		Ctx:      s.auditCtx,
 		Registry: s.registry,
@@ -142,19 +138,12 @@ func (s *Server) setupMCPSSE() *server.SSEServer {
 
 	mcpSrv := mcpserver.NewConfiguredServer(deps, true, nil)
 
-	sseServer := server.NewSSEServer(mcpSrv,
-		server.WithStaticBasePath("/mcp"),
-		server.WithUseFullURLForMessageEndpoint(false),
-		server.WithKeepAliveInterval(30*time.Second),
-		server.WithSSEContextFunc(func(ctx context.Context, r *http.Request) context.Context {
-			if user := srvpkg.UserFromContext(r.Context()); user != nil {
-				return srvpkg.WithUser(ctx, user)
-			}
-			return ctx
-		}),
+	handler := mcp.NewSSEHandler(
+		func(r *http.Request) *mcp.Server { return mcpSrv },
+		nil,
 	)
 
-	return sseServer
+	return handler
 }
 
 // mcpUserFromContext returns the user set by MCPTokenAuth, for role checks.

@@ -4,63 +4,60 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // addPrompts registers MCP prompts on the server.
-func addPrompts(s *server.MCPServer) {
+func addPrompts(s *mcp.Server) {
 	// 1. investigate-errors — Guided error investigation
 	s.AddPrompt(
-		mcp.NewPrompt("investigate-errors",
-			mcp.WithPromptDescription("Guided error investigation for a specific service"),
-			mcp.WithArgument("service",
-				mcp.ArgumentDescription("The service name to investigate errors for"),
-				mcp.RequiredArgument(),
-			),
-			mcp.WithArgument("timeframe",
-				mcp.ArgumentDescription("Time window to investigate (e.g. 1h, 6h, 24h). Defaults to 1h"),
-			),
-		),
+		&mcp.Prompt{
+			Name:        "investigate-errors",
+			Description: "Guided error investigation for a specific service",
+			Arguments: []*mcp.PromptArgument{
+				{Name: "service", Description: "The service name to investigate errors for", Required: true},
+				{Name: "timeframe", Description: "Time window to investigate (e.g. 1h, 6h, 24h). Defaults to 1h"},
+			},
+		},
 		investigateErrorsHandler,
 	)
 
 	// 2. database-health-check — Database health assessment
 	s.AddPrompt(
-		mcp.NewPrompt("database-health-check",
-			mcp.WithPromptDescription("Comprehensive database health assessment"),
-		),
+		&mcp.Prompt{
+			Name:        "database-health-check",
+			Description: "Comprehensive database health assessment",
+		},
 		databaseHealthCheckHandler,
 	)
 
 	// 3. deploy-validation — Post-deploy validation
 	s.AddPrompt(
-		mcp.NewPrompt("deploy-validation",
-			mcp.WithPromptDescription("Post-deploy validation to verify a deployment is healthy"),
-			mcp.WithArgument("service",
-				mcp.ArgumentDescription("The service that was deployed"),
-				mcp.RequiredArgument(),
-			),
-			mcp.WithArgument("commit_hash",
-				mcp.ArgumentDescription("The commit hash of the deployment (optional)"),
-			),
-		),
+		&mcp.Prompt{
+			Name:        "deploy-validation",
+			Description: "Post-deploy validation to verify a deployment is healthy",
+			Arguments: []*mcp.PromptArgument{
+				{Name: "service", Description: "The service that was deployed", Required: true},
+				{Name: "commit_hash", Description: "The commit hash of the deployment (optional)"},
+			},
+		},
 		deployValidationHandler,
 	)
 
 	// 4. triage — General system triage
 	s.AddPrompt(
-		mcp.NewPrompt("triage",
-			mcp.WithPromptDescription("General system triage to identify and investigate issues"),
-			mcp.WithArgument("symptom",
-				mcp.ArgumentDescription("Optional symptom or issue description to focus the triage"),
-			),
-		),
+		&mcp.Prompt{
+			Name:        "triage",
+			Description: "General system triage to identify and investigate issues",
+			Arguments: []*mcp.PromptArgument{
+				{Name: "symptom", Description: "Optional symptom or issue description to focus the triage"},
+			},
+		},
 		triageHandler,
 	)
 }
 
-func investigateErrorsHandler(_ context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+func investigateErrorsHandler(_ context.Context, request *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 	service := request.Params.Arguments["service"]
 	if service == "" {
 		return nil, fmt.Errorf("service argument is required")
@@ -92,16 +89,16 @@ func investigateErrorsHandler(_ context.Context, request mcp.GetPromptRequest) (
 
 	return &mcp.GetPromptResult{
 		Description: fmt.Sprintf("Error investigation for %s (last %s)", service, timeframe),
-		Messages: []mcp.PromptMessage{
+		Messages: []*mcp.PromptMessage{
 			{
-				Role:    mcp.RoleUser,
-				Content: mcp.TextContent{Type: "text", Text: prompt},
+				Role:    "user",
+				Content: &mcp.TextContent{Text: prompt},
 			},
 		},
 	}, nil
 }
 
-func databaseHealthCheckHandler(_ context.Context, _ mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+func databaseHealthCheckHandler(_ context.Context, _ *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 	prompt := `Perform a comprehensive database health assessment. Follow these steps:
 
 1. **Query Statistics**: Call opentrace(tool="database", action="query_stats") to review overall query performance metrics including total queries, average duration, and error rates.
@@ -123,16 +120,16 @@ func databaseHealthCheckHandler(_ context.Context, _ mcp.GetPromptRequest) (*mcp
 
 	return &mcp.GetPromptResult{
 		Description: "Database health assessment",
-		Messages: []mcp.PromptMessage{
+		Messages: []*mcp.PromptMessage{
 			{
-				Role:    mcp.RoleUser,
-				Content: mcp.TextContent{Type: "text", Text: prompt},
+				Role:    "user",
+				Content: &mcp.TextContent{Text: prompt},
 			},
 		},
 	}, nil
 }
 
-func deployValidationHandler(_ context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+func deployValidationHandler(_ context.Context, request *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 	service := request.Params.Arguments["service"]
 	if service == "" {
 		return nil, fmt.Errorf("service argument is required")
@@ -166,16 +163,16 @@ func deployValidationHandler(_ context.Context, request mcp.GetPromptRequest) (*
 
 	return &mcp.GetPromptResult{
 		Description: fmt.Sprintf("Deploy validation for %s%s", service, commitClause),
-		Messages: []mcp.PromptMessage{
+		Messages: []*mcp.PromptMessage{
 			{
-				Role:    mcp.RoleUser,
-				Content: mcp.TextContent{Type: "text", Text: prompt},
+				Role:    "user",
+				Content: &mcp.TextContent{Text: prompt},
 			},
 		},
 	}, nil
 }
 
-func triageHandler(_ context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+func triageHandler(_ context.Context, request *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 	symptom := request.Params.Arguments["symptom"]
 	symptomClause := ""
 	if symptom != "" {
@@ -206,10 +203,10 @@ func triageHandler(_ context.Context, request mcp.GetPromptRequest) (*mcp.GetPro
 
 	return &mcp.GetPromptResult{
 		Description: "System triage report",
-		Messages: []mcp.PromptMessage{
+		Messages: []*mcp.PromptMessage{
 			{
-				Role:    mcp.RoleUser,
-				Content: mcp.TextContent{Type: "text", Text: prompt},
+				Role:    "user",
+				Content: &mcp.TextContent{Text: prompt},
 			},
 		},
 	}, nil

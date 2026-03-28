@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/pkg/store"
 	"github.com/adham90/opentrace/internal/watcher"
@@ -20,47 +18,10 @@ type WatchesDeps struct {
 	WatchMetrics *watcher.WatchMetrics
 }
 
-// WatchesTool returns the consolidated tool definition for watch management.
-func WatchesTool() mcp.Tool {
-	return mcp.NewTool("watches",
-		mcp.WithDescription(`Watch management: create, list, delete watches, and manage alerts.
-
-Actions:
-- status: List active watches with current values and pending alert counts
-- create: Create a metric watch (error_rate, response_time, p95_response, log_count, error_count, heartbeat, sql_count, cache_hit_rate)
-- delete: Stop/delete a watch by watch_id
-- alerts: List pending alerts (from check_alerts)
-- dismiss: Dismiss an alert with a reason
-- acknowledge: Acknowledge an alert
-- investigate: Investigate a watch alert or collect data about a service`),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, create, delete, alerts, dismiss, acknowledge, investigate")),
-		// status filters
-		mcp.WithString("status", mcp.Description("Filter by status: active, triggered, resolved, expired (for status action)")),
-		mcp.WithString("service", mcp.Description("Service name filter")),
-		mcp.WithString("session_id", mcp.Description("Agent session ID filter")),
-		// create params
-		mcp.WithString("metric", mcp.Description("Metric to monitor: error_rate, response_time, p95_response, log_count, error_count, heartbeat, sql_count, cache_hit_rate")),
-		mcp.WithString("operator", mcp.Description("Comparison operator: gt, gte, lt, lte, eq, neq")),
-		mcp.WithNumber("threshold", mcp.Description("Threshold value to compare against")),
-		mcp.WithString("endpoint", mcp.Description("Specific endpoint/path to monitor")),
-		mcp.WithString("environment", mcp.Description("Environment filter (e.g. production, staging)")),
-		mcp.WithString("commit_hash", mcp.Description("Git commit to associate with this watch")),
-		mcp.WithString("duration", mcp.Description("How long the watch stays active (default: 1h). Examples: 30m, 2h, 24h")),
-		mcp.WithString("urgency", mcp.Description("Alert urgency: low, normal (default), high, critical")),
-		mcp.WithString("check_interval", mcp.Description("How often to check (default: 30s). Examples: 10s, 1m, 5m")),
-		mcp.WithNumber("min_consecutive", mcp.Description("Number of consecutive breaches before alerting (default: 1)")),
-		// delete / dismiss / acknowledge / investigate params
-		mcp.WithString("watch_id", mcp.Description("Watch ID (for delete action)")),
-		mcp.WithString("alert_id", mcp.Description("Alert ID (for dismiss, acknowledge, investigate actions)")),
-		mcp.WithString("reason", mcp.Description("Reason for dismissal")),
-		mcp.WithString("window", mcp.Description("Time window for service investigation (default: 1h). Examples: 15m, 1h, 6h")),
-	)
-}
-
 // WatchesHandler returns a handler for the consolidated watches tool.
-func WatchesHandler(d WatchesDeps) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
+func WatchesHandler(d WatchesDeps) ToolHandlerFunc {
+	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
+		args := GetArguments(request)
 		action, _ := args["action"].(string)
 
 		switch action {
@@ -79,12 +40,12 @@ func WatchesHandler(d WatchesDeps) server.ToolHandlerFunc {
 		case "investigate":
 			return handleWatchInvestigate(ctx, d, args)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s (use status, create, delete, alerts, dismiss, acknowledge, investigate)", action)), nil
+			return NewToolResultError(fmt.Sprintf("unknown action: %s (use status, create, delete, alerts, dismiss, acknowledge, investigate)", action)), nil
 		}
 	}
 }
 
-func handleWatchStatus(ctx context.Context, d WatchesDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleWatchStatus(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
 	params := store.ListWatchParams{}
 	if v, ok := args["status"].(string); ok {
 		params.Status = store.WatchStatus(v)
@@ -179,10 +140,10 @@ func handleWatchStatus(ctx context.Context, d WatchesDeps, args map[string]any) 
 	WithSuggestions(result, suggestions...)
 
 	data, _ := json.Marshal(result)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleWatchCreate(ctx context.Context, d WatchesDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleWatchCreate(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
 	metricStr, _ := args["metric"].(string)
 	operatorStr, _ := args["operator"].(string)
 	threshold, _ := args["threshold"].(float64)
@@ -235,25 +196,25 @@ func handleWatchCreate(ctx context.Context, d WatchesDeps, args map[string]any) 
 	}
 
 	data, _ := json.Marshal(w)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleWatchDelete(ctx context.Context, d WatchesDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleWatchDelete(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
 	watchID, _ := args["watch_id"].(string)
 	if watchID == "" {
-		return mcp.NewToolResultError("watch_id is required for delete action"), nil
+		return NewToolResultError("watch_id is required for delete action"), nil
 	}
 	if err := d.WatchStore.Delete(ctx, watchID); err != nil {
 		return nil, fmt.Errorf("stopping watch: %w", err)
 	}
-	return mcp.NewToolResultText(fmt.Sprintf(`{"status":"stopped","watch_id":"%s"}`, watchID)), nil
+	return NewToolResultText(fmt.Sprintf(`{"status":"stopped","watch_id":"%s"}`, watchID)), nil
 }
 
-func handleWatchAlerts(ctx context.Context, d WatchesDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleWatchAlerts(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 	alerts, err := d.WatchStore.ListAlerts(ctx, "", "pending", 20)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to list alerts: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to list alerts: %v", err)), nil
 	}
 
 	var filtered []store.WatchAlert
@@ -272,13 +233,13 @@ func handleWatchAlerts(ctx context.Context, d WatchesDeps, args map[string]any) 
 	}
 
 	data, _ := json.Marshal(result)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleWatchDismiss(ctx context.Context, d WatchesDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleWatchDismiss(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
 	alertID, _ := args["alert_id"].(string)
 	if alertID == "" {
-		return mcp.NewToolResultError("alert_id is required for dismiss action"), nil
+		return NewToolResultError("alert_id is required for dismiss action"), nil
 	}
 	reason, _ := args["reason"].(string)
 	if reason == "" {
@@ -287,21 +248,21 @@ func handleWatchDismiss(ctx context.Context, d WatchesDeps, args map[string]any)
 	if err := d.WatchStore.DismissAlert(ctx, alertID, reason); err != nil {
 		return nil, fmt.Errorf("dismissing alert: %w", err)
 	}
-	return mcp.NewToolResultText(fmt.Sprintf(`{"status":"dismissed","alert_id":"%s","reason":"%s"}`, alertID, reason)), nil
+	return NewToolResultText(fmt.Sprintf(`{"status":"dismissed","alert_id":"%s","reason":"%s"}`, alertID, reason)), nil
 }
 
-func handleWatchAcknowledge(ctx context.Context, d WatchesDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleWatchAcknowledge(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
 	alertID, _ := args["alert_id"].(string)
 	if alertID == "" {
-		return mcp.NewToolResultError("alert_id is required for acknowledge action"), nil
+		return NewToolResultError("alert_id is required for acknowledge action"), nil
 	}
 	if err := d.WatchStore.AcknowledgeAlert(ctx, alertID); err != nil {
 		return nil, fmt.Errorf("acknowledging alert: %w", err)
 	}
-	return mcp.NewToolResultText(fmt.Sprintf(`{"status":"acknowledged","alert_id":"%s"}`, alertID)), nil
+	return NewToolResultText(fmt.Sprintf(`{"status":"acknowledged","alert_id":"%s"}`, alertID)), nil
 }
 
-func handleWatchInvestigate(ctx context.Context, d WatchesDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleWatchInvestigate(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
 	alertID, _ := args["alert_id"].(string)
 	service, _ := args["service"].(string)
 
@@ -329,7 +290,7 @@ func handleWatchInvestigate(ctx context.Context, d WatchesDeps, args map[string]
 		WithSuggestions(resp, suggestions...)
 
 		data, _ := json.Marshal(resp)
-		return mcp.NewToolResultText(string(data)), nil
+		return NewToolResultText(string(data)), nil
 	}
 
 	// Mode B: one-shot investigation
@@ -449,5 +410,5 @@ func handleWatchInvestigate(ctx context.Context, d WatchesDeps, args map[string]
 	WithSuggestions(resp, suggestions...)
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }

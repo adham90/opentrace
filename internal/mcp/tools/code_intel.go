@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -22,36 +20,10 @@ type CodeIntelDeps struct {
 	InvestigationSessionStore store.InvestigationSessionStore
 }
 
-// CodeIntelTool returns the consolidated tool definition for code intelligence.
-func CodeIntelTool() mcp.Tool {
-	return mcp.NewTool("code_intel",
-		mcp.WithDescription(`Code intelligence: risk scores, fragile code, error context, and test gaps.
-
-Actions:
-- risk: Bulk risk scores for a list of files (pre-deploy safety check)
-- fragile: Riskiest code entities for a service
-- context: Error history and risk for a code entity (file, controller, or endpoint)
-- test_gaps: Uncovered production error paths ranked by impact
-- test_priority: Detailed error context for a specific fingerprint to help write tests`),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: risk, fragile, context, test_gaps, test_priority")),
-		mcp.WithString("service", mcp.Description("Service name filter")),
-		// risk params
-		mcp.WithObject("files", mcp.Description("Array of file paths for risk assessment")),
-		// fragile / test_gaps params
-		mcp.WithNumber("limit", mcp.Description("Max results (default: 10)")),
-		// context params
-		mcp.WithString("entity_name", mcp.Description("Code entity name (file path, controller, or endpoint)")),
-		// context meta-tool params
-		mcp.WithString("task", mcp.Description("Task description for context meta-tool (e.g. 'debugging payment errors')")),
-		// test_priority params
-		mcp.WithString("fingerprint", mcp.Description("Error fingerprint (for test_priority)")),
-	)
-}
-
 // CodeIntelHandler returns a handler for the consolidated code_intel tool.
-func CodeIntelHandler(d CodeIntelDeps) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
+func CodeIntelHandler(d CodeIntelDeps) ToolHandlerFunc {
+	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
+		args := GetArguments(request)
 		action, _ := args["action"].(string)
 
 		switch action {
@@ -66,14 +38,14 @@ func CodeIntelHandler(d CodeIntelDeps) server.ToolHandlerFunc {
 		case "test_priority":
 			return handleTestPriority(ctx, d, args)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s (use risk, fragile, context, test_gaps, test_priority)", action)), nil
+			return NewToolResultError(fmt.Sprintf("unknown action: %s (use risk, fragile, context, test_gaps, test_priority)", action)), nil
 		}
 	}
 }
 
-func handleCodeRisk(ctx context.Context, d CodeIntelDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleCodeRisk(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
 	if d.CodeEntityStore == nil {
-		return mcp.NewToolResultError("CodeEntityStore not configured"), nil
+		return NewToolResultError("CodeEntityStore not configured"), nil
 	}
 
 	service, _ := args["service"].(string)
@@ -91,12 +63,12 @@ func handleCodeRisk(ctx context.Context, d CodeIntelDeps, args map[string]any) (
 	}
 
 	if len(files) == 0 {
-		return mcp.NewToolResultError("files array is required"), nil
+		return NewToolResultError("files array is required"), nil
 	}
 
 	entities, err := d.CodeEntityStore.BatchGetRisk(ctx, store.CodeEntityFile, files, service)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to get risk scores: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to get risk scores: %v", err)), nil
 	}
 
 	known := make(map[string]*store.CodeEntity, len(entities))
@@ -137,12 +109,12 @@ func handleCodeRisk(ctx context.Context, d CodeIntelDeps, args map[string]any) (
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleFragile(ctx context.Context, d CodeIntelDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleFragile(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
 	if d.CodeEntityStore == nil {
-		return mcp.NewToolResultError("CodeEntityStore not configured"), nil
+		return NewToolResultError("CodeEntityStore not configured"), nil
 	}
 
 	service, _ := args["service"].(string)
@@ -156,11 +128,11 @@ func handleFragile(ctx context.Context, d CodeIntelDeps, args map[string]any) (*
 
 	entities, err := d.CodeEntityStore.TopByRisk(ctx, service, limit)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query fragile code: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query fragile code: %v", err)), nil
 	}
 
 	if len(entities) == 0 {
-		return mcp.NewToolResultText(`{"message":"No code entities with risk data found","entities":[]}`), nil
+		return NewToolResultText(`{"message":"No code entities with risk data found","entities":[]}`), nil
 	}
 
 	items := make([]map[string]any, 0, len(entities))
@@ -182,10 +154,10 @@ func handleFragile(ctx context.Context, d CodeIntelDeps, args map[string]any) (*
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleCodeContext(ctx context.Context, d CodeIntelDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleCodeContext(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
 	// Check if this is a task-based context request
 	task, _ := args["task"].(string)
 	if task != "" {
@@ -193,12 +165,12 @@ func handleCodeContext(ctx context.Context, d CodeIntelDeps, args map[string]any
 	}
 
 	if d.CodeEntityStore == nil {
-		return mcp.NewToolResultError("CodeEntityStore not configured"), nil
+		return NewToolResultError("CodeEntityStore not configured"), nil
 	}
 
 	entityName, _ := args["entity_name"].(string)
 	if entityName == "" {
-		return mcp.NewToolResultError("entity_name is required"), nil
+		return NewToolResultError("entity_name is required"), nil
 	}
 	service, _ := args["service"].(string)
 
@@ -218,7 +190,7 @@ func handleCodeContext(ctx context.Context, d CodeIntelDeps, args map[string]any
 			"entity_name": entityName,
 			"service":     service,
 		})
-		return mcp.NewToolResultText(string(data)), nil
+		return NewToolResultText(string(data)), nil
 	}
 
 	resp := map[string]any{
@@ -250,10 +222,10 @@ func handleCodeContext(ctx context.Context, d CodeIntelDeps, args map[string]any
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleTaskContext(ctx context.Context, d CodeIntelDeps, args map[string]any, task string) (*mcp.CallToolResult, error) {
+func handleTaskContext(ctx context.Context, d CodeIntelDeps, args map[string]any, task string) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 
 	taskType := classifyTaskType(task)
@@ -277,14 +249,14 @@ func handleTaskContext(ctx context.Context, d CodeIntelDeps, args map[string]any
 
 	data, err := json.Marshal(result)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal context: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal context: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleTestGaps(ctx context.Context, d CodeIntelDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleTestGaps(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
 	if d.TestCorrelationStore == nil {
-		return mcp.NewToolResultError("TestCorrelationStore not configured"), nil
+		return NewToolResultError("TestCorrelationStore not configured"), nil
 	}
 
 	service, _ := args["service"].(string)
@@ -296,11 +268,11 @@ func handleTestGaps(ctx context.Context, d CodeIntelDeps, args map[string]any) (
 
 	paths, err := d.TestCorrelationStore.TopByPriority(ctx, service, limit)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query test gaps: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query test gaps: %v", err)), nil
 	}
 
 	if len(paths) == 0 {
-		return mcp.NewToolResultText("No uncovered error paths found."), nil
+		return NewToolResultText("No uncovered error paths found."), nil
 	}
 
 	result := map[string]any{
@@ -310,19 +282,19 @@ func handleTestGaps(ctx context.Context, d CodeIntelDeps, args map[string]any) (
 
 	data, err := json.Marshal(result)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleTestPriority(ctx context.Context, d CodeIntelDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleTestPriority(ctx context.Context, d CodeIntelDeps, args map[string]any) (*CallToolResult, error) {
 	if d.TestCorrelationStore == nil {
-		return mcp.NewToolResultError("TestCorrelationStore not configured"), nil
+		return NewToolResultError("TestCorrelationStore not configured"), nil
 	}
 
 	fingerprint, _ := args["fingerprint"].(string)
 	if fingerprint == "" {
-		return mcp.NewToolResultError("fingerprint parameter is required"), nil
+		return NewToolResultError("fingerprint parameter is required"), nil
 	}
 
 	result := map[string]any{
@@ -348,9 +320,9 @@ func handleTestPriority(ctx context.Context, d CodeIntelDeps, args map[string]an
 
 	data, err := json.Marshal(result)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // --- helpers ---

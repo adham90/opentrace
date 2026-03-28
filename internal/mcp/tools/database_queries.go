@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/adham90/opentrace/internal/guardrail"
 )
@@ -16,7 +15,7 @@ import (
 // Action: queries — query stats from pg_stat_statements
 // ---------------------------------------------------------------------------
 
-func handleQueries(ctx context.Context, deps DatabaseDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleQueries(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	qe, errResult := getQueryExecutor(deps.Registry)
 	if errResult != nil {
 		return errResult, nil
@@ -67,7 +66,7 @@ LIMIT %d`, whereClause, orderBy, limit)
 	if err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "pg_stat_statements") && strings.Contains(errMsg, "does not exist") {
-			return mcp.NewToolResultText(
+			return NewToolResultText(
 				"pg_stat_statements extension is not enabled.\n\n" +
 					"To enable it:\n" +
 					"1. Add to postgresql.conf: shared_preload_libraries = 'pg_stat_statements'\n" +
@@ -75,11 +74,11 @@ LIMIT %d`, whereClause, orderBy, limit)
 					"3. Run: CREATE EXTENSION IF NOT EXISTS pg_stat_statements;\n\n" +
 					"This extension tracks query execution statistics and is very useful for identifying slow queries."), nil
 		}
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query pg_stat_statements: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query pg_stat_statements: %v", err)), nil
 	}
 
 	if result.RowCount == 0 {
-		return mcp.NewToolResultText("No query statistics found. The database may have been recently restarted, or pg_stat_statements may have no recorded queries yet."), nil
+		return NewToolResultText("No query statistics found. The database may have been recently restarted, or pg_stat_statements may have no recorded queries yet."), nil
 	}
 
 	type queryStatsRow struct {
@@ -137,9 +136,9 @@ LIMIT %d`, whereClause, orderBy, limit)
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -154,15 +153,15 @@ func normalizeQueryFingerprint(query string) string {
 	return strings.TrimSpace(queryFingerprintRe.ReplaceAllString(query, "?"))
 }
 
-func handleExplain(ctx context.Context, deps DatabaseDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleExplain(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
-		return mcp.NewToolResultError("query is required for the explain action"), nil
+		return NewToolResultError("query is required for the explain action"), nil
 	}
 
 	// Validate that it's a SELECT statement.
 	if err := guardrail.ValidateReadOnlyGeneric(query); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("only SELECT queries can be explained: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("only SELECT queries can be explained: %v", err)), nil
 	}
 
 	qe, errResult := getQueryExecutor(deps.Registry)
@@ -208,7 +207,7 @@ func handleExplain(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 
 	result, err := qe.ExecuteReadQuery(ctx, explainQuery)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("EXPLAIN failed: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("EXPLAIN failed: %v", err)), nil
 	}
 
 	// Collect the plan output.
@@ -252,9 +251,9 @@ func handleExplain(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // analyzeExplainPlan inspects EXPLAIN output text for common performance issues.

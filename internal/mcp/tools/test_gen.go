@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -20,30 +18,10 @@ type TestGenDeps struct {
 	LogStore             store.LogStore
 }
 
-// TestGenTool returns the tool definition for test generation from production errors.
-func TestGenTool() mcp.Tool {
-	return mcp.NewTool("test_gen",
-		mcp.WithDescription(`Generate regression tests from real production errors.
-
-Uses actual error data — exact inputs, stack traces, affected users — to create
-tests that reproduce real failures. Every test has a story: the error ID, when it
-happened, how many users it affected.
-
-Actions:
-- context: Get structured test-ready data for a specific error group (inputs, stack trace, edge case)
-- suggest: Rank which errors most need regression tests (by occurrence, impact, recurrence)
-- coverage: Find production errors that have no corresponding test coverage`),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: context, suggest, coverage")),
-		mcp.WithString("fingerprint", mcp.Description("Error fingerprint for 'context' action")),
-		mcp.WithString("service", mcp.Description("Filter by service name")),
-		mcp.WithNumber("limit", mcp.Description("Number of results (default: 10, max: 30)")),
-	)
-}
-
 // TestGenHandler returns a handler for the test generation tool.
-func TestGenHandler(d TestGenDeps) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
+func TestGenHandler(d TestGenDeps) ToolHandlerFunc {
+	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
+		args := GetArguments(request)
 		action, _ := args["action"].(string)
 
 		switch action {
@@ -54,25 +32,25 @@ func TestGenHandler(d TestGenDeps) server.ToolHandlerFunc {
 		case "coverage":
 			return handleTestGenCoverage(ctx, d, args)
 		default:
-			return mcp.NewToolResultError("unknown action: " + action + ". Use: context, suggest, coverage"), nil
+			return NewToolResultError("unknown action: " + action + ". Use: context, suggest, coverage"), nil
 		}
 	}
 }
 
-func handleTestGenContext(ctx context.Context, d TestGenDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleTestGenContext(ctx context.Context, d TestGenDeps, args map[string]any) (*CallToolResult, error) {
 	fingerprint, _ := args["fingerprint"].(string)
 	if fingerprint == "" {
-		return mcp.NewToolResultError("fingerprint is required for context action"), nil
+		return NewToolResultError("fingerprint is required for context action"), nil
 	}
 
 	if d.ErrorGroupStore == nil {
-		return mcp.NewToolResultError("ErrorGroupStore not configured"), nil
+		return NewToolResultError("ErrorGroupStore not configured"), nil
 	}
 
 	// Get the error group
 	eg, err := d.ErrorGroupStore.Get(ctx, fingerprint)
 	if err != nil {
-		return mcp.NewToolResultError("error group not found: " + fingerprint), nil
+		return NewToolResultError("error group not found: " + fingerprint), nil
 	}
 
 	result := map[string]any{
@@ -131,12 +109,12 @@ func handleTestGenContext(ctx context.Context, d TestGenDeps, args map[string]an
 	)
 
 	data, _ := json.Marshal(result)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleTestGenSuggest(ctx context.Context, d TestGenDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleTestGenSuggest(ctx context.Context, d TestGenDeps, args map[string]any) (*CallToolResult, error) {
 	if d.ErrorGroupStore == nil {
-		return mcp.NewToolResultError("ErrorGroupStore not configured"), nil
+		return NewToolResultError("ErrorGroupStore not configured"), nil
 	}
 
 	limit := 10
@@ -156,7 +134,7 @@ func handleTestGenSuggest(ctx context.Context, d TestGenDeps, args map[string]an
 		SortBy:  "occurrence_count",
 	})
 	if err != nil {
-		return mcp.NewToolResultError("failed to list errors: " + err.Error()), nil
+		return NewToolResultError("failed to list errors: " + err.Error()), nil
 	}
 
 	var suggestions []map[string]any
@@ -198,10 +176,10 @@ func handleTestGenSuggest(ctx context.Context, d TestGenDeps, args map[string]an
 		"count":       len(suggestions),
 		"tip":         "Use test_gen(action: \"context\", fingerprint: \"...\") to get test-ready data for any error.",
 	})
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleTestGenCoverage(ctx context.Context, d TestGenDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleTestGenCoverage(ctx context.Context, d TestGenDeps, args map[string]any) (*CallToolResult, error) {
 	limit := 10
 	if v, ok := args["limit"].(float64); ok && v > 0 {
 		limit = int(v)
@@ -259,7 +237,7 @@ func handleTestGenCoverage(ctx context.Context, d TestGenDeps, args map[string]a
 		"count":            len(gaps),
 		"tip":              "Use test_gen(action: \"context\", fingerprint: \"...\") to get test-ready data for any error.",
 	})
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 func sanitizeTestName(s string) string {

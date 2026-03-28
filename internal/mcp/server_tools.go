@@ -4,8 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	mcplib "github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/mcp/tools"
@@ -154,7 +153,7 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 	// --- overview (includes agent memory: notes + session_summary) ---
 	var overviewSessionCallback tools.SessionSummaryCallback
 	if deps.InvestigationSessionStore != nil && sessionTracker != nil {
-		overviewSessionCallback = func(ctx context.Context, args map[string]any) (*mcplib.CallToolResult, error) {
+		overviewSessionCallback = func(ctx context.Context, args map[string]any) (*mcp.CallToolResult, error) {
 			return handleSessionSummaryFromArgs(args)
 		}
 	}
@@ -346,7 +345,7 @@ func registerWriteTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 // handleSessionSummaryFromArgs handles the session_summary action using the
 // package-level sessionTracker. This bridges the tools package (which can't
 // access the mcp package's sessionTracker) with the actual implementation.
-func handleSessionSummaryFromArgs(args map[string]any) (*mcplib.CallToolResult, error) {
+func handleSessionSummaryFromArgs(args map[string]any) (*mcp.CallToolResult, error) {
 	summary, _ := args["summary"].(string)
 	rootCause, _ := args["root_cause"].(string)
 	fixApplied, _ := args["fix_applied"].(string)
@@ -354,11 +353,11 @@ func handleSessionSummaryFromArgs(args map[string]any) (*mcplib.CallToolResult, 
 	primaryService, _ := args["primary_service"].(string)
 
 	if summary == "" {
-		return mcplib.NewToolResultError("summary is required"), nil
+		return NewToolResultError("summary is required"), nil
 	}
 
 	if sessionTracker == nil {
-		return mcplib.NewToolResultError("session tracking is not enabled"), nil
+		return NewToolResultError("session tracking is not enabled"), nil
 	}
 
 	var status *store.InvestigationSessionStatus
@@ -403,11 +402,11 @@ func handleSessionSummaryFromArgs(args map[string]any) (*mcplib.CallToolResult, 
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcplib.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // wrapHandler applies activity logging and metrics to a handler.
-func wrapHandler(toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
+func wrapHandler(toolName string, handler ToolHandlerFunc) ToolHandlerFunc {
 	handler = wrapWithMetrics(toolName, handler)
 	if activityStoreForLogging != nil {
 		handler = wrapWithActivityLog(activityStoreForLogging, toolName, handler)
@@ -421,46 +420,43 @@ func wrapHandler(toolName string, handler server.ToolHandlerFunc) server.ToolHan
 
 // convertTool maps a connector.Tool to an mcp.Tool with the appropriate
 // JSON Schema properties derived from the tool's parameter definitions.
-func convertTool(t connector.Tool) mcplib.Tool {
-	opts := []mcplib.ToolOption{
-		mcplib.WithDescription(t.Description),
-	}
-
+func convertTool(t connector.Tool) *mcp.Tool {
+	props := make(map[string]SchemaProperty)
+	var required []string
 	for _, p := range t.Params {
-		var propOpts []mcplib.PropertyOption
-		if p.Required {
-			propOpts = append(propOpts, mcplib.Required())
-		}
-
+		schemaType := "string"
 		switch p.Type {
-		case "string":
-			opts = append(opts, mcplib.WithString(p.Name, propOpts...))
 		case "int":
-			opts = append(opts, mcplib.WithNumber(p.Name, propOpts...))
+			schemaType = "number"
 		case "bool":
-			opts = append(opts, mcplib.WithBoolean(p.Name, propOpts...))
-		default:
-			opts = append(opts, mcplib.WithString(p.Name, propOpts...))
+			schemaType = "boolean"
+		}
+		props[p.Name] = SchemaProperty{Type: schemaType}
+		if p.Required {
+			required = append(required, p.Name)
 		}
 	}
-
-	return mcplib.NewTool(t.Name, opts...)
+	return &mcp.Tool{
+		Name:        t.Name,
+		Description: t.Description,
+		InputSchema: ToolSchema(props, required),
+	}
 }
 
 // bridgeHandler wraps a connector.Tool handler as an MCP ToolHandlerFunc.
-func bridgeHandler(t connector.Tool) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-		args := request.GetArguments()
+func bridgeHandler(t connector.Tool) ToolHandlerFunc {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := GetArguments(request)
 		if args == nil {
 			args = make(map[string]any)
 		}
 
 		result, err := t.Handler(ctx, args)
 		if err != nil {
-			return mcplib.NewToolResultError(err.Error()), nil
+			return NewToolResultError(err.Error()), nil
 		}
 
-		return mcplib.NewToolResultText(result), nil
+		return NewToolResultText(result), nil
 	}
 }
 

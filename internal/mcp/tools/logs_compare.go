@@ -8,7 +8,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -17,10 +16,10 @@ import (
 // action: compare — compare metrics between two time periods (from comparePeriodsHandler)
 // ---------------------------------------------------------------------------
 
-func logsCompare(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.CallToolResult, error) {
+func logsCompare(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	metric, _ := args["metric"].(string)
 	if metric == "" {
-		return mcp.NewToolResultError("metric is required (errors, log_volume)"), nil
+		return NewToolResultError("metric is required (errors, log_volume)"), nil
 	}
 
 	currentPeriod := "last_1h"
@@ -38,12 +37,12 @@ func logsCompare(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.
 	now := time.Now().UTC()
 	currentStart, currentEnd, err := logsResolvePeriod(currentPeriod, now)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid current_period: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("invalid current_period: %v", err)), nil
 	}
 
 	baseStart, baseEnd, err := logsResolveBaseline(baselinePeriod, currentStart, currentEnd)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid baseline_period: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("invalid baseline_period: %v", err)), nil
 	}
 
 	switch metric {
@@ -52,21 +51,21 @@ func logsCompare(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.
 	case "log_volume":
 		return logsCompareLogVolume(ctx, deps.LogStore, currentStart, currentEnd, baseStart, baseEnd, serviceFilter)
 	default:
-		return mcp.NewToolResultError(fmt.Sprintf("invalid metric: %q (use errors or log_volume)", metric)), nil
+		return NewToolResultError(fmt.Sprintf("invalid metric: %q (use errors or log_volume)", metric)), nil
 	}
 }
 
-func logsCompareErrors(ctx context.Context, ls store.LogStore, curStart, curEnd, baseStart, baseEnd time.Time, service string) (*mcp.CallToolResult, error) {
+func logsCompareErrors(ctx context.Context, ls store.LogStore, curStart, curEnd, baseStart, baseEnd time.Time, service string) (*CallToolResult, error) {
 	curParams := store.LogCountParams{Since: curStart, Until: curEnd, Service: service}
 	baseParams := store.LogCountParams{Since: baseStart, Until: baseEnd, Service: service}
 
 	curSvc, err := ls.CountByService(ctx, curParams)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to count current errors: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to count current errors: %v", err)), nil
 	}
 	baseSvc, err := ls.CountByService(ctx, baseParams)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to count baseline errors: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to count baseline errors: %v", err)), nil
 	}
 
 	curTotal := 0
@@ -150,20 +149,20 @@ func logsCompareErrors(ctx context.Context, ls store.LogStore, curStart, curEnd,
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func logsCompareLogVolume(ctx context.Context, ls store.LogStore, curStart, curEnd, baseStart, baseEnd time.Time, service string) (*mcp.CallToolResult, error) {
+func logsCompareLogVolume(ctx context.Context, ls store.LogStore, curStart, curEnd, baseStart, baseEnd time.Time, service string) (*CallToolResult, error) {
 	curParams := store.LogCountParams{Since: curStart, Until: curEnd, Service: service}
 	baseParams := store.LogCountParams{Since: baseStart, Until: baseEnd, Service: service}
 
 	curLevels, err := ls.CountByLevel(ctx, curParams)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to count current logs: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to count current logs: %v", err)), nil
 	}
 	baseLevels, err := ls.CountByLevel(ctx, baseParams)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to count baseline logs: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to count baseline logs: %v", err)), nil
 	}
 
 	curTotal := 0
@@ -217,5 +216,5 @@ func logsCompareLogVolume(ctx context.Context, ls store.LogStore, curStart, curE
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }

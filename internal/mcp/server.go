@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
@@ -71,7 +71,7 @@ type Deps struct {
 // registered; otherwise only read-only tools are registered.
 // This is used by both the stdio transport (Serve) and the SSE transport
 // (web server).
-func NewConfiguredServer(deps Deps, isAdmin bool, hooks *server.Hooks) *server.MCPServer {
+func NewConfiguredServer(deps Deps, isAdmin bool, serverOpts *mcp.ServerOptions) *mcp.Server {
 	name := deps.ServerName
 	if name == "" {
 		name = "opentrace"
@@ -87,19 +87,18 @@ func NewConfiguredServer(deps Deps, isAdmin bool, hooks *server.Hooks) *server.M
 		activityLogger = NewActivityLogger(alCtx, deps.MCPActivityStore, 256, 2)
 	}
 
-	opts := []server.ServerOption{
-		server.WithToolCapabilities(false),
-		server.WithResourceCapabilities(false, true),
-		server.WithInstructions(mcpInstructions),
+	if serverOpts == nil {
+		serverOpts = &mcp.ServerOptions{}
 	}
-	if hooks != nil {
-		opts = append(opts, server.WithHooks(hooks))
+	serverOpts.Instructions = mcpInstructions
+	serverOpts.Capabilities = &mcp.ServerCapabilities{
+		Tools:     &mcp.ToolCapabilities{ListChanged: false},
+		Resources: &mcp.ResourceCapabilities{ListChanged: false, Subscribe: true},
 	}
 
-	s := server.NewMCPServer(
-		name,
-		"0.1.0",
-		opts...,
+	s := mcp.NewServer(
+		&mcp.Implementation{Name: name, Version: "0.1.0"},
+		serverOpts,
 	)
 
 	b := &CatalogBuilder{}
@@ -166,12 +165,19 @@ func Serve(deps Deps) error {
 		if name == "" {
 			name = "opentrace"
 		}
-		s := server.NewMCPServer(name, "0.1.0", server.WithToolCapabilities(false))
-		return server.ServeStdio(s)
+		s := mcp.NewServer(
+			&mcp.Implementation{Name: name, Version: "0.1.0"},
+			&mcp.ServerOptions{
+				Capabilities: &mcp.ServerCapabilities{
+					Tools: &mcp.ToolCapabilities{ListChanged: false},
+				},
+			},
+		)
+		return s.Run(context.Background(), &mcp.StdioTransport{})
 	}
 
-	// Set up investigation session tracking hooks.
-	hooks := &server.Hooks{}
+	// Set up investigation session tracking.
+	serverOpts := &mcp.ServerOptions{}
 	appCtx := deps.Ctx
 	if appCtx == nil {
 		appCtx = context.Background()
@@ -179,8 +185,12 @@ func Serve(deps Deps) error {
 
 	if deps.InvestigationSessionStore != nil {
 		sessionTracker = NewSessionTracker(appCtx, deps.InvestigationSessionStore, authUser, "stdio")
-		sessionTracker.RegisterHooks(hooks)
 		recurrenceDetector = NewRecurrenceDetector(deps.InvestigationSessionStore)
+
+		// Wire session tracking via InitializedHandler.
+		serverOpts.InitializedHandler = func(_ context.Context, req *mcp.InitializedRequest) {
+			sessionTracker.OnInitialize(req)
+		}
 
 		// Stage 3: Wire transition and activity stores into session tracker
 		if deps.ToolTransitionStore != nil {
@@ -249,9 +259,9 @@ func Serve(deps Deps) error {
 		SeedDefaultTemplates(appCtx, deps.WorkflowTemplateStore)
 	}
 
-	s := NewConfiguredServer(deps, isAdmin, hooks)
+	s := NewConfiguredServer(deps, isAdmin, serverOpts)
 
-	err := server.ServeStdio(s)
+	err := s.Run(context.Background(), &mcp.StdioTransport{})
 
 	// Clean up on exit.
 	if sessionTracker != nil {

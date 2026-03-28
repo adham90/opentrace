@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -20,33 +18,10 @@ type AnnotationsDeps struct {
 	LogStore         store.LogStore
 }
 
-// AnnotationsTool returns the tool definition for production code annotations.
-func AnnotationsTool() mcp.Tool {
-	return mcp.NewTool("annotations",
-		mcp.WithDescription(`Production code annotations — live runtime metrics for source code.
-
-When you're about to modify a file, call this tool to see how it behaves in production:
-call counts, error rates, latency percentiles, risk scores, and open errors.
-
-Actions:
-- file: Get production metrics for all endpoints/functions mapped to a source file
-- function: Get detailed metrics for a specific endpoint (method + path)
-- hotspots: Get the top N most error-prone or risky code entities across the codebase`),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: file, function, hotspots")),
-		mcp.WithString("path", mcp.Description("Source file path for 'file' action (e.g., app/controllers/payments_controller.rb)")),
-		mcp.WithString("controller", mcp.Description("Controller name for 'function' action (e.g., PaymentsController)")),
-		mcp.WithString("function_name", mcp.Description("Function/action name for 'function' action (e.g., charge)")),
-		mcp.WithString("method", mcp.Description("HTTP method for 'function' action (e.g., POST)")),
-		mcp.WithString("endpoint", mcp.Description("Endpoint path for 'function' action (e.g., /api/payments/charge)")),
-		mcp.WithString("service", mcp.Description("Filter by service name")),
-		mcp.WithNumber("limit", mcp.Description("Number of results for 'hotspots' (default: 10, max: 50)")),
-	)
-}
-
 // AnnotationsHandler returns a handler for the annotations tool.
-func AnnotationsHandler(d AnnotationsDeps) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
+func AnnotationsHandler(d AnnotationsDeps) ToolHandlerFunc {
+	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
+		args := GetArguments(request)
 		action, _ := args["action"].(string)
 
 		switch action {
@@ -57,15 +32,15 @@ func AnnotationsHandler(d AnnotationsDeps) server.ToolHandlerFunc {
 		case "hotspots":
 			return handleAnnotationsHotspots(ctx, d, args)
 		default:
-			return mcp.NewToolResultError("unknown action: " + action + ". Use: file, function, hotspots"), nil
+			return NewToolResultError("unknown action: " + action + ". Use: file, function, hotspots"), nil
 		}
 	}
 }
 
-func handleAnnotationsFile(ctx context.Context, d AnnotationsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleAnnotationsFile(ctx context.Context, d AnnotationsDeps, args map[string]any) (*CallToolResult, error) {
 	filePath, _ := args["path"].(string)
 	if filePath == "" {
-		return mcp.NewToolResultError("path is required for file action"), nil
+		return NewToolResultError("path is required for file action"), nil
 	}
 
 	result := map[string]any{
@@ -147,16 +122,16 @@ func handleAnnotationsFile(ctx context.Context, d AnnotationsDeps, args map[stri
 	}
 
 	data, _ := json.Marshal(result)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleAnnotationsFunction(ctx context.Context, d AnnotationsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleAnnotationsFunction(ctx context.Context, d AnnotationsDeps, args map[string]any) (*CallToolResult, error) {
 	controller, _ := args["controller"].(string)
 	endpoint, _ := args["endpoint"].(string)
 	service, _ := args["service"].(string)
 
 	if controller == "" && endpoint == "" {
-		return mcp.NewToolResultError("controller or endpoint is required for function action"), nil
+		return NewToolResultError("controller or endpoint is required for function action"), nil
 	}
 
 	result := map[string]any{}
@@ -187,10 +162,10 @@ func handleAnnotationsFunction(ctx context.Context, d AnnotationsDeps, args map[
 	}
 
 	data, _ := json.Marshal(result)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleAnnotationsHotspots(ctx context.Context, d AnnotationsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleAnnotationsHotspots(ctx context.Context, d AnnotationsDeps, args map[string]any) (*CallToolResult, error) {
 	limit := 10
 	if v, ok := args["limit"].(float64); ok && v > 0 {
 		limit = int(v)
@@ -220,14 +195,14 @@ func handleAnnotationsHotspots(ctx context.Context, d AnnotationsDeps, args map[
 	}
 
 	if len(hotspots) == 0 {
-		return mcp.NewToolResultText(`{"message": "No code entity data available. Code risk scores are computed from error and investigation data over time."}`), nil
+		return NewToolResultText(`{"message": "No code entity data available. Code risk scores are computed from error and investigation data over time."}`), nil
 	}
 
 	data, _ := json.Marshal(map[string]any{
 		"hotspots": hotspots,
 		"count":    len(hotspots),
 	})
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // controllerFromPath extracts a controller name from a file path using conventions.

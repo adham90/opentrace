@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -20,29 +18,10 @@ type DependenciesDeps struct {
 	LogStore        store.LogStore
 }
 
-// DependenciesTool returns the tool definition for runtime dependency analysis.
-func DependenciesTool() mcp.Tool {
-	return mcp.NewTool("dependencies",
-		mcp.WithDescription(`Runtime dependency graph and pre-deploy risk assessment.
-
-Built from actual production traffic (not static analysis). Shows how services
-communicate, what depends on what, and the blast radius of changes.
-
-Actions:
-- service: Show all dependencies for a specific service (what it calls, what calls it)
-- blast_radius: What breaks if a given service/endpoint goes down
-- change_risk: Risk assessment for modifying a specific file or endpoint`),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: service, blast_radius, change_risk")),
-		mcp.WithString("service", mcp.Description("Service name (required for service, blast_radius)")),
-		mcp.WithString("file", mcp.Description("Source file path for change_risk action")),
-		mcp.WithString("endpoint", mcp.Description("Endpoint path for change_risk action (e.g., POST /api/payments/charge)")),
-	)
-}
-
 // DependenciesHandler returns a handler for the dependencies tool.
-func DependenciesHandler(d DependenciesDeps) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
+func DependenciesHandler(d DependenciesDeps) ToolHandlerFunc {
+	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
+		args := GetArguments(request)
 		action, _ := args["action"].(string)
 
 		switch action {
@@ -53,15 +32,15 @@ func DependenciesHandler(d DependenciesDeps) server.ToolHandlerFunc {
 		case "change_risk":
 			return handleDepsChangeRisk(ctx, d, args)
 		default:
-			return mcp.NewToolResultError("unknown action: " + action + ". Use: service, blast_radius, change_risk"), nil
+			return NewToolResultError("unknown action: " + action + ". Use: service, blast_radius, change_risk"), nil
 		}
 	}
 }
 
-func handleDepsService(ctx context.Context, d DependenciesDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleDepsService(ctx context.Context, d DependenciesDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 	if service == "" {
-		return mcp.NewToolResultError("service is required"), nil
+		return NewToolResultError("service is required"), nil
 	}
 
 	result := map[string]any{
@@ -147,13 +126,13 @@ func handleDepsService(ctx context.Context, d DependenciesDeps, args map[string]
 	}
 
 	data, _ := json.Marshal(result)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleDepsBlastRadius(ctx context.Context, d DependenciesDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleDepsBlastRadius(ctx context.Context, d DependenciesDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 	if service == "" {
-		return mcp.NewToolResultError("service is required"), nil
+		return NewToolResultError("service is required"), nil
 	}
 
 	result := map[string]any{
@@ -199,16 +178,16 @@ func handleDepsBlastRadius(ctx context.Context, d DependenciesDeps, args map[str
 	}
 
 	data, _ := json.Marshal(result)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleDepsChangeRisk(ctx context.Context, d DependenciesDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleDepsChangeRisk(ctx context.Context, d DependenciesDeps, args map[string]any) (*CallToolResult, error) {
 	file, _ := args["file"].(string)
 	endpoint, _ := args["endpoint"].(string)
 	service, _ := args["service"].(string)
 
 	if file == "" && endpoint == "" {
-		return mcp.NewToolResultError("file or endpoint is required"), nil
+		return NewToolResultError("file or endpoint is required"), nil
 	}
 
 	result := map[string]any{}
@@ -321,5 +300,5 @@ func handleDepsChangeRisk(ctx context.Context, d DependenciesDeps, args map[stri
 	}
 
 	data, _ := json.Marshal(result)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }

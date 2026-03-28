@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -19,40 +17,10 @@ type AnalyticsDeps struct {
 	TrendStore     store.TrendStore
 }
 
-// AnalyticsTool returns the consolidated tool definition for web analytics and trends.
-func AnalyticsTool() mcp.Tool {
-	return mcp.NewTool("analytics",
-		mcp.WithDescription(`Web analytics, traffic trends, and top movers.
-
-Actions:
-- traffic: Web traffic overview with request counts, error rates, and latency
-- endpoints: Top endpoints by request count, error rate, or latency
-- heatmap: Traffic heatmap by day of week and hour
-- trends: Time-series trends for a metric with optional baseline comparison
-- movers: Top movers — endpoints/services with the biggest metric changes`),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: traffic, endpoints, heatmap, trends, movers")),
-		mcp.WithString("service", mcp.Description("Service name filter")),
-		mcp.WithString("since", mcp.Description("Time window (default: 24h). Examples: 1h, 12h, 7d")),
-		// endpoints params
-		mcp.WithString("sort_by", mcp.Description("Sort by: request_count, error_rate, avg_duration, p95_duration (for endpoints)")),
-		mcp.WithNumber("limit", mcp.Description("Max results (default: 10-20)")),
-		mcp.WithNumber("min_requests", mcp.Description("Minimum request count to include (default: 5, for endpoints)")),
-		// heatmap params
-		mcp.WithString("metric", mcp.Description("Metric: request_count, error_count, avg_duration (for heatmap/trends/movers)")),
-		// trends params
-		mcp.WithString("interval", mcp.Description("Bucket interval: 5m, 15m, 1h, 1d (for trends)")),
-		mcp.WithString("endpoint", mcp.Description("Endpoint filter (for trends)")),
-		mcp.WithString("environment", mcp.Description("Environment filter (for trends)")),
-		mcp.WithString("compare_to", mcp.Description("Baseline comparison: previous_period, previous_week (for trends)")),
-		// movers params
-		mcp.WithString("baseline", mcp.Description("Baseline for movers: previous_period (default), previous_week")),
-	)
-}
-
 // AnalyticsHandler returns a handler for the consolidated analytics tool.
-func AnalyticsHandler(d AnalyticsDeps) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
+func AnalyticsHandler(d AnalyticsDeps) ToolHandlerFunc {
+	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
+		args := GetArguments(request)
 		action, _ := args["action"].(string)
 
 		switch action {
@@ -67,12 +35,12 @@ func AnalyticsHandler(d AnalyticsDeps) server.ToolHandlerFunc {
 		case "movers":
 			return handleMovers(ctx, d, args)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s (use traffic, endpoints, heatmap, trends, movers)", action)), nil
+			return NewToolResultError(fmt.Sprintf("unknown action: %s (use traffic, endpoints, heatmap, trends, movers)", action)), nil
 		}
 	}
 }
 
-func handleTraffic(ctx context.Context, d AnalyticsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleTraffic(ctx context.Context, d AnalyticsDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 
 	sinceStr := "24h"
@@ -82,7 +50,7 @@ func handleTraffic(ctx context.Context, d AnalyticsDeps, args map[string]any) (*
 
 	duration, err := ParseTimeRange(sinceStr)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid since: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("invalid since: %v", err)), nil
 	}
 
 	now := time.Now().UTC()
@@ -94,7 +62,7 @@ func handleTraffic(ctx context.Context, d AnalyticsDeps, args map[string]any) (*
 		Until:   now,
 	})
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to get traffic summary: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to get traffic summary: %v", err)), nil
 	}
 
 	resp := map[string]any{
@@ -126,10 +94,10 @@ func handleTraffic(ctx context.Context, d AnalyticsDeps, args map[string]any) (*
 	)
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleEndpoints(ctx context.Context, d AnalyticsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleEndpoints(ctx context.Context, d AnalyticsDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 	sortBy, _ := args["sort_by"].(string)
 	if sortBy == "" {
@@ -153,7 +121,7 @@ func handleEndpoints(ctx context.Context, d AnalyticsDeps, args map[string]any) 
 
 	duration, err := ParseTimeRange(sinceStr)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid since: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("invalid since: %v", err)), nil
 	}
 
 	now := time.Now().UTC()
@@ -168,7 +136,7 @@ func handleEndpoints(ctx context.Context, d AnalyticsDeps, args map[string]any) 
 		MinRequests: minRequests,
 	})
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to get endpoints: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to get endpoints: %v", err)), nil
 	}
 
 	type endpointResult struct {
@@ -224,10 +192,10 @@ func handleEndpoints(ctx context.Context, d AnalyticsDeps, args map[string]any) 
 	)
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleHeatmap(ctx context.Context, d AnalyticsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleHeatmap(ctx context.Context, d AnalyticsDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 	metricField := "request_count"
 	if v, ok := args["metric"].(string); ok && v != "" {
@@ -236,7 +204,7 @@ func handleHeatmap(ctx context.Context, d AnalyticsDeps, args map[string]any) (*
 
 	cells, err := d.AnalyticsStore.TrafficHeatmap(ctx, service)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to get heatmap: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to get heatmap: %v", err)), nil
 	}
 
 	dayNames := []string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
@@ -285,10 +253,10 @@ func handleHeatmap(ctx context.Context, d AnalyticsDeps, args map[string]any) (*
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleTrends(ctx context.Context, d AnalyticsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleTrends(ctx context.Context, d AnalyticsDeps, args map[string]any) (*CallToolResult, error) {
 	metric, _ := args["metric"].(string)
 	if metric == "" {
 		metric = "request_volume"
@@ -311,7 +279,7 @@ func handleTrends(ctx context.Context, d AnalyticsDeps, args map[string]any) (*m
 
 	duration, err := ParseTimeRange(sinceStr)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid since: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("invalid since: %v", err)), nil
 	}
 
 	now := time.Now().UTC()
@@ -329,7 +297,7 @@ func handleTrends(ctx context.Context, d AnalyticsDeps, args map[string]any) (*m
 
 	buckets, err := d.TrendStore.QueryTrends(ctx, params)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query trends: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query trends: %v", err)), nil
 	}
 
 	type dataPoint struct {
@@ -436,10 +404,10 @@ func handleTrends(ctx context.Context, d AnalyticsDeps, args map[string]any) (*m
 	)
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleMovers(ctx context.Context, d AnalyticsDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleMovers(ctx context.Context, d AnalyticsDeps, args map[string]any) (*CallToolResult, error) {
 	metric, _ := args["metric"].(string)
 	if metric == "" {
 		metric = "p95_response"
@@ -462,7 +430,7 @@ func handleMovers(ctx context.Context, d AnalyticsDeps, args map[string]any) (*m
 
 	duration, err := ParseTimeRange(sinceStr)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid since: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("invalid since: %v", err)), nil
 	}
 
 	now := time.Now().UTC()
@@ -475,7 +443,7 @@ func handleMovers(ctx context.Context, d AnalyticsDeps, args map[string]any) (*m
 		Until:    now,
 	})
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query current: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query current: %v", err)), nil
 	}
 
 	baselineBuckets, err := d.TrendStore.QueryTrends(ctx, store.TrendQueryParams{
@@ -484,7 +452,7 @@ func handleMovers(ctx context.Context, d AnalyticsDeps, args map[string]any) (*m
 		Until:    baselineUntil,
 	})
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query baseline: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query baseline: %v", err)), nil
 	}
 
 	type svcMetric struct {
@@ -567,7 +535,7 @@ func handleMovers(ctx context.Context, d AnalyticsDeps, args map[string]any) (*m
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // --- helpers ---

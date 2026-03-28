@@ -8,8 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/pkg/store"
@@ -19,9 +18,9 @@ import (
 // When a DataSourceStore is available, returns full connector details from the
 // database with optional type filter. Falls back to listing
 // active registry tools when no store is provided.
-func listConnectorsHandler(registry *connector.Registry, dsStore store.DataSourceStore) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
+func listConnectorsHandler(registry *connector.Registry, dsStore store.DataSourceStore) ToolHandlerFunc {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := GetArguments(request)
 
 		// When we have a store, return rich connector info.
 		if dsStore != nil {
@@ -32,10 +31,10 @@ func listConnectorsHandler(registry *connector.Registry, dsStore store.DataSourc
 
 			connectors, err := dsStore.List(ctx, params)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("failed to list connectors: %v", err)), nil
+				return NewToolResultError(fmt.Sprintf("failed to list connectors: %v", err)), nil
 			}
 			if len(connectors) == 0 {
-				return mcp.NewToolResultText("No connectors found."), nil
+				return NewToolResultText("No connectors found."), nil
 			}
 
 			// Build response with connector details + active tools.
@@ -78,15 +77,15 @@ func listConnectorsHandler(registry *connector.Registry, dsStore store.DataSourc
 
 			data, err := json.Marshal(entries)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("failed to marshal connectors: %v", err)), nil
+				return NewToolResultError(fmt.Sprintf("failed to marshal connectors: %v", err)), nil
 			}
-			return mcp.NewToolResultText(string(data)), nil
+			return NewToolResultText(string(data)), nil
 		}
 
 		// Fallback: no store, just list active registry tools.
 		tools := registry.AllTools()
 		if len(tools) == 0 {
-			return mcp.NewToolResultText("No connectors are currently active."), nil
+			return NewToolResultText("No connectors are currently active."), nil
 		}
 
 		var b strings.Builder
@@ -95,41 +94,41 @@ func listConnectorsHandler(registry *connector.Registry, dsStore store.DataSourc
 			b.WriteString(fmt.Sprintf("- %s: %s\n", t.Name, t.Description))
 		}
 
-		return mcp.NewToolResultText(b.String()), nil
+		return NewToolResultText(b.String()), nil
 	}
 }
 
 // listServersHandler returns a handler that lists all monitored servers.
-func listServersHandler(ss store.ServerStore) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func listServersHandler(ss store.ServerStore) ToolHandlerFunc {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		servers, err := ss.List(ctx, store.ListServerParams{})
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to list servers: %v", err)), nil
+			return NewToolResultError(fmt.Sprintf("failed to list servers: %v", err)), nil
 		}
 		if len(servers) == 0 {
-			return mcp.NewToolResultText("No monitored servers."), nil
+			return NewToolResultText("No monitored servers."), nil
 		}
 		data, err := json.Marshal(servers)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal servers: %v", err)), nil
+			return NewToolResultError(fmt.Sprintf("failed to marshal servers: %v", err)), nil
 		}
-		return mcp.NewToolResultText(string(data)), nil
+		return NewToolResultText(string(data)), nil
 	}
 }
 
 // queryMetricsHandler returns a handler that queries time-series metrics.
-func queryMetricsHandler(ss store.ServerStore, ms store.MetricStore) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
+func queryMetricsHandler(ss store.ServerStore, ms store.MetricStore) ToolHandlerFunc {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := GetArguments(request)
 
 		serverIDStr, _ := args["server_id"].(string)
 		if serverIDStr == "" {
-			return mcp.NewToolResultError("server_id is required"), nil
+			return NewToolResultError("server_id is required"), nil
 		}
 
 		serverID, err := uuid.Parse(serverIDStr)
 		if err != nil {
-			return mcp.NewToolResultError("invalid server_id format"), nil
+			return NewToolResultError("invalid server_id format"), nil
 		}
 
 		q := store.MetricQuery{ServerID: serverID}
@@ -152,43 +151,43 @@ func queryMetricsHandler(ss store.ServerStore, ms store.MetricStore) server.Tool
 
 		points, err := ms.Query(ctx, q)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to query metrics: %v", err)), nil
+			return NewToolResultError(fmt.Sprintf("failed to query metrics: %v", err)), nil
 		}
 		if len(points) == 0 {
-			return mcp.NewToolResultText("No metrics found matching the given criteria."), nil
+			return NewToolResultText("No metrics found matching the given criteria."), nil
 		}
 
 		data, err := json.Marshal(points)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal metrics: %v", err)), nil
+			return NewToolResultError(fmt.Sprintf("failed to marshal metrics: %v", err)), nil
 		}
-		return mcp.NewToolResultText(string(data)), nil
+		return NewToolResultText(string(data)), nil
 	}
 }
 
 // serverHealthHandler returns a handler that shows the latest metrics for a server.
-func serverHealthHandler(ss store.ServerStore, ms store.MetricStore) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
+func serverHealthHandler(ss store.ServerStore, ms store.MetricStore) ToolHandlerFunc {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := GetArguments(request)
 
 		serverIDStr, _ := args["server_id"].(string)
 		if serverIDStr == "" {
-			return mcp.NewToolResultError("server_id is required"), nil
+			return NewToolResultError("server_id is required"), nil
 		}
 
 		serverID, err := uuid.Parse(serverIDStr)
 		if err != nil {
-			return mcp.NewToolResultError("invalid server_id format"), nil
+			return NewToolResultError("invalid server_id format"), nil
 		}
 
 		srv, err := ss.GetByID(ctx, serverID)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("server not found: %v", err)), nil
+			return NewToolResultError(fmt.Sprintf("server not found: %v", err)), nil
 		}
 
 		latest, err := ms.LatestByServer(ctx, serverID)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to query metrics: %v", err)), nil
+			return NewToolResultError(fmt.Sprintf("failed to query metrics: %v", err)), nil
 		}
 
 		result := map[string]any{
@@ -197,8 +196,8 @@ func serverHealthHandler(ss store.ServerStore, ms store.MetricStore) server.Tool
 		}
 		data, err := json.Marshal(result)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal: %v", err)), nil
+			return NewToolResultError(fmt.Sprintf("failed to marshal: %v", err)), nil
 		}
-		return mcp.NewToolResultText(string(data)), nil
+		return NewToolResultText(string(data)), nil
 	}
 }

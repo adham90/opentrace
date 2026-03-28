@@ -7,7 +7,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -16,7 +15,7 @@ import (
 // action: summary — debugging overview (from logSummaryHandler)
 // ---------------------------------------------------------------------------
 
-func logsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.CallToolResult, error) {
+func logsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	timeRange := "1h"
 	if v, ok := args["time_range"].(string); ok && v != "" {
 		timeRange = v
@@ -27,7 +26,7 @@ func logsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.
 
 	duration, err := parseTimeRange(timeRange)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid time_range: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("invalid time_range: %v", err)), nil
 	}
 
 	now := time.Now().UTC()
@@ -41,7 +40,7 @@ func logsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.
 	}
 	levelCounts, err := deps.LogStore.CountByLevel(ctx, countParams)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to count logs: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to count logs: %v", err)), nil
 	}
 
 	totalLogs := 0
@@ -66,7 +65,7 @@ func logsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.
 	}
 	entries, err := deps.LogStore.Search(ctx, searchParams)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to search logs: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to search logs: %v", err)), nil
 	}
 
 	// 3. Aggregate by commit hash.
@@ -338,7 +337,7 @@ func logsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }

@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/adham90/opentrace/internal/mcp/tools"
 	"github.com/adham90/opentrace/internal/metrics"
@@ -87,7 +86,7 @@ func (r *rankerAdapter) RankAndTrack(suggestions []tools.ToolSuggestion) []tools
 // maybeAddTool registers a tool on the MCP server if s is non-nil.
 // When s is nil (catalog-only mode), this is a no-op.
 // If activity logging is enabled, wraps the handler to record tool calls.
-func maybeAddTool(s *server.MCPServer, tool mcp.Tool, handler server.ToolHandlerFunc) {
+func maybeAddTool(s *mcp.Server, tool *mcp.Tool, handler ToolHandlerFunc) {
 	if s != nil {
 		// Wrap with Prometheus metrics recording (always active).
 		handler = wrapWithMetrics(tool.Name, handler)
@@ -99,16 +98,16 @@ func maybeAddTool(s *server.MCPServer, tool mcp.Tool, handler server.ToolHandler
 }
 
 // wrapWithMetrics wraps a tool handler to record Prometheus metrics for each call.
-func wrapWithMetrics(toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func wrapWithMetrics(toolName string, handler ToolHandlerFunc) ToolHandlerFunc {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		metrics.RecordMCPToolCall(toolName)
 		return handler(ctx, request)
 	}
 }
 
 // wrapWithActivityLog wraps a tool handler to log its execution to the activity store.
-func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler ToolHandlerFunc) ToolHandlerFunc {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Snapshot the suggestions from the PREVIOUS tool's response before this
 		// handler runs and overwrites them with its own suggestions.
 		var priorSuggestions []ToolSuggestion
@@ -122,7 +121,7 @@ func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler ser
 
 		// Build a brief preview of args
 		argsPreview := ""
-		if args := request.GetArguments(); len(args) > 0 {
+		if args := GetArguments(request); len(args) > 0 {
 			data, _ := json.Marshal(args)
 			argsPreview = string(data)
 			if len(argsPreview) > 500 {
@@ -134,7 +133,7 @@ func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler ser
 		isError := err != nil
 		resultPreview := ""
 		if result != nil && len(result.Content) > 0 {
-			if txt, ok := result.Content[0].(mcp.TextContent); ok {
+			if txt, ok := result.Content[0].(*mcp.TextContent); ok {
 				resultPreview = txt.Text
 				if len(resultPreview) > 500 {
 					resultPreview = resultPreview[:500]
@@ -199,9 +198,9 @@ func wrapWithActivityLog(as store.MCPActivityStore, toolName string, handler ser
 		// Inject investigation context for investigation-intent sessions.
 		if contextInjector != nil && sessionTracker != nil && result != nil && !result.IsError && len(result.Content) > 0 {
 			if sess := sessionTracker.CurrentSession(); sess != nil && sess.Intent == IntentInvestigation {
-				if txt, ok := result.Content[0].(mcp.TextContent); ok {
+				if txt, ok := result.Content[0].(*mcp.TextContent); ok {
 					if enriched := InjectContextIntoResult(contextInjector, sess, toolName, txt.Text); enriched != txt.Text {
-						result.Content[0] = mcp.NewTextContent(enriched)
+						result.Content[0] = &mcp.TextContent{Text: enriched}
 					}
 				}
 			}

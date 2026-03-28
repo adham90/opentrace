@@ -7,8 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/pkg/store"
@@ -16,7 +14,7 @@ import (
 
 // SessionSummaryHandler is a callback for handling session summary updates.
 // This avoids the tools package depending on the mcp package's sessionTracker.
-type SessionSummaryHandler func(ctx context.Context, args map[string]any) (*mcp.CallToolResult, error)
+type SessionSummaryHandler func(ctx context.Context, args map[string]any) (*CallToolResult, error)
 
 // AdminDeps holds the stores needed by the admin tool.
 type AdminDeps struct {
@@ -29,49 +27,10 @@ type AdminDeps struct {
 	SessionSummaryCallback SessionSummaryHandler // optional, nil-safe
 }
 
-// AdminTool returns the consolidated tool definition for admin operations.
-func AdminTool() mcp.Tool {
-	return mcp.NewTool("admin",
-		mcp.WithDescription(`Admin operations: settings, users, audit log, agent notes, and activity stats.
-
-Actions:
-- settings: Get current settings (retention, query limits, MCP name)
-- update_retention: Update data retention period (1-365 days)
-- users: List all user accounts with roles and status
-- update_role: Change a user's role to admin or member
-- toggle_active: Enable or disable a user account
-- delete_user: Permanently delete a user account
-- audit: View recent admin actions for security review
-- notes: Get or set agent notes (persistent memory for entities)
-- delete_note: Delete an agent note
-- activity: Database connection activity (pg_stat_activity)
-- session_summary: Save investigation summary for future reference`),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: settings, update_retention, users, update_role, toggle_active, delete_user, audit, notes, delete_note, activity, session_summary")),
-		// update_retention params
-		mcp.WithNumber("retention_days", mcp.Description("Retention period in days (1-365)")),
-		// user management params
-		mcp.WithString("user_id", mcp.Description("User ID")),
-		mcp.WithString("role", mcp.Description("User role: admin or member")),
-		mcp.WithBoolean("is_active", mcp.Description("true to enable, false to disable the account")),
-		// audit params
-		mcp.WithNumber("limit", mcp.Description("Max results (default: 50, max: 200)")),
-		// notes params
-		mcp.WithString("entity_type", mcp.Description("Entity type: query, endpoint, service, healthcheck, error")),
-		mcp.WithString("entity_id", mcp.Description("Entity identifier")),
-		mcp.WithString("note", mcp.Description("Note text (for setting a note)")),
-		// session_summary params
-		mcp.WithString("summary", mcp.Description("(session_summary) One sentence describing what was investigated and found")),
-		mcp.WithString("root_cause", mcp.Description("(session_summary) Root cause if identified")),
-		mcp.WithString("fix_applied", mcp.Description("(session_summary) What fix was applied, if any")),
-		mcp.WithString("outcome", mcp.Description("(session_summary) Outcome: resolved, unresolved, or partial")),
-		mcp.WithString("primary_service", mcp.Description("(session_summary) Primary service investigated")),
-	)
-}
-
 // AdminHandler returns a handler for the consolidated admin tool.
-func AdminHandler(d AdminDeps) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
+func AdminHandler(d AdminDeps) ToolHandlerFunc {
+	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
+		args := GetArguments(request)
 		action, _ := args["action"].(string)
 
 		switch action {
@@ -97,23 +56,23 @@ func AdminHandler(d AdminDeps) server.ToolHandlerFunc {
 			return handleActivity(ctx, d)
 		case "session_summary":
 			if d.SessionSummaryCallback == nil {
-				return mcp.NewToolResultError("session tracking is not enabled"), nil
+				return NewToolResultError("session tracking is not enabled"), nil
 			}
 			return d.SessionSummaryCallback(ctx, args)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s (use settings, update_retention, users, update_role, toggle_active, delete_user, audit, notes, delete_note, activity, session_summary)", action)), nil
+			return NewToolResultError(fmt.Sprintf("unknown action: %s (use settings, update_retention, users, update_role, toggle_active, delete_user, audit, notes, delete_note, activity, session_summary)", action)), nil
 		}
 	}
 }
 
-func handleSettings(ctx context.Context, d AdminDeps) (*mcp.CallToolResult, error) {
+func handleSettings(ctx context.Context, d AdminDeps) (*CallToolResult, error) {
 	if d.SettingsStore == nil {
-		return mcp.NewToolResultError("SettingsStore not configured"), nil
+		return NewToolResultError("SettingsStore not configured"), nil
 	}
 
 	retention, err := d.SettingsStore.GetRetention(ctx)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to read retention settings: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to read retention settings: %v", err)), nil
 	}
 
 	resp := map[string]any{
@@ -133,37 +92,37 @@ func handleSettings(ctx context.Context, d AdminDeps) (*mcp.CallToolResult, erro
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal settings: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal settings: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleUpdateRetention(ctx context.Context, d AdminDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleUpdateRetention(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
 	if d.SettingsStore == nil {
-		return mcp.NewToolResultError("SettingsStore not configured"), nil
+		return NewToolResultError("SettingsStore not configured"), nil
 	}
 
 	daysF, ok := args["retention_days"].(float64)
 	if !ok || daysF < 1 || daysF > 365 {
-		return mcp.NewToolResultError("retention_days is required and must be between 1 and 365"), nil
+		return NewToolResultError("retention_days is required and must be between 1 and 365"), nil
 	}
 	days := int(daysF)
 
 	if err := d.SettingsStore.SetRetention(ctx, store.RetentionSettings{RetentionDays: days}); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to update retention: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to update retention: %v", err)), nil
 	}
 
-	return mcp.NewToolResultText(fmt.Sprintf("Data retention updated to %d days. Logs, alerts, and watcher runs older than %d days will be pruned on the next cleanup cycle.", days, days)), nil
+	return NewToolResultText(fmt.Sprintf("Data retention updated to %d days. Logs, alerts, and watcher runs older than %d days will be pruned on the next cleanup cycle.", days, days)), nil
 }
 
-func handleListUsers(ctx context.Context, d AdminDeps) (*mcp.CallToolResult, error) {
+func handleListUsers(ctx context.Context, d AdminDeps) (*CallToolResult, error) {
 	if d.UserStore == nil {
-		return mcp.NewToolResultError("UserStore not configured"), nil
+		return NewToolResultError("UserStore not configured"), nil
 	}
 
 	users, err := d.UserStore.List(ctx)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to list users: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to list users: %v", err)), nil
 	}
 
 	type userSummary struct {
@@ -191,30 +150,30 @@ func handleListUsers(ctx context.Context, d AdminDeps) (*mcp.CallToolResult, err
 
 	data, err := json.Marshal(summaries)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal users: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal users: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleUpdateRole(ctx context.Context, d AdminDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleUpdateRole(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
 	if d.UserStore == nil {
-		return mcp.NewToolResultError("UserStore not configured"), nil
+		return NewToolResultError("UserStore not configured"), nil
 	}
 
 	userID, _ := args["user_id"].(string)
 	if userID == "" {
-		return mcp.NewToolResultError("user_id is required. Use admin with action=users to find user IDs."), nil
+		return NewToolResultError("user_id is required. Use admin with action=users to find user IDs."), nil
 	}
 
 	roleStr, _ := args["role"].(string)
 	if roleStr != "admin" && roleStr != "member" {
-		return mcp.NewToolResultError("role must be 'admin' or 'member'."), nil
+		return NewToolResultError("role must be 'admin' or 'member'."), nil
 	}
 
 	role := store.UserRole(roleStr)
 	user, err := d.UserStore.Update(ctx, userID, store.UpdateUserParams{Role: &role})
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to update role: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to update role: %v", err)), nil
 	}
 
 	result := map[string]any{
@@ -226,29 +185,29 @@ func handleUpdateRole(ctx context.Context, d AdminDeps, args map[string]any) (*m
 
 	data, err := json.Marshal(result)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleToggleActive(ctx context.Context, d AdminDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleToggleActive(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
 	if d.UserStore == nil {
-		return mcp.NewToolResultError("UserStore not configured"), nil
+		return NewToolResultError("UserStore not configured"), nil
 	}
 
 	userID, _ := args["user_id"].(string)
 	if userID == "" {
-		return mcp.NewToolResultError("user_id is required. Use admin with action=users to find user IDs."), nil
+		return NewToolResultError("user_id is required. Use admin with action=users to find user IDs."), nil
 	}
 
 	active, ok := args["is_active"].(bool)
 	if !ok {
-		return mcp.NewToolResultError("is_active is required (true or false)."), nil
+		return NewToolResultError("is_active is required (true or false)."), nil
 	}
 
 	user, err := d.UserStore.Update(ctx, userID, store.UpdateUserParams{IsActive: &active})
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to update user: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to update user: %v", err)), nil
 	}
 
 	status := "enabled"
@@ -265,28 +224,28 @@ func handleToggleActive(ctx context.Context, d AdminDeps, args map[string]any) (
 
 	data, err := json.Marshal(result)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleDeleteUser(ctx context.Context, d AdminDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleDeleteUser(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
 	if d.UserStore == nil {
-		return mcp.NewToolResultError("UserStore not configured"), nil
+		return NewToolResultError("UserStore not configured"), nil
 	}
 
 	userID, _ := args["user_id"].(string)
 	if userID == "" {
-		return mcp.NewToolResultError("user_id is required. Use admin with action=users to find user IDs."), nil
+		return NewToolResultError("user_id is required. Use admin with action=users to find user IDs."), nil
 	}
 
 	user, err := d.UserStore.GetByID(ctx, userID)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("user not found: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("user not found: %v", err)), nil
 	}
 
 	if err := d.UserStore.Delete(ctx, userID); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to delete user: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to delete user: %v", err)), nil
 	}
 
 	result := map[string]any{
@@ -297,14 +256,14 @@ func handleDeleteUser(ctx context.Context, d AdminDeps, args map[string]any) (*m
 
 	data, err := json.Marshal(result)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleAudit(ctx context.Context, d AdminDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleAudit(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
 	if d.AuditStore == nil {
-		return mcp.NewToolResultError("AuditStore not configured"), nil
+		return NewToolResultError("AuditStore not configured"), nil
 	}
 
 	limit := 50
@@ -317,23 +276,23 @@ func handleAudit(ctx context.Context, d AdminDeps, args map[string]any) (*mcp.Ca
 
 	entries, err := d.AuditStore.Recent(ctx, limit)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch audit log: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to fetch audit log: %v", err)), nil
 	}
 
 	if len(entries) == 0 {
-		return mcp.NewToolResultText("No audit log entries found."), nil
+		return NewToolResultText("No audit log entries found."), nil
 	}
 
 	data, err := json.Marshal(entries)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal audit log: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal audit log: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleNotes(ctx context.Context, d AdminDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleNotes(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
 	if d.AgentNoteStore == nil {
-		return mcp.NewToolResultError("AgentNoteStore not configured"), nil
+		return NewToolResultError("AgentNoteStore not configured"), nil
 	}
 
 	entityType, _ := args["entity_type"].(string)
@@ -343,15 +302,15 @@ func handleNotes(ctx context.Context, d AdminDeps, args map[string]any) (*mcp.Ca
 	// If note text is provided, this is an upsert
 	if noteText != "" {
 		if entityType == "" {
-			return mcp.NewToolResultError("entity_type is required (query, endpoint, service, healthcheck, error)"), nil
+			return NewToolResultError("entity_type is required (query, endpoint, service, healthcheck, error)"), nil
 		}
 		if entityID == "" {
-			return mcp.NewToolResultError("entity_id is required"), nil
+			return NewToolResultError("entity_id is required"), nil
 		}
 
 		result, err := d.AgentNoteStore.Upsert(ctx, entityType, entityID, noteText)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to save note: %v", err)), nil
+			return NewToolResultError(fmt.Sprintf("failed to save note: %v", err)), nil
 		}
 
 		resp := map[string]any{
@@ -363,27 +322,27 @@ func handleNotes(ctx context.Context, d AdminDeps, args map[string]any) (*mcp.Ca
 		}
 
 		data, _ := json.Marshal(resp)
-		return mcp.NewToolResultText(string(data)), nil
+		return NewToolResultText(string(data)), nil
 	}
 
 	// If both type and ID given, get a specific note
 	if entityType != "" && entityID != "" {
 		note, err := d.AgentNoteStore.Get(ctx, entityType, entityID)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("note not found: %v", err)), nil
+			return NewToolResultError(fmt.Sprintf("note not found: %v", err)), nil
 		}
 		data, _ := json.Marshal(note)
-		return mcp.NewToolResultText(string(data)), nil
+		return NewToolResultText(string(data)), nil
 	}
 
 	// Otherwise, list (optionally filtered by entity_type)
 	notes, err := d.AgentNoteStore.List(ctx, entityType)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to list notes: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to list notes: %v", err)), nil
 	}
 
 	if len(notes) == 0 {
-		return mcp.NewToolResultText("No agent notes found. Use admin with action=notes and a note parameter to save context for future sessions."), nil
+		return NewToolResultText("No agent notes found. Use admin with action=notes and a note parameter to save context for future sessions."), nil
 	}
 
 	resp := map[string]any{
@@ -391,25 +350,25 @@ func handleNotes(ctx context.Context, d AdminDeps, args map[string]any) (*mcp.Ca
 		"notes": notes,
 	}
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleDeleteNote(ctx context.Context, d AdminDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleDeleteNote(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
 	if d.AgentNoteStore == nil {
-		return mcp.NewToolResultError("AgentNoteStore not configured"), nil
+		return NewToolResultError("AgentNoteStore not configured"), nil
 	}
 
 	entityType, _ := args["entity_type"].(string)
 	if entityType == "" {
-		return mcp.NewToolResultError("entity_type is required"), nil
+		return NewToolResultError("entity_type is required"), nil
 	}
 	entityID, _ := args["entity_id"].(string)
 	if entityID == "" {
-		return mcp.NewToolResultError("entity_id is required"), nil
+		return NewToolResultError("entity_id is required"), nil
 	}
 
 	if err := d.AgentNoteStore.Delete(ctx, entityType, entityID); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to delete note: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to delete note: %v", err)), nil
 	}
 
 	resp := map[string]any{
@@ -417,22 +376,22 @@ func handleDeleteNote(ctx context.Context, d AdminDeps, args map[string]any) (*m
 		"message": fmt.Sprintf("Note for %s '%s' deleted.", entityType, entityID),
 	}
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleActivity(ctx context.Context, d AdminDeps) (*mcp.CallToolResult, error) {
+func handleActivity(ctx context.Context, d AdminDeps) (*CallToolResult, error) {
 	if d.Registry == nil {
-		return mcp.NewToolResultError("No connector registry available."), nil
+		return NewToolResultError("No connector registry available."), nil
 	}
 
 	ds := d.Registry.Get(connector.ConnectorDatabase)
 	if ds == nil {
-		return mcp.NewToolResultError("No database connector is active. Connect a PostgreSQL data source first."), nil
+		return NewToolResultError("No database connector is active. Connect a PostgreSQL data source first."), nil
 	}
 
 	qe, ok := ds.(connector.QueryExecutor)
 	if !ok {
-		return mcp.NewToolResultError("The active database connector does not support direct queries."), nil
+		return NewToolResultError("The active database connector does not support direct queries."), nil
 	}
 
 	// 1. Connection summary by state.
@@ -447,7 +406,7 @@ ORDER BY count DESC`
 
 	summaryResult, err := qe.ExecuteReadQuery(ctx, summaryQuery)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query connection summary: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query connection summary: %v", err)), nil
 	}
 
 	type connSummary struct {
@@ -483,7 +442,7 @@ LIMIT 20`
 
 	longResult, err := qe.ExecuteReadQuery(ctx, longRunningQuery)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query long-running queries: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query long-running queries: %v", err)), nil
 	}
 
 	type longQuery struct {
@@ -522,7 +481,7 @@ LIMIT 20`
 
 	idleResult, err := qe.ExecuteReadQuery(ctx, idleQuery)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query idle-in-transaction sessions: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to query idle-in-transaction sessions: %v", err)), nil
 	}
 
 	type idleSession struct {
@@ -587,7 +546,7 @@ LIMIT 20`
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }

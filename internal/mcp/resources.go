@@ -7,23 +7,22 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 // addResources registers MCP resources on the server.
-func addResources(s *server.MCPServer, deps Deps) {
+func addResources(s *mcp.Server, deps Deps) {
 	// 1. Service status template: opentrace://services/{service}/status
 	if deps.ErrorGroupStore != nil || deps.DeployStore != nil || deps.CodeEntityStore != nil {
 		s.AddResourceTemplate(
-			mcp.NewResourceTemplate(
-				"opentrace://services/{service}/status",
-				"Service Status",
-				mcp.WithTemplateDescription("Live status for a service: error counts, recent deploys, top risks"),
-				mcp.WithTemplateMIMEType("application/json"),
-			),
+			&mcp.ResourceTemplate{
+				URITemplate: "opentrace://services/{service}/status",
+				Name:        "Service Status",
+				Description: "Live status for a service: error counts, recent deploys, top risks",
+				MIMEType:    "application/json",
+			},
 			serviceStatusHandler(deps),
 		)
 	}
@@ -31,12 +30,12 @@ func addResources(s *server.MCPServer, deps Deps) {
 	// 2. Code risk summary: opentrace://code/risk-summary
 	if deps.CodeEntityStore != nil {
 		s.AddResource(
-			mcp.NewResource(
-				"opentrace://code/risk-summary",
-				"Code Risk Summary",
-				mcp.WithResourceDescription("Top 10 risky code entities across all services"),
-				mcp.WithMIMEType("application/json"),
-			),
+			&mcp.Resource{
+				URI:         "opentrace://code/risk-summary",
+				Name:        "Code Risk Summary",
+				Description: "Top 10 risky code entities across all services",
+				MIMEType:    "application/json",
+			},
 			codeRiskSummaryHandler(deps.CodeEntityStore),
 		)
 	}
@@ -44,12 +43,12 @@ func addResources(s *server.MCPServer, deps Deps) {
 	// 3. Active investigations: opentrace://investigations/active
 	if deps.InvestigationSessionStore != nil {
 		s.AddResource(
-			mcp.NewResource(
-				"opentrace://investigations/active",
-				"Active Investigations",
-				mcp.WithResourceDescription("Currently open investigation sessions"),
-				mcp.WithMIMEType("application/json"),
-			),
+			&mcp.Resource{
+				URI:         "opentrace://investigations/active",
+				Name:        "Active Investigations",
+				Description: "Currently open investigation sessions",
+				MIMEType:    "application/json",
+			},
 			activeInvestigationsHandler(deps.InvestigationSessionStore),
 		)
 	}
@@ -57,12 +56,12 @@ func addResources(s *server.MCPServer, deps Deps) {
 	// 4. Current configuration: opentrace://config/current
 	if deps.SettingsStore != nil {
 		s.AddResource(
-			mcp.NewResource(
-				"opentrace://config/current",
-				"Current Configuration",
-				mcp.WithResourceDescription("Current configuration (retention settings, MCP name, limits)"),
-				mcp.WithMIMEType("application/json"),
-			),
+			&mcp.Resource{
+				URI:         "opentrace://config/current",
+				Name:        "Current Configuration",
+				Description: "Current configuration (retention settings, MCP name, limits)",
+				MIMEType:    "application/json",
+			},
 			configCurrentHandler(deps.SettingsStore),
 		)
 	}
@@ -70,12 +69,12 @@ func addResources(s *server.MCPServer, deps Deps) {
 	// 5. Service list: opentrace://services/list
 	if deps.LogStore != nil {
 		s.AddResource(
-			mcp.NewResource(
-				"opentrace://services/list",
-				"Service List",
-				mcp.WithResourceDescription("List all known service names from logs"),
-				mcp.WithMIMEType("application/json"),
-			),
+			&mcp.Resource{
+				URI:         "opentrace://services/list",
+				Name:        "Service List",
+				Description: "List all known service names from logs",
+				MIMEType:    "application/json",
+			},
 			servicesListHandler(deps.LogStore),
 		)
 	}
@@ -83,12 +82,12 @@ func addResources(s *server.MCPServer, deps Deps) {
 	// 6. Connector status: opentrace://connectors/status
 	if deps.DSStore != nil {
 		s.AddResource(
-			mcp.NewResource(
-				"opentrace://connectors/status",
-				"Connector Status",
-				mcp.WithResourceDescription("Active connector status"),
-				mcp.WithMIMEType("application/json"),
-			),
+			&mcp.Resource{
+				URI:         "opentrace://connectors/status",
+				Name:        "Connector Status",
+				Description: "Active connector status",
+				MIMEType:    "application/json",
+			},
 			connectorsStatusHandler(deps.DSStore),
 		)
 	}
@@ -96,19 +95,19 @@ func addResources(s *server.MCPServer, deps Deps) {
 	// 7. Health check summary: opentrace://healthchecks/summary
 	if deps.HealthCheckStore != nil {
 		s.AddResource(
-			mcp.NewResource(
-				"opentrace://healthchecks/summary",
-				"Health Check Summary",
-				mcp.WithResourceDescription("Current health check status"),
-				mcp.WithMIMEType("application/json"),
-			),
+			&mcp.Resource{
+				URI:         "opentrace://healthchecks/summary",
+				Name:        "Health Check Summary",
+				Description: "Current health check status",
+				MIMEType:    "application/json",
+			},
 			healthchecksSummaryHandler(deps.HealthCheckStore),
 		)
 	}
 }
 
-func serviceStatusHandler(deps Deps) server.ResourceTemplateHandlerFunc {
-	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+func serviceStatusHandler(deps Deps) func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	return func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 		uri := request.Params.URI
 		// Extract service from URI: opentrace://services/{service}/status
 		service := ""
@@ -180,18 +179,16 @@ func serviceStatusHandler(deps Deps) server.ResourceTemplateHandlerFunc {
 		}
 
 		data, _ := json.Marshal(result)
-		return []mcp.ResourceContents{
-			mcp.TextResourceContents{
-				URI:      uri,
-				MIMEType: "application/json",
-				Text:     string(data),
+		return &mcp.ReadResourceResult{
+			Contents: []*mcp.ResourceContents{
+				{URI: uri, MIMEType: "application/json", Text: string(data)},
 			},
 		}, nil
 	}
 }
 
-func codeRiskSummaryHandler(ces store.CodeEntityStore) server.ResourceHandlerFunc {
-	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+func codeRiskSummaryHandler(ces store.CodeEntityStore) func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	return func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 		entities, err := ces.TopByRisk(ctx, "", 10)
 		if err != nil {
 			return nil, fmt.Errorf("querying top risks: %w", err)
@@ -203,18 +200,16 @@ func codeRiskSummaryHandler(ces store.CodeEntityStore) server.ResourceHandlerFun
 		}
 
 		data, _ := json.Marshal(result)
-		return []mcp.ResourceContents{
-			mcp.TextResourceContents{
-				URI:      "opentrace://code/risk-summary",
-				MIMEType: "application/json",
-				Text:     string(data),
+		return &mcp.ReadResourceResult{
+			Contents: []*mcp.ResourceContents{
+				{URI: "opentrace://code/risk-summary", MIMEType: "application/json", Text: string(data)},
 			},
 		}, nil
 	}
 }
 
-func activeInvestigationsHandler(iss store.InvestigationSessionStore) server.ResourceHandlerFunc {
-	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+func activeInvestigationsHandler(iss store.InvestigationSessionStore) func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	return func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 		sessions, err := iss.List(ctx, store.ListInvestigationSessionParams{
 			Status: store.InvestigationStatusOpen,
 			Limit:  20,
@@ -241,18 +236,16 @@ func activeInvestigationsHandler(iss store.InvestigationSessionStore) server.Res
 		}
 
 		data, _ := json.Marshal(result)
-		return []mcp.ResourceContents{
-			mcp.TextResourceContents{
-				URI:      "opentrace://investigations/active",
-				MIMEType: "application/json",
-				Text:     string(data),
+		return &mcp.ReadResourceResult{
+			Contents: []*mcp.ResourceContents{
+				{URI: "opentrace://investigations/active", MIMEType: "application/json", Text: string(data)},
 			},
 		}, nil
 	}
 }
 
-func configCurrentHandler(ss store.SettingsStore) server.ResourceHandlerFunc {
-	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+func configCurrentHandler(ss store.SettingsStore) func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	return func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 		result := map[string]any{}
 
 		retention, err := ss.GetRetention(ctx)
@@ -277,18 +270,16 @@ func configCurrentHandler(ss store.SettingsStore) server.ResourceHandlerFunc {
 		}
 
 		data, _ := json.Marshal(result)
-		return []mcp.ResourceContents{
-			mcp.TextResourceContents{
-				URI:      "opentrace://config/current",
-				MIMEType: "application/json",
-				Text:     string(data),
+		return &mcp.ReadResourceResult{
+			Contents: []*mcp.ResourceContents{
+				{URI: "opentrace://config/current", MIMEType: "application/json", Text: string(data)},
 			},
 		}, nil
 	}
 }
 
-func servicesListHandler(ls store.LogStore) server.ResourceHandlerFunc {
-	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+func servicesListHandler(ls store.LogStore) func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	return func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 		now := time.Now().UTC()
 		services, err := ls.DistinctValues(ctx, "service", store.LogCountParams{
 			Since: now.Add(-30 * 24 * time.Hour),
@@ -304,18 +295,16 @@ func servicesListHandler(ls store.LogStore) server.ResourceHandlerFunc {
 		}
 
 		data, _ := json.Marshal(result)
-		return []mcp.ResourceContents{
-			mcp.TextResourceContents{
-				URI:      "opentrace://services/list",
-				MIMEType: "application/json",
-				Text:     string(data),
+		return &mcp.ReadResourceResult{
+			Contents: []*mcp.ResourceContents{
+				{URI: "opentrace://services/list", MIMEType: "application/json", Text: string(data)},
 			},
 		}, nil
 	}
 }
 
-func connectorsStatusHandler(ds store.DataSourceStore) server.ResourceHandlerFunc {
-	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+func connectorsStatusHandler(ds store.DataSourceStore) func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	return func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 		sources, err := ds.List(ctx, store.ListDataSourceParams{})
 		if err != nil {
 			return nil, fmt.Errorf("listing connectors: %w", err)
@@ -341,18 +330,16 @@ func connectorsStatusHandler(ds store.DataSourceStore) server.ResourceHandlerFun
 		}
 
 		data, _ := json.Marshal(result)
-		return []mcp.ResourceContents{
-			mcp.TextResourceContents{
-				URI:      "opentrace://connectors/status",
-				MIMEType: "application/json",
-				Text:     string(data),
+		return &mcp.ReadResourceResult{
+			Contents: []*mcp.ResourceContents{
+				{URI: "opentrace://connectors/status", MIMEType: "application/json", Text: string(data)},
 			},
 		}, nil
 	}
 }
 
-func healthchecksSummaryHandler(hcs store.HealthCheckStore) server.ResourceHandlerFunc {
-	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+func healthchecksSummaryHandler(hcs store.HealthCheckStore) func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	return func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 		summaries, err := hcs.UptimeSummaries(ctx, time.Now().Add(-24*time.Hour))
 		if err != nil {
 			return nil, fmt.Errorf("listing health checks: %w", err)
@@ -377,11 +364,9 @@ func healthchecksSummaryHandler(hcs store.HealthCheckStore) server.ResourceHandl
 		}
 
 		data, _ := json.Marshal(result)
-		return []mcp.ResourceContents{
-			mcp.TextResourceContents{
-				URI:      "opentrace://healthchecks/summary",
-				MIMEType: "application/json",
-				Text:     string(data),
+		return &mcp.ReadResourceResult{
+			Contents: []*mcp.ResourceContents{
+				{URI: "opentrace://healthchecks/summary", MIMEType: "application/json", Text: string(data)},
 			},
 		}, nil
 	}

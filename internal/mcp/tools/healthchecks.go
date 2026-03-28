@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -17,39 +15,14 @@ type HealthchecksDeps struct {
 	HealthCheckStore store.HealthCheckStore
 }
 
-// HealthchecksTool returns the consolidated tool definition for health check management.
-func HealthchecksTool() mcp.Tool {
-	return mcp.NewTool("healthchecks",
-		mcp.WithDescription(`Health check management: list, create, delete, and view uptime.
-
-Actions:
-- list: List all configured health checks with current status
-- uptime: Uptime summary across all health checks with response times
-- create: Create a new HTTP health check
-- delete: Remove a health check and its results`),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: list, uptime, create, delete")),
-		// create params
-		mcp.WithString("name", mcp.Description("Health check name (required for create)")),
-		mcp.WithString("url", mcp.Description("URL to check (required for create)")),
-		mcp.WithString("method", mcp.Description("HTTP method (default: GET)")),
-		mcp.WithNumber("interval_secs", mcp.Description("Check interval in seconds (default: 60)")),
-		mcp.WithNumber("timeout_secs", mcp.Description("Timeout in seconds (default: 10)")),
-		mcp.WithNumber("expected_status", mcp.Description("Expected HTTP status code (default: 200)")),
-		// delete params
-		mcp.WithString("id", mcp.Description("Health check ID (required for delete)")),
-		// uptime params
-		mcp.WithNumber("hours", mcp.Description("Uptime window in hours (default: 24, max: 720)")),
-	)
-}
-
 // HealthchecksHandler returns a handler for the consolidated healthchecks tool.
-func HealthchecksHandler(d HealthchecksDeps) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func HealthchecksHandler(d HealthchecksDeps) ToolHandlerFunc {
+	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
 		if d.HealthCheckStore == nil {
-			return mcp.NewToolResultError("HealthCheckStore not configured"), nil
+			return NewToolResultError("HealthCheckStore not configured"), nil
 		}
 
-		args := request.GetArguments()
+		args := GetArguments(request)
 		action, _ := args["action"].(string)
 
 		switch action {
@@ -62,19 +35,19 @@ func HealthchecksHandler(d HealthchecksDeps) server.ToolHandlerFunc {
 		case "delete":
 			return handleHealthcheckDelete(ctx, d, args)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s (use list, uptime, create, delete)", action)), nil
+			return NewToolResultError(fmt.Sprintf("unknown action: %s (use list, uptime, create, delete)", action)), nil
 		}
 	}
 }
 
-func handleHealthcheckList(ctx context.Context, d HealthchecksDeps) (*mcp.CallToolResult, error) {
+func handleHealthcheckList(ctx context.Context, d HealthchecksDeps) (*CallToolResult, error) {
 	checks, err := d.HealthCheckStore.List(ctx, store.ListHealthCheckParams{})
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to list health checks: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to list health checks: %v", err)), nil
 	}
 
 	if len(checks) == 0 {
-		return mcp.NewToolResultText("No health checks configured. Use healthchecks with action=create to add one."), nil
+		return NewToolResultText("No health checks configured. Use healthchecks with action=create to add one."), nil
 	}
 
 	type checkSummary struct {
@@ -118,10 +91,10 @@ func handleHealthcheckList(ctx context.Context, d HealthchecksDeps) (*mcp.CallTo
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleHealthcheckUptime(ctx context.Context, d HealthchecksDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleHealthcheckUptime(ctx context.Context, d HealthchecksDeps, args map[string]any) (*CallToolResult, error) {
 	hours := 24.0
 	if v, ok := args["hours"].(float64); ok && v > 0 {
 		hours = v
@@ -134,11 +107,11 @@ func handleHealthcheckUptime(ctx context.Context, d HealthchecksDeps, args map[s
 
 	summaries, err := d.HealthCheckStore.UptimeSummaries(ctx, since)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to get uptime summaries: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to get uptime summaries: %v", err)), nil
 	}
 
 	if len(summaries) == 0 {
-		return mcp.NewToolResultText("No health checks configured. Use healthchecks with action=create to add one."), nil
+		return NewToolResultText("No health checks configured. Use healthchecks with action=create to add one."), nil
 	}
 
 	type extSummary struct {
@@ -176,17 +149,17 @@ func handleHealthcheckUptime(ctx context.Context, d HealthchecksDeps, args map[s
 	WithSuggestions(resp, suggestions...)
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleHealthcheckCreate(ctx context.Context, d HealthchecksDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleHealthcheckCreate(ctx context.Context, d HealthchecksDeps, args map[string]any) (*CallToolResult, error) {
 	name, _ := args["name"].(string)
 	if name == "" {
-		return mcp.NewToolResultError("name is required"), nil
+		return NewToolResultError("name is required"), nil
 	}
 	url, _ := args["url"].(string)
 	if url == "" {
-		return mcp.NewToolResultError("url is required"), nil
+		return NewToolResultError("url is required"), nil
 	}
 
 	params := store.CreateHealthCheckParams{
@@ -208,7 +181,7 @@ func handleHealthcheckCreate(ctx context.Context, d HealthchecksDeps, args map[s
 
 	hc, err := d.HealthCheckStore.Create(ctx, params)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to create health check: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to create health check: %v", err)), nil
 	}
 
 	resp := map[string]any{
@@ -224,17 +197,17 @@ func handleHealthcheckCreate(ctx context.Context, d HealthchecksDeps, args map[s
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleHealthcheckDelete(ctx context.Context, d HealthchecksDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleHealthcheckDelete(ctx context.Context, d HealthchecksDeps, args map[string]any) (*CallToolResult, error) {
 	id, _ := args["id"].(string)
 	if id == "" {
-		return mcp.NewToolResultError("id is required"), nil
+		return NewToolResultError("id is required"), nil
 	}
 
 	if err := d.HealthCheckStore.Delete(ctx, id); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to delete health check: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to delete health check: %v", err)), nil
 	}
 
 	resp := map[string]any{
@@ -244,5 +217,5 @@ func handleHealthcheckDelete(ctx context.Context, d HealthchecksDeps, args map[s
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }

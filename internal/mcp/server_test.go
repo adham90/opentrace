@@ -2,10 +2,12 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -18,20 +20,49 @@ func resultText(t *testing.T, r *mcp.CallToolResult) string {
 	if len(r.Content) != 1 {
 		t.Fatalf("expected 1 content block, got %d", len(r.Content))
 	}
-	tc, ok := mcp.AsTextContent(r.Content[0])
+	tc, ok := r.Content[0].(*mcp.TextContent)
 	if !ok {
-		t.Fatalf("expected TextContent, got %T", r.Content[0])
+		t.Fatalf("expected *TextContent, got %T", r.Content[0])
 	}
 	return tc.Text
 }
 
 // makeRequest creates a CallToolRequest with the given arguments.
-func makeRequest(args map[string]any) mcp.CallToolRequest {
-	return mcp.CallToolRequest{
-		Params: mcp.CallToolParams{
-			Arguments: args,
-		},
+func makeRequest(args map[string]any) *mcp.CallToolRequest {
+	return MakeCallToolRequest("test", args)
+}
+
+// schemaProps extracts the properties map from a tool's InputSchema.
+func schemaProps(t *testing.T, tool *mcp.Tool) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		t.Fatalf("failed to marshal InputSchema: %v", err)
 	}
+	var schema struct {
+		Properties map[string]any `json:"properties"`
+		Required   []string       `json:"required"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatalf("failed to unmarshal InputSchema: %v", err)
+	}
+	return schema.Properties
+}
+
+// schemaRequired extracts the required array from a tool's InputSchema.
+func schemaRequired(t *testing.T, tool *mcp.Tool) []string {
+	t.Helper()
+	raw, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		t.Fatalf("failed to marshal InputSchema: %v", err)
+	}
+	var schema struct {
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatalf("failed to unmarshal InputSchema: %v", err)
+	}
+	return schema.Required
 }
 
 // --- convertTool tests ---
@@ -52,13 +83,14 @@ func TestConvertTool_StringParam(t *testing.T) {
 		t.Errorf("description = %q, want %q", tool.Description, "Search through logs")
 	}
 
-	props := tool.InputSchema.Properties
+	props := schemaProps(t, tool)
 	if _, ok := props["query"]; !ok {
 		t.Fatal("expected 'query' property in schema")
 	}
 
-	if len(tool.InputSchema.Required) != 1 || tool.InputSchema.Required[0] != "query" {
-		t.Errorf("required = %v, want [query]", tool.InputSchema.Required)
+	required := schemaRequired(t, tool)
+	if len(required) != 1 || required[0] != "query" {
+		t.Errorf("required = %v, want [query]", required)
 	}
 }
 
@@ -71,13 +103,15 @@ func TestConvertTool_IntParam(t *testing.T) {
 		},
 	})
 
-	if _, ok := tool.InputSchema.Properties["limit"]; !ok {
+	props := schemaProps(t, tool)
+	if _, ok := props["limit"]; !ok {
 		t.Fatal("expected 'limit' property in schema")
 	}
 
 	// Not required — should not appear in Required list
-	if len(tool.InputSchema.Required) != 0 {
-		t.Errorf("required = %v, want empty", tool.InputSchema.Required)
+	required := schemaRequired(t, tool)
+	if len(required) != 0 {
+		t.Errorf("required = %v, want empty", required)
 	}
 }
 
@@ -90,12 +124,14 @@ func TestConvertTool_BoolParam(t *testing.T) {
 		},
 	})
 
-	if _, ok := tool.InputSchema.Properties["verbose"]; !ok {
+	props := schemaProps(t, tool)
+	if _, ok := props["verbose"]; !ok {
 		t.Fatal("expected 'verbose' property in schema")
 	}
 
-	if len(tool.InputSchema.Required) != 1 || tool.InputSchema.Required[0] != "verbose" {
-		t.Errorf("required = %v, want [verbose]", tool.InputSchema.Required)
+	required := schemaRequired(t, tool)
+	if len(required) != 1 || required[0] != "verbose" {
+		t.Errorf("required = %v, want [verbose]", required)
 	}
 }
 
@@ -110,23 +146,24 @@ func TestConvertTool_MultipleParams(t *testing.T) {
 		},
 	})
 
-	if len(tool.InputSchema.Properties) != 3 {
-		t.Fatalf("properties count = %d, want 3", len(tool.InputSchema.Properties))
+	props := schemaProps(t, tool)
+	if len(props) != 3 {
+		t.Fatalf("properties count = %d, want 3", len(props))
 	}
 
 	for _, name := range []string{"query", "limit", "exact"} {
-		if _, ok := tool.InputSchema.Properties[name]; !ok {
+		if _, ok := props[name]; !ok {
 			t.Errorf("missing property %q", name)
 		}
 	}
 
 	// query and exact are required; limit is not
 	requiredSet := make(map[string]bool)
-	for _, r := range tool.InputSchema.Required {
+	for _, r := range schemaRequired(t, tool) {
 		requiredSet[r] = true
 	}
 	if !requiredSet["query"] || !requiredSet["exact"] {
-		t.Errorf("required = %v, want query and exact", tool.InputSchema.Required)
+		t.Errorf("required = %v, want query and exact", schemaRequired(t, tool))
 	}
 	if requiredSet["limit"] {
 		t.Error("limit should not be required")
@@ -144,8 +181,9 @@ func TestConvertTool_NoParams(t *testing.T) {
 		t.Errorf("name = %q, want %q", tool.Name, "list_tables")
 	}
 
-	if len(tool.InputSchema.Properties) != 0 {
-		t.Errorf("properties count = %d, want 0", len(tool.InputSchema.Properties))
+	props := schemaProps(t, tool)
+	if len(props) != 0 {
+		t.Errorf("properties count = %d, want 0", len(props))
 	}
 }
 
@@ -216,11 +254,7 @@ func TestBridgeHandler_NilArgs(t *testing.T) {
 	handler := bridgeHandler(tool)
 
 	// Create request with nil arguments
-	req := mcp.CallToolRequest{
-		Params: mcp.CallToolParams{
-			Arguments: nil,
-		},
-	}
+	req := MakeCallToolRequest("check_args", nil)
 
 	result, err := handler(context.Background(), req)
 	if err != nil {
@@ -243,10 +277,10 @@ type mockDataSource struct {
 	tools    []connector.Tool
 }
 
-func (m *mockDataSource) Type() connector.ConnectorType                      { return m.connType }
-func (m *mockDataSource) TestConnection(ctx context.Context) error           { return nil }
-func (m *mockDataSource) Tools() []connector.Tool                               { return m.tools }
-func (m *mockDataSource) Close() error                                      { return nil }
+func (m *mockDataSource) Type() connector.ConnectorType            { return m.connType }
+func (m *mockDataSource) TestConnection(ctx context.Context) error { return nil }
+func (m *mockDataSource) Tools() []connector.Tool                  { return m.tools }
+func (m *mockDataSource) Close() error                             { return nil }
 
 func TestListConnectorsHandler_Empty(t *testing.T) {
 	registry := connector.NewRegistry()
@@ -316,42 +350,6 @@ func searchString(s, sub string) bool {
 
 // --- Mock stores for watcher/alert tests ---
 
-
-
-
-
-
-
-
-
-
-
-
-// mockWatcherRunStore implements store.WatcherRunStore for MCP tests.
-
-
-
-
-// --- listWatchersHandler tests ---
-
-
-
-
-
-// --- createWatcherHandler tests ---
-
-
-
-
-
-
-
-// --- previewWatcherHandler tests ---
-
-
-
-
-
 // previewMockQE implements DataSource + QueryExecutor for preview tests.
 type previewMockQE struct {
 	mockDataSource
@@ -361,11 +359,6 @@ type previewMockQE struct {
 func (m *previewMockQE) ExecuteReadQuery(ctx context.Context, query string) (*connector.QueryResult, error) {
 	return m.result, nil
 }
-
-// --- listAlertsHandler tests ---
-
-
-
 
 // --- Mock UserStore for auth tests ---
 
@@ -443,7 +436,6 @@ func testAccessControl(deps Deps) (hasAccess, isAdmin bool) {
 // --- Access-control logic tests ---
 
 func TestAccessControl_NoUserStore(t *testing.T) {
-	// No UserStore, no token → backward compat → full access.
 	deps := Deps{
 		Registry: connector.NewRegistry(),
 	}
@@ -529,8 +521,6 @@ func TestAccessControl_InvalidToken(t *testing.T) {
 }
 
 func TestAccessControl_EmptyToken(t *testing.T) {
-	// UserStore is set but token is empty → condition (UserStore != nil && MCPToken != "")
-	// is false → backward compat → full access.
 	us := &mockUserStore{
 		users: map[string]*store.User{},
 	}
@@ -548,13 +538,3 @@ func TestAccessControl_EmptyToken(t *testing.T) {
 		t.Error("expected isAdmin=true when MCPToken is empty (backward compat)")
 	}
 }
-
-// --- Tool registration tests ---
-
-
-
-// --- getDigestHandler tests ---
-
-
-
-

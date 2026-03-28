@@ -5,16 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 
-	mcplib "github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 // setSessionSummaryHandler returns the handler for the set_session_summary tool.
-func setSessionSummaryHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-		args := request.GetArguments()
+func setSessionSummaryHandler() ToolHandlerFunc {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := GetArguments(request)
 
 		summary, _ := args["summary"].(string)
 		rootCause, _ := args["root_cause"].(string)
@@ -23,11 +22,11 @@ func setSessionSummaryHandler() server.ToolHandlerFunc {
 		primaryService, _ := args["primary_service"].(string)
 
 		if summary == "" {
-			return mcplib.NewToolResultError("summary is required"), nil
+			return NewToolResultError("summary is required"), nil
 		}
 
 		if sessionTracker == nil {
-			return mcplib.NewToolResultError("session tracking is not enabled"), nil
+			return NewToolResultError("session tracking is not enabled"), nil
 		}
 
 		// Map outcome string to status.
@@ -76,7 +75,7 @@ func setSessionSummaryHandler() server.ToolHandlerFunc {
 		}
 
 		data, _ := json.Marshal(resp)
-		return mcplib.NewToolResultText(string(data)), nil
+		return NewToolResultText(string(data)), nil
 	}
 }
 

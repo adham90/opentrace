@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -15,7 +14,7 @@ import (
 // action: performance — request performance analysis (from requestPerformanceHandler)
 // ---------------------------------------------------------------------------
 
-func logsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*mcp.CallToolResult, error) {
+func logsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	// Parse time range (default: 24h).
 	timeRange := "24h"
 	if v, ok := args["time_range"].(string); ok && v != "" {
@@ -23,7 +22,7 @@ func logsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*
 	}
 	duration, err := parseTimeRange(timeRange)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid time_range: %v. Use formats like '1h', '24h', '7d'.", err)), nil
+		return NewToolResultError(fmt.Sprintf("invalid time_range: %v. Use formats like '1h', '24h', '7d'.", err)), nil
 	}
 	now := time.Now().UTC()
 	start := now.Add(-duration)
@@ -55,7 +54,7 @@ func logsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*
 		case "duration_ms", "sql_count", "db_time_ms", "duplicate_queries":
 			sortBy = v
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("invalid sort_by: %q. Use duration_ms, sql_count, db_time_ms, or duplicate_queries.", v)), nil
+			return NewToolResultError(fmt.Sprintf("invalid sort_by: %q. Use duration_ms, sql_count, db_time_ms, or duplicate_queries.", v)), nil
 		}
 	}
 	params.SortBy = sortBy
@@ -71,7 +70,7 @@ func logsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*
 
 	results, err := deps.LogStore.SearchRequestSummaries(ctx, params)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to search request summaries: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to search request summaries: %v", err)), nil
 	}
 
 	if len(results) == 0 {
@@ -80,7 +79,7 @@ func logsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*
 			hint += " No N+1 queries detected in this time range — that's good!"
 		}
 		hint += " Try extending the time_range or broadening your filters."
-		return mcp.NewToolResultText(hint), nil
+		return NewToolResultText(hint), nil
 	}
 
 	// Build response entries.
@@ -182,7 +181,7 @@ func logsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }

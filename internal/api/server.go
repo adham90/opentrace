@@ -18,7 +18,7 @@ import (
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/ingest"
 	"github.com/adham90/opentrace/internal/mcp/notifications"
-	mcpgoserver "github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
 	"github.com/adham90/opentrace/internal/version"
@@ -68,9 +68,9 @@ type Server struct {
 	eventStore               store.EventStore
 	testCorrelationStore     store.TestCorrelationStore
 	reliabilityProvider      ReliabilityProvider
-	sseServer         *mcpgoserver.SSEServer
-	streamableServer  *mcpgoserver.StreamableHTTPServer
-	mcpServer         *mcpgoserver.MCPServer // stored for notification dispatch
+	sseServer         *mcp.SSEHandler
+	streamableServer  *mcp.StreamableHTTPHandler
+	mcpServer         *mcp.Server // stored for notification dispatch
 	NotifyError       func(n notifications.ErrorEvent)         // called from ingest pipeline
 	NotifyDeploy      func(ctx context.Context, d store.Deploy) // called from deploy webhook
 	NotifyHealthCheck func(e notifications.HealthCheckEvent)    // called from health check scheduler
@@ -234,14 +234,13 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		router.Route("/mcp-sse", func(r chi.Router) {
 			r.Use(apiLimiter.Middleware)
 			r.Use(srv.MCPTokenAuth)
-			r.Handle("/sse", sseServer.SSEHandler())
-			r.Handle("/message", sseServer.MessageHandler())
+			r.Handle("/*", sseServer)
 		})
 	}
 
 	// Wire up proactive notifications (uses the MCP server for dispatch)
 	if srv.mcpServer != nil {
-		dispatcher := notifications.NewDispatcher(srv.mcpServer)
+		dispatcher := notifications.NewDispatcher(notifications.NewMCPServerSender(srv.mcpServer))
 		errorWatcher := notifications.NewErrorWatcher(dispatcher)
 		deployWatcher := notifications.NewDeployWatcher(dispatcher, srv.errorGroupStore, srv.logStore)
 		healthWatcher := notifications.NewHealthWatcher(dispatcher)
@@ -348,9 +347,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		s.auditWg.Wait()
 	}
 
-	if s.sseServer != nil {
-		return s.sseServer.Shutdown(ctx)
-	}
+	// The new go-sdk SSEHandler has no Shutdown method; connections close when
+	// the HTTP server shuts down.
 	return nil
 }
 

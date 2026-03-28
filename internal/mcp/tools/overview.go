@@ -8,15 +8,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 // SessionSummaryCallback is a callback for handling session summary updates.
 // Defined here so overview (read-only) can call it without importing admin.
-type SessionSummaryCallback func(ctx context.Context, args map[string]any) (*mcp.CallToolResult, error)
+type SessionSummaryCallback func(ctx context.Context, args map[string]any) (*CallToolResult, error)
 
 // OverviewDeps holds the stores needed by the overview tool.
 type OverviewDeps struct {
@@ -31,45 +29,10 @@ type OverviewDeps struct {
 	SessionSummary   SessionSummaryCallback
 }
 
-// OverviewTool returns the consolidated tool definition for system overview,
-// triage, diagnose, and incident timeline.
-func OverviewTool() mcp.Tool {
-	return mcp.NewTool("overview",
-		mcp.WithDescription(`System overview, triage, diagnosis, incident timeline, and agent memory.
-
-Actions:
-- status: High-level system health dashboard (error groups, watch alerts, healthchecks, connectors, servers)
-- triage: Prioritized list of items needing attention, sorted by severity then recency
-- diagnose: All-in-one investigation with error summary, log volume, request performance, watch alerts, and healthchecks
-- timeline: Chronological incident timeline from multiple data sources
-- investigate: Comprehensive single-call service investigation (errors, logs, alerts, volume)
-- changes: Correlation/changes timeline showing new errors and volume shifts
-- settings: Read current server settings (retention, query limits, API key)
-- notes: Get or set agent notes (persistent memory for entities across sessions)
-- delete_note: Delete a saved note
-- session_summary: Save investigation summary for future reference`),
-		mcp.WithString("action", mcp.Required(), mcp.Description("Action: status, triage, diagnose, timeline, investigate, changes, settings, notes, delete_note, session_summary")),
-		mcp.WithString("service", mcp.Description("Service name to scope investigation")),
-		mcp.WithString("timeframe", mcp.Description("Time window for diagnose (default: 1h). Examples: 30m, 2h, 24h, 7d")),
-		mcp.WithString("start", mcp.Description("Start time for timeline (ISO 8601 / RFC3339)")),
-		mcp.WithString("end", mcp.Description("End time for timeline (ISO 8601 / RFC3339)")),
-		// notes params
-		mcp.WithString("entity_type", mcp.Description("(notes) Entity type: query, endpoint, service, healthcheck, error")),
-		mcp.WithString("entity_id", mcp.Description("(notes) Entity identifier")),
-		mcp.WithString("note", mcp.Description("(notes) Note text to save. Omit to read existing notes")),
-		// session_summary params
-		mcp.WithString("summary", mcp.Description("(session_summary) What was investigated and found")),
-		mcp.WithString("root_cause", mcp.Description("(session_summary) Root cause if identified")),
-		mcp.WithString("fix_applied", mcp.Description("(session_summary) What fix was applied, if any")),
-		mcp.WithString("outcome", mcp.Description("(session_summary) Outcome: resolved, unresolved, or partial")),
-		mcp.WithString("primary_service", mcp.Description("(session_summary) Primary service investigated")),
-	)
-}
-
 // OverviewHandler returns a handler for the consolidated overview tool.
-func OverviewHandler(d OverviewDeps) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.GetArguments()
+func OverviewHandler(d OverviewDeps) ToolHandlerFunc {
+	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
+		args := GetArguments(request)
 		action, _ := args["action"].(string)
 
 		switch action {
@@ -93,18 +56,18 @@ func OverviewHandler(d OverviewDeps) server.ToolHandlerFunc {
 			return handleOverviewDeleteNote(ctx, d, args)
 		case "session_summary":
 			if d.SessionSummary == nil {
-				return mcp.NewToolResultError("session tracking is not enabled"), nil
+				return NewToolResultError("session tracking is not enabled"), nil
 			}
 			return d.SessionSummary(ctx, args)
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s (use status, triage, diagnose, timeline, investigate, changes, settings, notes, delete_note, session_summary)", action)), nil
+			return NewToolResultError(fmt.Sprintf("unknown action: %s (use status, triage, diagnose, timeline, investigate, changes, settings, notes, delete_note, session_summary)", action)), nil
 		}
 	}
 }
 
 // --- status action ---
 
-func handleStatus(ctx context.Context, d OverviewDeps) (*mcp.CallToolResult, error) {
+func handleStatus(ctx context.Context, d OverviewDeps) (*CallToolResult, error) {
 	overview := map[string]any{}
 
 	// Logs (last hour)
@@ -229,9 +192,9 @@ func handleStatus(ctx context.Context, d OverviewDeps) (*mcp.CallToolResult, err
 
 	data, err := json.Marshal(overview)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal overview: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal overview: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // --- triage action ---
@@ -245,7 +208,7 @@ type triageEntry struct {
 	ID       string `json:"id"`
 }
 
-func handleTriage(ctx context.Context, d OverviewDeps) (*mcp.CallToolResult, error) {
+func handleTriage(ctx context.Context, d OverviewDeps) (*CallToolResult, error) {
 	var items []triageEntry
 
 	// Unresolved error groups (highest priority)
@@ -376,7 +339,7 @@ func handleTriage(ctx context.Context, d OverviewDeps) (*mcp.CallToolResult, err
 	}
 
 	if len(items) == 0 {
-		return mcp.NewToolResultText("Nothing needs attention. System looks healthy."), nil
+		return NewToolResultText("Nothing needs attention. System looks healthy."), nil
 	}
 
 	resp := map[string]any{
@@ -410,9 +373,9 @@ func handleTriage(ctx context.Context, d OverviewDeps) (*mcp.CallToolResult, err
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal triage: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal triage: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 func sevOrder(sev string) int {
@@ -428,7 +391,7 @@ func sevOrder(sev string) int {
 
 // --- diagnose action ---
 
-func handleDiagnose(ctx context.Context, d OverviewDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleDiagnose(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 
 	// Parse timeframe (default 1h)
@@ -438,7 +401,7 @@ func handleDiagnose(ctx context.Context, d OverviewDeps, args map[string]any) (*
 	}
 	duration, err := ParseTimeframe(timeframe)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid timeframe %q: %v", timeframe, err)), nil
+		return NewToolResultError(fmt.Sprintf("invalid timeframe %q: %v", timeframe, err)), nil
 	}
 
 	now := time.Now().UTC()
@@ -520,7 +483,7 @@ func handleDiagnose(ctx context.Context, d OverviewDeps, args map[string]any) (*
 	resp["suggested_tools"] = buildDiagnoseSuggestions(resp, service)
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 func collectErrors(ctx context.Context, d OverviewDeps, service string, since time.Time) map[string]any {
@@ -799,27 +762,27 @@ type timelineEvent struct {
 	ID       string `json:"id,omitempty"`
 }
 
-func handleTimeline(ctx context.Context, d OverviewDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleTimeline(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
 	startStr, _ := args["start"].(string)
 	if startStr == "" {
-		return mcp.NewToolResultError("start is required (ISO 8601 format)"), nil
+		return NewToolResultError("start is required (ISO 8601 format)"), nil
 	}
 	endStr, _ := args["end"].(string)
 	if endStr == "" {
-		return mcp.NewToolResultError("end is required (ISO 8601 format)"), nil
+		return NewToolResultError("end is required (ISO 8601 format)"), nil
 	}
 
 	start, err := time.Parse(time.RFC3339, startStr)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid start time: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("invalid start time: %v", err)), nil
 	}
 	end, err := time.Parse(time.RFC3339, endStr)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid end time: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("invalid end time: %v", err)), nil
 	}
 
 	if end.Before(start) {
-		return mcp.NewToolResultError("end must be after start"), nil
+		return NewToolResultError("end must be after start"), nil
 	}
 
 	serviceFilter, _ := args["service"].(string)
@@ -1059,10 +1022,10 @@ func handleTimeline(ctx context.Context, d OverviewDeps, args map[string]any) (*
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal timeline: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal timeline: %v", err)), nil
 	}
 
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // ParseTimeframe converts strings like "1h", "30m", "24h", "7d" to a duration.
@@ -1104,10 +1067,10 @@ func minInt(a, b int) int {
 
 // --- investigate action ---
 
-func handleInvestigate(ctx context.Context, d OverviewDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleInvestigate(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
 	service, _ := args["service"].(string)
 	if service == "" {
-		return mcp.NewToolResultError("service is required for the investigate action"), nil
+		return NewToolResultError("service is required for the investigate action"), nil
 	}
 
 	since := GetSinceParam(args, 1*time.Hour)
@@ -1278,14 +1241,14 @@ func handleInvestigate(ctx context.Context, d OverviewDeps, args map[string]any)
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal investigate: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal investigate: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // --- changes action ---
 
-func handleChanges(ctx context.Context, d OverviewDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleChanges(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
 	since := GetSinceParam(args, 2*time.Hour)
 	now := time.Now().UTC()
 	windowDuration := now.Sub(since)
@@ -1408,16 +1371,16 @@ func handleChanges(ctx context.Context, d OverviewDeps, args map[string]any) (*m
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal changes: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal changes: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // --- notes action (agent memory) ---
 
-func handleOverviewNotes(ctx context.Context, d OverviewDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleOverviewNotes(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
 	if d.AgentNoteStore == nil {
-		return mcp.NewToolResultError("AgentNoteStore not configured"), nil
+		return NewToolResultError("AgentNoteStore not configured"), nil
 	}
 
 	entityType, _ := args["entity_type"].(string)
@@ -1427,15 +1390,15 @@ func handleOverviewNotes(ctx context.Context, d OverviewDeps, args map[string]an
 	// If note text is provided, this is an upsert
 	if noteText != "" {
 		if entityType == "" {
-			return mcp.NewToolResultError("entity_type is required (query, endpoint, service, healthcheck, error)"), nil
+			return NewToolResultError("entity_type is required (query, endpoint, service, healthcheck, error)"), nil
 		}
 		if entityID == "" {
-			return mcp.NewToolResultError("entity_id is required"), nil
+			return NewToolResultError("entity_id is required"), nil
 		}
 
 		result, err := d.AgentNoteStore.Upsert(ctx, entityType, entityID, noteText)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to save note: %v", err)), nil
+			return NewToolResultError(fmt.Sprintf("failed to save note: %v", err)), nil
 		}
 
 		resp := map[string]any{
@@ -1446,27 +1409,27 @@ func handleOverviewNotes(ctx context.Context, d OverviewDeps, args map[string]an
 			"message":     fmt.Sprintf("Note saved for %s '%s'. This will be included in future tool responses.", entityType, entityID),
 		}
 		data, _ := json.Marshal(resp)
-		return mcp.NewToolResultText(string(data)), nil
+		return NewToolResultText(string(data)), nil
 	}
 
 	// If both type and ID given, get a specific note
 	if entityType != "" && entityID != "" {
 		note, err := d.AgentNoteStore.Get(ctx, entityType, entityID)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("note not found: %v", err)), nil
+			return NewToolResultError(fmt.Sprintf("note not found: %v", err)), nil
 		}
 		data, _ := json.Marshal(note)
-		return mcp.NewToolResultText(string(data)), nil
+		return NewToolResultText(string(data)), nil
 	}
 
 	// Otherwise, list (optionally filtered by entity_type)
 	notes, err := d.AgentNoteStore.List(ctx, entityType)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to list notes: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to list notes: %v", err)), nil
 	}
 
 	if len(notes) == 0 {
-		return mcp.NewToolResultText("No agent notes found. Use overview with action=notes and a note parameter to save context for future sessions."), nil
+		return NewToolResultText("No agent notes found. Use overview with action=notes and a note parameter to save context for future sessions."), nil
 	}
 
 	resp := map[string]any{
@@ -1474,25 +1437,25 @@ func handleOverviewNotes(ctx context.Context, d OverviewDeps, args map[string]an
 		"notes": notes,
 	}
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func handleOverviewDeleteNote(ctx context.Context, d OverviewDeps, args map[string]any) (*mcp.CallToolResult, error) {
+func handleOverviewDeleteNote(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
 	if d.AgentNoteStore == nil {
-		return mcp.NewToolResultError("AgentNoteStore not configured"), nil
+		return NewToolResultError("AgentNoteStore not configured"), nil
 	}
 
 	entityType, _ := args["entity_type"].(string)
 	if entityType == "" {
-		return mcp.NewToolResultError("entity_type is required"), nil
+		return NewToolResultError("entity_type is required"), nil
 	}
 	entityID, _ := args["entity_id"].(string)
 	if entityID == "" {
-		return mcp.NewToolResultError("entity_id is required"), nil
+		return NewToolResultError("entity_id is required"), nil
 	}
 
 	if err := d.AgentNoteStore.Delete(ctx, entityType, entityID); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to delete note: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to delete note: %v", err)), nil
 	}
 
 	resp := map[string]any{
@@ -1500,14 +1463,14 @@ func handleOverviewDeleteNote(ctx context.Context, d OverviewDeps, args map[stri
 		"message": fmt.Sprintf("Note for %s '%s' deleted.", entityType, entityID),
 	}
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
 // --- settings action (read-only) ---
 
-func handleOverviewSettings(ctx context.Context, d OverviewDeps) (*mcp.CallToolResult, error) {
+func handleOverviewSettings(ctx context.Context, d OverviewDeps) (*CallToolResult, error) {
 	if d.SettingsStore == nil {
-		return mcp.NewToolResultError("SettingsStore not configured"), nil
+		return NewToolResultError("SettingsStore not configured"), nil
 	}
 
 	resp := map[string]any{}
@@ -1530,5 +1493,5 @@ func handleOverviewSettings(ctx context.Context, d OverviewDeps) (*mcp.CallToolR
 	}
 
 	data, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }

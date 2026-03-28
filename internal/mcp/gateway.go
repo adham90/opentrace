@@ -7,8 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	mcplib "github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // quiet and detail params are documented in the gateway tool description.
@@ -19,9 +18,9 @@ import (
 // window usage for coding agents: instead of 14+ tool schemas, the agent
 // sees just 1.
 type Gateway struct {
-	handlers  map[string]server.ToolHandlerFunc
+	handlers  map[string]ToolHandlerFunc
 	entries   []GatewayEntry
-	mcpServer *server.MCPServer // set after registration, for elicitation
+	mcpServer *mcp.Server // set after registration, for elicitation
 }
 
 // GatewayEntry describes a tool registered in the gateway (for discover).
@@ -40,50 +39,49 @@ type GatewayEntry struct {
 // NewGateway creates a new Gateway.
 func NewGateway() *Gateway {
 	return &Gateway{
-		handlers: make(map[string]server.ToolHandlerFunc),
+		handlers: make(map[string]ToolHandlerFunc),
 	}
 }
 
 // Register adds an internal tool handler to the gateway.
-func (g *Gateway) Register(name string, handler server.ToolHandlerFunc, entry GatewayEntry) {
+func (g *Gateway) Register(name string, handler ToolHandlerFunc, entry GatewayEntry) {
 	g.handlers[name] = handler
 	entry.Name = name
 	g.entries = append(g.entries, entry)
 }
 
 // Tool returns the single MCP tool definition for the gateway.
-// Item 1: Tool annotations (readOnlyHint, openWorldHint).
-// Item 2: Trimmed description — no inline tool list.
-func (g *Gateway) Tool() mcplib.Tool {
-	return mcplib.NewTool("opentrace",
-		mcplib.WithDescription(
-			`OpenTrace monitoring gateway. Use tool="discover" to list all tools. `+
-				`Use tool="describe" action="<name>" for param docs. `+
-				`Execute: tool=<name> action=<action> params={...}. `+
-				`All tools accept "since" for time range (e.g. "1h", "24h", "7d"). `+
-				`Add quiet=true to omit suggestions. Add detail="brief" for compact output.`),
-		mcplib.WithString("tool", mcplib.Required(),
-			mcplib.Description("Tool name, 'discover', or 'describe'")),
-		mcplib.WithString("action",
-			mcplib.Description("Action to perform (or tool name for describe)")),
-		mcplib.WithObject("params",
-			mcplib.Description("Action-specific parameters (all accept 'since' for time range)")),
-		mcplib.WithBoolean("quiet",
-			mcplib.Description("Omit suggested_tools and investigation_context from response")),
-		mcplib.WithString("detail",
-			mcplib.Description("Response detail: 'brief' (compact, truncated arrays) or 'full' (default)")),
-		// Item 1: Annotations — conservative defaults for the gateway.
-		mcplib.WithReadOnlyHintAnnotation(false),
-		mcplib.WithDestructiveHintAnnotation(false),
-		mcplib.WithIdempotentHintAnnotation(false),
-		mcplib.WithOpenWorldHintAnnotation(true),
-	)
+func (g *Gateway) Tool() *mcp.Tool {
+	readOnly := false
+	destructive := false
+	openWorld := true
+	return &mcp.Tool{
+		Name: "opentrace",
+		Description: `OpenTrace monitoring gateway. Use tool="discover" to list all tools. ` +
+			`Use tool="describe" action="<name>" for param docs. ` +
+			`Execute: tool=<name> action=<action> params={...}. ` +
+			`All tools accept "since" for time range (e.g. "1h", "24h", "7d"). ` +
+			`Add quiet=true to omit suggestions. Add detail="brief" for compact output.`,
+		InputSchema: ToolSchema(map[string]SchemaProperty{
+			"tool":   {Type: "string", Description: "Tool name, 'discover', or 'describe'"},
+			"action": {Type: "string", Description: "Action to perform (or tool name for describe)"},
+			"params": {Type: "object", Description: "Action-specific parameters (all accept 'since' for time range)"},
+			"quiet":  {Type: "boolean", Description: "Omit suggested_tools and investigation_context from response"},
+			"detail": {Type: "string", Description: "Response detail: 'brief' (compact, truncated arrays) or 'full' (default)"},
+		}, []string{"tool"}),
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    readOnly,
+			DestructiveHint: &destructive,
+			IdempotentHint:  false,
+			OpenWorldHint:   &openWorld,
+		},
+	}
 }
 
 // Handler returns the MCP handler for the gateway tool.
-func (g *Gateway) Handler() server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-		args := request.GetArguments()
+func (g *Gateway) Handler() ToolHandlerFunc {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := GetArguments(request)
 		toolName, _ := args["tool"].(string)
 
 		switch toolName {
@@ -100,7 +98,7 @@ func (g *Gateway) Handler() server.ToolHandlerFunc {
 				valid = append(valid, e.Name)
 			}
 			sort.Strings(valid)
-			return mcplib.NewToolResultError(fmt.Sprintf(
+			return NewToolResultError(fmt.Sprintf(
 				"unknown tool %q. Available: %s. Use tool=\"discover\" for details.",
 				toolName, strings.Join(valid, ", "))), nil
 		}
@@ -115,9 +113,7 @@ func (g *Gateway) Handler() server.ToolHandlerFunc {
 			params["action"] = action
 		}
 
-		innerReq := mcplib.CallToolRequest{}
-		innerReq.Params.Name = toolName
-		innerReq.Params.Arguments = params
+		innerReq := MakeCallToolRequest(toolName, params)
 
 		result, err := handler(ctx, innerReq)
 		if err != nil {
@@ -144,14 +140,14 @@ func (g *Gateway) Handler() server.ToolHandlerFunc {
 }
 
 // postProcess applies quiet mode and detail level to a tool result.
-func (g *Gateway) postProcess(result *mcplib.CallToolResult, quiet bool, detail string) *mcplib.CallToolResult {
+func (g *Gateway) postProcess(result *mcp.CallToolResult, quiet bool, detail string) *mcp.CallToolResult {
 	if result == nil || result.IsError {
 		return result
 	}
 
 	// Parse the JSON text content.
 	for i, content := range result.Content {
-		tc, ok := content.(mcplib.TextContent)
+		tc, ok := content.(*mcp.TextContent)
 		if !ok {
 			continue
 		}
@@ -183,6 +179,7 @@ func (g *Gateway) postProcess(result *mcplib.CallToolResult, quiet bool, detail 
 		if modified {
 			newJSON, err := json.Marshal(data)
 			if err == nil {
+				// TextContent is a pointer in go-sdk, so mutate in place.
 				tc.Text = string(newJSON)
 				result.Content[i] = tc
 			}
@@ -210,7 +207,7 @@ func truncateForBrief(data map[string]any) bool {
 }
 
 // handleDiscover returns a compact catalog of available tools.
-func (g *Gateway) handleDiscover(args map[string]any) (*mcplib.CallToolResult, error) {
+func (g *Gateway) handleDiscover(args map[string]any) (*mcp.CallToolResult, error) {
 	categoryFilter, _ := args["action"].(string)
 
 	var filtered []GatewayEntry
@@ -258,49 +255,48 @@ func (g *Gateway) handleDiscover(args map[string]any) (*mcplib.CallToolResult, e
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return mcplib.NewToolResultError(fmt.Sprintf("failed to marshal catalog: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to marshal catalog: %v", err)), nil
 	}
-	return mcplib.NewToolResultText(string(data)), nil
+	return NewToolResultText(string(data)), nil
 }
 
-// SetServer stores the MCPServer reference for elicitation support (Item 14).
+// SetServer stores the Server reference for elicitation support (Item 14).
 // Called after the gateway tool is registered on the server.
-func (g *Gateway) SetServer(s *server.MCPServer) {
+func (g *Gateway) SetServer(s *mcp.Server) {
 	g.mcpServer = s
 }
 
 // Elicit requests structured user input via the MCP Elicitation primitive.
-// Returns nil, nil if elicitation is not supported by the client.
+// Returns nil, nil if elicitation is not supported by the client or no sessions exist.
 func (g *Gateway) Elicit(ctx context.Context, message string, schema any) (map[string]any, error) {
 	if g.mcpServer == nil {
 		return nil, nil
 	}
 
-	result, err := g.mcpServer.RequestElicitation(ctx, mcplib.ElicitationRequest{
-		Params: mcplib.ElicitationParams{
+	// Elicitation is per-session in the new SDK. Attempt elicitation on the first active session.
+	for ss := range g.mcpServer.Sessions() {
+		result, err := ss.Elicit(ctx, &mcp.ElicitParams{
 			Message:         message,
 			RequestedSchema: schema,
-		},
-	})
-	if err != nil {
-		return nil, nil // elicitation not supported — fall back to error
-	}
-	if result == nil || result.Action != "accept" {
-		return nil, nil
+		})
+		if err != nil {
+			return nil, nil // elicitation not supported — fall back to error
+		}
+		if result == nil || result.Action != "accept" {
+			return nil, nil
+		}
+		return result.Content, nil
 	}
 
-	if content, ok := result.Content.(map[string]any); ok {
-		return content, nil
-	}
 	return nil, nil
 }
 
 // handleDescribe returns full parameter documentation for a specific tool.
 // Item 3: Schema-on-demand — avoids embedding all schemas in the gateway description.
-func (g *Gateway) handleDescribe(args map[string]any) (*mcplib.CallToolResult, error) {
+func (g *Gateway) handleDescribe(args map[string]any) (*mcp.CallToolResult, error) {
 	targetTool, _ := args["action"].(string)
 	if targetTool == "" {
-		return mcplib.NewToolResultError("specify the tool name in the action parameter: tool=\"describe\" action=\"logs\""), nil
+		return NewToolResultError("specify the tool name in the action parameter: tool=\"describe\" action=\"logs\""), nil
 	}
 
 	for _, e := range g.entries {
@@ -321,9 +317,9 @@ func (g *Gateway) handleDescribe(args map[string]any) (*mcplib.CallToolResult, e
 				resp["params"] = e.Params
 			}
 			data, _ := json.Marshal(resp)
-			return mcplib.NewToolResultText(string(data)), nil
+			return NewToolResultText(string(data)), nil
 		}
 	}
 
-	return mcplib.NewToolResultError(fmt.Sprintf("unknown tool %q. Use tool=\"discover\" to see available tools.", targetTool)), nil
+	return NewToolResultError(fmt.Sprintf("unknown tool %q. Use tool=\"discover\" to see available tools.", targetTool)), nil
 }

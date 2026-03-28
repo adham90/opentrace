@@ -9,8 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	mcplib "github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -199,11 +198,63 @@ func (st *SessionTracker) SnapshotLastSuggestions() []ToolSuggestion {
 	return out
 }
 
-// RegisterHooks wires the session tracker into the mcp-go hooks system.
-func (st *SessionTracker) RegisterHooks(hooks *server.Hooks) {
-	hooks.AddOnRegisterSession(st.onSessionRegistered)
-	hooks.AddAfterInitialize(st.onInitialize)
-	hooks.AddOnUnregisterSession(st.onDisconnect)
+// OnInitialize is called after the MCP Initialize handshake completes.
+// It creates an investigation session and starts a goroutine to watch for disconnect.
+func (st *SessionTracker) OnInitialize(req *mcp.InitializedRequest) {
+	if st.store == nil {
+		return
+	}
+
+	// Capture connection ID from the session
+	st.handleSessionRegistered(req.Session)
+
+	params := store.CreateInvestigationSessionParams{
+		Transport:    st.transport,
+		ConnectionID: st.connectionID,
+	}
+
+	// Extract client info from the session's initialize params
+	initParams := req.Session.InitializeParams()
+	if initParams != nil && initParams.ClientInfo != nil {
+		params.ClientName = initParams.ClientInfo.Name
+		params.ClientVersion = initParams.ClientInfo.Version
+	}
+
+	// Extract user identity.
+	if st.user != nil {
+		params.UserID = st.user.ID
+		params.UserEmail = st.user.Email
+		params.UserRole = string(st.user.Role)
+	}
+
+	createCtx, cancel := context.WithTimeout(st.ctx, 10*time.Second)
+	defer cancel()
+
+	sess, err := st.store.Create(createCtx, params)
+	if err != nil {
+		slog.Error("failed to create investigation session",
+			"error", err,
+			"user_id", params.UserID,
+		)
+		return
+	}
+
+	st.mu.Lock()
+	st.session = sess
+	st.mu.Unlock()
+
+	slog.Info("investigation session created",
+		"session_id", sess.ID,
+		"user_id", sess.UserID,
+		"client", sess.ClientName,
+		"transport", sess.Transport,
+	)
+
+	// Start disconnect watcher
+	go func() {
+		req.Session.Wait()
+		st.CloseSession()
+	}()
 }
 
 // CurrentSession returns the current investigation session, or nil if none.
@@ -433,68 +484,11 @@ func (st *SessionTracker) UpdateSession(params store.UpdateInvestigationSessionP
 	}
 }
 
-// onSessionRegistered captures the connection ID when the MCP session is first registered.
-func (st *SessionTracker) onSessionRegistered(_ context.Context, clientSession server.ClientSession) {
+// handleSessionRegistered captures the connection ID from the MCP session.
+func (st *SessionTracker) handleSessionRegistered(session *mcp.ServerSession) {
 	st.mu.Lock()
-	st.connectionID = clientSession.SessionID()
+	st.connectionID = session.ID()
 	st.mu.Unlock()
-}
-
-// onInitialize is called after the MCP Initialize handshake completes.
-func (st *SessionTracker) onInitialize(_ context.Context, _ any, req *mcplib.InitializeRequest, _ *mcplib.InitializeResult) {
-	if st.store == nil {
-		return
-	}
-
-	st.mu.RLock()
-	connID := st.connectionID
-	st.mu.RUnlock()
-
-	params := store.CreateInvestigationSessionParams{
-		Transport:    st.transport,
-		ConnectionID: connID,
-	}
-
-	// Extract client info from InitializeRequest.
-	if req != nil {
-		params.ClientName = req.Params.ClientInfo.Name
-		params.ClientVersion = req.Params.ClientInfo.Version
-	}
-
-	// Extract user identity.
-	if st.user != nil {
-		params.UserID = st.user.ID
-		params.UserEmail = st.user.Email
-		params.UserRole = string(st.user.Role)
-	}
-
-	createCtx, cancel := context.WithTimeout(st.ctx, 10*time.Second)
-	defer cancel()
-
-	sess, err := st.store.Create(createCtx, params)
-	if err != nil {
-		slog.Error("failed to create investigation session",
-			"error", err,
-			"user_id", params.UserID,
-		)
-		return
-	}
-
-	st.mu.Lock()
-	st.session = sess
-	st.mu.Unlock()
-
-	slog.Info("investigation session created",
-		"session_id", sess.ID,
-		"user_id", sess.UserID,
-		"client", sess.ClientName,
-		"transport", sess.Transport,
-	)
-}
-
-// onDisconnect is called when an MCP session is unregistered (connection closes).
-func (st *SessionTracker) onDisconnect(_ context.Context, _ server.ClientSession) {
-	st.CloseSession()
 }
 
 // --- Stage 4: Lifecycle hooks ---
