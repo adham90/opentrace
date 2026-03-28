@@ -97,6 +97,7 @@ func (s *Server) setupMCPStreamableHTTP() *server.StreamableHTTPServer {
 	}
 
 	mcpSrv := mcpserver.NewConfiguredServer(deps, true, nil)
+	s.mcpServer = mcpSrv // store for notification dispatch
 
 	httpServer := server.NewStreamableHTTPServer(mcpSrv,
 		server.WithEndpointPath("/mcp"),

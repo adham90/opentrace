@@ -17,6 +17,7 @@ import (
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/ingest"
+	"github.com/adham90/opentrace/internal/mcp/notifications"
 	mcpgoserver "github.com/mark3labs/mcp-go/server"
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
@@ -69,6 +70,10 @@ type Server struct {
 	reliabilityProvider      ReliabilityProvider
 	sseServer         *mcpgoserver.SSEServer
 	streamableServer  *mcpgoserver.StreamableHTTPServer
+	mcpServer         *mcpgoserver.MCPServer // stored for notification dispatch
+	NotifyError       func(n notifications.ErrorEvent)         // called from ingest pipeline
+	NotifyDeploy      func(ctx context.Context, d store.Deploy) // called from deploy webhook
+	NotifyHealthCheck func(e notifications.HealthCheckEvent)    // called from health check scheduler
 	loginLimiter   *RateLimiter
 	apiLimiter     *RateLimiter
 	metricsConnMu  sync.Mutex
@@ -234,7 +239,36 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		})
 	}
 
-	// Static files removed — headless API-only server.
+	// Wire up proactive notifications (uses the MCP server for dispatch)
+	if srv.mcpServer != nil {
+		dispatcher := notifications.NewDispatcher(srv.mcpServer)
+		errorWatcher := notifications.NewErrorWatcher(dispatcher)
+		deployWatcher := notifications.NewDeployWatcher(dispatcher, srv.errorGroupStore, srv.logStore)
+		healthWatcher := notifications.NewHealthWatcher(dispatcher)
+
+		srv.NotifyError = errorWatcher.OnError
+		srv.NotifyDeploy = deployWatcher.OnDeploy
+		srv.NotifyHealthCheck = healthWatcher.OnHealthCheckResult
+
+		// Wire deploy notifications into shared deps (domain modules read from here)
+		if srv.sharedDeps != nil {
+			srv.sharedDeps.OnDeployCreated = deployWatcher.OnDeploy
+		}
+
+		// Wire error notifications into the ingest pipeline
+		if srv.ingestHandler != nil {
+			srv.ingestHandler.OnErrorGroup = func(fingerprint, exceptionClass, message, service string, count int) {
+				errorWatcher.OnError(notifications.ErrorEvent{
+					Fingerprint:     fingerprint,
+					ExceptionClass:  exceptionClass,
+					Message:         message,
+					Service:         service,
+					OccurrenceCount: count,
+					FirstSeenAt:     time.Now(),
+				})
+			}
+		}
+	}
 
 	// Expose the root router and login limiter so auth/onboarding modules
 	// can register unauthenticated routes (login, register, logout, onboarding).

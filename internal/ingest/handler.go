@@ -48,6 +48,10 @@ type Handler struct {
 	WatchStream      WatchStreamEvaluator
 	Queue            *Queue
 
+	// OnErrorGroup is called when an error group is upserted during ingestion.
+	// Used by the notification system to detect new error groups.
+	OnErrorGroup func(fingerprint, exceptionClass, message, service string, count int)
+
 	logsConnMu sync.Mutex
 }
 
@@ -313,6 +317,10 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 					// Track user impact if we have a user ID
 					if h.ErrorImpactStore != nil && e.UserID != "" {
 						_ = h.ErrorImpactStore.TrackImpact(r.Context(), e.ErrorFingerprint, e.UserID, e.Metadata, e.ID, e.Service)
+					}
+					// Notify error watcher for proactive alerting
+					if h.OnErrorGroup != nil {
+						h.OnErrorGroup(e.ErrorFingerprint, e.ExceptionClass, e.Message, e.Service, 1)
 					}
 				}
 			}

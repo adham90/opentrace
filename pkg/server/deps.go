@@ -4,6 +4,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 
@@ -65,4 +66,8 @@ type Deps struct {
 
 	// LoginLimiter is rate-limiting middleware for login/register endpoints.
 	LoginLimiter func(http.Handler) http.Handler
+
+	// OnDeployCreated is called when a deploy is recorded via webhook.
+	// Used by the notification system to start post-deploy observation.
+	OnDeployCreated func(ctx context.Context, d store.Deploy)
 }

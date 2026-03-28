@@ -14,7 +14,8 @@ var Module = server.Module{
 
 func mount(_ chi.Router, deps *server.Deps) {
 	h := &handler{
-		store: deps.DeployStore,
+		store:           deps.DeployStore,
+		onDeployCreated: deps.OnDeployCreated,
 	}
 
 	// Webhook route (API key auth, registered on the API router directly)

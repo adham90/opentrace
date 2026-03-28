@@ -1,6 +1,7 @@
 package deploys
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -10,7 +11,8 @@ import (
 )
 
 type handler struct {
-	store store.DeployStore
+	store           store.DeployStore
+	onDeployCreated func(ctx context.Context, d store.Deploy)
 }
 
 func (h *handler) webhook(w http.ResponseWriter, r *http.Request) {
@@ -59,6 +61,11 @@ func (h *handler) webhook(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		server.WriteError(w, http.StatusInternalServerError, "failed to record deploy")
 		return
+	}
+
+	// Notify deploy watcher for post-deploy observation
+	if h.onDeployCreated != nil {
+		go h.onDeployCreated(r.Context(), *d)
 	}
 
 	server.WriteJSON(w, http.StatusCreated, map[string]any{
