@@ -99,7 +99,7 @@ func ErrorsUserErrors(ctx context.Context, deps ErrorsDeps, args map[string]any)
 	}
 
 	sinceStr := ArgStringDefault(args, "since", "24h")
-	duration, err := parseTimeRange(sinceStr)
+	duration, err := ParseTimeRange(sinceStr)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("invalid since: %v", err)), nil
 	}
@@ -184,7 +184,7 @@ func ErrorsRanking(ctx context.Context, deps ErrorsDeps, args map[string]any) (*
 	params.Limit = ArgInt(args, "limit", 20, 100)
 
 	sinceStr := ArgStringDefault(args, "since", "24h")
-	duration, err := parseTimeRange(sinceStr)
+	duration, err := ParseTimeRange(sinceStr)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("invalid since: %v", err)), nil
 	}

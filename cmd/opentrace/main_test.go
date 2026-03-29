@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/adham90/opentrace/internal/connector"
-	dbstore "github.com/adham90/opentrace/internal/db"
+	dbstore "github.com/adham90/opentrace/internal/adapter/sqlite"
 	"github.com/adham90/opentrace/internal/api"
 )
 

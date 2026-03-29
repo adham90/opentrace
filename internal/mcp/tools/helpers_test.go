@@ -197,18 +197,18 @@ func TestParseTimeRange(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseTimeRange(tt.input)
+			got, err := ParseTimeRange(tt.input)
 			if tt.wantErr {
 				if err == nil {
-					t.Errorf("parseTimeRange(%q) expected error, got %v", tt.input, got)
+					t.Errorf("ParseTimeRange(%q) expected error, got %v", tt.input, got)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("parseTimeRange(%q) unexpected error: %v", tt.input, err)
+				t.Fatalf("ParseTimeRange(%q) unexpected error: %v", tt.input, err)
 			}
 			if got != tt.want {
-				t.Errorf("parseTimeRange(%q) = %v, want %v", tt.input, got, tt.want)
+				t.Errorf("ParseTimeRange(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}

@@ -8,7 +8,7 @@ import (
 
 	"github.com/adham90/opentrace/internal/auth"
 	"github.com/adham90/opentrace/internal/config"
-	dbstore "github.com/adham90/opentrace/internal/db"
+	dbstore "github.com/adham90/opentrace/internal/adapter/sqlite"
 	"github.com/adham90/opentrace/internal/version"
 )
 

@@ -3,7 +3,6 @@ package tools
 import (
 	"fmt"
 	"regexp"
-	"strings"
 	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
@@ -12,30 +11,6 @@ import (
 // ---------------------------------------------------------------------------
 // Shared helpers (used across logs_*.go files and errors.go)
 // ---------------------------------------------------------------------------
-
-// parseTimeRange parses shorthand like "15m", "1h", "6h", "24h", "7d".
-func parseTimeRange(s string) (time.Duration, error) {
-	if s == "" {
-		return time.Hour, nil
-	}
-
-	// Try standard Go duration first.
-	d, err := time.ParseDuration(s)
-	if err == nil {
-		return d, nil
-	}
-
-	// Handle "d" suffix.
-	if strings.HasSuffix(s, "d") {
-		numStr := strings.TrimSuffix(s, "d")
-		var days int
-		if _, err := fmt.Sscanf(numStr, "%d", &days); err == nil {
-			return time.Duration(days) * 24 * time.Hour, nil
-		}
-	}
-
-	return 0, fmt.Errorf("cannot parse %q as duration (use 15m, 1h, 6h, 24h, 7d)", s)
-}
 
 // logsBuildTimeHistogram creates a compact time distribution of log entries.
 // Auto-selects bucket size based on the time span of the results.

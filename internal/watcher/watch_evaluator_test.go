@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	dbstore "github.com/adham90/opentrace/internal/db"
+	dbstore "github.com/adham90/opentrace/internal/adapter/sqlite"
 	"github.com/adham90/opentrace/pkg/store"
 )
 

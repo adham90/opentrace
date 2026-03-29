@@ -20,7 +20,7 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 	environmentFilter := ArgString(args, "environment")
 	commitFilter := ArgString(args, "commit_hash")
 
-	duration, err := parseTimeRange(timeRange)
+	duration, err := ParseTimeRange(timeRange)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("invalid time_range: %v", err)), nil
 	}

@@ -16,7 +16,7 @@ import (
 	"github.com/adham90/opentrace/internal/healthcheck"
 	"github.com/adham90/opentrace/internal/jobs"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
-	dbstore "github.com/adham90/opentrace/internal/db"
+	dbstore "github.com/adham90/opentrace/internal/adapter/sqlite"
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
 	"github.com/adham90/opentrace/internal/version"

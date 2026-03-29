@@ -70,7 +70,7 @@ func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallT
 
 	// Parse time range.
 	if v := ArgString(args, "time_range"); v != "" {
-		duration, err := parseTimeRange(v)
+		duration, err := ParseTimeRange(v)
 		if err != nil {
 			return NewToolResultError(fmt.Sprintf("invalid time_range: %v. Use formats like '15m', '1h', '6h', '24h', '7d'.", err)), nil
 		}

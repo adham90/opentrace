@@ -269,8 +269,6 @@ func TestBridgeHandler_NilArgs(t *testing.T) {
 	}
 }
 
-// --- listConnectorsHandler tests ---
-
 // mockDataSource implements connector.DataSource for testing.
 type mockDataSource struct {
 	connType connector.ConnectorType
@@ -281,59 +279,6 @@ func (m *mockDataSource) Type() connector.ConnectorType            { return m.co
 func (m *mockDataSource) TestConnection(ctx context.Context) error { return nil }
 func (m *mockDataSource) Tools() []connector.Tool                  { return m.tools }
 func (m *mockDataSource) Close() error                             { return nil }
-
-func TestListConnectorsHandler_Empty(t *testing.T) {
-	registry := connector.NewRegistry()
-	handler := listConnectorsHandler(registry, nil)
-
-	result, err := handler(context.Background(), makeRequest(nil))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	text := resultText(t, result)
-	if text != "No connectors are currently active." {
-		t.Errorf("text = %q, want 'No connectors are currently active.'", text)
-	}
-}
-
-func TestListConnectorsHandler_WithTools(t *testing.T) {
-	registry := connector.NewRegistry()
-	registry.Register(&mockDataSource{
-		connType: connector.ConnectorLogs,
-		tools: []connector.Tool{
-			{Name: "search_logs", Description: "Search through log entries"},
-		},
-	})
-	registry.Register(&mockDataSource{
-		connType: connector.ConnectorDatabase,
-		tools: []connector.Tool{
-			{Name: "run_query", Description: "Run a SQL query"},
-		},
-	})
-
-	handler := listConnectorsHandler(registry, nil)
-	result, err := handler(context.Background(), makeRequest(nil))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.IsError {
-		t.Fatal("expected success result")
-	}
-
-	text := resultText(t, result)
-
-	// Should mention both tools
-	if !contains(text, "search_logs") {
-		t.Error("expected output to contain 'search_logs'")
-	}
-	if !contains(text, "run_query") {
-		t.Error("expected output to contain 'run_query'")
-	}
-	if !contains(text, "Active tools (2)") {
-		t.Error("expected output to contain 'Active tools (2)'")
-	}
-}
 
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)

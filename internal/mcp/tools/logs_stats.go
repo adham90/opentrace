@@ -21,12 +21,12 @@ func LogsStats(ctx context.Context, args map[string]any, deps LogsDeps) (*CallTo
 	levelFilter := ArgString(args, "level")
 	bucketInterval := ArgStringDefault(args, "bucket_interval", "5m")
 
-	duration, err := parseTimeRange(timeRange)
+	duration, err := ParseTimeRange(timeRange)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("invalid time_range: %v", err)), nil
 	}
 
-	bucketDur, err := parseTimeRange(bucketInterval)
+	bucketDur, err := ParseTimeRange(bucketInterval)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("invalid bucket_interval: %v", err)), nil
 	}

@@ -9,7 +9,7 @@ import (
 
 	"github.com/uptrace/bun"
 
-	dbstore "github.com/adham90/opentrace/internal/db"
+	dbstore "github.com/adham90/opentrace/internal/adapter/sqlite"
 	"github.com/adham90/opentrace/pkg/store"
 )
 

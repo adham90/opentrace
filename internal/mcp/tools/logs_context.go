@@ -165,7 +165,7 @@ func LogsAttributes(ctx context.Context, args map[string]any, deps LogsDeps) (*C
 
 	// Parse time range (default: 24h).
 	timeRange := ArgStringDefault(args, "time_range", "24h")
-	duration, err := parseTimeRange(timeRange)
+	duration, err := ParseTimeRange(timeRange)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("invalid time_range: %v", err)), nil
 	}

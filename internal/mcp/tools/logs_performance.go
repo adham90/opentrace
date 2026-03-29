@@ -16,7 +16,7 @@ import (
 func LogsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	// Parse time range (default: 24h).
 	timeRange := ArgStringDefault(args, "time_range", "24h")
-	duration, err := parseTimeRange(timeRange)
+	duration, err := ParseTimeRange(timeRange)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("invalid time_range: %v. Use formats like '1h', '24h', '7d'.", err)), nil
 	}
