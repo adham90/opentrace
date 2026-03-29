@@ -1,6 +1,6 @@
 // Package auth provides authentication utilities: token generation
 // and rate limiting.
-package auth
+package cryptoutil
 
 import (
 	"crypto/rand"

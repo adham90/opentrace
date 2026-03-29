@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/adham90/opentrace/internal/auth"
+	"github.com/adham90/opentrace/internal/cryptoutil"
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -96,7 +96,7 @@ func (h *handler) handleConnectCreateAdmin(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	mcpToken, err := auth.GenerateMCPToken()
+	mcpToken, err := cryptoutil.GenerateMCPToken()
 	if err != nil {
 		server.WriteError(w, http.StatusInternalServerError, "failed to generate token")
 		return
@@ -172,7 +172,7 @@ func (h *handler) handleConnectLogin(w http.ResponseWriter, r *http.Request, req
 		mcpToken = *user.MCPToken
 	} else {
 		// User doesn't have an MCP token yet — generate one
-		newToken, err := auth.GenerateMCPToken()
+		newToken, err := cryptoutil.GenerateMCPToken()
 		if err != nil {
 			server.WriteError(w, http.StatusInternalServerError, "failed to generate token")
 			return

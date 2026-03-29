@@ -1,4 +1,4 @@
-package auth
+package cryptoutil
 
 import (
 	"encoding/hex"

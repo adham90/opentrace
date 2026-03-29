@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/adham90/opentrace/internal/auth"
+	"github.com/adham90/opentrace/internal/cryptoutil"
 	"github.com/adham90/opentrace/internal/config"
 	dbstore "github.com/adham90/opentrace/internal/adapter/sqlite"
 	"github.com/adham90/opentrace/internal/version"
@@ -64,7 +64,7 @@ func runInit() error {
 	fmt.Println("done")
 
 	// Generate API key for SDK ingestion
-	apiKey, err := auth.GenerateAPIKey()
+	apiKey, err := cryptoutil.GenerateAPIKey()
 	if err != nil {
 		return fmt.Errorf("generating API key: %w", err)
 	}

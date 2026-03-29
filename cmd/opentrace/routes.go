@@ -4,10 +4,10 @@
 package main
 
 import (
-	authmod "github.com/adham90/opentrace/internal/domains/auth"
-	"github.com/adham90/opentrace/internal/domains/deploys"
-	"github.com/adham90/opentrace/internal/domains/events"
-	"github.com/adham90/opentrace/internal/domains/servers"
+	authmod "github.com/adham90/opentrace/internal/routes/auth"
+	"github.com/adham90/opentrace/internal/routes/deploys"
+	"github.com/adham90/opentrace/internal/routes/events"
+	"github.com/adham90/opentrace/internal/routes/servers"
 	"github.com/adham90/opentrace/pkg/server"
 )
 
