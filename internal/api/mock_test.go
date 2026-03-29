@@ -687,6 +687,14 @@ func (m *mockSettingsStore) SetSamplingRules(ctx context.Context, rules []store.
 	return nil
 }
 
+func (m *mockSettingsStore) GetTelegramConfig(_ context.Context) (*store.TelegramConfig, error) {
+	return &store.TelegramConfig{}, nil
+}
+
+func (m *mockSettingsStore) SetTelegramConfig(_ context.Context, _ store.TelegramConfig) error {
+	return nil
+}
+
 // mockMCPActivityStore implements store.MCPActivityStore for testing.
 type mockMCPActivityStore struct {
 	mu     sync.Mutex

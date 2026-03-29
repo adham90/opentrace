@@ -215,3 +215,31 @@ func (s *settingsStore) SetSamplingRules(ctx context.Context, rules []store.Samp
 	}
 	return nil
 }
+
+const telegramConfigKey = "telegram_config"
+
+func (s *settingsStore) GetTelegramConfig(ctx context.Context) (*store.TelegramConfig, error) {
+	raw, err := s.getSetting(ctx, telegramConfigKey)
+	if errors.Is(err, sql.ErrNoRows) || raw == "" {
+		return &store.TelegramConfig{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying telegram_config: %w", err)
+	}
+	var cfg store.TelegramConfig
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return nil, fmt.Errorf("unmarshaling telegram_config: %w", err)
+	}
+	return &cfg, nil
+}
+
+func (s *settingsStore) SetTelegramConfig(ctx context.Context, cfg store.TelegramConfig) error {
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshaling telegram_config: %w", err)
+	}
+	if err := s.upsertSetting(ctx, telegramConfigKey, string(raw)); err != nil {
+		return fmt.Errorf("upserting telegram_config: %w", err)
+	}
+	return nil
+}

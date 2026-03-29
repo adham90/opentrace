@@ -50,6 +50,8 @@ func AdminHandler(d AdminDeps) ToolHandlerFunc {
 			return HandleDeleteNote(ctx, d, args)
 		case "activity":
 			return HandleAdminActivity(ctx, d)
+		case "notifications":
+			return HandleNotifications(ctx, d, args)
 		case "session_summary":
 			if d.SessionSummaryCallback == nil {
 				return NewToolResultError("session tracking is not enabled"), nil

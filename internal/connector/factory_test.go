@@ -36,6 +36,12 @@ func (m *mockSettingsStore) GetSamplingRules(_ context.Context) ([]store.Samplin
 func (m *mockSettingsStore) SetSamplingRules(_ context.Context, _ []store.SamplingRule) error {
 	return nil
 }
+func (m *mockSettingsStore) GetTelegramConfig(_ context.Context) (*store.TelegramConfig, error) {
+	return &store.TelegramConfig{}, nil
+}
+func (m *mockSettingsStore) SetTelegramConfig(_ context.Context, _ store.TelegramConfig) error {
+	return nil
+}
 func (m *mockSettingsStore) SetMaxQueryRows(_ context.Context, _ int) error    { return nil }
 func (m *mockSettingsStore) SetStatementTimeout(_ context.Context, _ int) error { return nil }
 

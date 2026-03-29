@@ -20,6 +20,7 @@ type SettingsStore struct {
 	StatementTimeout int
 	MCPName          string
 	SamplingRules    []store.SamplingRule
+	TelegramConfig   *store.TelegramConfig
 }
 
 // NewSettingsStore returns an initialised SettingsStore mock.
@@ -118,5 +119,21 @@ func (m *SettingsStore) SetSamplingRules(_ context.Context, rules []store.Sampli
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.SamplingRules = rules
+	return nil
+}
+
+func (m *SettingsStore) GetTelegramConfig(_ context.Context) (*store.TelegramConfig, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.TelegramConfig == nil {
+		return &store.TelegramConfig{}, nil
+	}
+	return m.TelegramConfig, nil
+}
+
+func (m *SettingsStore) SetTelegramConfig(_ context.Context, cfg store.TelegramConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.TelegramConfig = &cfg
 	return nil
 }

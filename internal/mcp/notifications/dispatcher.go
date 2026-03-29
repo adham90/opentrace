@@ -45,20 +45,34 @@ func (s *MCPServerSender) SendNotificationToAllClients(method string, params map
 // Compile-time check that *MCPServerSender satisfies Sender.
 var _ Sender = (*MCPServerSender)(nil)
 
-// Dispatcher watches for events and dispatches notifications to connected MCP clients.
+// Dispatcher watches for events and dispatches notifications to all registered senders
+// (MCP clients, Telegram, Slack, webhooks, etc.).
 type Dispatcher struct {
-	sender Sender
+	senders []Sender
 }
 
-// NewDispatcher creates a notification dispatcher.
-// Pass an MCPServerSender (or any Sender) as the sender.
-func NewDispatcher(sender Sender) *Dispatcher {
-	return &Dispatcher{sender: sender}
+// NewDispatcher creates a notification dispatcher with one or more senders.
+// Pass an MCPServerSender, a NotificationBridge for Telegram, etc.
+func NewDispatcher(senders ...Sender) *Dispatcher {
+	var active []Sender
+	for _, s := range senders {
+		if s != nil {
+			active = append(active, s)
+		}
+	}
+	return &Dispatcher{senders: active}
 }
 
-// Notify sends a notification to all connected MCP clients.
+// AddSender adds a sender at runtime (e.g., when Telegram is configured after startup).
+func (d *Dispatcher) AddSender(s Sender) {
+	if s != nil {
+		d.senders = append(d.senders, s)
+	}
+}
+
+// Notify sends a notification to all registered senders.
 func (d *Dispatcher) Notify(n Notification) {
-	if d.sender == nil {
+	if len(d.senders) == 0 {
 		return
 	}
 
@@ -76,7 +90,10 @@ func (d *Dispatcher) Notify(n Notification) {
 		"type", n.Type,
 		"severity", n.Severity,
 		"title", n.Title,
+		"senders", len(d.senders),
 	)
 
-	d.sender.SendNotificationToAllClients(MCPMethod, params)
+	for _, s := range d.senders {
+		s.SendNotificationToAllClients(MCPMethod, params)
+	}
 }

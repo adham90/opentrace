@@ -108,6 +108,12 @@ func (m *mockSettingsStore) SetStatementTimeout(context.Context, int) error     
 func (m *mockSettingsStore) GetMCPName(context.Context) (string, error)                  { return "", nil }
 func (m *mockSettingsStore) SetMCPName(context.Context, string) error                    { return nil }
 func (m *mockSettingsStore) SetSamplingRules(context.Context, []store.SamplingRule) error { return nil }
+func (m *mockSettingsStore) GetTelegramConfig(context.Context) (*store.TelegramConfig, error) {
+	return &store.TelegramConfig{}, nil
+}
+func (m *mockSettingsStore) SetTelegramConfig(context.Context, store.TelegramConfig) error {
+	return nil
+}
 
 // mockWatchStream satisfies WatchStreamEvaluator.
 type mockWatchStream struct {

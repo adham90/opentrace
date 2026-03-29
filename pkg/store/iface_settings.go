@@ -24,4 +24,13 @@ type SettingsStore interface {
 	SetMCPName(ctx context.Context, name string) error
 	GetSamplingRules(ctx context.Context) ([]SamplingRule, error)
 	SetSamplingRules(ctx context.Context, rules []SamplingRule) error
+	GetTelegramConfig(ctx context.Context) (*TelegramConfig, error)
+	SetTelegramConfig(ctx context.Context, cfg TelegramConfig) error
+}
+
+// TelegramConfig holds Telegram notification settings.
+type TelegramConfig struct {
+	BotToken string `json:"bot_token"`
+	ChatID   string `json:"chat_id"`
+	Enabled  bool   `json:"enabled"`
 }
