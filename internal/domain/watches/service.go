@@ -23,12 +23,7 @@ func (s *Service) List(ctx context.Context, params store.ListWatchParams) ([]sto
 	if s.repo == nil {
 		return nil, fmt.Errorf("list watches: %w", domain.ErrNotConfigured)
 	}
-	if params.Limit <= 0 {
-		params.Limit = 50
-	}
-	if params.Limit > 200 {
-		params.Limit = 200
-	}
+	params.Limit = domain.ClampLimit(params.Limit, 50, 200)
 	watches, err := s.repo.List(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("listing watches: %w", err)
@@ -85,12 +80,7 @@ func (s *Service) Alerts(ctx context.Context, watchID string, status string, lim
 	if s.repo == nil {
 		return nil, fmt.Errorf("list alerts: %w", domain.ErrNotConfigured)
 	}
-	if limit <= 0 {
-		limit = 50
-	}
-	if limit > 200 {
-		limit = 200
-	}
+	limit = domain.ClampLimit(limit, 50, 200)
 	alerts, err := s.repo.ListAlerts(ctx, watchID, status, limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing alerts: %w", err)

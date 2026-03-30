@@ -38,48 +38,43 @@ func (s *serverStore) Register(ctx context.Context, params store.RegisterServerP
 		labelsJSON = string(b)
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	var existingID string
-	err = tx.QueryRowContext(ctx,
-		`SELECT id FROM servers WHERE hostname = ?`, params.Hostname,
-	).Scan(&existingID)
-
 	var serverID uuid.UUID
 
-	if err == nil {
-		serverID, _ = uuid.Parse(existingID)
-		_, err := tx.ExecContext(ctx,
-			`UPDATE servers SET ip_address = ?, os = ?, arch = ?, agent_version = ?,
-			 labels = ?, status = 'online', last_seen_at = ?, updated_at = ?
-			 WHERE id = ?`,
-			params.IPAddress, params.OS, params.Arch, params.AgentVersion,
-			labelsJSON, nowStr, nowStr, existingID,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("updating server: %w", err)
-		}
-	} else if errors.Is(err, sql.ErrNoRows) {
-		serverID = uuid.New()
-		_, err = tx.ExecContext(ctx,
-			`INSERT INTO servers (id, hostname, display_name, ip_address, os, arch, agent_version, labels, status, last_seen_at, created_at, updated_at)
-			 VALUES (?, ?, '', ?, ?, ?, ?, ?, 'online', ?, ?, ?)`,
-			serverID.String(), params.Hostname, params.IPAddress, params.OS, params.Arch,
-			params.AgentVersion, labelsJSON, nowStr, nowStr, nowStr,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("inserting server: %w", err)
-		}
-	} else {
-		return nil, fmt.Errorf("checking existing server: %w", err)
-	}
+	if err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		var existingID string
+		err := tx.QueryRowContext(ctx,
+			`SELECT id FROM servers WHERE hostname = ?`, params.Hostname,
+		).Scan(&existingID)
 
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit: %w", err)
+		if err == nil {
+			serverID, _ = uuid.Parse(existingID)
+			_, err := tx.ExecContext(ctx,
+				`UPDATE servers SET ip_address = ?, os = ?, arch = ?, agent_version = ?,
+				 labels = ?, status = 'online', last_seen_at = ?, updated_at = ?
+				 WHERE id = ?`,
+				params.IPAddress, params.OS, params.Arch, params.AgentVersion,
+				labelsJSON, nowStr, nowStr, existingID,
+			)
+			if err != nil {
+				return fmt.Errorf("updating server: %w", err)
+			}
+		} else if errors.Is(err, sql.ErrNoRows) {
+			serverID = uuid.New()
+			_, err = tx.ExecContext(ctx,
+				`INSERT INTO servers (id, hostname, display_name, ip_address, os, arch, agent_version, labels, status, last_seen_at, created_at, updated_at)
+				 VALUES (?, ?, '', ?, ?, ?, ?, ?, 'online', ?, ?, ?)`,
+				serverID.String(), params.Hostname, params.IPAddress, params.OS, params.Arch,
+				params.AgentVersion, labelsJSON, nowStr, nowStr, nowStr,
+			)
+			if err != nil {
+				return fmt.Errorf("inserting server: %w", err)
+			}
+		} else {
+			return fmt.Errorf("checking existing server: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	return &store.Server{

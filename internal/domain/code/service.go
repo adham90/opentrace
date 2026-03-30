@@ -32,12 +32,7 @@ func (s *Service) Risk(ctx context.Context, service string, limit int) (*RiskRes
 		return nil, fmt.Errorf("code risk: %w", domain.ErrNotConfigured)
 	}
 
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > 100 {
-		limit = 100
-	}
+	limit = domain.ClampLimit(limit, 20, 100)
 
 	entities, err := s.entities.TopByRisk(ctx, service, limit)
 	if err != nil {
@@ -62,12 +57,7 @@ func (s *Service) Fragile(ctx context.Context, service string, limit int) (*Frag
 		return nil, fmt.Errorf("code fragile: %w", domain.ErrNotConfigured)
 	}
 
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > 100 {
-		limit = 100
-	}
+	limit = domain.ClampLimit(limit, 20, 100)
 
 	paths, err := s.tests.TopByPriority(ctx, service, limit)
 	if err != nil {

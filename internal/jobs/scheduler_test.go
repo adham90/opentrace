@@ -9,6 +9,9 @@ import (
 )
 
 func TestSchedulerEnqueuesJobs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-dependent test in short mode")
+	}
 	db := setupTestDB(t)
 	q := NewQueue(db)
 	ctx := context.Background()
@@ -44,6 +47,9 @@ func TestSchedulerEnqueuesJobs(t *testing.T) {
 }
 
 func TestSchedulerSkipsDuplicates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-dependent test in short mode")
+	}
 	db := setupTestDB(t)
 	q := NewQueue(db)
 	ctx := context.Background()
@@ -63,9 +69,20 @@ func TestSchedulerSkipsDuplicates(t *testing.T) {
 
 	s.Start(ctx)
 
-	// Let a few ticks pass.
-	time.Sleep(350 * time.Millisecond)
-	s.Stop()
+	// Let a few ticks pass, then verify no duplicates were created.
+	done := make(chan struct{})
+	go func() {
+		time.Sleep(350 * time.Millisecond)
+		s.Stop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// OK
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for scheduler to stop")
+	}
 
 	stats, err := q.Stats(ctx)
 	if err != nil {

@@ -32,12 +32,7 @@ func (s *Service) Search(ctx context.Context, params store.LogSearchParams) (*Se
 		return nil, fmt.Errorf("log search: %w", domain.ErrNotConfigured)
 	}
 
-	if params.Limit <= 0 {
-		params.Limit = 50
-	}
-	if params.Limit > 500 {
-		params.Limit = 500
-	}
+	params.Limit = domain.ClampLimit(params.Limit, 50, 500)
 
 	entries, err := s.repo.Search(ctx, params)
 	if err != nil {

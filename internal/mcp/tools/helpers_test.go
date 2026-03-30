@@ -292,13 +292,14 @@ func TestLogsNormalizeMessage(t *testing.T) {
 	}
 }
 
-func TestLogsToInt(t *testing.T) {
+func TestToInt(t *testing.T) {
 	tests := []struct {
 		name  string
 		input any
 		want  int
 	}{
 		{"int value", int(5), 5},
+		{"int64 value", int64(42), 42},
 		{"float64 truncates", float64(3.7), 3},
 		{"string returns 0", "x", 0},
 		{"nil returns 0", nil, 0},
@@ -307,15 +308,15 @@ func TestLogsToInt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := logsToInt(tt.input)
+			got := toInt(tt.input)
 			if got != tt.want {
-				t.Errorf("logsToInt(%v) = %d, want %d", tt.input, got, tt.want)
+				t.Errorf("toInt(%v) = %d, want %d", tt.input, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestLogsRound2(t *testing.T) {
+func TestRound2(t *testing.T) {
 	tests := []struct {
 		name  string
 		input float64
@@ -330,9 +331,9 @@ func TestLogsRound2(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := logsRound2(tt.input)
+			got := round2(tt.input)
 			if math.Abs(got-tt.want) > 0.001 {
-				t.Errorf("logsRound2(%f) = %f, want %f", tt.input, got, tt.want)
+				t.Errorf("round2(%f) = %f, want %f", tt.input, got, tt.want)
 			}
 		})
 	}

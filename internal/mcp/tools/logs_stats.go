@@ -90,7 +90,7 @@ func LogsStatsByLevel(ctx context.Context, svc *logs.Service, params store.LogCo
 	// Detect error rate spike in last bucket vs average.
 	if len(trend) >= 2 {
 		lastBucket := trend[len(trend)-1]
-		lastErrors := logsToInt(lastBucket["error"]) + logsToInt(lastBucket["fatal"])
+		lastErrors := toInt(lastBucket["error"]) + toInt(lastBucket["fatal"])
 		avgErrors := float64(lc.ErrorCount) / float64(len(trend))
 		if avgErrors > 0 && float64(lastErrors) > avgErrors*1.4 {
 			pctIncrease := (float64(lastErrors) - avgErrors) / avgErrors * 100
@@ -102,7 +102,7 @@ func LogsStatsByLevel(ctx context.Context, svc *logs.Service, params store.LogCo
 		"time_range":     map[string]any{"start": since.Format(time.RFC3339), "end": until.Format(time.RFC3339)},
 		"total_logs":     lc.Total,
 		"by_level":       lc.ByLevel,
-		"error_rate_pct": logsRound2(lc.ErrorRate),
+		"error_rate_pct": round2(lc.ErrorRate),
 	}
 	if len(trend) > 0 {
 		resp["trend"] = trend
@@ -138,7 +138,7 @@ func LogsStatsByService(ctx context.Context, svc *logs.Service, params store.Log
 			"service":        s.Service,
 			"total":          s.Total,
 			"errors":         s.ErrorCount,
-			"error_rate_pct": logsRound2(errRate),
+			"error_rate_pct": round2(errRate),
 		})
 	}
 	if total > 0 {
@@ -264,7 +264,7 @@ func LogsStatsByPattern(ctx context.Context, svc *logs.Service, since, until tim
 		entry := map[string]any{
 			"pattern":        sp.key,
 			"count":          sp.pd.count,
-			"pct_of_errors":  logsRound2(pctOfErrors),
+			"pct_of_errors":  round2(pctOfErrors),
 			"first_seen":     sp.pd.firstSeen.Format(time.RFC3339),
 			"last_seen":      sp.pd.lastSeen.Format(time.RFC3339),
 			"sample_message": sp.pd.sample,

@@ -1,3 +1,6 @@
+// Package connectors provides the domain service layer for managing data source
+// connectors (list, create, update, delete). For low-level connector interfaces
+// and tool registration, see internal/connector.
 package connectors
 
 import (

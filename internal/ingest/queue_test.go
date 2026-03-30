@@ -168,6 +168,9 @@ func TestEnqueue_WithinCapacity(t *testing.T) {
 }
 
 func TestEnqueue_TriggersBatchFlush(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-dependent test in short mode")
+	}
 	ms := &queueMockLogStore{}
 	q := NewQueue(ms, QueueConfig{
 		MaxQueueSize:  200,
@@ -194,6 +197,9 @@ func TestEnqueue_TriggersBatchFlush(t *testing.T) {
 }
 
 func TestEnqueue_OverflowFallsBackToSync(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-dependent test in short mode")
+	}
 	ms := &queueMockLogStore{}
 	q := NewQueue(ms, QueueConfig{
 		MaxQueueSize:  5,  // tiny queue
@@ -318,6 +324,9 @@ func TestFlush_EmptyBuffer_NoOp(t *testing.T) {
 }
 
 func TestFlush_SplitsIntoBatches(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-dependent test in short mode")
+	}
 	ms := &queueMockLogStore{}
 	q := NewQueue(ms, QueueConfig{
 		MaxQueueSize:  100,
@@ -490,6 +499,9 @@ func TestOverflowCount(t *testing.T) {
 }
 
 func TestTimerFlush(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-dependent test in short mode")
+	}
 	ms := &queueMockLogStore{}
 	q := NewQueue(ms, QueueConfig{
 		MaxQueueSize:  100,
@@ -512,6 +524,9 @@ func TestTimerFlush(t *testing.T) {
 }
 
 func TestEnqueue_ConcurrentSafety(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-dependent test in short mode")
+	}
 	ms := &queueMockLogStore{}
 	q := NewQueue(ms, QueueConfig{
 		MaxQueueSize:  10000,

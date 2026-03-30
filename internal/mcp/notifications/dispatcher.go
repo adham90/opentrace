@@ -1,3 +1,5 @@
+// Package notifications provides the abstract notification dispatch framework
+// (types, dispatcher, watchers). Concrete delivery adapters live in internal/notify.
 package notifications
 
 import (

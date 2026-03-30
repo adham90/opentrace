@@ -32,94 +32,89 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []store.LogEntry) (i
 		return 0, nil
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO logs (timestamp, level, service, environment, commit_hash,
-		                   trace_id, span_id, parent_span_id, request_id,
-		                   user_id, session_id,
-		                   message, event_type, exception_class, error_fingerprint,
-		                   source_file, source_line, metadata)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return 0, fmt.Errorf("prepare insert: %w", err)
-	}
-	defer stmt.Close()
-
-	var summaryStmt *sql.Stmt
-
-	for _, e := range entries {
-		promoteFromMetadata(&e)
-
-		metaStr := e.MetadataJSON
-		if metaStr == "" {
-			meta, err := json.Marshal(e.Metadata)
-			if err != nil {
-				return 0, fmt.Errorf("marshaling metadata: %w", err)
-			}
-			metaStr = string(meta)
-		}
-		ts := e.Timestamp.UTC().Format(time.RFC3339Nano)
-		res, err := stmt.ExecContext(ctx, ts, e.Level, e.Service, e.Environment, e.CommitHash,
-			e.TraceID, e.SpanID, e.ParentSpanID, e.RequestID,
-			e.UserID, e.SessionID,
-			e.Message, e.EventType, e.ExceptionClass, e.ErrorFingerprint,
-			e.SourceFile, e.SourceLine, metaStr)
+	if err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		stmt, err := tx.PrepareContext(ctx,
+			`INSERT INTO logs (timestamp, level, service, environment, commit_hash,
+			                   trace_id, span_id, parent_span_id, request_id,
+			                   user_id, session_id,
+			                   message, event_type, exception_class, error_fingerprint,
+			                   source_file, source_line, metadata)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 		if err != nil {
-			return 0, fmt.Errorf("inserting log entry: %w", err)
+			return fmt.Errorf("prepare insert: %w", err)
 		}
+		defer stmt.Close()
 
-		if e.RequestSummary != nil {
-			logID, err := res.LastInsertId()
-			if err != nil {
-				return 0, fmt.Errorf("getting last insert id: %w", err)
-			}
+		var summaryStmt *sql.Stmt
 
-			if summaryStmt == nil {
-				summaryStmt, err = tx.PrepareContext(ctx,
-					`INSERT INTO request_summaries (
-						log_id, controller, action, method, path, status,
-						duration_ms, db_time_ms, view_time_ms,
-						sql_count, sql_total_ms, sql_slowest_ms, sql_slowest_name, n_plus_one,
-						view_count, view_total_ms, view_slowest_ms, view_slowest_template,
-						cache_reads, cache_hits, cache_writes, cache_hit_ratio,
-						http_external_count, http_external_total_ms, http_slowest_ms, http_slowest_host,
-						memory_before_mb, memory_after_mb, memory_delta_mb, timeline,
-						time_breakdown, duplicate_queries, worst_duplicate_count, top_duplicates
-					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		for _, e := range entries {
+			promoteFromMetadata(&e)
+
+			metaStr := e.MetadataJSON
+			if metaStr == "" {
+				meta, err := json.Marshal(e.Metadata)
 				if err != nil {
-					return 0, fmt.Errorf("prepare summary insert: %w", err)
+					return fmt.Errorf("marshaling metadata: %w", err)
 				}
-				defer summaryStmt.Close()
+				metaStr = string(meta)
+			}
+			ts := e.Timestamp.UTC().Format(time.RFC3339Nano)
+			res, err := stmt.ExecContext(ctx, ts, e.Level, e.Service, e.Environment, e.CommitHash,
+				e.TraceID, e.SpanID, e.ParentSpanID, e.RequestID,
+				e.UserID, e.SessionID,
+				e.Message, e.EventType, e.ExceptionClass, e.ErrorFingerprint,
+				e.SourceFile, e.SourceLine, metaStr)
+			if err != nil {
+				return fmt.Errorf("inserting log entry: %w", err)
 			}
 
-			rs := e.RequestSummary
-			nPlusOne := 0
-			if rs.NPlusOne {
-				nPlusOne = 1
-			}
-			_, err = summaryStmt.ExecContext(ctx,
-				logID, rs.Controller, rs.Action, rs.Method, rs.Path, rs.Status,
-				rs.DurationMs, rs.DBTimeMs, rs.ViewTimeMs,
-				rs.SQLCount, rs.SQLTotalMs, rs.SQLSlowestMs, rs.SQLSlowestName, nPlusOne,
-				rs.ViewCount, rs.ViewTotalMs, rs.ViewSlowestMs, rs.ViewSlowestTemplate,
-				rs.CacheReads, rs.CacheHits, rs.CacheWrites, rs.CacheHitRatio,
-				rs.HTTPExternalCount, rs.HTTPExternalTotalMs, rs.HTTPSlowestMs, rs.HTTPSlowestHost,
-				rs.MemoryBeforeMb, rs.MemoryAfterMb, rs.MemoryDeltaMb, rs.Timeline,
-				rs.TimeBreakdown, rs.DuplicateQueries, rs.WorstDuplicateCount, rs.TopDuplicates,
-			)
-			if err != nil {
-				return 0, fmt.Errorf("inserting request summary: %w", err)
+			if e.RequestSummary != nil {
+				logID, err := res.LastInsertId()
+				if err != nil {
+					return fmt.Errorf("getting last insert id: %w", err)
+				}
+
+				if summaryStmt == nil {
+					summaryStmt, err = tx.PrepareContext(ctx,
+						`INSERT INTO request_summaries (
+							log_id, controller, action, method, path, status,
+							duration_ms, db_time_ms, view_time_ms,
+							sql_count, sql_total_ms, sql_slowest_ms, sql_slowest_name, n_plus_one,
+							view_count, view_total_ms, view_slowest_ms, view_slowest_template,
+							cache_reads, cache_hits, cache_writes, cache_hit_ratio,
+							http_external_count, http_external_total_ms, http_slowest_ms, http_slowest_host,
+							memory_before_mb, memory_after_mb, memory_delta_mb, timeline,
+							time_breakdown, duplicate_queries, worst_duplicate_count, top_duplicates
+						) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+					if err != nil {
+						return fmt.Errorf("prepare summary insert: %w", err)
+					}
+					defer summaryStmt.Close()
+				}
+
+				rs := e.RequestSummary
+				nPlusOne := 0
+				if rs.NPlusOne {
+					nPlusOne = 1
+				}
+				_, err = summaryStmt.ExecContext(ctx,
+					logID, rs.Controller, rs.Action, rs.Method, rs.Path, rs.Status,
+					rs.DurationMs, rs.DBTimeMs, rs.ViewTimeMs,
+					rs.SQLCount, rs.SQLTotalMs, rs.SQLSlowestMs, rs.SQLSlowestName, nPlusOne,
+					rs.ViewCount, rs.ViewTotalMs, rs.ViewSlowestMs, rs.ViewSlowestTemplate,
+					rs.CacheReads, rs.CacheHits, rs.CacheWrites, rs.CacheHitRatio,
+					rs.HTTPExternalCount, rs.HTTPExternalTotalMs, rs.HTTPSlowestMs, rs.HTTPSlowestHost,
+					rs.MemoryBeforeMb, rs.MemoryAfterMb, rs.MemoryDeltaMb, rs.Timeline,
+					rs.TimeBreakdown, rs.DuplicateQueries, rs.WorstDuplicateCount, rs.TopDuplicates,
+				)
+				if err != nil {
+					return fmt.Errorf("inserting request summary: %w", err)
+				}
 			}
 		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit batch insert: %w", err)
+		return nil
+	}); err != nil {
+		return 0, err
 	}
 
 	return len(entries), nil
@@ -184,27 +179,25 @@ func parseBacktraceLine(line string) (string, int) {
 }
 
 func (s *logStore) Search(ctx context.Context, params store.LogSearchParams) ([]store.LogEntry, error) {
-	var conditions []string
-	var args []any
+	var qb queryBuilder
 	useFTS := false
 
 	if params.Query != "" && params.Query != "*" {
 		useFTS = true
-		conditions = append(conditions, "logs_fts MATCH ?")
-		args = append(args, params.Query)
+		qb.where("logs_fts MATCH ?", params.Query)
 	}
 	multiIn := func(col, value string) {
 		vals := strings.Split(value, ",")
 		if len(vals) == 1 {
-			conditions = append(conditions, col+" = ? COLLATE NOCASE")
-			args = append(args, strings.TrimSpace(vals[0]))
+			qb.where(col+" = ? COLLATE NOCASE", strings.TrimSpace(vals[0]))
 		} else {
 			ph := make([]string, len(vals))
+			trimmed := make([]any, len(vals))
 			for i, v := range vals {
 				ph[i] = "?"
-				args = append(args, strings.TrimSpace(v))
+				trimmed[i] = strings.TrimSpace(v)
 			}
-			conditions = append(conditions, col+" COLLATE NOCASE IN ("+strings.Join(ph, ",")+")")
+			qb.where(col+" COLLATE NOCASE IN ("+strings.Join(ph, ",")+")", trimmed...)
 		}
 	}
 
@@ -215,24 +208,20 @@ func (s *logStore) Search(ctx context.Context, params store.LogSearchParams) ([]
 		multiIn("l.level", params.Level)
 	}
 	if params.TraceID != "" {
-		conditions = append(conditions, "l.trace_id = ?")
-		args = append(args, params.TraceID)
+		qb.where("l.trace_id = ?", params.TraceID)
 	}
 	if params.Environment != "" {
 		multiIn("l.environment", params.Environment)
 	}
 	if params.CommitHash != "" {
 		if len(params.CommitHash) < 40 {
-			conditions = append(conditions, "l.commit_hash LIKE ?")
-			args = append(args, params.CommitHash+"%")
+			qb.where("l.commit_hash LIKE ?", params.CommitHash+"%")
 		} else {
-			conditions = append(conditions, "l.commit_hash = ?")
-			args = append(args, params.CommitHash)
+			qb.where("l.commit_hash = ?", params.CommitHash)
 		}
 	}
 	if params.RequestID != "" {
-		conditions = append(conditions, "l.request_id = ?")
-		args = append(args, params.RequestID)
+		qb.where("l.request_id = ?", params.RequestID)
 	}
 	if params.EventType != "" {
 		multiIn("l.event_type", params.EventType)
@@ -260,28 +249,25 @@ func (s *logStore) Search(ctx context.Context, params store.LogSearchParams) ([]
 		}
 		vals := strings.Split(rawVal, ",")
 		if len(vals) == 1 {
-			conditions = append(conditions, col+" != ? COLLATE NOCASE")
-			args = append(args, strings.TrimSpace(vals[0]))
+			qb.where(col+" != ? COLLATE NOCASE", strings.TrimSpace(vals[0]))
 		} else {
 			ph := make([]string, len(vals))
+			trimmed := make([]any, len(vals))
 			for i, v := range vals {
 				ph[i] = "?"
-				args = append(args, strings.TrimSpace(v))
+				trimmed[i] = strings.TrimSpace(v)
 			}
-			conditions = append(conditions, col+" COLLATE NOCASE NOT IN ("+strings.Join(ph, ",")+")")
+			qb.where(col+" COLLATE NOCASE NOT IN ("+strings.Join(ph, ",")+")", trimmed...)
 		}
 	}
 	if params.SinceID > 0 {
-		conditions = append(conditions, "l.id > ?")
-		args = append(args, params.SinceID)
+		qb.where("l.id > ?", params.SinceID)
 	}
 	if params.Start != nil {
-		conditions = append(conditions, "l.timestamp >= ?")
-		args = append(args, params.Start.UTC().Format(time.RFC3339Nano))
+		qb.where("l.timestamp >= ?", params.Start.UTC().Format(time.RFC3339Nano))
 	}
 	if params.End != nil {
-		conditions = append(conditions, "l.timestamp <= ?")
-		args = append(args, params.End.UTC().Format(time.RFC3339Nano))
+		qb.where("l.timestamp <= ?", params.End.UTC().Format(time.RFC3339Nano))
 	}
 
 	const selectCols = `l.id, l.timestamp, l.level, l.service, l.environment, l.commit_hash,
@@ -290,30 +276,25 @@ func (s *logStore) Search(ctx context.Context, params store.LogSearchParams) ([]
 		l.message, l.event_type, l.exception_class, l.error_fingerprint,
 		l.source_file, l.source_line, l.metadata`
 
-	var query string
+	var baseQuery string
 	if useFTS {
-		query = `SELECT ` + selectCols + ` FROM logs l JOIN logs_fts ON l.id = logs_fts.rowid`
+		baseQuery = `SELECT ` + selectCols + ` FROM logs l JOIN logs_fts ON l.id = logs_fts.rowid`
 	} else {
-		query = `SELECT ` + selectCols + ` FROM logs l`
+		baseQuery = `SELECT ` + selectCols + ` FROM logs l`
 	}
 
 	for k, v := range params.MetadataFilter {
 		path := "$." + k
 		if v == "*" {
-			conditions = append(conditions, "json_extract(l.metadata, ?) IS NOT NULL")
-			args = append(args, path)
+			qb.where("json_extract(l.metadata, ?) IS NOT NULL", path)
 		} else if strings.HasPrefix(v, "~") {
-			conditions = append(conditions, "json_extract(l.metadata, ?) LIKE ?")
-			args = append(args, path, "%"+v[1:]+"%")
+			qb.where("json_extract(l.metadata, ?) LIKE ?", path, "%"+v[1:]+"%")
 		} else {
-			conditions = append(conditions, "json_extract(l.metadata, ?) = ?")
-			args = append(args, path, v)
+			qb.where("json_extract(l.metadata, ?) = ?", path, v)
 		}
 	}
 
-	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
-	}
+	query, args := qb.build(baseQuery)
 
 	if params.SortAsc {
 		query += " ORDER BY l.timestamp ASC"
@@ -700,7 +681,7 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*store.LogEntry, erro
 }
 
 func (s *logStore) SearchRequestSummaries(ctx context.Context, params store.RequestSummarySearchParams) ([]store.RequestSummaryResult, error) {
-	query := `SELECT rs.id, rs.log_id, rs.controller, rs.action, rs.method, rs.path, rs.status,
+	baseQuery := `SELECT rs.id, rs.log_id, rs.controller, rs.action, rs.method, rs.path, rs.status,
 		rs.duration_ms, rs.db_time_ms, rs.view_time_ms,
 		rs.sql_count, rs.sql_total_ms, rs.sql_slowest_ms, rs.sql_slowest_name, rs.n_plus_one,
 		rs.view_count, rs.view_total_ms, rs.view_slowest_ms, rs.view_slowest_template,
@@ -713,44 +694,34 @@ func (s *logStore) SearchRequestSummaries(ctx context.Context, params store.Requ
 	FROM request_summaries rs
 	JOIN logs l ON l.id = rs.log_id`
 
-	var conditions []string
-	var args []any
+	var qb queryBuilder
 
 	if params.Start != nil {
-		conditions = append(conditions, "l.timestamp >= ?")
-		args = append(args, params.Start.UTC().Format(time.RFC3339Nano))
+		qb.where("l.timestamp >= ?", params.Start.UTC().Format(time.RFC3339Nano))
 	}
 	if params.End != nil {
-		conditions = append(conditions, "l.timestamp <= ?")
-		args = append(args, params.End.UTC().Format(time.RFC3339Nano))
+		qb.where("l.timestamp <= ?", params.End.UTC().Format(time.RFC3339Nano))
 	}
 	if params.Controller != "" {
-		conditions = append(conditions, "rs.controller LIKE ?")
-		args = append(args, "%"+params.Controller+"%")
+		qb.where("rs.controller LIKE ?", "%"+params.Controller+"%")
 	}
 	if params.Action != "" {
-		conditions = append(conditions, "rs.action = ?")
-		args = append(args, params.Action)
+		qb.where("rs.action = ?", params.Action)
 	}
 	if params.Path != "" {
-		conditions = append(conditions, "rs.path LIKE ?")
-		args = append(args, "%"+params.Path+"%")
+		qb.where("rs.path LIKE ?", "%"+params.Path+"%")
 	}
 	if params.NPlusOneOnly {
-		conditions = append(conditions, "rs.n_plus_one = 1")
+		qb.where("rs.n_plus_one = 1")
 	}
 	if params.MinDurationMs > 0 {
-		conditions = append(conditions, "rs.duration_ms >= ?")
-		args = append(args, params.MinDurationMs)
+		qb.where("rs.duration_ms >= ?", params.MinDurationMs)
 	}
 	if params.MinSQLCount > 0 {
-		conditions = append(conditions, "rs.sql_count >= ?")
-		args = append(args, params.MinSQLCount)
+		qb.where("rs.sql_count >= ?", params.MinSQLCount)
 	}
 
-	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
-	}
+	query, args := qb.build(baseQuery)
 
 	sortCol := "rs.duration_ms"
 	switch params.SortBy {

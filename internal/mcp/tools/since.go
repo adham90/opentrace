@@ -69,9 +69,21 @@ func ParseSinceOr(s string, fallback time.Duration) time.Time {
 	return t
 }
 
-// GetSinceParam extracts and parses the "since" param from args, with a default.
+// GetSinceParam extracts and parses the time-range parameter from MCP tool args,
+// returning the computed absolute time or falling back to now - defaultDuration.
+//
+// For backward compatibility with existing MCP clients, three parameter names
+// are accepted in the following priority order:
+//
+//  1. "since"      — the canonical/preferred name for new tools
+//  2. "time_range" — used by logs_search, logs_stats, logs_summary, logs_context, logs_performance
+//  3. "timeframe"  — used by overview_diagnose
+//
+// When writing new tools, always use "since" as the parameter name and call this
+// helper rather than reading the argument directly. Do NOT rename the legacy
+// parameter names — that would break MCP clients that already use them.
 func GetSinceParam(args map[string]any, defaultDuration time.Duration) time.Time {
-	// Check "since" first, then "time_range" for backward compat.
+	// Priority: "since" > "time_range" > "timeframe".
 	if v, ok := args["since"].(string); ok && v != "" {
 		return ParseSinceOr(v, defaultDuration)
 	}

@@ -195,6 +195,9 @@ func TestDeployLinkInvestigation(t *testing.T) {
 }
 
 func TestDeployPrune(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-dependent test in short mode")
+	}
 	s := setupDeployStore(t)
 	ctx := context.Background()
 
@@ -227,6 +230,9 @@ func TestDeployPrune(t *testing.T) {
 }
 
 func TestDeployGetPendingMeasurement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-dependent test in short mode")
+	}
 	s := setupDeployStore(t)
 	ctx := context.Background()
 

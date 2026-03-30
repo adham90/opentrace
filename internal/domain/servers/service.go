@@ -25,12 +25,7 @@ func (s *Service) List(ctx context.Context, params store.ListServerParams) ([]st
 	if s.servers == nil {
 		return nil, fmt.Errorf("list servers: %w", domain.ErrNotConfigured)
 	}
-	if params.Limit <= 0 {
-		params.Limit = 50
-	}
-	if params.Limit > 200 {
-		params.Limit = 200
-	}
+	params.Limit = domain.ClampLimit(params.Limit, 50, 200)
 	servers, err := s.servers.List(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("listing servers: %w", err)
@@ -76,12 +71,7 @@ func (s *Service) QueryMetrics(ctx context.Context, params store.MetricQuery) ([
 	if params.ServerID == uuid.Nil {
 		return nil, fmt.Errorf("server_id: %w", domain.ErrInvalidInput)
 	}
-	if params.Limit <= 0 {
-		params.Limit = 100
-	}
-	if params.Limit > 500 {
-		params.Limit = 500
-	}
+	params.Limit = domain.ClampLimit(params.Limit, 100, 500)
 	points, err := s.metrics.Query(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("querying metrics: %w", err)

@@ -37,12 +37,7 @@ func (s *Service) Endpoints(ctx context.Context, params store.TopEndpointParams)
 	if s.repo == nil {
 		return nil, fmt.Errorf("top endpoints: %w", domain.ErrNotConfigured)
 	}
-	if params.Limit <= 0 {
-		params.Limit = 20
-	}
-	if params.Limit > 200 {
-		params.Limit = 200
-	}
+	params.Limit = domain.ClampLimit(params.Limit, 20, 200)
 	stats, err := s.repo.TopEndpoints(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("fetching top endpoints: %w", err)

@@ -168,6 +168,9 @@ func TestCodeEntityBatchGetRisk(t *testing.T) {
 }
 
 func TestCodeEntityPrune(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-dependent test in short mode")
+	}
 	s := setupCodeEntityStore(t)
 	ctx := context.Background()
 

@@ -21,6 +21,9 @@ func makeWatchDue(t *testing.T, ws store.WatchStore, watchID string) {
 }
 
 func TestWatchScheduler_StartStop(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-dependent test in short mode")
+	}
 	watchStore, logStore := setupWatchTestDB(t)
 	metrics := NewWatchMetrics(logStore)
 	evaluator := NewWatchEvaluator(metrics, watchStore)
@@ -336,6 +339,9 @@ func TestWatchScheduler_MultipleWatches(t *testing.T) {
 }
 
 func TestWatchScheduler_ContextCancellation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-dependent test in short mode")
+	}
 	watchStore, logStore := setupWatchTestDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 

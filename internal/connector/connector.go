@@ -1,3 +1,6 @@
+// Package connector defines low-level connector interfaces and types for tool
+// registration (ConnectorType, Tool, DataSource, QueryExecutor). For high-level
+// business logic (CRUD operations on data sources), see internal/domain/connectors.
 package connector
 
 import "context"

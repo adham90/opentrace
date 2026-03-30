@@ -219,6 +219,9 @@ func TestEnqueue_EmptySlice(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTimerFlush_StoreError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-dependent test in short mode")
+	}
 	storeErr := errors.New("write error")
 	ms := &queueMockLogStore{batchErr: storeErr}
 	q := NewQueue(ms, QueueConfig{

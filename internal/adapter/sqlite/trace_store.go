@@ -31,123 +31,119 @@ func (s *traceStore) UpsertTraceStatus(ctx context.Context, traceID string, entr
 	now := time.Now().UTC().Format(time.RFC3339)
 	ts := entry.Timestamp.UTC().Format(time.RFC3339)
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Check if trace already exists
-	var existing struct {
-		spanCount   int
-		rootSpanID  string
-		services    string
-		firstSeenAt string
-		hasErrors   int
-		earliestTS  string
-		latestTS    string
-	}
-
-	err = tx.QueryRowContext(ctx,
-		`SELECT span_count, COALESCE(root_span_id, ''), services,
-		        first_seen_at, has_errors,
-		        first_seen_at, last_updated_at
-		 FROM trace_status WHERE trace_id = ?`, traceID,
-	).Scan(&existing.spanCount, &existing.rootSpanID, &existing.services,
-		&existing.firstSeenAt, &existing.hasErrors,
-		&existing.earliestTS, &existing.latestTS)
-
-	isError := isErrorLevel(entry.Level)
-	isRoot := entry.SpanID != "" && entry.ParentSpanID == ""
-
-	if err == sql.ErrNoRows {
-		// New trace -- insert
-		services := "[]"
-		if entry.Service != "" {
-			servicesJSON, _ := json.Marshal([]string{entry.Service})
-			services = string(servicesJSON)
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		// Check if trace already exists
+		var existing struct {
+			spanCount   int
+			rootSpanID  string
+			services    string
+			firstSeenAt string
+			hasErrors   int
+			earliestTS  string
+			latestTS    string
 		}
 
-		rootSpanID := sql.NullString{}
-		if isRoot {
-			rootSpanID = sql.NullString{String: entry.SpanID, Valid: true}
+		err := tx.QueryRowContext(ctx,
+			`SELECT span_count, COALESCE(root_span_id, ''), services,
+			        first_seen_at, has_errors,
+			        first_seen_at, last_updated_at
+			 FROM trace_status WHERE trace_id = ?`, traceID,
+		).Scan(&existing.spanCount, &existing.rootSpanID, &existing.services,
+			&existing.firstSeenAt, &existing.hasErrors,
+			&existing.earliestTS, &existing.latestTS)
+
+		isError := isErrorLevel(entry.Level)
+		isRoot := entry.SpanID != "" && entry.ParentSpanID == ""
+
+		if err == sql.ErrNoRows {
+			// New trace -- insert
+			services := "[]"
+			if entry.Service != "" {
+				servicesJSON, _ := json.Marshal([]string{entry.Service})
+				services = string(servicesJSON)
+			}
+
+			rootSpanID := sql.NullString{}
+			if isRoot {
+				rootSpanID = sql.NullString{String: entry.SpanID, Valid: true}
+			}
+
+			hasErrors := 0
+			if isError {
+				hasErrors = 1
+			}
+
+			_, err = tx.ExecContext(ctx,
+				`INSERT INTO trace_status (trace_id, span_count, root_span_id, services, first_seen_at, last_updated_at, duration_ms, status, has_errors)
+				 VALUES (?, 1, ?, ?, ?, ?, 0, 'partial', ?)`,
+				traceID, rootSpanID, services, ts, now, hasErrors,
+			)
+			if err != nil {
+				return fmt.Errorf("insert trace_status: %w", err)
+			}
+
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("query trace_status: %w", err)
 		}
 
-		hasErrors := 0
+		// Update existing trace
+		newSpanCount := existing.spanCount + 1
+
+		rootSpanID := existing.rootSpanID
+		if isRoot && rootSpanID == "" {
+			rootSpanID = entry.SpanID
+		}
+
+		var servicesList []string
+		if err := json.Unmarshal([]byte(existing.services), &servicesList); err != nil {
+			servicesList = []string{}
+		}
+		if entry.Service != "" && !containsString(servicesList, entry.Service) {
+			servicesList = append(servicesList, entry.Service)
+		}
+		servicesJSON, _ := json.Marshal(servicesList)
+
+		hasErrors := existing.hasErrors
 		if isError {
 			hasErrors = 1
 		}
 
-		_, err = tx.ExecContext(ctx,
-			`INSERT INTO trace_status (trace_id, span_count, root_span_id, services, first_seen_at, last_updated_at, duration_ms, status, has_errors)
-			 VALUES (?, 1, ?, ?, ?, ?, 0, 'partial', ?)`,
-			traceID, rootSpanID, services, ts, now, hasErrors,
-		)
-		if err != nil {
-			return fmt.Errorf("insert trace_status: %w", err)
+		earliestTS := existing.firstSeenAt
+		if ts < earliestTS {
+			earliestTS = ts
+		}
+		earliestTime, _ := time.Parse(time.RFC3339, earliestTS)
+		entryTime := entry.Timestamp.UTC()
+		latestTime, _ := time.Parse(time.RFC3339, existing.latestTS)
+		if entryTime.After(latestTime) {
+			latestTime = entryTime
+		}
+		durationMs := float64(latestTime.Sub(earliestTime).Milliseconds())
+
+		rootSpanNull := sql.NullString{}
+		if rootSpanID != "" {
+			rootSpanNull = sql.NullString{String: rootSpanID, Valid: true}
 		}
 
-		return tx.Commit()
-	}
-	if err != nil {
-		return fmt.Errorf("query trace_status: %w", err)
-	}
+		_, err = tx.ExecContext(ctx,
+			`UPDATE trace_status
+			 SET span_count = ?,
+			     root_span_id = ?,
+			     services = ?,
+			     last_updated_at = ?,
+			     duration_ms = ?,
+			     has_errors = ?
+			 WHERE trace_id = ?`,
+			newSpanCount, rootSpanNull, string(servicesJSON), now, durationMs, hasErrors, traceID,
+		)
+		if err != nil {
+			return fmt.Errorf("update trace_status: %w", err)
+		}
 
-	// Update existing trace
-	newSpanCount := existing.spanCount + 1
-
-	rootSpanID := existing.rootSpanID
-	if isRoot && rootSpanID == "" {
-		rootSpanID = entry.SpanID
-	}
-
-	var servicesList []string
-	if err := json.Unmarshal([]byte(existing.services), &servicesList); err != nil {
-		servicesList = []string{}
-	}
-	if entry.Service != "" && !containsString(servicesList, entry.Service) {
-		servicesList = append(servicesList, entry.Service)
-	}
-	servicesJSON, _ := json.Marshal(servicesList)
-
-	hasErrors := existing.hasErrors
-	if isError {
-		hasErrors = 1
-	}
-
-	earliestTS := existing.firstSeenAt
-	if ts < earliestTS {
-		earliestTS = ts
-	}
-	earliestTime, _ := time.Parse(time.RFC3339, earliestTS)
-	entryTime := entry.Timestamp.UTC()
-	latestTime, _ := time.Parse(time.RFC3339, existing.latestTS)
-	if entryTime.After(latestTime) {
-		latestTime = entryTime
-	}
-	durationMs := float64(latestTime.Sub(earliestTime).Milliseconds())
-
-	rootSpanNull := sql.NullString{}
-	if rootSpanID != "" {
-		rootSpanNull = sql.NullString{String: rootSpanID, Valid: true}
-	}
-
-	_, err = tx.ExecContext(ctx,
-		`UPDATE trace_status
-		 SET span_count = ?,
-		     root_span_id = ?,
-		     services = ?,
-		     last_updated_at = ?,
-		     duration_ms = ?,
-		     has_errors = ?
-		 WHERE trace_id = ?`,
-		newSpanCount, rootSpanNull, string(servicesJSON), now, durationMs, hasErrors, traceID,
-	)
-	if err != nil {
-		return fmt.Errorf("update trace_status: %w", err)
-	}
-
-	return tx.Commit()
+		return nil
+	})
 }
 
 // GetTraceStatus returns the current status of a trace.

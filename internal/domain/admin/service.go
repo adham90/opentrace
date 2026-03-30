@@ -66,12 +66,7 @@ func (s *Service) Audit(ctx context.Context, limit int) ([]store.AuditEntry, err
 	if s.audit == nil {
 		return nil, fmt.Errorf("admin audit: %w", domain.ErrNotConfigured)
 	}
-	if limit <= 0 {
-		limit = 50
-	}
-	if limit > 500 {
-		limit = 500
-	}
+	limit = domain.ClampLimit(limit, 50, 500)
 	return s.audit.Recent(ctx, limit)
 }
 

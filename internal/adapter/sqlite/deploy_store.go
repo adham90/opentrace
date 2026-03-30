@@ -123,45 +123,41 @@ func (s *deployStore) MeasureImpact(ctx context.Context, id int64, impact store.
 
 // LinkInvestigation uses a transaction for the read-modify-write to prevent concurrent data loss.
 func (s *deployStore) LinkInvestigation(ctx context.Context, id int64, sessionID string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("linking investigation to deploy: %w", err)
-	}
-	defer tx.Rollback()
-
-	var linkedJSON string
-	err = tx.QueryRowContext(ctx,
-		`SELECT linked_investigation_ids_json FROM deploys WHERE id = ?`, id,
-	).Scan(&linkedJSON)
-	if err != nil {
-		return fmt.Errorf("reading linked investigations: %w", err)
-	}
-
-	var linked []string
-	if err := json.Unmarshal([]byte(linkedJSON), &linked); err != nil {
-		linked = nil
-	}
-
-	// Dedup
-	for _, existing := range linked {
-		if existing == sessionID {
-			return nil // already linked
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		var linkedJSON string
+		err := tx.QueryRowContext(ctx,
+			`SELECT linked_investigation_ids_json FROM deploys WHERE id = ?`, id,
+		).Scan(&linkedJSON)
+		if err != nil {
+			return fmt.Errorf("reading linked investigations: %w", err)
 		}
-	}
-	linked = append(linked, sessionID)
 
-	newJSON, err := json.Marshal(linked)
-	if err != nil {
-		return fmt.Errorf("marshaling linked investigations: %w", err)
-	}
-	_, err = tx.ExecContext(ctx,
-		`UPDATE deploys SET linked_investigation_ids_json = ? WHERE id = ?`,
-		string(newJSON), id,
-	)
-	if err != nil {
-		return fmt.Errorf("linking investigation to deploy: %w", err)
-	}
-	return tx.Commit()
+		var linked []string
+		if err := json.Unmarshal([]byte(linkedJSON), &linked); err != nil {
+			linked = nil
+		}
+
+		// Dedup
+		for _, existing := range linked {
+			if existing == sessionID {
+				return nil // already linked
+			}
+		}
+		linked = append(linked, sessionID)
+
+		newJSON, err := json.Marshal(linked)
+		if err != nil {
+			return fmt.Errorf("marshaling linked investigations: %w", err)
+		}
+		_, err = tx.ExecContext(ctx,
+			`UPDATE deploys SET linked_investigation_ids_json = ? WHERE id = ?`,
+			string(newJSON), id,
+		)
+		if err != nil {
+			return fmt.Errorf("linking investigation to deploy: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *deployStore) GetPendingMeasurement(ctx context.Context, olderThan time.Duration) ([]store.Deploy, error) {

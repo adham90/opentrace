@@ -1,3 +1,6 @@
+// Package healthcheck provides the runtime health check scheduler, checker, and
+// alerting logic. For the domain service layer (CRUD, business rules), see
+// internal/domain/healthchecks.
 package healthcheck
 
 import (

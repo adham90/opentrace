@@ -48,39 +48,34 @@ func (s *metricStore) BatchInsert(ctx context.Context, serverID uuid.UUID, ts ti
 	}
 
 	// Use a transaction with prepared statements for best performance with SQLite.
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO metrics (server_id, timestamp, metric_name, metric_value, unit, labels, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return 0, fmt.Errorf("prepare insert: %w", err)
-	}
-	defer stmt.Close()
-
-	tsStr := tsUTC.Format(time.RFC3339)
-	nowStr := now.Format(time.RFC3339)
-
-	for _, sample := range samples {
-		labelsJSON := "{}"
-		if sample.Labels != nil {
-			labelsJSON = marshalMetadataJSON(toAnyMap(sample.Labels))
-		}
-		_, err = stmt.ExecContext(ctx,
-			serverID.String(), tsStr, sample.Name, sample.Value,
-			sample.Unit, labelsJSON, nowStr,
-		)
+	if err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		stmt, err := tx.PrepareContext(ctx,
+			`INSERT INTO metrics (server_id, timestamp, metric_name, metric_value, unit, labels, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`)
 		if err != nil {
-			return 0, fmt.Errorf("inserting metric %s: %w", sample.Name, err)
+			return fmt.Errorf("prepare insert: %w", err)
 		}
-	}
+		defer stmt.Close()
 
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit batch insert: %w", err)
+		tsStr := tsUTC.Format(time.RFC3339)
+		nowStr := now.Format(time.RFC3339)
+
+		for _, sample := range samples {
+			labelsJSON := "{}"
+			if sample.Labels != nil {
+				labelsJSON = marshalMetadataJSON(toAnyMap(sample.Labels))
+			}
+			_, err = stmt.ExecContext(ctx,
+				serverID.String(), tsStr, sample.Name, sample.Value,
+				sample.Unit, labelsJSON, nowStr,
+			)
+			if err != nil {
+				return fmt.Errorf("inserting metric %s: %w", sample.Name, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return 0, err
 	}
 
 	return len(samples), nil

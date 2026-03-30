@@ -1,3 +1,6 @@
+// Package healthchecks provides the domain service for health check management
+// (CRUD operations, uptime queries). For runtime scheduling and alerting, see
+// internal/healthcheck.
 package healthchecks
 
 import (
@@ -24,12 +27,7 @@ func (s *Service) List(ctx context.Context, params store.ListHealthCheckParams) 
 	if s.repo == nil {
 		return nil, fmt.Errorf("list healthchecks: %w", domain.ErrNotConfigured)
 	}
-	if params.Limit <= 0 {
-		params.Limit = 50
-	}
-	if params.Limit > 200 {
-		params.Limit = 200
-	}
+	params.Limit = domain.ClampLimit(params.Limit, 50, 200)
 	checks, err := s.repo.List(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("listing healthchecks: %w", err)

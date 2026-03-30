@@ -220,7 +220,7 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 	for _, rs := range summaries {
 		ep := map[string]any{
 			"path":        rs.Path,
-			"duration_ms": logsRound2(rs.DurationMs),
+			"duration_ms": round2(rs.DurationMs),
 		}
 		if rs.Method != "" {
 			ep["method"] = rs.Method
@@ -245,7 +245,7 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 		"time_range":     map[string]any{"start": since.Format(time.RFC3339), "end": now.Format(time.RFC3339), "window": timeRange},
 		"total_logs":     totalLogs,
 		"error_count":    errorCount,
-		"error_rate_pct": logsRound2(errorRatePct),
+		"error_rate_pct": round2(errorRatePct),
 		"by_level":       lc.ByLevel,
 	}
 	if len(activeCommits) > 0 {

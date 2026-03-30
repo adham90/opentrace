@@ -311,25 +311,25 @@ func TestDatabasePath_Various(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// parseTrustedProxies
+// parseCommaSeparated
 // ---------------------------------------------------------------------------
 
-func TestParseTrustedProxies_Empty(t *testing.T) {
-	result := parseTrustedProxies("")
+func TestParseCommaSeparated_Empty(t *testing.T) {
+	result := parseCommaSeparated("")
 	if result != nil {
-		t.Errorf("parseTrustedProxies(\"\") = %v, want nil", result)
+		t.Errorf("parseCommaSeparated(\"\") = %v, want nil", result)
 	}
 }
 
-func TestParseTrustedProxies_SingleValue(t *testing.T) {
-	result := parseTrustedProxies("10.0.0.1")
+func TestParseCommaSeparated_SingleValue(t *testing.T) {
+	result := parseCommaSeparated("10.0.0.1")
 	if len(result) != 1 || result[0] != "10.0.0.1" {
-		t.Errorf("parseTrustedProxies(\"10.0.0.1\") = %v, want [10.0.0.1]", result)
+		t.Errorf("parseCommaSeparated(\"10.0.0.1\") = %v, want [10.0.0.1]", result)
 	}
 }
 
-func TestParseTrustedProxies_MultipleValues(t *testing.T) {
-	result := parseTrustedProxies("10.0.0.1,10.0.0.2,10.0.0.3")
+func TestParseCommaSeparated_MultipleValues(t *testing.T) {
+	result := parseCommaSeparated("10.0.0.1,10.0.0.2,10.0.0.3")
 	if len(result) != 3 {
 		t.Fatalf("got %d elements, want 3", len(result))
 	}
@@ -341,8 +341,8 @@ func TestParseTrustedProxies_MultipleValues(t *testing.T) {
 	}
 }
 
-func TestParseTrustedProxies_Whitespace(t *testing.T) {
-	result := parseTrustedProxies("  10.0.0.1 , 10.0.0.2 ,10.0.0.3  ")
+func TestParseCommaSeparated_Whitespace(t *testing.T) {
+	result := parseCommaSeparated("  10.0.0.1 , 10.0.0.2 ,10.0.0.3  ")
 	if len(result) != 3 {
 		t.Fatalf("got %d elements, want 3", len(result))
 	}
@@ -353,8 +353,8 @@ func TestParseTrustedProxies_Whitespace(t *testing.T) {
 	}
 }
 
-func TestParseTrustedProxies_TrailingComma(t *testing.T) {
-	result := parseTrustedProxies("10.0.0.1,")
+func TestParseCommaSeparated_TrailingComma(t *testing.T) {
+	result := parseCommaSeparated("10.0.0.1,")
 	if len(result) != 1 {
 		t.Fatalf("got %d elements, want 1 (trailing comma empty segment filtered)", len(result))
 	}
@@ -363,33 +363,15 @@ func TestParseTrustedProxies_TrailingComma(t *testing.T) {
 	}
 }
 
-func TestParseTrustedProxies_OnlyCommas(t *testing.T) {
-	result := parseTrustedProxies(",,,")
+func TestParseCommaSeparated_OnlyCommas(t *testing.T) {
+	result := parseCommaSeparated(",,,")
 	if len(result) != 0 {
-		t.Errorf("parseTrustedProxies(\",,,\") = %v, want empty slice", result)
+		t.Errorf("parseCommaSeparated(\",,,\") = %v, want empty slice", result)
 	}
 }
 
-// ---------------------------------------------------------------------------
-// parseCORSOrigins
-// ---------------------------------------------------------------------------
-
-func TestParseCORSOrigins_Empty(t *testing.T) {
-	result := parseCORSOrigins("")
-	if result != nil {
-		t.Errorf("parseCORSOrigins(\"\") = %v, want nil", result)
-	}
-}
-
-func TestParseCORSOrigins_SingleValue(t *testing.T) {
-	result := parseCORSOrigins("http://localhost:3000")
-	if len(result) != 1 || result[0] != "http://localhost:3000" {
-		t.Errorf("parseCORSOrigins single = %v", result)
-	}
-}
-
-func TestParseCORSOrigins_MultipleValues(t *testing.T) {
-	result := parseCORSOrigins("http://localhost,https://example.com,https://app.example.com")
+func TestParseCommaSeparated_CORSOrigins(t *testing.T) {
+	result := parseCommaSeparated("http://localhost,https://example.com,https://app.example.com")
 	if len(result) != 3 {
 		t.Fatalf("got %d elements, want 3", len(result))
 	}
@@ -398,33 +380,6 @@ func TestParseCORSOrigins_MultipleValues(t *testing.T) {
 		if result[i] != w {
 			t.Errorf("result[%d] = %q, want %q", i, result[i], w)
 		}
-	}
-}
-
-func TestParseCORSOrigins_Whitespace(t *testing.T) {
-	result := parseCORSOrigins(" http://a.com , http://b.com ")
-	if len(result) != 2 {
-		t.Fatalf("got %d elements, want 2", len(result))
-	}
-	if result[0] != "http://a.com" || result[1] != "http://b.com" {
-		t.Errorf("values not trimmed: %v", result)
-	}
-}
-
-func TestParseCORSOrigins_TrailingComma(t *testing.T) {
-	result := parseCORSOrigins("http://localhost,")
-	if len(result) != 1 {
-		t.Fatalf("got %d elements, want 1", len(result))
-	}
-	if result[0] != "http://localhost" {
-		t.Errorf("result[0] = %q", result[0])
-	}
-}
-
-func TestParseCORSOrigins_OnlyCommas(t *testing.T) {
-	result := parseCORSOrigins(",,")
-	if len(result) != 0 {
-		t.Errorf("parseCORSOrigins(\",,\") = %v, want empty slice", result)
 	}
 }
 

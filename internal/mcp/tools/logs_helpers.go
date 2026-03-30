@@ -90,21 +90,6 @@ func logsNormalizeMessage(msg string) string {
 	return msg
 }
 
-func logsToInt(v any) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case float64:
-		return int(n)
-	default:
-		return 0
-	}
-}
-
-func logsRound2(f float64) float64 {
-	return float64(int(f*100)) / 100
-}
-
 func logsResolvePeriod(period string, now time.Time) (time.Time, time.Time, error) {
 	switch period {
 	case "last_1h":
@@ -143,7 +128,7 @@ func logsCalcChange(baseline, current int) (float64, string) {
 		return 100, "new"
 	}
 	pct := float64(current-baseline) / float64(baseline) * 100
-	pct = logsRound2(pct)
+	pct = round2(pct)
 	if pct > 0 {
 		return pct, "increase"
 	} else if pct < 0 {

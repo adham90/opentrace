@@ -11,17 +11,25 @@ import (
 )
 
 type Config struct {
-	DataDir    string
+	// DataDir is the directory for SQLite database and backups. Defaults to ~/.opentrace.
+	DataDir string
+	// ListenAddr is the address the HTTP server binds to. Used by 'serve' command.
 	ListenAddr string
-	APIKey     string
+	// APIKey is the pre-shared API key for authenticating API requests.
+	APIKey string
 
-	MaxQueryRows       int
+	// MaxQueryRows is the maximum rows returned by database queries. Default 500.
+	MaxQueryRows int
+	// StatementTimeoutMS is the SQLite statement timeout in milliseconds. Default 5000.
 	StatementTimeoutMS int
 
+	// TrustedProxies lists IP addresses trusted to set X-Forwarded-For headers.
 	TrustedProxies []string
 
+	// CORSAllowedOrigins lists origins allowed for CORS requests.
 	CORSAllowedOrigins []string
 
+	// DevMode enables development mode (verbose logging, relaxed security).
 	DevMode bool
 }
 
@@ -91,8 +99,8 @@ func Load() (*Config, error) {
 		APIKey:             os.Getenv("OPENTRACE_API_KEY"),
 		MaxQueryRows:       maxQueryRows,
 		StatementTimeoutMS: stmtTimeout,
-		TrustedProxies:     parseTrustedProxies(os.Getenv("OPENTRACE_TRUSTED_PROXIES")),
-		CORSAllowedOrigins: parseCORSOrigins(os.Getenv("OPENTRACE_CORS_ORIGINS")),
+		TrustedProxies:     parseCommaSeparated(os.Getenv("OPENTRACE_TRUSTED_PROXIES")),
+		CORSAllowedOrigins: parseCommaSeparated(os.Getenv("OPENTRACE_CORS_ORIGINS")),
 		DevMode:            os.Getenv("OPENTRACE_DEV") == "true",
 	}, nil
 }
@@ -109,22 +117,8 @@ func envOrDefault(key, defaultVal string) string {
 	return defaultVal
 }
 
-func parseTrustedProxies(val string) []string {
-	if val == "" {
-		return nil
-	}
-	parts := strings.Split(val, ",")
-	var result []string
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			result = append(result, p)
-		}
-	}
-	return result
-}
-
-func parseCORSOrigins(val string) []string {
+// parseCommaSeparated splits a comma-delimited string into trimmed, non-empty parts.
+func parseCommaSeparated(val string) []string {
 	if val == "" {
 		return nil
 	}

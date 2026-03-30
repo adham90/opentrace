@@ -10,13 +10,23 @@ import (
 
 	"github.com/adham90/opentrace/internal/jobs"
 	"github.com/adham90/opentrace/pkg/server"
+	"github.com/adham90/opentrace/pkg/store"
 	"golang.org/x/sync/errgroup"
 )
 
 // registerBackgroundJobs registers all background job handlers with the worker.
 func registerBackgroundJobs(w *jobs.Worker, deps *server.Deps) {
-	w.Register("cleanup:sessions", func(ctx context.Context, _ json.RawMessage) error {
-		n, err := deps.SessionStore.DeleteExpired(ctx)
+	w.Register("cleanup:sessions", handleSessionCleanup(deps.SessionStore))
+	w.Register("cleanup:stale_servers", handleStaleServerCleanup(deps.ServerStore))
+	w.Register("cleanup:stale_traces", handleStaleTraceCleanup(deps.TraceStore))
+	w.Register("retention:prune", retentionPruneHandler(deps))
+	w.Register("aggregate:all", aggregationHandler(deps))
+}
+
+// handleSessionCleanup returns a job handler that deletes expired browser sessions.
+func handleSessionCleanup(sessionStore store.SessionStore) jobs.HandlerFunc {
+	return func(ctx context.Context, _ json.RawMessage) error {
+		n, err := sessionStore.DeleteExpired(ctx)
 		if err != nil {
 			return fmt.Errorf("session cleanup: %w", err)
 		}
@@ -24,10 +34,14 @@ func registerBackgroundJobs(w *jobs.Worker, deps *server.Deps) {
 			slog.Info("cleaned expired sessions", "count", n)
 		}
 		return nil
-	})
+	}
+}
 
-	w.Register("cleanup:stale_servers", func(ctx context.Context, _ json.RawMessage) error {
-		n, err := deps.ServerStore.MarkStaleOffline(ctx, 2*time.Minute)
+// handleStaleServerCleanup returns a job handler that marks servers offline
+// when they haven't sent a heartbeat within the threshold.
+func handleStaleServerCleanup(serverStore store.ServerStore) jobs.HandlerFunc {
+	return func(ctx context.Context, _ json.RawMessage) error {
+		n, err := serverStore.MarkStaleOffline(ctx, 2*time.Minute)
 		if err != nil {
 			return fmt.Errorf("stale server cleanup: %w", err)
 		}
@@ -35,13 +49,17 @@ func registerBackgroundJobs(w *jobs.Worker, deps *server.Deps) {
 			slog.Info("marked stale servers offline", "count", n)
 		}
 		return nil
-	})
+	}
+}
 
-	w.Register("cleanup:stale_traces", func(ctx context.Context, _ json.RawMessage) error {
-		if deps.TraceStore == nil {
+// handleStaleTraceCleanup returns a job handler that marks incomplete traces
+// as timed out when no new spans arrive within the threshold.
+func handleStaleTraceCleanup(traceStore store.TraceStore) jobs.HandlerFunc {
+	return func(ctx context.Context, _ json.RawMessage) error {
+		if traceStore == nil {
 			return nil
 		}
-		n, err := deps.TraceStore.MarkStaleTraces(ctx, 30*time.Second)
+		n, err := traceStore.MarkStaleTraces(ctx, 30*time.Second)
 		if err != nil {
 			return fmt.Errorf("stale trace cleanup: %w", err)
 		}
@@ -49,11 +67,7 @@ func registerBackgroundJobs(w *jobs.Worker, deps *server.Deps) {
 			slog.Info("marked stale traces as timeout", "count", n)
 		}
 		return nil
-	})
-
-	w.Register("retention:prune", retentionPruneHandler(deps))
-
-	w.Register("aggregate:all", aggregationHandler(deps))
+	}
 }
 
 // retentionPruneHandler returns a job handler that prunes all stores according
@@ -195,5 +209,68 @@ func aggregationHandler(deps *server.Deps) jobs.HandlerFunc {
 			})
 		}
 		return g.Wait()
+	}
+}
+
+// measureDeployImpacts finds deploys older than 15 minutes that haven't been measured yet,
+// computes before/after error rates and durations using the analytics store, and updates
+// each deploy with its impact metrics.
+func measureDeployImpacts(ctx context.Context, ds store.DeployStore, as store.AnalyticsStore) {
+	pending, err := ds.GetPendingMeasurement(ctx, 15*time.Minute)
+	if err != nil {
+		slog.Warn("failed to get pending deploy measurements", "error", err)
+		return
+	}
+	for _, d := range pending {
+		window := 15 * time.Minute
+
+		preSummary, err := as.TrafficSummary(ctx, store.AnalyticsParams{
+			Service: d.Service,
+			Since:   d.DeployedAt.Add(-window),
+			Until:   d.DeployedAt,
+		})
+		if err != nil {
+			slog.Warn("deploy impact: pre-deploy traffic summary failed", "deploy_id", d.ID, "error", err)
+			continue
+		}
+
+		postSummary, err := as.TrafficSummary(ctx, store.AnalyticsParams{
+			Service: d.Service,
+			Since:   d.DeployedAt,
+			Until:   d.DeployedAt.Add(window),
+		})
+		if err != nil {
+			slog.Warn("deploy impact: post-deploy traffic summary failed", "deploy_id", d.ID, "error", err)
+			continue
+		}
+
+		impact := store.DeployImpact{
+			PreErrorRate:      preSummary.ErrorRate,
+			PostErrorRate:     postSummary.ErrorRate,
+			PreAvgDurationMs:  preSummary.AvgDurationMs,
+			PostAvgDurationMs: postSummary.AvgDurationMs,
+		}
+
+		if preSummary.ErrorRate > 0 {
+			impact.ErrorRateChangePct = ((postSummary.ErrorRate - preSummary.ErrorRate) / preSummary.ErrorRate) * 100
+		}
+		if preSummary.AvgDurationMs > 0 {
+			impact.DurationChangePct = ((postSummary.AvgDurationMs - preSummary.AvgDurationMs) / preSummary.AvgDurationMs) * 100
+		}
+
+		// Mark as incident if error rate increased >50% or response time >2x
+		impact.IsIncident = impact.ErrorRateChangePct > 50 || impact.DurationChangePct > 100
+
+		if err := ds.MeasureImpact(ctx, d.ID, impact); err != nil {
+			slog.Warn("deploy impact: failed to record measurement", "deploy_id", d.ID, "error", err)
+		} else {
+			status := "measured"
+			if impact.IsIncident {
+				status = "incident"
+			}
+			slog.Info("measured deploy impact", "deploy_id", d.ID, "status", status,
+				"error_rate_change_pct", impact.ErrorRateChangePct,
+				"duration_change_pct", impact.DurationChangePct)
+		}
 	}
 }

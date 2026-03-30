@@ -3,6 +3,12 @@ package tools
 // compat.go provides helper functions that bridge common patterns from the
 // old mark3labs/mcp-go SDK to the new modelcontextprotocol/go-sdk. This makes
 // the migration largely mechanical across tool files.
+//
+// NOTE: These helpers duplicate the ones in internal/mcp/compat.go.
+// This is intentional — the parent mcp package imports this tools package
+// (via server_factories.go and server_tools.go), so importing mcp from here
+// would create a circular dependency. Both copies import the SDK types
+// directly and must be kept in sync.
 
 import (
 	"encoding/json"

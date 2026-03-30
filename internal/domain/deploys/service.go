@@ -23,12 +23,7 @@ func (s *Service) List(ctx context.Context, service string, limit int) ([]store.
 	if s.repo == nil {
 		return nil, fmt.Errorf("list deploys: %w", domain.ErrNotConfigured)
 	}
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > 200 {
-		limit = 200
-	}
+	limit = domain.ClampLimit(limit, 20, 200)
 	deploys, err := s.repo.GetRecent(ctx, service, limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing deploys: %w", err)

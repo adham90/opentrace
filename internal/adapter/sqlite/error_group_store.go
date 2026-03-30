@@ -125,20 +125,16 @@ func (s *errorGroupStore) Get(ctx context.Context, fingerprint string) (*store.E
 }
 
 func (s *errorGroupStore) List(ctx context.Context, params store.ListErrorGroupParams) ([]store.ErrorGroup, error) {
-	var conditions []string
-	var args []any
+	var qb queryBuilder
 
 	if params.Status != "" {
-		conditions = append(conditions, "status = ?")
-		args = append(args, string(params.Status))
+		qb.where("status = ?", string(params.Status))
 	}
 	if params.Service != "" {
-		conditions = append(conditions, "service = ?")
-		args = append(args, params.Service)
+		qb.where("service = ?", params.Service)
 	}
 	if params.Environment != "" {
-		conditions = append(conditions, "environment = ?")
-		args = append(args, params.Environment)
+		qb.where("environment = ?", params.Environment)
 	}
 
 	orderBy := "last_seen_at DESC"
@@ -154,15 +150,13 @@ func (s *errorGroupStore) List(ctx context.Context, params store.ListErrorGroupP
 		limit = 50
 	}
 
-	query := `SELECT fingerprint, service, environment, exception_class, message,
+	baseQuery := `SELECT fingerprint, service, environment, exception_class, message,
 		source_file, source_line, status, first_seen_at, last_seen_at,
 		occurrence_count, last_log_id, reopened_count, resolved_at, ignored_at,
 		unique_users, impact_score, COALESCE(common_context, '{}')
 		FROM error_groups`
 
-	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
-	}
+	query, args := qb.build(baseQuery)
 	query += " ORDER BY " + orderBy
 	query += " LIMIT ? OFFSET ?"
 	args = append(args, limit, params.Offset)

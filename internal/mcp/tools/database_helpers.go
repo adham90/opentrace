@@ -28,6 +28,22 @@ func getQueryExecutor(registry *connector.Registry) (connector.QueryExecutor, *C
 // Utility functions (local to tools package)
 // ---------------------------------------------------------------------------
 
+// toInt converts an any value to int, returning 0 if conversion fails.
+func toInt(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case nil:
+		return 0
+	default:
+		return 0
+	}
+}
+
 // toInt64 converts an any value to int64, returning 0 if conversion fails.
 func toInt64(v any) int64 {
 	switch n := v.(type) {

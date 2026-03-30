@@ -1,4 +1,5 @@
-// Package notify provides notification delivery channels.
+// Package notify provides concrete notification delivery adapters (currently
+// Telegram). It implements the Sender interface defined in internal/mcp/notifications.
 // Channels are configured at runtime via the settings store —
 // no environment variables or restarts needed.
 package notify

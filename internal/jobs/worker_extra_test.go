@@ -147,6 +147,9 @@ func TestRetry_PendingJob_NoOp(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWorkerHandlerError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-dependent test in short mode")
+	}
 	db := setupTestDB(t)
 	q := NewQueue(db)
 	ctx := context.Background()
@@ -170,19 +173,13 @@ func TestWorkerHandlerError(t *testing.T) {
 	for {
 		select {
 		case <-deadline:
-			t.Fatal("timed out waiting for handler to be called")
+			t.Fatal("timed out waiting for handler error to be recorded")
 		default:
-			if called.Load() {
-				// Give the worker time to record the failure
-				time.Sleep(50 * time.Millisecond)
-
-				job, err := q.getByID(ctx, 1)
-				if err != nil {
-					t.Fatalf("getByID: %v", err)
-				}
-				if job.Attempts == 0 {
-					t.Error("expected attempts > 0 after handler error")
-				}
+			job, err := q.getByID(ctx, 1)
+			if err != nil {
+				t.Fatalf("getByID: %v", err)
+			}
+			if job.Attempts > 0 {
 				if job.LastError != "handler exploded" {
 					t.Errorf("last_error = %q, want %q", job.LastError, "handler exploded")
 				}
@@ -198,6 +195,9 @@ func TestWorkerHandlerError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWorkerStartStop_NoJobs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-dependent test in short mode")
+	}
 	db := setupTestDB(t)
 	q := NewQueue(db)
 	ctx := context.Background()
@@ -208,8 +208,21 @@ func TestWorkerStartStop_NoJobs(t *testing.T) {
 	})
 
 	w.Start(ctx)
-	time.Sleep(150 * time.Millisecond) // let a few polls pass
-	w.Stop()                           // should not hang or panic
+
+	// Let a few polls pass, then stop. Use a deadline to guard against hangs.
+	done := make(chan struct{})
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		w.Stop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// OK — should not hang or panic
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for worker to stop")
+	}
 }
 
 func TestWorkerStop_NilCancel(t *testing.T) {
