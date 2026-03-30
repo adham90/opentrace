@@ -43,7 +43,7 @@ func (m *WatchSessionManager) CheckAutoResolve(ctx context.Context, w *store.Wat
 		return err
 	}
 
-	baselineValue := getBaselineMetricValue(w)
+	baselineValue := baselineMetricValue(w)
 	if baselineValue == 0 {
 		// Can't compare to zero baseline
 		return nil
@@ -71,26 +71,3 @@ func (m *WatchSessionManager) Cleanup(ctx context.Context) {
 	}
 }
 
-func getBaselineMetricValue(w *store.Watch) float64 {
-	if w.BaselineJSON == nil {
-		return 0
-	}
-	switch w.Metric {
-	case store.WatchMetricErrorRate:
-		return w.BaselineJSON.ErrorRate
-	case store.WatchMetricResponseTime:
-		return w.BaselineJSON.AvgResponseMs
-	case store.WatchMetricP95Response:
-		return w.BaselineJSON.P95ResponseMs
-	case store.WatchMetricLogCount:
-		return float64(w.BaselineJSON.LogCount)
-	case store.WatchMetricErrorCount:
-		return float64(w.BaselineJSON.ErrorCount)
-	case store.WatchMetricSQLCount:
-		return w.BaselineJSON.SQLCount
-	case store.WatchMetricCacheHitRate:
-		return w.BaselineJSON.CacheHitRate
-	default:
-		return 0
-	}
-}

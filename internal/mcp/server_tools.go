@@ -6,6 +6,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/adham90/opentrace/internal/domain/logs"
 	"github.com/adham90/opentrace/internal/mcp/tools"
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -83,8 +84,10 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 				}
 			}
 		}
+		logService := logs.NewService(deps.LogStore)
 		gw.Register("logs",
 			wrapHandler(deps, "logs", tools.LogsHandler(tools.LogsDeps{
+				Logs:                 logService,
 				LogStore:             deps.LogStore,
 				ErrorGroupStore:      deps.ErrorGroupStore,
 				TraceSessionRecorder: traceRecorder,

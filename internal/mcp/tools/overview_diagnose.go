@@ -156,7 +156,7 @@ func collectLogVolume(ctx context.Context, d OverviewDeps, service string, since
 	for _, c := range byLevel {
 		total += c
 	}
-	errorCount := byLevel["ERROR"] + byLevel["FATAL"]
+	errorCount := byLevel["error"] + byLevel["fatal"]
 
 	var errorRate float64
 	if total > 0 {

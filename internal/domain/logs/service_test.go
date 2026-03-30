@@ -155,7 +155,7 @@ func TestCountByLevel_NilRepo(t *testing.T) {
 }
 
 func TestCountByLevel_WithData(t *testing.T) {
-	f := &fake{levels: map[string]int{"INFO": 100, "ERROR": 10, "FATAL": 2}}
+	f := &fake{levels: map[string]int{"info": 100, "error": 10, "fatal": 2}}
 	svc := NewService(f)
 	counts, err := svc.CountByLevel(context.Background(), store.LogCountParams{})
 	if err != nil {

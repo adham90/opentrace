@@ -13,6 +13,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func LogsContext(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
+	InitLogsDeps(&deps)
 	logID, ok := args["log_id"].(float64)
 	if !ok || logID <= 0 {
 		return NewToolResultError("log_id is required (positive integer)"), nil
@@ -35,7 +36,7 @@ func LogsContext(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 	sameService := ArgBool(args, "same_service")
 
 	// Fetch the anchor log entry.
-	anchor, err := deps.LogStore.GetByID(ctx, int64(logID))
+	anchor, err := deps.Logs.GetByID(ctx, int64(logID))
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("log entry %d not found: %v", int64(logID), err)), nil
 	}
@@ -49,10 +50,11 @@ func LogsContext(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 	if sameService && anchor.Service != "" {
 		beforeParams.Service = anchor.Service
 	}
-	beforeEntries, err := deps.LogStore.Search(ctx, beforeParams)
+	beforeResult, err := deps.Logs.Search(ctx, beforeParams)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to fetch context before: %v", err)), nil
 	}
+	beforeEntries := beforeResult.Entries
 
 	// Filter out the anchor entry itself from before results.
 	filtered := make([]store.LogEntry, 0, len(beforeEntries))
@@ -77,10 +79,11 @@ func LogsContext(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 	if sameService && anchor.Service != "" {
 		afterParams.Service = anchor.Service
 	}
-	afterEntries, err := deps.LogStore.Search(ctx, afterParams)
+	afterResult, err := deps.Logs.Search(ctx, afterParams)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to fetch context after: %v", err)), nil
 	}
+	afterEntries := afterResult.Entries
 
 	// Filter out the anchor entry itself.
 	filteredAfter := make([]store.LogEntry, 0, len(afterEntries))
@@ -158,6 +161,7 @@ func LogsContext(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 // ---------------------------------------------------------------------------
 
 func LogsAttributes(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
+	InitLogsDeps(&deps)
 	field := ArgString(args, "field")
 	if field == "" {
 		return NewToolResultError("field is required (service, level, event_type, environment, commit_hash, request_id, exception_class, error_fingerprint, source_file, or metadata_key)"), nil
@@ -177,7 +181,7 @@ func LogsAttributes(ctx context.Context, args map[string]any, deps LogsDeps) (*C
 	params.Service = ArgString(args, "service")
 
 	if field == "metadata_key" {
-		keys, err := deps.LogStore.MetadataKeys(ctx, params)
+		keys, err := deps.Logs.MetadataKeys(ctx, params)
 		if err != nil {
 			return NewToolResultError(fmt.Sprintf("failed to list metadata keys: %v", err)), nil
 		}
@@ -192,7 +196,7 @@ func LogsAttributes(ctx context.Context, args map[string]any, deps LogsDeps) (*C
 		})
 	}
 
-	values, err := deps.LogStore.DistinctValues(ctx, field, params)
+	values, err := deps.Logs.Attributes(ctx, field, params)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to list values: %v", err)), nil
 	}

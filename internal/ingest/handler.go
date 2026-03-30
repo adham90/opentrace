@@ -159,12 +159,10 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Validate required fields
+	// Validate required fields and normalize levels to lowercase
 	validLevels := map[string]bool{
 		"debug": true, "info": true, "warn": true, "warning": true,
 		"error": true, "fatal": true,
-		"DEBUG": true, "INFO": true, "WARN": true, "WARNING": true,
-		"ERROR": true, "FATAL": true,
 	}
 	for i, e := range entries {
 		var missing []string
@@ -181,7 +179,8 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 			server.WriteError(w, http.StatusBadRequest, fmt.Sprintf("entry %d: missing required field(s): %s", i, strings.Join(missing, ", ")))
 			return
 		}
-		if !validLevels[e.Level] {
+		entries[i].Level = strings.ToLower(e.Level)
+		if !validLevels[entries[i].Level] {
 			server.WriteError(w, http.StatusBadRequest, fmt.Sprintf("entry %d: 'level' must be one of: debug, info, warn, error, fatal (got %q)", i, e.Level))
 			return
 		}

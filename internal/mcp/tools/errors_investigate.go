@@ -39,7 +39,7 @@ func ErrorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 		// Pick the first error-level entry, or the last entry.
 		picked := &traceEntries[len(traceEntries)-1]
 		for i := range traceEntries {
-			if traceEntries[i].Level == "ERROR" || traceEntries[i].Level == "FATAL" {
+			if traceEntries[i].Level == "error" || traceEntries[i].Level == "fatal" {
 				picked = &traceEntries[i]
 				break
 			}

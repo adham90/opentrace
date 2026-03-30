@@ -15,6 +15,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func LogsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
+	InitLogsDeps(&deps)
 	traceID := ArgString(args, "trace_id")
 	if traceID == "" {
 		return NewToolResultError("trace_id is required"), nil
@@ -23,13 +24,14 @@ func LogsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallTo
 	includeContext := ArgBool(args, "include_context")
 
 	// Fetch all log entries for this trace.
-	entries, err := deps.LogStore.Search(ctx, store.LogSearchParams{
+	traceResult, err := deps.Logs.Search(ctx, store.LogSearchParams{
 		TraceID: traceID,
 		Limit:   1000,
 	})
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to search logs: %v", err)), nil
 	}
+	entries := traceResult.Entries
 
 	// Sort by timestamp ascending.
 	sort.Slice(entries, func(i, j int) bool {
@@ -163,7 +165,7 @@ func LogsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallTo
 		for svc, stats := range svcMap {
 			ctxStart := stats.firstTime.Add(-2 * time.Second)
 			ctxEnd := stats.lastTime.Add(2 * time.Second)
-			ctxLogs, err := deps.LogStore.Search(ctx, store.LogSearchParams{
+			ctxResult, err := deps.Logs.Search(ctx, store.LogSearchParams{
 				Service: svc,
 				Start:   &ctxStart,
 				End:     &ctxEnd,
@@ -172,7 +174,7 @@ func LogsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallTo
 			if err != nil {
 				continue
 			}
-			for _, cl := range ctxLogs {
+			for _, cl := range ctxResult.Entries {
 				if cl.TraceID == traceID {
 					continue // skip entries already in the trace
 				}

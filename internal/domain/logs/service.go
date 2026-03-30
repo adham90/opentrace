@@ -85,7 +85,7 @@ func (s *Service) CountByLevel(ctx context.Context, params store.LogCountParams)
 	errorCount := 0
 	for level, count := range counts {
 		total += count
-		if level == "ERROR" || level == "error" || level == "FATAL" || level == "fatal" {
+		if level == "error" || level == "fatal" {
 			errorCount += count
 		}
 	}
@@ -149,7 +149,7 @@ func (s *Service) Trace(ctx context.Context, traceID string) (*TraceResult, erro
 		if e.Service != "" {
 			servicesSet[e.Service] = true
 		}
-		if e.Level == "error" || e.Level == "fatal" || e.Level == "ERROR" || e.Level == "FATAL" {
+		if e.Level == "error" || e.Level == "fatal" {
 			hasErrors = true
 		}
 	}

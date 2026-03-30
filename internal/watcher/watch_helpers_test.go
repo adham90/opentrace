@@ -183,9 +183,9 @@ func TestGetBaselineMetricValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := getBaselineMetricValue(tt.watch)
+			got := baselineMetricValue(tt.watch)
 			if got != tt.want {
-				t.Errorf("getBaselineMetricValue() = %v, want %v", got, tt.want)
+				t.Errorf("baselineMetricValue() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -219,9 +219,9 @@ func TestGetBaselineMetricValue_ZeroBaseline(t *testing.T) {
 				Metric:       metric,
 				BaselineJSON: baseline,
 			}
-			got := getBaselineMetricValue(w)
+			got := baselineMetricValue(w)
 			if got != 0 {
-				t.Errorf("getBaselineMetricValue() for %s with zero baseline = %v, want 0", metric, got)
+				t.Errorf("baselineMetricValue() for %s with zero baseline = %v, want 0", metric, got)
 			}
 		})
 	}

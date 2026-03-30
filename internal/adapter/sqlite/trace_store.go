@@ -206,8 +206,8 @@ func (s *traceStore) MarkStaleTraces(ctx context.Context, olderThan time.Duratio
 
 // isErrorLevel returns true if the log level indicates an error.
 func isErrorLevel(level string) bool {
-	upper := strings.ToUpper(level)
-	return upper == "ERROR" || upper == "FATAL"
+	lower := strings.ToLower(level)
+	return lower == "error" || lower == "fatal"
 }
 
 // containsString checks if a slice contains a string.

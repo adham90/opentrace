@@ -192,7 +192,7 @@ func run() error {
 	// Agent-first watch evaluator + stream (reactive on log ingestion)
 	watchEvaluator := watcher.NewWatchEvaluator(watchMetrics, deps.WatchStore)
 	watchEvidenceBuilder := watcher.NewWatchEvidenceBuilder(deps.LogStore, watchMetrics)
-	watchStream := watcher.NewWatchStreamEvaluator(ctx, deps.WatchStore, watchEvaluator, watchEvidenceBuilder)
+	watchStream := watcher.NewWatchStreamEvaluator(ctx, deps.WatchStore, watchEvaluator, watchEvidenceBuilder, nil)
 
 	// Create health check scheduler early so we can inject its reliability data into the web server.
 	hcSched := healthcheck.NewScheduler(deps.HealthCheckStore, 0)

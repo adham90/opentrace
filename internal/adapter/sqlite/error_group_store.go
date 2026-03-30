@@ -28,8 +28,8 @@ func (s *errorGroupStore) Upsert(ctx context.Context, entry store.LogEntry) erro
 	if entry.ErrorFingerprint == "" {
 		return nil
 	}
-	level := strings.ToUpper(entry.Level)
-	if level != "ERROR" && level != "FATAL" {
+	level := strings.ToLower(entry.Level)
+	if level != "error" && level != "fatal" {
 		return nil
 	}
 

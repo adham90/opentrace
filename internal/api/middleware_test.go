@@ -1086,6 +1086,39 @@ func TestProxyAuth_TrustEnabled_NoForwardedUser(t *testing.T) {
 	}
 }
 
+func TestProxyAuth_TrustEnabled_CreateUserFails(t *testing.T) {
+	os.Setenv("OPENTRACE_TRUST_PROXY_AUTH", "true")
+	defer os.Unsetenv("OPENTRACE_TRUST_PROXY_AUTH")
+
+	mockUsers := newMockUserStore()
+	mockUsers.createErr = fmt.Errorf("database is down")
+
+	s := &Server{
+		userStore: mockUsers,
+		auditCh:   make(chan auditEntry, 1),
+	}
+
+	innerCalled := false
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		innerCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := s.ProxyAuth(inner)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Forwarded-User", "new-user@example.com")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when user creation fails, got %d", rec.Code)
+	}
+	if innerCalled {
+		t.Fatal("inner handler should not be called when user creation fails")
+	}
+}
+
 // ---------- MCPTokenAuth ----------
 
 func TestMCPTokenAuth_MissingAuthorizationHeader(t *testing.T) {

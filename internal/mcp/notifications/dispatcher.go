@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"log/slog"
+	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -48,6 +49,7 @@ var _ Sender = (*MCPServerSender)(nil)
 // Dispatcher watches for events and dispatches notifications to all registered senders
 // (MCP clients, Telegram, Slack, webhooks, etc.).
 type Dispatcher struct {
+	mu      sync.RWMutex
 	senders []Sender
 }
 
@@ -66,13 +68,19 @@ func NewDispatcher(senders ...Sender) *Dispatcher {
 // AddSender adds a sender at runtime (e.g., when Telegram is configured after startup).
 func (d *Dispatcher) AddSender(s Sender) {
 	if s != nil {
+		d.mu.Lock()
 		d.senders = append(d.senders, s)
+		d.mu.Unlock()
 	}
 }
 
 // Notify sends a notification to all registered senders.
 func (d *Dispatcher) Notify(n Notification) {
-	if len(d.senders) == 0 {
+	d.mu.RLock()
+	senders := d.senders
+	d.mu.RUnlock()
+
+	if len(senders) == 0 {
 		return
 	}
 
@@ -90,10 +98,10 @@ func (d *Dispatcher) Notify(n Notification) {
 		"type", n.Type,
 		"severity", n.Severity,
 		"title", n.Title,
-		"senders", len(d.senders),
+		"senders", len(senders),
 	)
 
-	for _, s := range d.senders {
+	for _, s := range senders {
 		s.SendNotificationToAllClients(MCPMethod, params)
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-
+	"github.com/adham90/opentrace/internal/domain/logs"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -15,6 +15,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func LogsStats(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
+	InitLogsDeps(&deps)
 	timeRange := ArgStringDefault(args, "time_range", "1h")
 	groupBy := ArgStringDefault(args, "group_by", "level")
 	serviceFilter := ArgString(args, "service")
@@ -43,31 +44,20 @@ func LogsStats(ctx context.Context, args map[string]any, deps LogsDeps) (*CallTo
 
 	switch groupBy {
 	case "level":
-		return LogsStatsByLevel(ctx, deps.LogStore, params, since, now, bucketDur)
+		return LogsStatsByLevel(ctx, deps.Logs, params, since, now, bucketDur)
 	case "service":
-		return LogsStatsByService(ctx, deps.LogStore, params, since, now)
+		return LogsStatsByService(ctx, deps.Logs, params, since, now)
 	case "pattern":
-		return LogsStatsByPattern(ctx, deps.LogStore, since, now, serviceFilter)
+		return LogsStatsByPattern(ctx, deps.Logs, since, now, serviceFilter)
 	default:
 		return NewToolResultError(fmt.Sprintf("invalid group_by: %q (use level, service, or pattern)", groupBy)), nil
 	}
 }
 
-func LogsStatsByLevel(ctx context.Context, ls store.LogStore, params store.LogCountParams, since, until time.Time, bucketDur time.Duration) (*CallToolResult, error) {
-	counts, err := ls.CountByLevel(ctx, params)
+func LogsStatsByLevel(ctx context.Context, svc *logs.Service, params store.LogCountParams, since, until time.Time, bucketDur time.Duration) (*CallToolResult, error) {
+	lc, err := svc.CountByLevel(ctx, params)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to count logs: %v", err)), nil
-	}
-
-	total := 0
-	for _, c := range counts {
-		total += c
-	}
-
-	errorCount := counts["error"] + counts["fatal"]
-	var errorRate float64
-	if total > 0 {
-		errorRate = float64(errorCount) / float64(total) * 100
 	}
 
 	// Build trend buckets.
@@ -83,14 +73,14 @@ func LogsStatsByLevel(ctx context.Context, ls store.LogStore, params store.LogCo
 			Service: params.Service,
 			Level:   params.Level,
 		}
-		bucketCounts, err := ls.CountByLevel(ctx, bucketParams)
+		bucketLC, err := svc.CountByLevel(ctx, bucketParams)
 		if err != nil {
 			continue
 		}
 		bucket := map[string]any{
 			"bucket": t.Format(time.RFC3339),
 		}
-		for level, count := range bucketCounts {
+		for level, count := range bucketLC.ByLevel {
 			bucket[level] = count
 		}
 		trend = append(trend, bucket)
@@ -101,7 +91,7 @@ func LogsStatsByLevel(ctx context.Context, ls store.LogStore, params store.LogCo
 	if len(trend) >= 2 {
 		lastBucket := trend[len(trend)-1]
 		lastErrors := logsToInt(lastBucket["error"]) + logsToInt(lastBucket["fatal"])
-		avgErrors := float64(errorCount) / float64(len(trend))
+		avgErrors := float64(lc.ErrorCount) / float64(len(trend))
 		if avgErrors > 0 && float64(lastErrors) > avgErrors*1.4 {
 			pctIncrease := (float64(lastErrors) - avgErrors) / avgErrors * 100
 			warnings = append(warnings, fmt.Sprintf("Error rate increased %.0f%% in the last bucket compared to the average", pctIncrease))
@@ -110,9 +100,9 @@ func LogsStatsByLevel(ctx context.Context, ls store.LogStore, params store.LogCo
 
 	resp := map[string]any{
 		"time_range":     map[string]any{"start": since.Format(time.RFC3339), "end": until.Format(time.RFC3339)},
-		"total_logs":     total,
-		"by_level":       counts,
-		"error_rate_pct": logsRound2(errorRate),
+		"total_logs":     lc.Total,
+		"by_level":       lc.ByLevel,
+		"error_rate_pct": logsRound2(lc.ErrorRate),
 	}
 	if len(trend) > 0 {
 		resp["trend"] = trend
@@ -124,8 +114,8 @@ func LogsStatsByLevel(ctx context.Context, ls store.LogStore, params store.LogCo
 	return JSONResult(resp)
 }
 
-func LogsStatsByService(ctx context.Context, ls store.LogStore, params store.LogCountParams, since, until time.Time) (*CallToolResult, error) {
-	services, err := ls.CountByService(ctx, params)
+func LogsStatsByService(ctx context.Context, svc *logs.Service, params store.LogCountParams, since, until time.Time) (*CallToolResult, error) {
+	services, err := svc.CountByService(ctx, params)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to count logs: %v", err)), nil
 	}
@@ -177,26 +167,30 @@ func LogsStatsByService(ctx context.Context, ls store.LogStore, params store.Log
 	return JSONResult(resp)
 }
 
-func LogsStatsByPattern(ctx context.Context, ls store.LogStore, since, until time.Time, service string) (*CallToolResult, error) {
+func LogsStatsByPattern(ctx context.Context, svc *logs.Service, since, until time.Time, service string) (*CallToolResult, error) {
 	// Fetch error/fatal logs for pattern clustering.
-	searchParams := store.LogSearchParams{
+	errorResult, err := svc.Search(ctx, store.LogSearchParams{
 		Level:   "error",
 		Service: service,
 		Start:   &since,
 		End:     &until,
 		Limit:   10000,
-	}
-
-	errorLogs, err := ls.Search(ctx, searchParams)
+	})
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to search logs: %v", err)), nil
 	}
+	errorLogs := errorResult.Entries
 
 	// Also fetch fatal logs.
-	searchParams.Level = "fatal"
-	fatalLogs, err := ls.Search(ctx, searchParams)
+	fatalResult, err := svc.Search(ctx, store.LogSearchParams{
+		Level:   "fatal",
+		Service: service,
+		Start:   &since,
+		End:     &until,
+		Limit:   10000,
+	})
 	if err == nil {
-		errorLogs = append(errorLogs, fatalLogs...)
+		errorLogs = append(errorLogs, fatalResult.Entries...)
 	}
 
 	// Cluster by normalized message.

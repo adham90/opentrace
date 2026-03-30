@@ -15,6 +15,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
+	InitLogsDeps(&deps)
 	query := ArgString(args, "query")
 	service := ArgString(args, "service")
 	level := ArgString(args, "level")
@@ -80,10 +81,11 @@ func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallT
 		params.End = &now
 	}
 
-	entries, err := deps.LogStore.Search(ctx, params)
+	result, err := deps.Logs.Search(ctx, params)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to search logs: %v. Verify your query syntax and filters.", err)), nil
 	}
+	entries := result.Entries
 
 	// If FTS query returned nothing, try a fallback LIKE search against
 	// the service field (expanded search scope).
@@ -91,7 +93,9 @@ func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallT
 		fallbackParams := params
 		fallbackParams.Query = ""
 		fallbackParams.Service = query
-		entries, _ = deps.LogStore.Search(ctx, fallbackParams)
+		if fb, err := deps.Logs.Search(ctx, fallbackParams); err == nil {
+			entries = fb.Entries
+		}
 	}
 
 	if len(entries) == 0 {
@@ -280,7 +284,7 @@ func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallT
 	if len(entries) > 0 {
 		// For error entries, suggest investigate_error for one-call deep dive.
 		for _, e := range entries {
-			if e.Level == "ERROR" || e.Level == "FATAL" {
+			if e.Level == "error" || e.Level == "fatal" {
 				suggestions = append(suggestions, Suggest("errors", "Deep-dive into this error: exception, backtrace, params, SQL, context", map[string]any{
 					"action": "investigate",
 					"log_id": e.ID,

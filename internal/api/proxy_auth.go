@@ -39,7 +39,7 @@ func (s *Server) ProxyAuth(next http.Handler) http.Handler {
 			})
 			if err != nil {
 				slog.Error("proxy auth: failed to create user", "email", email, "error", err)
-				next.ServeHTTP(w, r)
+				server.WriteError(w, http.StatusInternalServerError, "failed to establish user identity")
 				return
 			}
 			slog.Info("proxy auth: auto-created user", "email", email, "role", role)

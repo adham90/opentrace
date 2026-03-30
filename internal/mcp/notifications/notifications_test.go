@@ -590,11 +590,11 @@ func TestDeployWatcher_CountErrors_NilLogStore(t *testing.T) {
 func TestDeployWatcher_CountErrors_SumsErrorAndFatal(t *testing.T) {
 	ls := &mockLogStoreForDeploy{
 		countByLevel: map[string]int{
-			"DEBUG": 100,
-			"INFO":  50,
-			"WARN":  10,
-			"ERROR": 7,
-			"FATAL": 3,
+			"debug": 100,
+			"info":  50,
+			"warn":  10,
+			"error": 7,
+			"fatal": 3,
 		},
 	}
 	d := NewDispatcher(&mockSender{})
@@ -603,7 +603,7 @@ func TestDeployWatcher_CountErrors_SumsErrorAndFatal(t *testing.T) {
 	now := time.Now()
 	result := w.countErrors(context.Background(), "api", now.Add(-30*time.Minute), now)
 	if result != 10 {
-		t.Fatalf("expected 10 (7 ERROR + 3 FATAL), got %d", result)
+		t.Fatalf("expected 10 (7 error + 3 fatal), got %d", result)
 	}
 }
 

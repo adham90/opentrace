@@ -380,9 +380,10 @@ func (m *mockMetricStore) Prune(ctx context.Context, olderThan time.Duration) (i
 
 // mockUserStore implements store.UserStore for testing.
 type mockUserStore struct {
-	mu    sync.Mutex
-	users map[string]*store.User
-	count int
+	mu        sync.Mutex
+	users     map[string]*store.User
+	count     int
+	createErr error // if set, Create returns this error
 }
 
 func newMockUserStore() *mockUserStore {
@@ -392,6 +393,9 @@ func newMockUserStore() *mockUserStore {
 func (m *mockUserStore) Create(ctx context.Context, params store.CreateUserParams) (*store.User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.createErr != nil {
+		return nil, m.createErr
+	}
 	for _, u := range m.users {
 		if u.Email == params.Email {
 			return nil, store.ErrEmailTaken

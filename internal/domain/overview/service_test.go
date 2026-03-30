@@ -125,7 +125,7 @@ func TestStatus_WithLogCounter(t *testing.T) {
 
 func TestStatus_WithLogCounter_Counts(t *testing.T) {
 	svc := NewService(WithLogCounter(&fakeLogCounter{
-		counts: map[string]int{"INFO": 50, "ERROR": 3, "FATAL": 1},
+		counts: map[string]int{"info": 50, "error": 3, "fatal": 1},
 	}))
 	report, err := svc.Status(context.Background())
 	if err != nil {

@@ -3,7 +3,7 @@ package tools
 import (
 	"context"
 
-
+	"github.com/adham90/opentrace/internal/domain/logs"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -13,7 +13,8 @@ type TraceSessionRecorder func(traceID string)
 
 // LogsDeps holds the dependencies for the consolidated logs tool.
 type LogsDeps struct {
-	LogStore             store.LogStore
+	Logs                 *logs.Service
+	LogStore             store.LogStore       // retained for actions not yet migrated to domain service
 	ErrorGroupStore      store.ErrorGroupStore
 	TraceSessionRecorder TraceSessionRecorder // optional, nil-safe
 	Ranker               SuggestionRanker     // optional, nil-safe
@@ -26,8 +27,16 @@ func LogsCatalogInfo() (category, description, access string) {
 		"read"
 }
 
+// InitLogsDeps ensures the Logs service is constructed from LogStore if not set.
+func InitLogsDeps(deps *LogsDeps) {
+	if deps.Logs == nil && deps.LogStore != nil {
+		deps.Logs = logs.NewService(deps.LogStore)
+	}
+}
+
 // LogsHandler returns a handler that dispatches to the appropriate action.
 func LogsHandler(deps LogsDeps) ToolHandlerFunc {
+	InitLogsDeps(&deps)
 	return func(ctx context.Context, request *CallToolRequest) (*CallToolResult, error) {
 		args := GetArguments(request)
 

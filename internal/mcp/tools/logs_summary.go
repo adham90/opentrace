@@ -15,6 +15,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
+	InitLogsDeps(&deps)
 	timeRange := ArgStringDefault(args, "time_range", "1h")
 	serviceFilter := ArgString(args, "service")
 	environmentFilter := ArgString(args, "environment")
@@ -34,20 +35,14 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 		Until:   now,
 		Service: serviceFilter,
 	}
-	levelCounts, err := deps.LogStore.CountByLevel(ctx, countParams)
+	lc, err := deps.Logs.CountByLevel(ctx, countParams)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to count logs: %v", err)), nil
 	}
 
-	totalLogs := 0
-	for _, c := range levelCounts {
-		totalLogs += c
-	}
-	errorCount := levelCounts["error"] + levelCounts["fatal"]
-	var errorRatePct float64
-	if totalLogs > 0 {
-		errorRatePct = float64(errorCount) / float64(totalLogs) * 100
-	}
+	totalLogs := lc.Total
+	errorCount := lc.ErrorCount
+	errorRatePct := lc.ErrorRate
 
 	// 2. Fetch recent logs to aggregate commits and errors in Go.
 	searchParams := store.LogSearchParams{
@@ -59,10 +54,11 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 		Limit:       2000,
 		SortAsc:     false,
 	}
-	entries, err := deps.LogStore.Search(ctx, searchParams)
+	searchResult, err := deps.Logs.Search(ctx, searchParams)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to search logs: %v", err)), nil
 	}
+	entries := searchResult.Entries
 
 	// 3. Aggregate by commit hash.
 	type commitInfo struct {
@@ -250,7 +246,7 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 		"total_logs":     totalLogs,
 		"error_count":    errorCount,
 		"error_rate_pct": logsRound2(errorRatePct),
-		"by_level":       levelCounts,
+		"by_level":       lc.ByLevel,
 	}
 	if len(activeCommits) > 0 {
 		resp["active_commits"] = activeCommits

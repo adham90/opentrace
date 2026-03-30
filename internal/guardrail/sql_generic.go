@@ -74,8 +74,7 @@ func ValidateReadOnlyGeneric(query string) error {
 	case strings.HasPrefix(upper, "DESCRIBE"), strings.HasPrefix(upper, "DESC "):
 		return nil
 	case strings.HasPrefix(upper, "PRAGMA"):
-		// SQLite/Turso read-only PRAGMAs
-		return nil
+		return validateReadOnlyPragma(upper)
 	default:
 		return fmt.Errorf("only SELECT statements are allowed")
 	}
@@ -115,6 +114,42 @@ func isReadOnlyKeyword(upper string) bool {
 	default:
 		return false
 	}
+}
+
+// readOnlyPragmas lists PRAGMA prefixes known to be read-only.
+// Write PRAGMAs (e.g., WAL_CHECKPOINT, OPTIMIZE, INTEGRITY_CHECK) are rejected.
+var readOnlyPragmas = []string{
+	"PRAGMA TABLE_INFO",
+	"PRAGMA TABLE_LIST",
+	"PRAGMA TABLE_XINFO",
+	"PRAGMA INDEX_LIST",
+	"PRAGMA INDEX_INFO",
+	"PRAGMA INDEX_XINFO",
+	"PRAGMA FOREIGN_KEY_LIST",
+	"PRAGMA FOREIGN_KEY_CHECK",
+	"PRAGMA DATABASE_LIST",
+	"PRAGMA COMPILE_OPTIONS",
+	"PRAGMA COLLATION_LIST",
+	"PRAGMA JOURNAL_MODE",
+	"PRAGMA PAGE_COUNT",
+	"PRAGMA PAGE_SIZE",
+	"PRAGMA MAX_PAGE_COUNT",
+	"PRAGMA FREELIST_COUNT",
+	"PRAGMA ENCODING",
+	"PRAGMA DATA_VERSION",
+	"PRAGMA SCHEMA_VERSION",
+	"PRAGMA USER_VERSION",
+	"PRAGMA APPLICATION_ID",
+}
+
+// validateReadOnlyPragma checks whether a PRAGMA statement is in the read-only allowlist.
+func validateReadOnlyPragma(upper string) error {
+	for _, prefix := range readOnlyPragmas {
+		if strings.HasPrefix(upper, prefix) {
+			return nil
+		}
+	}
+	return fmt.Errorf("PRAGMA not in read-only allowlist")
 }
 
 // HasLimitGeneric checks whether a query contains a LIMIT clause using simple

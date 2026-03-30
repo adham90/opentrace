@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-
+	"github.com/adham90/opentrace/internal/domain/logs"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -16,6 +16,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func LogsCompare(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
+	InitLogsDeps(&deps)
 	metric := ArgString(args, "metric")
 	if metric == "" {
 		return NewToolResultError("metric is required (errors, log_volume)"), nil
@@ -38,23 +39,23 @@ func LogsCompare(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 
 	switch metric {
 	case "errors":
-		return LogsCompareErrors(ctx, deps.LogStore, currentStart, currentEnd, baseStart, baseEnd, serviceFilter)
+		return LogsCompareErrors(ctx, deps.Logs, currentStart, currentEnd, baseStart, baseEnd, serviceFilter)
 	case "log_volume":
-		return LogsCompareLogVolume(ctx, deps.LogStore, currentStart, currentEnd, baseStart, baseEnd, serviceFilter)
+		return LogsCompareLogVolume(ctx, deps.Logs, currentStart, currentEnd, baseStart, baseEnd, serviceFilter)
 	default:
 		return NewToolResultError(fmt.Sprintf("invalid metric: %q (use errors or log_volume)", metric)), nil
 	}
 }
 
-func LogsCompareErrors(ctx context.Context, ls store.LogStore, curStart, curEnd, baseStart, baseEnd time.Time, service string) (*CallToolResult, error) {
+func LogsCompareErrors(ctx context.Context, svc *logs.Service, curStart, curEnd, baseStart, baseEnd time.Time, service string) (*CallToolResult, error) {
 	curParams := store.LogCountParams{Since: curStart, Until: curEnd, Service: service}
 	baseParams := store.LogCountParams{Since: baseStart, Until: baseEnd, Service: service}
 
-	curSvc, err := ls.CountByService(ctx, curParams)
+	curSvc, err := svc.CountByService(ctx, curParams)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to count current errors: %v", err)), nil
 	}
-	baseSvc, err := ls.CountByService(ctx, baseParams)
+	baseSvc, err := svc.CountByService(ctx, baseParams)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to count baseline errors: %v", err)), nil
 	}
@@ -142,27 +143,23 @@ func LogsCompareErrors(ctx context.Context, ls store.LogStore, curStart, curEnd,
 	return JSONResult(resp)
 }
 
-func LogsCompareLogVolume(ctx context.Context, ls store.LogStore, curStart, curEnd, baseStart, baseEnd time.Time, service string) (*CallToolResult, error) {
+func LogsCompareLogVolume(ctx context.Context, svc *logs.Service, curStart, curEnd, baseStart, baseEnd time.Time, service string) (*CallToolResult, error) {
 	curParams := store.LogCountParams{Since: curStart, Until: curEnd, Service: service}
 	baseParams := store.LogCountParams{Since: baseStart, Until: baseEnd, Service: service}
 
-	curLevels, err := ls.CountByLevel(ctx, curParams)
+	curLC, err := svc.CountByLevel(ctx, curParams)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to count current logs: %v", err)), nil
 	}
-	baseLevels, err := ls.CountByLevel(ctx, baseParams)
+	baseLC, err := svc.CountByLevel(ctx, baseParams)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to count baseline logs: %v", err)), nil
 	}
 
-	curTotal := 0
-	for _, c := range curLevels {
-		curTotal += c
-	}
-	baseTotal := 0
-	for _, c := range baseLevels {
-		baseTotal += c
-	}
+	curLevels := curLC.ByLevel
+	baseLevels := baseLC.ByLevel
+	curTotal := curLC.Total
+	baseTotal := baseLC.Total
 
 	changePct, direction := logsCalcChange(baseTotal, curTotal)
 

@@ -91,12 +91,10 @@ func HandleChanges(ctx context.Context, d OverviewDeps, args map[string]any) (*C
 		currentErrors := 0
 		previousErrors := 0
 		if currErr == nil {
-			currentErrors = currentCounts["ERROR"] + currentCounts["FATAL"] +
-				currentCounts["error"] + currentCounts["fatal"]
+			currentErrors = currentCounts["error"] + currentCounts["fatal"]
 		}
 		if prevErr == nil {
-			previousErrors = prevCounts["ERROR"] + prevCounts["FATAL"] +
-				prevCounts["error"] + prevCounts["fatal"]
+			previousErrors = prevCounts["error"] + prevCounts["fatal"]
 		}
 
 		var changePct float64

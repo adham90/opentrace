@@ -108,7 +108,7 @@ func BuildSessionContext(ctx context.Context, stores store.Stores) *SessionConte
 		})
 		if err == nil {
 			for level, count := range counts {
-				if level == "ERROR" || level == "FATAL" {
+				if level == "error" || level == "fatal" {
 					status.ErrorsLastHour += count
 				}
 			}

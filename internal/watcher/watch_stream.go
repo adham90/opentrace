@@ -14,6 +14,7 @@ type WatchStreamEvaluator struct {
 	watchStore      store.WatchStore
 	evaluator       *WatchEvaluator
 	evidenceBuilder *WatchEvidenceBuilder
+	notifiers       []WatchAlertNotifier
 
 	// Parent context for deriving per-evaluation timeouts.
 	// When cancelled (e.g. app shutdown), in-flight evaluations stop promptly.
@@ -35,6 +36,7 @@ func NewWatchStreamEvaluator(
 	watchStore store.WatchStore,
 	evaluator *WatchEvaluator,
 	evidenceBuilder *WatchEvidenceBuilder,
+	notifiers []WatchAlertNotifier,
 ) *WatchStreamEvaluator {
 	if ctx == nil {
 		ctx = context.Background()
@@ -44,6 +46,7 @@ func NewWatchStreamEvaluator(
 		watchStore:      watchStore,
 		evaluator:       evaluator,
 		evidenceBuilder: evidenceBuilder,
+		notifiers:       notifiers,
 		lastEval:        make(map[string]time.Time),
 		minGap:          10 * time.Second,
 		sem:             make(chan struct{}, 16),
@@ -146,7 +149,7 @@ func (s *WatchStreamEvaluator) evaluateOne(ctx context.Context, w *store.Watch) 
 				evidence = ev
 			}
 		}
-		_, err := s.watchStore.CreateAlert(ctx, store.CreateWatchAlertParams{
+		alert, err := s.watchStore.CreateAlert(ctx, store.CreateWatchAlertParams{
 			WatchID:        w.ID,
 			RunID:          run.ID,
 			Urgency:        w.Urgency,
@@ -158,6 +161,10 @@ func (s *WatchStreamEvaluator) evaluateOne(ctx context.Context, w *store.Watch) 
 		})
 		if err != nil {
 			slog.Error("watch stream: creating alert", "watch_id", w.ID, "error", err)
+			return
+		}
+		if len(s.notifiers) > 0 {
+			NotifyAllWatchAlert(ctx, s.notifiers, alert, w)
 		}
 	}
 }

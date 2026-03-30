@@ -151,7 +151,7 @@ func (s *Service) Status(ctx context.Context) (*StatusReport, error) {
 			errCount := 0
 			for level, count := range counts {
 				total += count
-				if level == "ERROR" || level == "error" || level == "fatal" || level == "FATAL" {
+				if level == "error" || level == "fatal" {
 					errCount += count
 				}
 			}

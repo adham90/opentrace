@@ -163,7 +163,7 @@ func (b *WatchEvidenceBuilder) Build(ctx context.Context, w *store.Watch, result
 	if w.BaselineJSON != nil {
 		evidence.BaselineDiff = &store.WatchBaselineDiff{
 			MetricName:    string(w.Metric),
-			BaselineValue: b.getBaselineValue(w),
+			BaselineValue: baselineMetricValue(w),
 			CurrentValue:  result.Value,
 		}
 		if evidence.BaselineDiff.BaselineValue != 0 {
@@ -192,29 +192,6 @@ func (b *WatchEvidenceBuilder) Build(ctx context.Context, w *store.Watch, result
 	return evidence, nil
 }
 
-func (b *WatchEvidenceBuilder) getBaselineValue(w *store.Watch) float64 {
-	if w.BaselineJSON == nil {
-		return 0
-	}
-	switch w.Metric {
-	case store.WatchMetricErrorRate:
-		return w.BaselineJSON.ErrorRate
-	case store.WatchMetricResponseTime:
-		return w.BaselineJSON.AvgResponseMs
-	case store.WatchMetricP95Response:
-		return w.BaselineJSON.P95ResponseMs
-	case store.WatchMetricLogCount:
-		return float64(w.BaselineJSON.LogCount)
-	case store.WatchMetricErrorCount:
-		return float64(w.BaselineJSON.ErrorCount)
-	case store.WatchMetricSQLCount:
-		return w.BaselineJSON.SQLCount
-	case store.WatchMetricCacheHitRate:
-		return w.BaselineJSON.CacheHitRate
-	default:
-		return 0
-	}
-}
 
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {

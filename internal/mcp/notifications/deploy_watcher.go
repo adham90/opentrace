@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
@@ -14,6 +15,7 @@ type DeployWatcher struct {
 	dispatcher      *Dispatcher
 	errorGroupStore store.ErrorGroupStore
 	logStore        store.LogStore
+	wg              sync.WaitGroup
 }
 
 // NewDeployWatcher creates a deploy watcher.
@@ -42,25 +44,35 @@ func (w *DeployWatcher) OnDeploy(ctx context.Context, deploy store.Deploy) {
 		"baseline_errors", baseline,
 	)
 
-	go w.observe(ctx, deploy, baseline)
+	w.wg.Add(1)
+	go func() {
+		defer w.wg.Done()
+		obsCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+		defer cancel()
+		w.observe(obsCtx, deploy, baseline)
+	}()
+}
+
+// Stop waits for all active observation goroutines to finish.
+func (w *DeployWatcher) Stop() {
+	w.wg.Wait()
 }
 
 func (w *DeployWatcher) observe(ctx context.Context, deploy store.Deploy, baseline int) {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	timeout := time.After(30 * time.Minute)
 	alerted := false
 
 	for {
 		select {
 		case <-ctx.Done():
-			return
-		case <-timeout:
-			slog.Info("deploy watcher: observation window ended, all clear",
-				"deploy_id", deploy.ID,
-				"service", deploy.Service,
-			)
+			if ctx.Err() == context.DeadlineExceeded {
+				slog.Info("deploy watcher: observation window ended, all clear",
+					"deploy_id", deploy.ID,
+					"service", deploy.Service,
+				)
+			}
 			return
 		case <-ticker.C:
 			current := w.countErrors(ctx, deploy.Service, deploy.DeployedAt, time.Now())
@@ -142,7 +154,7 @@ func (w *DeployWatcher) countErrors(ctx context.Context, service string, since, 
 	}
 	total := 0
 	for level, count := range counts {
-		if level == "ERROR" || level == "FATAL" {
+		if level == "error" || level == "fatal" {
 			total += count
 		}
 	}
