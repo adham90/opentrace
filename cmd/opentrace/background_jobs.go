@@ -97,10 +97,6 @@ func retentionPruneHandler(deps *server.Deps) jobs.HandlerFunc {
 			pruneStore(ctx, "error groups", deps.ErrorGroupStore, retention)
 			pruneStore(ctx, "agent notes", deps.AgentNoteStore, retention)
 			pruneStore(ctx, "code entities", deps.CodeEntityStore, retention)
-			pruneStore(ctx, "deploys", deps.DeployStore, retention)
-			pruneStore(ctx, "events", deps.EventStore, retention)
-			pruneStore(ctx, "uncovered paths", deps.TestCorrelationStore, retention)
-
 			if deps.HealthCheckStore != nil {
 				if n, err := deps.HealthCheckStore.PruneResults(ctx, retention); err != nil {
 					slog.Warn("healthcheck results prune failed", "error", err)
@@ -194,83 +190,7 @@ func aggregationHandler(deps *server.Deps) jobs.HandlerFunc {
 				return nil
 			})
 		}
-		if deps.DeployStore != nil && deps.AnalyticsStore != nil {
-			g.Go(func() error {
-				measureDeployImpacts(gctx, deps.DeployStore, deps.AnalyticsStore)
-				return nil
-			})
-		}
-		if deps.TestCorrelationStore != nil {
-			g.Go(func() error {
-				if err := deps.TestCorrelationStore.RefreshUncoveredPaths(gctx); err != nil {
-					slog.Warn("test correlation refresh failed", "error", err)
-				}
-				return nil
-			})
-		}
 		return g.Wait()
 	}
 }
 
-// measureDeployImpacts finds deploys older than 15 minutes that haven't been measured yet,
-// computes before/after error rates and durations using the analytics store, and updates
-// each deploy with its impact metrics.
-func measureDeployImpacts(ctx context.Context, ds store.DeployStore, as store.AnalyticsStore) {
-	pending, err := ds.GetPendingMeasurement(ctx, 15*time.Minute)
-	if err != nil {
-		slog.Warn("failed to get pending deploy measurements", "error", err)
-		return
-	}
-	for _, d := range pending {
-		window := 15 * time.Minute
-
-		preSummary, err := as.TrafficSummary(ctx, store.AnalyticsParams{
-			Service: d.Service,
-			Since:   d.DeployedAt.Add(-window),
-			Until:   d.DeployedAt,
-		})
-		if err != nil {
-			slog.Warn("deploy impact: pre-deploy traffic summary failed", "deploy_id", d.ID, "error", err)
-			continue
-		}
-
-		postSummary, err := as.TrafficSummary(ctx, store.AnalyticsParams{
-			Service: d.Service,
-			Since:   d.DeployedAt,
-			Until:   d.DeployedAt.Add(window),
-		})
-		if err != nil {
-			slog.Warn("deploy impact: post-deploy traffic summary failed", "deploy_id", d.ID, "error", err)
-			continue
-		}
-
-		impact := store.DeployImpact{
-			PreErrorRate:      preSummary.ErrorRate,
-			PostErrorRate:     postSummary.ErrorRate,
-			PreAvgDurationMs:  preSummary.AvgDurationMs,
-			PostAvgDurationMs: postSummary.AvgDurationMs,
-		}
-
-		if preSummary.ErrorRate > 0 {
-			impact.ErrorRateChangePct = ((postSummary.ErrorRate - preSummary.ErrorRate) / preSummary.ErrorRate) * 100
-		}
-		if preSummary.AvgDurationMs > 0 {
-			impact.DurationChangePct = ((postSummary.AvgDurationMs - preSummary.AvgDurationMs) / preSummary.AvgDurationMs) * 100
-		}
-
-		// Mark as incident if error rate increased >50% or response time >2x
-		impact.IsIncident = impact.ErrorRateChangePct > 50 || impact.DurationChangePct > 100
-
-		if err := ds.MeasureImpact(ctx, d.ID, impact); err != nil {
-			slog.Warn("deploy impact: failed to record measurement", "deploy_id", d.ID, "error", err)
-		} else {
-			status := "measured"
-			if impact.IsIncident {
-				status = "incident"
-			}
-			slog.Info("measured deploy impact", "deploy_id", d.ID, "status", status,
-				"error_rate_change_pct", impact.ErrorRateChangePct,
-				"duration_change_pct", impact.DurationChangePct)
-		}
-	}
-}

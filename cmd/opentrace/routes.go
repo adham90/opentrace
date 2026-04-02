@@ -42,10 +42,8 @@
 // │   Domain module routes (all use apiLimiter + DynamicAPIKeyAuth):   │
 // │     POST /api/auth/connect     – CLI connect handshake [auth]     │
 // │     GET  /api/auth/connect     – connect status check   [auth]    │
-// │     POST /api/events/deploy    – deploy webhook         [deploys] │
 // │     POST /api/servers/register – server registration    [servers] │
 // │     POST /api/servers/{id}/metrics – metric push        [servers] │
-// │     POST /api/events/{type}    – event webhook          [events]  │
 // │                                                                    │
 // └─────────────────────────────────────────────────────────────────────┘
 //
@@ -58,15 +56,11 @@ package main
 
 import (
 	authmod "github.com/adham90/opentrace/internal/routes/auth"
-	"github.com/adham90/opentrace/internal/routes/deploys"
-	"github.com/adham90/opentrace/internal/routes/events"
 	"github.com/adham90/opentrace/internal/routes/servers"
 	"github.com/adham90/opentrace/pkg/server"
 )
 
 var modules = []server.Module{
 	authmod.Module,
-	deploys.Module,
 	servers.Module,
-	events.Module,
 }

@@ -51,32 +51,6 @@ func TestSentinelErrors_WrappingPreservesIs(t *testing.T) {
 // Enum string constants — catches copy-paste or renaming drift
 // ---------------------------------------------------------------------------
 
-func TestDeployStatusValues(t *testing.T) {
-	cases := map[DeployStatus]string{
-		DeployStatusPending:  "pending",
-		DeployStatusMeasured: "measured",
-		DeployStatusIncident: "incident",
-	}
-	for got, want := range cases {
-		if string(got) != want {
-			t.Errorf("DeployStatus: got %q, want %q", got, want)
-		}
-	}
-}
-
-func TestDeploySourceValues(t *testing.T) {
-	cases := map[DeploySource]string{
-		DeploySourceWebhook:      "webhook",
-		DeploySourceAutoDetected: "auto-detected",
-		DeploySourceManual:       "manual",
-	}
-	for got, want := range cases {
-		if string(got) != want {
-			t.Errorf("DeploySource: got %q, want %q", got, want)
-		}
-	}
-}
-
 func TestErrorGroupStatusValues(t *testing.T) {
 	cases := map[ErrorGroupStatus]string{
 		ErrorGroupUnresolved: "unresolved",
@@ -86,22 +60,6 @@ func TestErrorGroupStatusValues(t *testing.T) {
 	for got, want := range cases {
 		if string(got) != want {
 			t.Errorf("ErrorGroupStatus: got %q, want %q", got, want)
-		}
-	}
-}
-
-func TestEventTypeValues(t *testing.T) {
-	cases := map[EventType]string{
-		EventTypeDeploy: "deploy",
-		EventTypePR:     "pr",
-		EventTypeTest:   "test",
-		EventTypeAlert:  "alert",
-		EventTypeCommit: "commit",
-		EventTypeCustom: "custom",
-	}
-	for got, want := range cases {
-		if string(got) != want {
-			t.Errorf("EventType: got %q, want %q", got, want)
 		}
 	}
 }
@@ -181,20 +139,6 @@ func TestWatchUrgencyValues(t *testing.T) {
 	}
 }
 
-func TestInvestigationSessionStatusValues(t *testing.T) {
-	cases := map[InvestigationSessionStatus]string{
-		InvestigationStatusOpen:       "open",
-		InvestigationStatusResolved:   "resolved",
-		InvestigationStatusUnresolved: "unresolved",
-		InvestigationStatusAbandoned:  "abandoned",
-	}
-	for got, want := range cases {
-		if string(got) != want {
-			t.Errorf("InvestigationSessionStatus: got %q, want %q", got, want)
-		}
-	}
-}
-
 func TestServerStatusValues(t *testing.T) {
 	cases := map[ServerStatus]string{
 		ServerOnline:  "online",
@@ -266,32 +210,6 @@ func TestCodeEntityTypeValues(t *testing.T) {
 // ---------------------------------------------------------------------------
 // JSON round-trip for models with non-trivial serialization
 // ---------------------------------------------------------------------------
-
-func TestDeployImpact_JSONRoundTrip(t *testing.T) {
-	orig := DeployImpact{
-		PreErrorRate:       0.02,
-		PostErrorRate:      0.15,
-		PreAvgDurationMs:   120.5,
-		PostAvgDurationMs:  450.3,
-		ErrorRateChangePct: 650.0,
-		DurationChangePct:  273.7,
-		IsIncident:         true,
-	}
-
-	data, err := json.Marshal(orig)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	var decoded DeployImpact
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-
-	if decoded != orig {
-		t.Errorf("round-trip mismatch:\n got  %+v\nwant %+v", decoded, orig)
-	}
-}
 
 func TestSamplingRule_JSONRoundTrip(t *testing.T) {
 	orig := SamplingRule{
@@ -433,40 +351,6 @@ func TestWatchEvidenceBundle_JSONRoundTrip(t *testing.T) {
 	}
 }
 
-func TestCreateEventParams_JSONKeys(t *testing.T) {
-	p := CreateEventParams{
-		EventType:   EventTypeDeploy,
-		Source:      "github",
-		Service:     "api",
-		Title:       "Deploy v1.2.3",
-		Description: "Rolling update",
-		Metadata:    map[string]any{"sha": "abc123"},
-		ExternalID:  "gh-123",
-		ExternalURL: "https://github.com/org/repo/actions/runs/123",
-		Author:      "dev@example.com",
-	}
-
-	data, err := json.Marshal(p)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("unmarshal raw: %v", err)
-	}
-
-	expectedKeys := []string{
-		"event_type", "source", "service", "title", "description",
-		"metadata", "external_id", "external_url", "author",
-	}
-	for _, key := range expectedKeys {
-		if _, ok := raw[key]; !ok {
-			t.Errorf("expected JSON key %q not found in %s", key, string(data))
-		}
-	}
-}
-
 func TestLogSearchParams_OmitsEmptyFields(t *testing.T) {
 	// A zero-value LogSearchParams should not emit optional fields.
 	p := LogSearchParams{}
@@ -494,73 +378,10 @@ func TestLogSearchParams_OmitsEmptyFields(t *testing.T) {
 	}
 }
 
-func TestFunnelStepResult_JSONKeys(t *testing.T) {
-	r := FunnelStepResult{
-		Label:   "signup",
-		Count:   100,
-		Pct:     85.5,
-		DropOff: 15,
-	}
-
-	data, err := json.Marshal(r)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	var decoded FunnelStepResult
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-
-	if decoded != r {
-		t.Errorf("round-trip mismatch:\n got  %+v\nwant %+v", decoded, r)
-	}
-}
 
 // ---------------------------------------------------------------------------
 // Pointer/optional field serialization
 // ---------------------------------------------------------------------------
-
-func TestDeploy_OptionalFieldsOmitted(t *testing.T) {
-	d := Deploy{
-		ID:         1,
-		Service:    "api",
-		Status:     DeployStatusPending,
-		DeployedAt: time.Now(),
-		CreatedAt:  time.Now(),
-	}
-
-	data, err := json.Marshal(d)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("unmarshal raw: %v", err)
-	}
-
-	// Nil pointer fields should be omitted.
-	shouldBeAbsent := []string{
-		"pre_error_rate", "post_error_rate",
-		"pre_avg_duration_ms", "post_avg_duration_ms",
-		"impact_measured_at", "linked_investigation_ids",
-		"files_changed",
-	}
-	for _, key := range shouldBeAbsent {
-		if _, ok := raw[key]; ok {
-			t.Errorf("nil pointer field %q should be omitted from JSON", key)
-		}
-	}
-
-	// Required fields should be present.
-	shouldBePresent := []string{"id", "service", "status", "deployed_at", "created_at"}
-	for _, key := range shouldBePresent {
-		if _, ok := raw[key]; !ok {
-			t.Errorf("required field %q missing from JSON", key)
-		}
-	}
-}
 
 func TestErrorGroup_OptionalFieldsOmitted(t *testing.T) {
 	eg := ErrorGroup{

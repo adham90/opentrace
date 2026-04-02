@@ -3,9 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
-
 
 	"github.com/adham90/opentrace/internal/guardrail"
 )
@@ -132,13 +130,6 @@ LIMIT %d`, whereClause, orderBy, limit)
 // ---------------------------------------------------------------------------
 
 // queryFingerprintRe strips string/numeric literals to create a query fingerprint.
-var queryFingerprintRe = regexp.MustCompile(`'[^']*'|"[^"]*"|\b\d+(\.\d+)?\b`)
-
-// normalizeQueryFingerprint creates a stable fingerprint by replacing literals with ?.
-func normalizeQueryFingerprint(query string) string {
-	return strings.TrimSpace(queryFingerprintRe.ReplaceAllString(query, "?"))
-}
-
 func HandleExplain(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
 	query := ArgString(args, "query")
 	if query == "" {
@@ -212,24 +203,6 @@ func HandleExplain(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 
 	if len(warnings) > 0 {
 		resp["warnings"] = warnings
-	}
-
-	// Query memory: check for prior investigation of this query.
-	fingerprint := normalizeQueryFingerprint(query)
-	if deps.QueryMemoryStore != nil && fingerprint != "" {
-		qm, qmErr := deps.QueryMemoryStore.Get(ctx, fingerprint)
-		if qmErr == nil && qm != nil {
-			resp["query_memory"] = map[string]any{
-				"investigation_count": qm.InvestigationCount,
-				"last_root_cause":     qm.LastRootCause,
-				"last_fix":            qm.LastFix,
-			}
-		}
-	}
-
-	// Track fingerprint on session.
-	if deps.SessionTracking != nil && fingerprint != "" {
-		deps.SessionTracking.TrackExplainedQuery(fingerprint)
 	}
 
 	return JSONResult(resp)

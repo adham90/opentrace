@@ -400,3 +400,8 @@ func computeRecencyWeight(now, lastSeen time.Time) float64 {
 func joinConditions(conditions []string) string {
 	return strings.Join(conditions, " AND ")
 }
+
+// round2 rounds a float64 to 2 decimal places.
+func round2(f float64) float64 {
+	return math.Round(f*100) / 100
+}

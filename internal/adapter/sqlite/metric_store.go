@@ -182,6 +182,18 @@ func (s *metricStore) Prune(ctx context.Context, olderThan time.Duration) (int64
 	return totalDeleted, nil
 }
 
+// marshalMetadataJSON converts a map to a JSON string for metadata fields.
+func marshalMetadataJSON(m map[string]any) string {
+	if m == nil {
+		return "{}"
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
 // toAnyMap converts map[string]string to map[string]any for JSON marshaling.
 func toAnyMap(m map[string]string) map[string]any {
 	if m == nil {

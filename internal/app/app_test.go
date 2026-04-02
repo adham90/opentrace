@@ -32,16 +32,6 @@ func TestNew_EmptyStores(t *testing.T) {
 	if app.Setup == nil {
 		t.Error("Setup should always be non-nil")
 	}
-	// Telemetry should always be present.
-	if app.Startup == nil {
-		t.Error("Startup should always be non-nil")
-	}
-	if app.StoreStats == nil {
-		t.Error("StoreStats should always be non-nil")
-	}
-	if app.Workers == nil {
-		t.Error("Workers should always be non-nil")
-	}
 }
 
 func TestNew_WithAllStores(t *testing.T) {
@@ -51,14 +41,12 @@ func TestNew_WithAllStores(t *testing.T) {
 		ErrorImpactStore:     mocks.NewErrorImpactStore(),
 		WatchStore:           mocks.NewWatchStore(),
 		HealthCheckStore:     mocks.NewHealthCheckStore(),
-		DeployStore:          mocks.NewDeployStore(),
 		ServerStore:          mocks.NewServerStore(),
 		MetricStore:          mocks.NewMetricStore(),
 		AnalyticsStore:       mocks.NewAnalyticsStore(),
 		TrendStore:           mocks.NewTrendStore(),
-		CodeEntityStore:      mocks.NewCodeEntityStore(),
-		TestCorrelationStore: mocks.NewTestCorrelationStore(),
-		AgentNoteStore:       mocks.NewAgentNoteStore(),
+		CodeEntityStore: mocks.NewCodeEntityStore(),
+		AgentNoteStore:  mocks.NewAgentNoteStore(),
 		DSStore:              mocks.NewDataSourceStore(),
 		SettingsStore:        mocks.NewSettingsStore(),
 		AuditStore:           mocks.NewAuditStore(),
@@ -78,9 +66,6 @@ func TestNew_WithAllStores(t *testing.T) {
 	}
 	if app.Watches == nil {
 		t.Error("Watches should be non-nil with WatchStore")
-	}
-	if app.Deploys == nil {
-		t.Error("Deploys should be non-nil with DeployStore")
 	}
 	if app.HealthChecks == nil {
 		t.Error("HealthChecks should be non-nil with HealthCheckStore")

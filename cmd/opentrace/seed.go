@@ -24,7 +24,7 @@ func runSeed() error {
 
 	// Clear old seed data for idempotency.
 	tables := []string{"watch_alerts", "watch_runs", "watches", "request_summaries",
-		"error_group_events", "error_groups", "deploys", "logs", "data_sources",
+		"error_group_events", "error_groups", "logs", "data_sources",
 		"metric_points", "servers"}
 	for _, t := range tables {
 		deps.DB.ExecContext(ctx, "DELETE FROM "+t)
@@ -324,41 +324,6 @@ func runSeed() error {
 	}
 	slog.Info("seeded error groups", "upserted", errorGroupCount)
 
-	// --- Deploys (for deploy history/impact testing) ---
-	deployDefs := []struct {
-		service     string
-		env         string
-		commit      string
-		branch      string
-		author      string
-		daysAgo     int
-		status      store.DeployStatus
-		preErr      *float64
-		postErr     *float64
-		files       []string
-	}{
-		{"gateway", "production", "a1b2c3d", "main", "alice@example.com", 0, store.DeployStatusMeasured, ptr(0.02), ptr(0.05), []string{"lib/http_client.rb", "config/tls.yml"}},
-		{"payment-api", "production", "e4f5g6h", "main", "bob@example.com", 1, store.DeployStatusMeasured, ptr(0.01), ptr(0.01), []string{"app/services/payment_processor.rb"}},
-		{"order-service", "production", "i7j8k9l", "release/v2.15", "charlie@example.com", 2, store.DeployStatusMeasured, ptr(0.03), ptr(0.04), []string{"app/controllers/orders_controller.rb", "app/models/order.rb"}},
-		{"user-service", "production", "m0n1o2p", "main", "alice@example.com", 3, store.DeployStatusMeasured, ptr(0.005), ptr(0.005), []string{"app/controllers/users_controller.rb"}},
-		{"notification-service", "production", "q3r4s5t", "main", "bob@example.com", 5, store.DeployStatusMeasured, ptr(0.01), ptr(0.08), []string{"app/services/notification_client.rb", "app/mailers/order_mailer.rb"}},
-		{"gateway", "staging", "u6v7w8x", "feature/new-auth", "charlie@example.com", 0, store.DeployStatusPending, nil, nil, []string{"app/middleware/auth.rb"}},
-	}
-
-	for _, d := range deployDefs {
-		deployedAt := now.Add(-time.Duration(d.daysAgo) * 24 * time.Hour)
-		_, err := deps.DB.ExecContext(ctx,
-			`INSERT INTO deploys (service, environment, commit_hash, branch, author, files_changed_json, status, pre_error_rate, post_error_rate, deployed_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			d.service, d.env, d.commit, d.branch, d.author, "[]", string(d.status), d.preErr, d.postErr, deployedAt.Format(time.RFC3339),
-		)
-		if err != nil {
-			slog.Warn("failed to seed deploy", "service", d.service, "error", err)
-		} else {
-			slog.Info("seeded deploy", "service", d.service, "commit", d.commit, "days_ago", d.daysAgo)
-		}
-	}
-
 	// --- Watches ---
 	watchStore := deps.WatchStore
 
@@ -450,10 +415,7 @@ func runSeed() error {
 		"logs", len(logEntries),
 		"servers", len(serverIDs),
 		"watches", len(watchIDs),
-		"deploys", len(deployDefs),
 		"request_summaries", reqCount,
 	)
 	return nil
 }
-
-func ptr(f float64) *float64 { return &f }

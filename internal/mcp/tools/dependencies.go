@@ -13,7 +13,6 @@ type DependenciesDeps struct {
 	AnalyticsStore  store.AnalyticsStore
 	ErrorGroupStore store.ErrorGroupStore
 	CodeEntityStore store.CodeEntityStore
-	DeployStore     store.DeployStore
 	LogStore        store.LogStore
 }
 
@@ -164,17 +163,6 @@ func HandleDepsBlastRadius(ctx context.Context, d DependenciesDeps, args map[str
 		}
 	}
 
-	// Recent deploy history (indicates change velocity)
-	if d.DeployStore != nil {
-		deploys, err := d.DeployStore.GetRecent(ctx, service, 5)
-		if err == nil {
-			result["recent_deploys"] = len(deploys)
-			if len(deploys) > 3 {
-				result["deploy_velocity"] = "high — frequent changes increase risk of cascading failures"
-			}
-		}
-	}
-
 	return JSONResult(result)
 }
 
@@ -246,20 +234,6 @@ func HandleDepsChangeRisk(ctx context.Context, d DependenciesDeps, args map[stri
 				"detail": fmt.Sprintf("%d unresolved error groups in this service", len(groups)),
 			})
 			totalRisk += errorRisk * 0.2
-		}
-	}
-
-	// Check recent deploy history
-	if d.DeployStore != nil && service != "" {
-		deploys, err := d.DeployStore.GetRecent(ctx, service, 10)
-		if err == nil && len(deploys) > 5 {
-			churnRisk := 0.4
-			riskFactors = append(riskFactors, map[string]any{
-				"factor": "change_frequency",
-				"score":  churnRisk,
-				"detail": fmt.Sprintf("%d deploys recently — high churn increases risk", len(deploys)),
-			})
-			totalRisk += churnRisk * 0.2
 		}
 	}
 

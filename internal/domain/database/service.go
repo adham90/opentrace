@@ -10,12 +10,11 @@ import (
 // Service provides external database introspection (schema, queries, activity).
 type Service struct {
 	exec QueryExecutor
-	mem  QueryMemoryRepository
 }
 
 // NewService creates a database service.
-func NewService(exec QueryExecutor, mem QueryMemoryRepository) *Service {
-	return &Service{exec: exec, mem: mem}
+func NewService(exec QueryExecutor) *Service {
+	return &Service{exec: exec}
 }
 
 // SchemaResult holds the output of a schema introspection query.

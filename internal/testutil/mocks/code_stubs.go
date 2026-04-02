@@ -12,7 +12,6 @@ import (
 // ---------------------------------------------------------------------------
 
 var _ store.CodeEntityStore = (*CodeEntityStore)(nil)
-var _ store.TestCorrelationStore = (*TestCorrelationStore)(nil)
 
 // ===========================================================================
 // CodeEntityStore
@@ -44,26 +43,5 @@ func (m *CodeEntityStore) IncrementInvestigation(_ context.Context, _ store.Code
 }
 func (m *CodeEntityStore) BatchRecomputeRisk(_ context.Context) error { return nil }
 func (m *CodeEntityStore) Prune(_ context.Context, _ time.Duration) (int64, error) {
-	return 0, nil
-}
-
-// ===========================================================================
-// TestCorrelationStore
-// ===========================================================================
-
-// TestCorrelationStore is a stub implementing store.TestCorrelationStore.
-type TestCorrelationStore struct{}
-
-// NewTestCorrelationStore returns an initialised TestCorrelationStore stub.
-func NewTestCorrelationStore() *TestCorrelationStore { return &TestCorrelationStore{} }
-
-func (m *TestCorrelationStore) RefreshUncoveredPaths(_ context.Context) error { return nil }
-func (m *TestCorrelationStore) TopByPriority(_ context.Context, _ string, _ int) ([]store.UncoveredErrorPath, error) {
-	return nil, nil
-}
-func (m *TestCorrelationStore) GetByFingerprint(_ context.Context, _ string) (*store.UncoveredErrorPath, error) {
-	return nil, store.ErrNotFound
-}
-func (m *TestCorrelationStore) Prune(_ context.Context, _ time.Duration) (int64, error) {
 	return 0, nil
 }

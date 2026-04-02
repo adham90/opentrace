@@ -12,7 +12,7 @@ func TestDependenciesHandler_UnknownAction(t *testing.T) {
 		AnalyticsStore:  mocks.NewAnalyticsStore(),
 		ErrorGroupStore: mocks.NewErrorGroupStore(),
 		CodeEntityStore: mocks.NewCodeEntityStore(),
-		DeployStore:     mocks.NewDeployStore(),
+
 		LogStore:        mocks.NewLogStore(),
 	}
 	handler := DependenciesHandler(deps)
@@ -35,7 +35,7 @@ func TestHandleDepsService_MissingService(t *testing.T) {
 		AnalyticsStore:  mocks.NewAnalyticsStore(),
 		ErrorGroupStore: mocks.NewErrorGroupStore(),
 		CodeEntityStore: mocks.NewCodeEntityStore(),
-		DeployStore:     mocks.NewDeployStore(),
+
 		LogStore:        mocks.NewLogStore(),
 	}
 
@@ -57,7 +57,7 @@ func TestHandleDepsBlastRadius_MissingService(t *testing.T) {
 		AnalyticsStore:  mocks.NewAnalyticsStore(),
 		ErrorGroupStore: mocks.NewErrorGroupStore(),
 		CodeEntityStore: mocks.NewCodeEntityStore(),
-		DeployStore:     mocks.NewDeployStore(),
+
 		LogStore:        mocks.NewLogStore(),
 	}
 

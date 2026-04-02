@@ -12,7 +12,7 @@ func TestTestGenHandler_UnknownAction(t *testing.T) {
 		ErrorGroupStore:      mocks.NewErrorGroupStore(),
 		ErrorImpactStore:     mocks.NewErrorImpactStore(),
 		CodeEntityStore:      mocks.NewCodeEntityStore(),
-		TestCorrelationStore: mocks.NewTestCorrelationStore(),
+
 		LogStore:             mocks.NewLogStore(),
 	}
 	handler := TestGenHandler(deps)
@@ -35,7 +35,7 @@ func TestHandleTestGenContext_MissingFingerprint(t *testing.T) {
 		ErrorGroupStore:      mocks.NewErrorGroupStore(),
 		ErrorImpactStore:     mocks.NewErrorImpactStore(),
 		CodeEntityStore:      mocks.NewCodeEntityStore(),
-		TestCorrelationStore: mocks.NewTestCorrelationStore(),
+
 		LogStore:             mocks.NewLogStore(),
 	}
 
@@ -52,28 +52,3 @@ func TestHandleTestGenContext_MissingFingerprint(t *testing.T) {
 	}
 }
 
-func TestHandleTestGenCoverage_Empty(t *testing.T) {
-	deps := TestGenDeps{
-		ErrorGroupStore:      mocks.NewErrorGroupStore(),
-		ErrorImpactStore:     mocks.NewErrorImpactStore(),
-		CodeEntityStore:      mocks.NewCodeEntityStore(),
-		TestCorrelationStore: mocks.NewTestCorrelationStore(),
-		LogStore:             mocks.NewLogStore(),
-	}
-
-	args := map[string]any{"action": "coverage"}
-	result, err := HandleTestGenCoverage(context.Background(), deps, args)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result == nil {
-		t.Fatal("expected non-nil result")
-	}
-	if result.IsError {
-		t.Errorf("expected IsError to be false, got true: %s", extractText(t, result))
-	}
-	text := extractText(t, result)
-	if text == "" {
-		t.Error("expected non-empty text response")
-	}
-}

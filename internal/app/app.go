@@ -10,7 +10,6 @@ import (
 	"github.com/adham90/opentrace/internal/domain/code"
 	domainconnectors "github.com/adham90/opentrace/internal/domain/connectors"
 	"github.com/adham90/opentrace/internal/domain/database"
-	"github.com/adham90/opentrace/internal/domain/deploys"
 	domainerrors "github.com/adham90/opentrace/internal/domain/errors"
 	"github.com/adham90/opentrace/internal/domain/healthchecks"
 	"github.com/adham90/opentrace/internal/domain/logs"
@@ -18,7 +17,6 @@ import (
 	"github.com/adham90/opentrace/internal/domain/servers"
 	"github.com/adham90/opentrace/internal/domain/setup"
 	"github.com/adham90/opentrace/internal/domain/watches"
-	"github.com/adham90/opentrace/internal/telemetry"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -31,7 +29,6 @@ type App struct {
 	Overview     *overview.Service
 	Analytics    *analytics.Service
 	Watches      *watches.Service
-	Deploys      *deploys.Service
 	HealthChecks *healthchecks.Service
 	Servers      *servers.Service
 	Database     *database.Service
@@ -40,25 +37,12 @@ type App struct {
 	Connectors   *domainconnectors.Service
 	Setup        *setup.Service
 	Auth         *auth.Service
-
-	// Telemetry
-	Startup    *telemetry.Startup
-	StoreStats *telemetry.StoreMetrics
-	Workers    *telemetry.GoroutineHealth
 }
 
 // New constructs all domain services from the provided stores.
 // This is the single wiring point — add new services here.
 func New(stores store.Stores) *App {
-	startup := telemetry.NewStartup()
-	storeStats := telemetry.NewStoreMetrics()
-	workers := telemetry.NewGoroutineHealth()
-
-	app := &App{
-		Startup:    startup,
-		StoreStats: storeStats,
-		Workers:    workers,
-	}
+	app := &App{}
 
 	// Logs service
 	if stores.LogStore != nil {
@@ -90,11 +74,6 @@ func New(stores store.Stores) *App {
 		app.Watches = watches.NewService(stores.WatchStore)
 	}
 
-	// Deploys service
-	if stores.DeployStore != nil {
-		app.Deploys = deploys.NewService(stores.DeployStore)
-	}
-
 	// HealthChecks service
 	if stores.HealthCheckStore != nil {
 		app.HealthChecks = healthchecks.NewService(stores.HealthCheckStore)
@@ -106,8 +85,8 @@ func New(stores store.Stores) *App {
 	}
 
 	// Code service
-	if stores.CodeEntityStore != nil || stores.TestCorrelationStore != nil {
-		app.Code = code.NewService(stores.CodeEntityStore, stores.TestCorrelationStore, stores.AgentNoteStore)
+	if stores.CodeEntityStore != nil {
+		app.Code = code.NewService(stores.CodeEntityStore, nil, stores.AgentNoteStore)
 	}
 
 	// Admin service

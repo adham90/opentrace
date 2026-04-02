@@ -12,59 +12,8 @@ import (
 // Compile-time interface checks
 // ---------------------------------------------------------------------------
 
-var _ store.InvestigationSessionStore = (*InvestigationSessionStore)(nil)
 var _ store.MCPActivityStore = (*MCPActivityStore)(nil)
 var _ store.AgentNoteStore = (*AgentNoteStore)(nil)
-
-// ===========================================================================
-// InvestigationSessionStore
-// ===========================================================================
-
-// InvestigationSessionStore is a stub implementing store.InvestigationSessionStore.
-type InvestigationSessionStore struct{}
-
-// NewInvestigationSessionStore returns an initialised InvestigationSessionStore stub.
-func NewInvestigationSessionStore() *InvestigationSessionStore {
-	return &InvestigationSessionStore{}
-}
-
-func (m *InvestigationSessionStore) Create(_ context.Context, _ store.CreateInvestigationSessionParams) (*store.InvestigationSession, error) {
-	return &store.InvestigationSession{ID: "test-session"}, nil
-}
-func (m *InvestigationSessionStore) GetByID(_ context.Context, _ string) (*store.InvestigationSession, error) {
-	return nil, store.ErrNotFound
-}
-func (m *InvestigationSessionStore) Close(_ context.Context, _ string) error { return nil }
-func (m *InvestigationSessionStore) Update(_ context.Context, _ string, _ store.UpdateInvestigationSessionParams) error {
-	return nil
-}
-func (m *InvestigationSessionStore) FindRecent(_ context.Context, _ store.FindRecentSessionParams) (*store.InvestigationSession, error) {
-	return nil, nil
-}
-func (m *InvestigationSessionStore) List(_ context.Context, _ store.ListInvestigationSessionParams) ([]store.InvestigationSession, error) {
-	return nil, nil
-}
-func (m *InvestigationSessionStore) Stats(_ context.Context) (*store.InvestigationSessionStats, error) {
-	return &store.InvestigationSessionStats{}, nil
-}
-func (m *InvestigationSessionStore) Prune(_ context.Context, _ time.Duration) (int64, error) {
-	return 0, nil
-}
-func (m *InvestigationSessionStore) RecordStep(_ context.Context, _ string, _ string, _ bool) error {
-	return nil
-}
-func (m *InvestigationSessionStore) FindByCreatedWatcher(_ context.Context, _ string) (*store.InvestigationSession, error) {
-	return nil, nil
-}
-func (m *InvestigationSessionStore) FindByResolvedError(_ context.Context, _ string) (*store.InvestigationSession, error) {
-	return nil, nil
-}
-func (m *InvestigationSessionStore) FindByCreatedHealthcheck(_ context.Context, _ string) (*store.InvestigationSession, error) {
-	return nil, nil
-}
-func (m *InvestigationSessionStore) FindSimilar(_ context.Context, _ store.FindSimilarParams) ([]store.InvestigationSession, error) {
-	return nil, nil
-}
 
 // ===========================================================================
 // MCPActivityStore

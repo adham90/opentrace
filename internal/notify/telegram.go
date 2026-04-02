@@ -1,6 +1,5 @@
 // Package notify provides concrete notification delivery adapters (currently
-// Telegram). It implements the Sender interface defined in internal/mcp/notifications.
-// Channels are configured at runtime via the settings store —
+// Telegram). Channels are configured at runtime via the settings store —
 // no environment variables or restarts needed.
 package notify
 
@@ -10,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"time"
 )
@@ -85,61 +83,3 @@ func (t *TelegramSender) SendTest(ctx context.Context) error {
 	return t.Send(ctx, msg)
 }
 
-// FormatNotification converts a notification into a Telegram-friendly HTML message.
-func FormatNotification(notifType, severity, title, summary string, context map[string]any) string {
-	emoji := map[string]string{
-		"critical": "🔴",
-		"error":    "🟠",
-		"warn":     "🟡",
-		"info":     "🔵",
-	}
-
-	icon := emoji[severity]
-	if icon == "" {
-		icon = "📢"
-	}
-
-	msg := fmt.Sprintf("%s <b>%s</b>\n\n%s", icon, title, summary)
-
-	if action, ok := context["suggested_action"].(string); ok {
-		msg += fmt.Sprintf("\n\n💡 <i>%s</i>", action)
-	}
-
-	if service, ok := context["service"].(string); ok {
-		msg += fmt.Sprintf("\n\n🏷 Service: <code>%s</code>", service)
-	}
-
-	return msg
-}
-
-// NotificationBridge connects the existing mcp/notifications.Dispatcher
-// to the Telegram sender. It implements mcp/notifications.Sender.
-type NotificationBridge struct {
-	telegram *TelegramSender
-}
-
-// NewNotificationBridge creates a bridge between the MCP notification system
-// and Telegram delivery.
-func NewNotificationBridge(telegram *TelegramSender) *NotificationBridge {
-	return &NotificationBridge{telegram: telegram}
-}
-
-// SendNotificationToAllClients implements the notifications.Sender interface.
-// It formats the notification and sends it via Telegram.
-func (b *NotificationBridge) SendNotificationToAllClients(method string, params map[string]any) {
-	if b.telegram == nil {
-		return
-	}
-
-	notifType, _ := params["type"].(string)
-	severity, _ := params["severity"].(string)
-	title, _ := params["title"].(string)
-	summary, _ := params["summary"].(string)
-	ctx, _ := params["context"].(map[string]any)
-
-	msg := FormatNotification(notifType, severity, title, summary, ctx)
-
-	if err := b.telegram.Send(context.Background(), msg); err != nil {
-		slog.Warn("failed to send telegram notification", "error", err, "type", notifType)
-	}
-}

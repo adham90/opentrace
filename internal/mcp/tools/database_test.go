@@ -2,12 +2,10 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/adham90/opentrace/internal/connector"
-	"github.com/adham90/opentrace/internal/testutil/mocks"
 )
 
 func TestDatabaseHandler_UnknownAction(t *testing.T) {
@@ -188,27 +186,6 @@ func TestHandleDatabaseActivity_NoConnector(t *testing.T) {
 	}
 }
 
-func TestHandleRunbookAction_UnknownRunbook(t *testing.T) {
-	deps := DatabaseDeps{
-		Registry: connector.NewRegistry(),
-	}
-	args := map[string]any{"playbook": "nonexistent_runbook"}
-
-	result, err := HandleRunbookAction(context.Background(), deps, args)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result == nil {
-		t.Fatal("expected non-nil result")
-	}
-	if !result.IsError {
-		t.Error("expected IsError for unknown runbook")
-	}
-	text := extractText(t, result)
-	if !strings.Contains(text, "unknown playbook") {
-		t.Errorf("expected 'unknown playbook' in error text, got: %s", text)
-	}
-}
 
 func TestHandleStorage_NoConnector(t *testing.T) {
 	deps := DatabaseDeps{
@@ -254,40 +231,3 @@ func TestHandleConnections_NoConnector(t *testing.T) {
 	}
 }
 
-func TestRunbookErrorSpike_NoLogs(t *testing.T) {
-	// RunbookErrorSpike takes a LogStore directly (no connector needed).
-	// With a mock that has no entries, it should return a successful result
-	// indicating no error spike was detected.
-	logStore := mocks.NewLogStore()
-
-	result, err := RunbookErrorSpike(context.Background(), logStore)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result == nil {
-		t.Fatal("expected non-nil result")
-	}
-	if result.IsError {
-		t.Error("expected IsError to be false for empty log store")
-	}
-
-	text := extractText(t, result)
-	var parsed map[string]any
-	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
-		t.Fatalf("failed to parse result JSON: %v", err)
-	}
-	if parsed["playbook"] != "error_spike" {
-		t.Errorf("playbook = %v, want %q", parsed["playbook"], "error_spike")
-	}
-
-	diagnosis, ok := parsed["diagnosis"].([]any)
-	if !ok {
-		t.Fatalf("expected diagnosis array, got %T", parsed["diagnosis"])
-	}
-	if len(diagnosis) == 0 {
-		t.Fatal("expected at least one diagnosis entry")
-	}
-	if diagnosis[0] != "No error spike detected in last hour" {
-		t.Errorf("diagnosis[0] = %v, want %q", diagnosis[0], "No error spike detected in last hour")
-	}
-}

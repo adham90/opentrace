@@ -21,14 +21,12 @@ func testServer() *mcpsdk.Server {
 func testDeps() Deps {
 	return Deps{
 		Stores: store.Stores{
-			ErrorGroupStore:           mocks.NewErrorGroupStore(),
-			DeployStore:               mocks.NewDeployStore(),
-			CodeEntityStore:           mocks.NewCodeEntityStore(),
-			InvestigationSessionStore: mocks.NewInvestigationSessionStore(),
-			SettingsStore:             mocks.NewSettingsStore(),
-			LogStore:                  mocks.NewLogStore(),
-			DSStore:                   mocks.NewDataSourceStore(),
-			HealthCheckStore:          mocks.NewHealthCheckStore(),
+			ErrorGroupStore:  mocks.NewErrorGroupStore(),
+			CodeEntityStore:  mocks.NewCodeEntityStore(),
+			SettingsStore:    mocks.NewSettingsStore(),
+			LogStore:         mocks.NewLogStore(),
+			DSStore:          mocks.NewDataSourceStore(),
+			HealthCheckStore: mocks.NewHealthCheckStore(),
 		},
 	}
 }
@@ -61,17 +59,6 @@ func TestServiceStatusHandler_ValidService(t *testing.T) {
 
 func TestCodeRiskSummaryHandler_EmptyStore(t *testing.T) {
 	result, err := codeRiskSummaryHandler(mocks.NewCodeEntityStore())(context.Background(), &mcpsdk.ReadResourceRequest{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	var data map[string]any
-	if err := json.Unmarshal([]byte(result.Contents[0].Text), &data); err != nil {
-		t.Fatalf("failed to parse JSON: %v", err)
-	}
-}
-
-func TestActiveInvestigationsHandler_EmptyStore(t *testing.T) {
-	result, err := activeInvestigationsHandler(mocks.NewInvestigationSessionStore())(context.Background(), &mcpsdk.ReadResourceRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

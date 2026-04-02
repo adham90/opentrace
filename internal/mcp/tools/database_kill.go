@@ -89,11 +89,6 @@ func HandleKillQuery(ctx context.Context, deps DatabaseDeps, args map[string]any
 		resp["hint"] = "Query was cancelled gracefully. If the process doesn't stop, use force=true to terminate it."
 	}
 
-	// Track killed PID on session.
-	if success && deps.SessionTracking != nil {
-		deps.SessionTracking.TrackKilledQuery(fmt.Sprintf("%d", pid))
-	}
-
 	return JSONResult(resp)
 }
 

@@ -97,7 +97,6 @@ func (s *Server) setupMCPStreamableHTTP() *mcp.StreamableHTTPHandler {
 	}
 
 	mcpSrv := mcpserver.NewConfiguredServer(deps, true, nil)
-	s.mcpServer = mcpSrv // store for notification dispatch
 
 	handler := mcp.NewStreamableHTTPHandler(
 		func(r *http.Request) *mcp.Server { return mcpSrv },

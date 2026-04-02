@@ -106,21 +106,3 @@ func PopulateFromErrorLog(ctx context.Context, ces store.CodeEntityStore, entry 
 	}
 }
 
-// LinkInvestigationToEntities increments investigation counts for code entities
-// associated with a session's investigated error fingerprints.
-func LinkInvestigationToEntities(ctx context.Context, ces store.CodeEntityStore, egs store.ErrorGroupStore, sess *store.InvestigationSession) {
-	if ces == nil || egs == nil || sess == nil {
-		return
-	}
-
-	for _, fp := range sess.InvestigatedErrorFingerprints {
-		eg, err := egs.Get(ctx, fp)
-		if err != nil || eg == nil || eg.SourceFile == "" {
-			continue
-		}
-		if err := ces.IncrementInvestigation(ctx, store.CodeEntityFile, eg.SourceFile, eg.Service); err != nil {
-			slog.Debug("code_entity_populator: IncrementInvestigation failed",
-				"error", err, "file", eg.SourceFile, "fingerprint", fp)
-		}
-	}
-}

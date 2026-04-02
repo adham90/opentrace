@@ -413,18 +413,6 @@ func TestNewConfiguredServer_PresetActivityLogger(t *testing.T) {
 	}
 }
 
-func TestNewConfiguredServer_WithSessionTracker(t *testing.T) {
-	st := NewSessionTracker(context.Background(), nil, nil, "test")
-	deps := Deps{
-		Registry:       connector.NewRegistry(),
-		SessionTracker: st,
-	}
-	s := NewConfiguredServer(deps, false, nil)
-	if s == nil {
-		t.Fatal("expected non-nil server")
-	}
-}
-
 func TestNewConfiguredServer_AdminRegistersWriteTools(t *testing.T) {
 	registry := connector.NewRegistry()
 	registry.Register(&mockDataSource{
@@ -496,97 +484,6 @@ func TestWrapHandler_WithActivityStore(t *testing.T) {
 	text := resultText(t, result)
 	if text != "logged" {
 		t.Errorf("text = %q, want %q", text, "logged")
-	}
-}
-
-// --- rankingServiceAdapter tests ---
-
-func TestRankingServiceAdapter_NilWhenNoServices(t *testing.T) {
-	deps := Deps{}
-	adapter := rankingServiceAdapter(deps)
-	if adapter != nil {
-		t.Error("expected nil adapter when no RankingService or SessionTracker")
-	}
-}
-
-func TestRankingServiceAdapter_NilWhenOnlyRanking(t *testing.T) {
-	deps := Deps{
-		RankingService: &RankingService{},
-	}
-	adapter := rankingServiceAdapter(deps)
-	if adapter != nil {
-		t.Error("expected nil adapter when SessionTracker is nil")
-	}
-}
-
-func TestRankingServiceAdapter_NilWhenOnlySession(t *testing.T) {
-	deps := Deps{
-		SessionTracker: NewSessionTracker(context.Background(), nil, nil, "test"),
-	}
-	adapter := rankingServiceAdapter(deps)
-	if adapter != nil {
-		t.Error("expected nil adapter when RankingService is nil")
-	}
-}
-
-func TestRankingServiceAdapter_NonNilWhenBothPresent(t *testing.T) {
-	deps := Deps{
-		RankingService: &RankingService{},
-		SessionTracker: NewSessionTracker(context.Background(), nil, nil, "test"),
-	}
-	adapter := rankingServiceAdapter(deps)
-	if adapter == nil {
-		t.Error("expected non-nil adapter when both services are present")
-	}
-}
-
-// --- handleSessionSummaryFromArgs tests ---
-
-func TestHandleSessionSummaryFromArgs_NilTracker(t *testing.T) {
-	result, err := handleSessionSummaryFromArgs(nil, map[string]any{"summary": "test"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.IsError {
-		t.Error("expected error result when session tracker is nil")
-	}
-	text := resultText(t, result)
-	if !contains(text, "session tracking is not enabled") {
-		t.Errorf("expected 'session tracking is not enabled', got %q", text)
-	}
-}
-
-func TestHandleSessionSummaryFromArgs_EmptySummary(t *testing.T) {
-	st := NewSessionTracker(context.Background(), nil, nil, "test")
-	result, err := handleSessionSummaryFromArgs(st, map[string]any{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.IsError {
-		t.Error("expected error result when summary is empty")
-	}
-	text := resultText(t, result)
-	if !contains(text, "summary is required") {
-		t.Errorf("expected 'summary is required', got %q", text)
-	}
-}
-
-func TestHandleSessionSummaryFromArgs_Success(t *testing.T) {
-	st := NewSessionTracker(context.Background(), nil, nil, "test")
-	result, err := handleSessionSummaryFromArgs(st, map[string]any{
-		"summary":    "Fixed the auth issue",
-		"root_cause": "Token expiry misconfigured",
-		"outcome":    "resolved",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.IsError {
-		t.Errorf("expected success, got error: %s", resultText(t, result))
-	}
-	text := resultText(t, result)
-	if !contains(text, "saved") {
-		t.Errorf("expected 'saved' in response, got %q", text)
 	}
 }
 

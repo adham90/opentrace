@@ -15,12 +15,12 @@ import (
 // addResources registers MCP resources on the server.
 func addResources(s *mcp.Server, deps Deps) {
 	// 1. Service status template: opentrace://services/{service}/status
-	if deps.ErrorGroupStore != nil || deps.DeployStore != nil || deps.CodeEntityStore != nil {
+	if deps.ErrorGroupStore != nil || deps.CodeEntityStore != nil {
 		s.AddResourceTemplate(
 			&mcp.ResourceTemplate{
 				URITemplate: "opentrace://services/{service}/status",
 				Name:        "Service Status",
-				Description: "Live status for a service: error counts, recent deploys, top risks",
+				Description: "Live status for a service: error counts, top risks",
 				MIMEType:    "application/json",
 			},
 			serviceStatusHandler(deps),
@@ -40,20 +40,7 @@ func addResources(s *mcp.Server, deps Deps) {
 		)
 	}
 
-	// 3. Active investigations: opentrace://investigations/active
-	if deps.InvestigationSessionStore != nil {
-		s.AddResource(
-			&mcp.Resource{
-				URI:         "opentrace://investigations/active",
-				Name:        "Active Investigations",
-				Description: "Currently open investigation sessions",
-				MIMEType:    "application/json",
-			},
-			activeInvestigationsHandler(deps.InvestigationSessionStore),
-		)
-	}
-
-	// 4. Current configuration: opentrace://config/current
+	// 3. Current configuration: opentrace://config/current
 	if deps.SettingsStore != nil {
 		s.AddResource(
 			&mcp.Resource{
@@ -144,23 +131,6 @@ func serviceStatusHandler(deps Deps) func(ctx context.Context, request *mcp.Read
 			}
 		}
 
-		// Recent deploys
-		if deps.DeployStore != nil {
-			deploys, err := deps.DeployStore.GetRecent(ctx, service, 3)
-			if err == nil {
-				deploySummaries := make([]map[string]any, 0, len(deploys))
-				for _, d := range deploys {
-					deploySummaries = append(deploySummaries, map[string]any{
-						"id":          d.ID,
-						"commit_hash": d.CommitHash,
-						"status":      d.Status,
-						"deployed_at": d.DeployedAt.Format(time.RFC3339),
-					})
-				}
-				result["recent_deploys"] = deploySummaries
-			}
-		}
-
 		// Top risks
 		if deps.CodeEntityStore != nil {
 			entities, err := deps.CodeEntityStore.TopByRisk(ctx, service, 3)
@@ -203,42 +173,6 @@ func codeRiskSummaryHandler(ces store.CodeEntityStore) func(ctx context.Context,
 		return &mcp.ReadResourceResult{
 			Contents: []*mcp.ResourceContents{
 				{URI: "opentrace://code/risk-summary", MIMEType: "application/json", Text: string(data)},
-			},
-		}, nil
-	}
-}
-
-func activeInvestigationsHandler(iss store.InvestigationSessionStore) func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-	return func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-		sessions, err := iss.List(ctx, store.ListInvestigationSessionParams{
-			Status: store.InvestigationStatusOpen,
-			Limit:  20,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("listing active investigations: %w", err)
-		}
-
-		summaries := make([]map[string]any, 0, len(sessions))
-		for _, s := range sessions {
-			summaries = append(summaries, map[string]any{
-				"id":         s.ID,
-				"user_email": s.UserEmail,
-				"intent":     s.Intent,
-				"service":    s.PrimaryService,
-				"steps":      s.TotalSteps,
-				"started_at": s.StartedAt.Format(time.RFC3339),
-			})
-		}
-
-		result := map[string]any{
-			"count":          len(sessions),
-			"investigations": summaries,
-		}
-
-		data, _ := json.Marshal(result)
-		return &mcp.ReadResourceResult{
-			Contents: []*mcp.ResourceContents{
-				{URI: "opentrace://investigations/active", MIMEType: "application/json", Text: string(data)},
 			},
 		}, nil
 	}

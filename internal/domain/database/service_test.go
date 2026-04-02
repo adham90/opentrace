@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/adham90/opentrace/internal/domain"
-	"github.com/adham90/opentrace/pkg/store"
 )
 
 // fakeExec implements QueryExecutor for testing.
@@ -22,23 +21,6 @@ func (f *fakeExec) ExecuteReadQuery(_ context.Context, _ string) (*QueryResult, 
 // Compile-time check.
 var _ QueryExecutor = (*fakeExec)(nil)
 
-// fakeMem implements QueryMemoryRepository for testing.
-type fakeMem struct {
-	mem *store.QueryMemory
-	err error
-}
-
-func (f *fakeMem) Get(_ context.Context, _ string) (*store.QueryMemory, error) {
-	return f.mem, f.err
-}
-
-func (f *fakeMem) Upsert(_ context.Context, _ store.UpsertQueryMemoryParams) error {
-	return f.err
-}
-
-// Compile-time check.
-var _ QueryMemoryRepository = (*fakeMem)(nil)
-
 // --- Schema ---
 
 func TestSchema_NilExecutor(t *testing.T) {
@@ -50,7 +32,7 @@ func TestSchema_NilExecutor(t *testing.T) {
 }
 
 func TestSchema_EmptyQuery(t *testing.T) {
-	svc := NewService(&fakeExec{}, nil)
+	svc := NewService(&fakeExec{})
 	_, err := svc.Schema(context.Background(), "")
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput, got %v", err)
@@ -65,7 +47,7 @@ func TestSchema_Success(t *testing.T) {
 			RowCount: 2,
 		},
 	}
-	svc := NewService(exec, nil)
+	svc := NewService(exec)
 	result, err := svc.Schema(context.Background(), "SELECT table_name FROM information_schema.tables")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -77,7 +59,7 @@ func TestSchema_Success(t *testing.T) {
 
 func TestSchema_ExecutorError(t *testing.T) {
 	exec := &fakeExec{err: errors.New("connection refused")}
-	svc := NewService(exec, nil)
+	svc := NewService(exec)
 	_, err := svc.Schema(context.Background(), "SELECT 1")
 	if err == nil {
 		t.Fatal("expected error")
@@ -95,7 +77,7 @@ func TestExplain_NilExecutor(t *testing.T) {
 }
 
 func TestExplain_EmptyQuery(t *testing.T) {
-	svc := NewService(&fakeExec{}, nil)
+	svc := NewService(&fakeExec{})
 	_, err := svc.Explain(context.Background(), "")
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput, got %v", err)
@@ -120,7 +102,7 @@ func TestActivity_Success(t *testing.T) {
 			RowCount: 1,
 		},
 	}
-	svc := NewService(exec, nil)
+	svc := NewService(exec)
 	result, err := svc.Activity(context.Background(), "SELECT pid, state FROM pg_stat_activity")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

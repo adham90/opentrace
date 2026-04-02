@@ -3,11 +3,7 @@
 // what the service needs from a query executor and query memory store.
 package database
 
-import (
-	"context"
-
-	"github.com/adham90/opentrace/pkg/store"
-)
+import "context"
 
 // QueryResult holds structured results from a read-only SQL query.
 type QueryResult struct {
@@ -20,11 +16,4 @@ type QueryResult struct {
 // Implemented by connector.QueryExecutor in production.
 type QueryExecutor interface {
 	ExecuteReadQuery(ctx context.Context, query string) (*QueryResult, error)
-}
-
-// QueryMemoryRepository provides access to past query investigation history.
-// Implemented by internal/db.QueryMemoryStore (SQLite adapter).
-type QueryMemoryRepository interface {
-	Get(ctx context.Context, fingerprint string) (*store.QueryMemory, error)
-	Upsert(ctx context.Context, params store.UpsertQueryMemoryParams) error
 }

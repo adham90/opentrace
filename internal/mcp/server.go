@@ -28,14 +28,13 @@ const mcpInstructions = `OpenTrace is a self-hosted observability engine. You ha
 
 ## Tools
 
-- overview: status, triage, diagnose, timeline, investigate, changes, settings, notes, delete_note, session_summary
+- overview: status, triage, diagnose, timeline, investigate, changes, settings, notes, delete_note
 - logs: search, context, attributes, stats, summary, performance, trace, compare
 - errors: list, detail, investigate, impact, user_errors, ranking, resolve, ignore
-- database: queries, explain, tables, activity, locks, indexes, schema, runbook
+- database: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions
 - watches: status, create, delete, alerts, dismiss, acknowledge, investigate
 - analytics: traffic, endpoints, heatmap, trends, movers
-- code: risk, fragile, context, test_gaps, test_priority, annotate_file, annotate_function, hotspots, gen_context, gen_suggest, gen_coverage, deps_service, deps_blast, deps_risk
-- deploys: history, impact, record
+- code: risk, fragile, annotate_file, annotate_function, hotspots, gen_context, gen_suggest, deps_service, deps_blast, deps_risk
 - healthchecks: list, uptime, create, delete
 - connectors: list, get, create, test, update, delete
 - servers: list, query, health
@@ -48,7 +47,7 @@ Most tool responses include a "suggested_tools" array with pre-filled arguments 
 
 ## Agent memory
 
-Use overview(action: "notes") to save and recall persistent context about services, queries, endpoints, errors, and health checks across sessions. Call overview(action: "notes") at the start of a session to recall previous context. Use overview(action: "session_summary") to save investigation findings for future reference.
+Use overview(action: "notes") to save and recall persistent context about services, queries, endpoints, errors, and health checks across sessions. Call overview(action: "notes") at the start of a session to recall previous context.
 `
 
 // Deps holds the dependencies for the MCP server.
@@ -67,11 +66,7 @@ type Deps struct {
 
 	// Runtime services — created during Serve()/NewConfiguredServer(), not by callers.
 	// Exported so tests can inject them directly.
-	ActivityLogger     *ActivityLogger
-	SessionTracker     *SessionTracker
-	RecurrenceDetector *RecurrenceDetector
-	RankingService     *RankingService
-	ContextInjector    *ContextInjector
+	ActivityLogger *ActivityLogger
 }
 
 // NewConfiguredServer creates an MCPServer and registers tools based on the
@@ -144,7 +139,6 @@ func Serve(deps Deps) error {
 	// Determine access level.
 	isAdmin := true // default: full access (backward compat)
 	hasAccess := true
-	var authUser *store.User
 
 	if deps.UserStore != nil && deps.MCPToken != "" {
 		parentCtx := deps.Ctx
@@ -159,7 +153,6 @@ func Serve(deps Deps) error {
 			hasAccess = false
 		} else {
 			isAdmin = user.Role == store.RoleAdmin
-			authUser = user
 		}
 	}
 
@@ -180,98 +173,11 @@ func Serve(deps Deps) error {
 		return s.Run(context.Background(), &mcp.StdioTransport{})
 	}
 
-	// Set up investigation session tracking.
-	serverOpts := &mcp.ServerOptions{}
-	appCtx := deps.Ctx
-	if appCtx == nil {
-		appCtx = context.Background()
-	}
-
-	if deps.InvestigationSessionStore != nil {
-		deps.SessionTracker = NewSessionTracker(appCtx, deps.InvestigationSessionStore, authUser, "stdio")
-		deps.RecurrenceDetector = NewRecurrenceDetector(deps.InvestigationSessionStore)
-
-		// Wire session tracking via InitializedHandler.
-		st := deps.SessionTracker // capture for closure
-		serverOpts.InitializedHandler = func(_ context.Context, req *mcp.InitializedRequest) {
-			st.OnInitialize(req)
-		}
-
-		// Wire transition and activity stores into session tracker
-		if deps.ToolTransitionStore != nil {
-			deps.SessionTracker.SetTransitionStore(deps.ToolTransitionStore)
-		}
-		if deps.MCPActivityStore != nil {
-			deps.SessionTracker.SetActivityStore(deps.MCPActivityStore)
-		}
-
-		// Wire additional stores into session tracker
-		if deps.AgentNoteStore != nil {
-			deps.SessionTracker.SetNoteStore(deps.AgentNoteStore)
-		}
-		if deps.RunbookEffectivenessStore != nil {
-			deps.SessionTracker.SetRunbookStore(deps.RunbookEffectivenessStore)
-		}
-		if deps.QueryMemoryStore != nil {
-			deps.SessionTracker.SetQueryMemoryStore(deps.QueryMemoryStore)
-		}
-		if deps.TrendStore != nil {
-			deps.SessionTracker.SetTrendStore(deps.TrendStore)
-		}
-		if deps.AuditStore != nil {
-			deps.SessionTracker.SetAuditStore(deps.AuditStore)
-		}
-
-		// Wire code entity + deploy stores into session tracker
-		if deps.CodeEntityStore != nil {
-			deps.SessionTracker.SetCodeEntityStore(deps.CodeEntityStore)
-		}
-		if deps.ErrorGroupStore != nil {
-			deps.SessionTracker.SetErrorGroupStore(deps.ErrorGroupStore)
-		}
-		if deps.DeployStore != nil {
-			deps.SessionTracker.SetDeployStore(deps.DeployStore)
-		}
-
-		// Wire event + test correlation stores into session tracker
-		if deps.EventStore != nil {
-			deps.SessionTracker.SetEventStore(deps.EventStore)
-		}
-		if deps.TestCorrelationStore != nil {
-			deps.SessionTracker.SetTestCorrelationStore(deps.TestCorrelationStore)
-		}
-	}
-
-	// Initialize ranking service and context injector
-	if deps.ToolTransitionStore != nil {
-		deps.RankingService = NewRankingService(deps.ToolTransitionStore, deps.WorkflowTemplateStore)
-	}
-	if deps.InvestigationSessionStore != nil && deps.ToolTransitionStore != nil {
-		deps.ContextInjector = NewContextInjector(deps.InvestigationSessionStore, deps.ToolTransitionStore, ContextInjectorDeps{
-			NoteStore:        deps.AgentNoteStore,
-			RunbookStore:     deps.RunbookEffectivenessStore,
-			QueryMemoryStore: deps.QueryMemoryStore,
-			AnalyticsStore:   deps.AnalyticsStore,
-			AuditStore:       deps.AuditStore,
-			TrendStore:       deps.TrendStore,
-			CodeEntityStore:  deps.CodeEntityStore,
-			DeployStore:      deps.DeployStore,
-		})
-	}
-
-	// Seed workflow templates for cold start
-	if deps.WorkflowTemplateStore != nil {
-		SeedDefaultTemplates(appCtx, deps.WorkflowTemplateStore)
-	}
-
-	s := NewConfiguredServer(deps, isAdmin, serverOpts)
+	s := NewConfiguredServer(deps, isAdmin, nil)
 
 	err := s.Run(context.Background(), &mcp.StdioTransport{})
 
 	// Clean up on exit.
-	if deps.SessionTracker != nil {
-		deps.SessionTracker.CloseSession()
-	}
 	if deps.ActivityLogger != nil {
 		deps.ActivityLogger.Close()
 	}

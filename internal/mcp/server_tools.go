@@ -1,14 +1,8 @@
 package mcp
 
 import (
-	"context"
-	"encoding/json"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/adham90/opentrace/internal/domain/logs"
 	"github.com/adham90/opentrace/internal/mcp/tools"
-	"github.com/adham90/opentrace/pkg/store"
 )
 
 // ---------------------------------------------------------------------------
@@ -50,48 +44,31 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 		})
 	b.Add("connectors", "Connector management: list, get, create, test, update, delete", "Connectors", "read", "")
 
-	// --- database (now includes runbook) ---
+	// --- database ---
 	gw.Register("database",
 		wrapHandler(deps, "database", tools.DatabaseHandler(tools.DatabaseDeps{
-			Registry:                  deps.Registry,
-			QueryMemoryStore:          deps.QueryMemoryStore,
-			LogStore:                  deps.LogStore,
-			RunbookEffectivenessStore: deps.RunbookEffectivenessStore,
+			Registry: deps.Registry,
+			LogStore: deps.LogStore,
 		})),
 		GatewayEntry{
-			Description: "Database introspection, management, and investigation runbooks",
-			Actions:     []string{"queries", "explain", "tables", "activity", "locks", "connections", "indexes", "schema", "storage", "kill_query", "long_transactions", "runbook"},
+			Description: "Database introspection and management",
+			Actions:     []string{"queries", "explain", "tables", "activity", "locks", "connections", "indexes", "schema", "storage", "kill_query", "long_transactions"},
 			Category:    "Database",
 			Access:      "read",
 			ReadOnly:    false,
 			Destructive: true,
-			Params:      map[string]string{"order_by": "Sort: calls, total_exec_time, mean_exec_time", "query": "SQL query (explain)", "playbook": "Runbook: slow_database, connection_exhaustion, disk_pressure, replication_lag, error_spike", "pid": "PID to kill (kill_query)"},
+			Params:      map[string]string{"order_by": "Sort: calls, total_exec_time, mean_exec_time", "query": "SQL query (explain)", "pid": "PID to kill (kill_query)"},
 		})
-	b.Add("database", "Database introspection and management: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions, runbook", "Database Introspection", "read", "database connector")
+	b.Add("database", "Database introspection and management: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions", "Database Introspection", "read", "database connector")
 
 	// --- logs ---
 	if deps.LogStore != nil {
-		var traceRecorder tools.TraceSessionRecorder
-		if deps.SessionTracker != nil {
-			st := deps.SessionTracker // capture for closure
-			traceRecorder = func(traceID string) {
-				if sess := st.CurrentSession(); sess != nil {
-					traceIDs := append([]string{}, sess.TraceIDs...)
-					traceIDs = append(traceIDs, traceID)
-					st.UpdateSession(store.UpdateInvestigationSessionParams{
-						TraceIDs: traceIDs,
-					})
-				}
-			}
-		}
 		logService := logs.NewService(deps.LogStore)
 		gw.Register("logs",
 			wrapHandler(deps, "logs", tools.LogsHandler(tools.LogsDeps{
-				Logs:                 logService,
-				LogStore:             deps.LogStore,
-				ErrorGroupStore:      deps.ErrorGroupStore,
-				TraceSessionRecorder: traceRecorder,
-				Ranker:               rankingServiceAdapter(deps),
+				Logs:            logService,
+				LogStore:        deps.LogStore,
+				ErrorGroupStore: deps.ErrorGroupStore,
 			})),
 			GatewayEntry{
 				Description: "Log intelligence: search, context, attributes, stats, summary, performance, trace, compare",
@@ -107,22 +84,11 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 
 	// --- errors ---
 	if deps.ErrorGroupStore != nil || deps.LogStore != nil || deps.ErrorImpactStore != nil {
-		var sess tools.SessionInfo
-		var rec tools.RecurrenceLinker
-		if deps.SessionTracker != nil {
-			sess = deps.SessionTracker
-		}
-		if deps.RecurrenceDetector != nil {
-			rec = deps.RecurrenceDetector
-		}
 		gw.Register("errors",
 			wrapHandler(deps, "errors", tools.ErrorsHandler(tools.ErrorsDeps{
 				ErrorGroupStore:  deps.ErrorGroupStore,
 				LogStore:         deps.LogStore,
 				ErrorImpactStore: deps.ErrorImpactStore,
-				Session:          sess,
-				Recurrence:       rec,
-				Ranker:           rankingServiceAdapter(deps),
 			})),
 			GatewayEntry{
 				Description: "Error management: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, new",
@@ -153,14 +119,7 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 		b.Add("healthchecks", "Health check management: list, uptime, create, delete", "Uptime", "read", "")
 	}
 
-	// --- overview (includes agent memory: notes + session_summary) ---
-	var overviewSessionCallback tools.SessionSummaryCallback
-	if deps.InvestigationSessionStore != nil && deps.SessionTracker != nil {
-		st := deps.SessionTracker // capture for closure
-		overviewSessionCallback = func(ctx context.Context, args map[string]any) (*mcp.CallToolResult, error) {
-			return handleSessionSummaryFromArgs(st, args)
-		}
-	}
+	// --- overview (includes agent memory: notes) ---
 	gw.Register("overview",
 		wrapHandler(deps, "overview", tools.OverviewHandler(tools.OverviewDeps{
 			LogStore:         deps.LogStore,
@@ -171,11 +130,10 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 			HealthCheckStore: deps.HealthCheckStore,
 			SettingsStore:    deps.SettingsStore,
 			AgentNoteStore:   deps.AgentNoteStore,
-			SessionSummary:   overviewSessionCallback,
 		})),
 		GatewayEntry{
-			Description: "System overview, triage, diagnosis, incident timeline, agent memory, and session summary",
-			Actions:     []string{"status", "triage", "diagnose", "timeline", "investigate", "changes", "settings", "notes", "delete_note", "session_summary"},
+			Description: "System overview, triage, diagnosis, incident timeline, and agent memory",
+			Actions:     []string{"status", "triage", "diagnose", "timeline", "investigate", "changes", "settings", "notes", "delete_note"},
 			Category:    "Overview",
 			Access:      "read",
 			ReadOnly:    true,
@@ -224,26 +182,23 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 	}
 
 	// --- code (unified: code_intel + annotations + test_gen + dependencies) ---
-	if deps.CodeEntityStore != nil || deps.TestCorrelationStore != nil ||
+	if deps.CodeEntityStore != nil ||
 		deps.AnalyticsStore != nil || deps.ErrorGroupStore != nil {
 		gw.Register("code",
 			wrapHandler(deps, "code", tools.CodeHandler(tools.CodeDeps{
-				CodeEntityStore:           deps.CodeEntityStore,
-				ErrorGroupStore:           deps.ErrorGroupStore,
-				ErrorImpactStore:          deps.ErrorImpactStore,
-				TestCorrelationStore:      deps.TestCorrelationStore,
-				DeployStore:               deps.DeployStore,
-				AgentNoteStore:            deps.AgentNoteStore,
-				InvestigationSessionStore: deps.InvestigationSessionStore,
-				AnalyticsStore:            deps.AnalyticsStore,
-				LogStore:                  deps.LogStore,
+				CodeEntityStore:  deps.CodeEntityStore,
+				ErrorGroupStore:  deps.ErrorGroupStore,
+				ErrorImpactStore: deps.ErrorImpactStore,
+				AgentNoteStore:   deps.AgentNoteStore,
+				AnalyticsStore:   deps.AnalyticsStore,
+				LogStore:         deps.LogStore,
 			})),
 			GatewayEntry{
 				Description: "Code intelligence, annotations, test generation, and dependency analysis",
 				Actions: []string{
-					"risk", "fragile", "context", "test_gaps", "test_priority",
+					"risk", "fragile",
 					"annotate_file", "annotate_function", "hotspots",
-					"gen_context", "gen_suggest", "gen_coverage",
+					"gen_context", "gen_suggest",
 					"deps_service", "deps_blast", "deps_risk",
 				},
 				Category:   "Code Intelligence",
@@ -253,23 +208,6 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 				Params:     map[string]string{"service": "Filter by service", "fingerprint": "Error fingerprint", "path": "Source file path", "files": "Array of file paths (risk)"},
 			})
 		b.Add("code", "Code intelligence, annotations, test generation, and dependency analysis", "Code Intelligence", "read", "")
-	}
-
-	// --- deploys ---
-	if deps.DeployStore != nil {
-		gw.Register("deploys",
-			wrapHandler(deps, "deploys", tools.DeploysHandler(tools.DeploysDeps{
-				DeployStore: deps.DeployStore,
-			})),
-			GatewayEntry{
-				Description: "Deploy management: history, impact, record",
-				Actions:     []string{"history", "impact", "record"},
-				Category:    "Deploys",
-				Access:      "read",
-				ReadOnly:    false,
-				Params:      map[string]string{"service": "Filter by service", "commit_hash": "Git commit hash (record)", "environment": "Deployment environment"},
-			})
-		b.Add("deploys", "Deploy management: history, impact, record", "Deploys", "read", "")
 	}
 
 	// --- servers (unified: list_servers + query_metrics + server_health) ---
@@ -346,65 +284,3 @@ func registerWriteTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 	b.Add("admin", "Admin operations: settings, users, audit, notes, retention, activity, session_summary", "Admin", "admin", "")
 }
 
-// handleSessionSummaryFromArgs handles the session_summary action using the
-// provided SessionTracker. This bridges the tools package with the session
-// tracking implementation.
-func handleSessionSummaryFromArgs(st *SessionTracker, args map[string]any) (*mcp.CallToolResult, error) {
-	summary, _ := args["summary"].(string)
-	rootCause, _ := args["root_cause"].(string)
-	fixApplied, _ := args["fix_applied"].(string)
-	outcome, _ := args["outcome"].(string)
-	primaryService, _ := args["primary_service"].(string)
-
-	if summary == "" {
-		return NewToolResultError("summary is required"), nil
-	}
-
-	if st == nil {
-		return NewToolResultError("session tracking is not enabled"), nil
-	}
-
-	var status *store.InvestigationSessionStatus
-	if outcome != "" {
-		switch outcome {
-		case "resolved":
-			s := store.InvestigationStatusResolved
-			status = &s
-		case "unresolved", "partial":
-			s := store.InvestigationStatusUnresolved
-			status = &s
-		default:
-			s := store.InvestigationSessionStatus(outcome)
-			status = &s
-		}
-	}
-
-	params := store.UpdateInvestigationSessionParams{
-		Summary: &summary,
-	}
-	if rootCause != "" {
-		params.RootCause = &rootCause
-	}
-	if fixApplied != "" {
-		params.FixDescription = &fixApplied
-	}
-	if status != nil {
-		params.Status = status
-	}
-	if primaryService != "" {
-		params.PrimaryService = &primaryService
-	}
-
-	st.UpdateSession(params)
-
-	resp := map[string]any{
-		"status":  "saved",
-		"message": "Session summary recorded. This will help future investigations of similar issues.",
-	}
-	if sessID := st.CurrentSessionID(); sessID != "" {
-		resp["session_id"] = sessID
-	}
-
-	data, _ := json.Marshal(resp)
-	return NewToolResultText(string(data)), nil
-}

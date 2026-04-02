@@ -17,7 +17,6 @@ import (
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/ingest"
-	"github.com/adham90/opentrace/internal/mcp/notifications"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
@@ -62,18 +61,10 @@ type Server struct {
 	analyticsStore     store.AnalyticsStore
 	errorImpactStore   store.ErrorImpactStore
 	traceStore         store.TraceStore
-	investigationSessionStore store.InvestigationSessionStore
 	codeEntityStore          store.CodeEntityStore
-	deployStore              store.DeployStore
-	eventStore               store.EventStore
-	testCorrelationStore     store.TestCorrelationStore
 	reliabilityProvider      ReliabilityProvider
 	sseServer         *mcp.SSEHandler
 	streamableServer  *mcp.StreamableHTTPHandler
-	mcpServer         *mcp.Server // stored for notification dispatch
-	NotifyError       func(n notifications.ErrorEvent)         // called from ingest pipeline
-	NotifyDeploy      func(ctx context.Context, d store.Deploy) // called from deploy webhook
-	NotifyHealthCheck func(e notifications.HealthCheckEvent)    // called from health check scheduler
 	loginLimiter   *RateLimiter
 	apiLimiter     *RateLimiter
 	metricsConnMu  sync.Mutex
@@ -154,11 +145,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		analyticsStore:            deps.Stores.AnalyticsStore,
 		errorImpactStore:          deps.Stores.ErrorImpactStore,
 		traceStore:                deps.Stores.TraceStore,
-		investigationSessionStore: deps.Stores.InvestigationSessionStore,
 		codeEntityStore:           deps.Stores.CodeEntityStore,
-		deployStore:               deps.Stores.DeployStore,
-		eventStore:                deps.Stores.EventStore,
-		testCorrelationStore:      deps.Stores.TestCorrelationStore,
 		reliabilityProvider:       deps.ReliabilityProvider,
 		sharedDeps:                deps.SharedDeps,
 		modules:                   deps.Modules,
@@ -238,37 +225,6 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		})
 	}
 
-	// Wire up proactive notifications (uses the MCP server for dispatch)
-	if srv.mcpServer != nil {
-		dispatcher := notifications.NewDispatcher(notifications.NewMCPServerSender(srv.mcpServer))
-		errorWatcher := notifications.NewErrorWatcher(dispatcher)
-		deployWatcher := notifications.NewDeployWatcher(dispatcher, srv.errorGroupStore, srv.logStore)
-		healthWatcher := notifications.NewHealthWatcher(dispatcher)
-
-		srv.NotifyError = errorWatcher.OnError
-		srv.NotifyDeploy = deployWatcher.OnDeploy
-		srv.NotifyHealthCheck = healthWatcher.OnHealthCheckResult
-
-		// Wire deploy notifications into shared deps (domain modules read from here)
-		if srv.sharedDeps != nil {
-			srv.sharedDeps.OnDeployCreated = deployWatcher.OnDeploy
-		}
-
-		// Wire error notifications into the ingest pipeline
-		if srv.ingestHandler != nil {
-			srv.ingestHandler.OnErrorGroup = func(fingerprint, exceptionClass, message, service string, count int) {
-				errorWatcher.OnError(notifications.ErrorEvent{
-					Fingerprint:     fingerprint,
-					ExceptionClass:  exceptionClass,
-					Message:         message,
-					Service:         service,
-					OccurrenceCount: count,
-					FirstSeenAt:     time.Now(),
-				})
-			}
-		}
-	}
-
 	// Expose the root router and login limiter so auth/onboarding modules
 	// can register unauthenticated routes (login, register, logout, onboarding).
 	if srv.sharedDeps != nil {
@@ -304,8 +260,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/logs", srv.ingestHandler.HandleIngestLogs)
 
 		// Expose the API router and middleware so domain modules can
-		// register webhook routes with API key auth (see deploys, events,
-		// servers modules).
+		// register webhook routes with API key auth (see servers module).
 		if srv.sharedDeps != nil {
 			srv.sharedDeps.APIRouter = r
 			srv.sharedDeps.APIKeyAuth = srv.DynamicAPIKeyAuth

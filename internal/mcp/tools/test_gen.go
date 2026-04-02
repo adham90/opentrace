@@ -10,11 +10,10 @@ import (
 
 // TestGenDeps holds stores needed by the test generation tool.
 type TestGenDeps struct {
-	ErrorGroupStore      store.ErrorGroupStore
-	ErrorImpactStore     store.ErrorImpactStore
-	CodeEntityStore      store.CodeEntityStore
-	TestCorrelationStore store.TestCorrelationStore
-	LogStore             store.LogStore
+	ErrorGroupStore  store.ErrorGroupStore
+	ErrorImpactStore store.ErrorImpactStore
+	CodeEntityStore  store.CodeEntityStore
+	LogStore         store.LogStore
 }
 
 // TestGenHandler returns a handler for the test generation tool.
@@ -28,10 +27,8 @@ func TestGenHandler(d TestGenDeps) ToolHandlerFunc {
 			return HandleTestGenContext(ctx, d, args)
 		case "suggest":
 			return HandleTestGenSuggest(ctx, d, args)
-		case "coverage":
-			return HandleTestGenCoverage(ctx, d, args)
 		default:
-			return NewToolResultError("unknown action: " + action + ". Use: context, suggest, coverage"), nil
+			return NewToolResultError("unknown action: " + action + ". Use: context, suggest"), nil
 		}
 	}
 }
@@ -139,25 +136,14 @@ func HandleTestGenSuggest(ctx context.Context, d TestGenDeps, args map[string]an
 		}
 
 		suggestion := map[string]any{
-			"rank":             i + 1,
-			"fingerprint":      g.Fingerprint,
-			"exception_class":  g.ExceptionClass,
-			"message":          Truncate(g.Message, 80),
-			"service":          g.Service,
-			"occurrences":      g.OccurrenceCount,
-			"priority":         priority,
-			"source_file":      g.SourceFile,
-		}
-
-		// Check if test coverage exists
-		if d.TestCorrelationStore != nil {
-			corr, err := d.TestCorrelationStore.GetByFingerprint(ctx, g.Fingerprint)
-			if err == nil && corr != nil {
-				suggestion["has_coverage"] = true
-				suggestion["coverage_source"] = corr.SourceFile
-			} else {
-				suggestion["has_coverage"] = false
-			}
+			"rank":            i + 1,
+			"fingerprint":     g.Fingerprint,
+			"exception_class": g.ExceptionClass,
+			"message":         Truncate(g.Message, 80),
+			"service":         g.Service,
+			"occurrences":     g.OccurrenceCount,
+			"priority":        priority,
+			"source_file":     g.SourceFile,
 		}
 
 		suggestions = append(suggestions, suggestion)
@@ -170,59 +156,6 @@ func HandleTestGenSuggest(ctx context.Context, d TestGenDeps, args map[string]an
 	})
 }
 
-func HandleTestGenCoverage(ctx context.Context, d TestGenDeps, args map[string]any) (*CallToolResult, error) {
-	limit := ArgInt(args, "limit", 10, 30)
-	service := ArgString(args, "service")
-
-	var gaps []map[string]any
-
-	// Get uncovered error paths from TestCorrelationStore
-	if d.TestCorrelationStore != nil {
-		paths, err := d.TestCorrelationStore.TopByPriority(ctx, service, limit)
-		if err == nil {
-			for _, p := range paths {
-				gaps = append(gaps, map[string]any{
-					"fingerprint":     p.ErrorFingerprint,
-					"exception_class": p.ErrorClass,
-					"service":         p.Service,
-					"error_count":     p.ErrorCount,
-					"source_file":     p.SourceFile,
-					"priority_score":  p.PriorityScore,
-				})
-			}
-		}
-	}
-
-	if len(gaps) == 0 {
-		// Fallback: list unresolved errors that likely lack tests
-		if d.ErrorGroupStore != nil {
-			groups, err := d.ErrorGroupStore.List(ctx, store.ListErrorGroupParams{
-				Service: service,
-				Status:  store.ErrorGroupUnresolved,
-				Limit:   limit,
-				SortBy:  "occurrence_count",
-			})
-			if err == nil {
-				for _, g := range groups {
-					gaps = append(gaps, map[string]any{
-						"fingerprint":     g.Fingerprint,
-						"exception_class": g.ExceptionClass,
-						"service":         g.Service,
-						"occurrences":     g.OccurrenceCount,
-						"source_file":     g.SourceFile,
-						"note":            "No test correlation data available — listed by occurrence count",
-					})
-				}
-			}
-		}
-	}
-
-	return JSONResult(map[string]any{
-		"uncovered_errors": gaps,
-		"count":            len(gaps),
-		"tip":              "Use test_gen(action: \"context\", fingerprint: \"...\") to get test-ready data for any error.",
-	})
-}
 
 func sanitizeTestName(s string) string {
 	// Simple: replace non-alphanumeric with underscore
