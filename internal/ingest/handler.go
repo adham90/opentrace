@@ -76,6 +76,7 @@ type ingestLogEntry struct {
 	SourceFile       string                 `json:"source_file"`
 	SourceLine       int                    `json:"source_line"`
 	Metadata         map[string]any         `json:"metadata"`
+	DeepCapture      json.RawMessage        `json:"deep_capture,omitempty"`
 	RequestSummary   *ingestRequestSummary  `json:"request_summary,omitempty"`
 }
 
@@ -226,6 +227,7 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 			SourceLine:     e.SourceLine,
 			Metadata:       e.Metadata,
 			MetadataJSON:   metadataJSON,
+			DeepCapture:    e.DeepCapture,
 		}
 
 		// Server-side fingerprinting: always compute on the server,

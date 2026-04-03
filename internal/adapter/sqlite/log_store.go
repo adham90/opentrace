@@ -12,6 +12,7 @@ import (
 
 	"github.com/uptrace/bun"
 
+	"github.com/adham90/opentrace/internal/deepcapture"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -47,8 +48,9 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []store.LogEntry) (i
 
 		var summaryStmt *sql.Stmt
 
-		for _, e := range entries {
-			promoteFromMetadata(&e)
+		for i := range entries {
+			e := &entries[i]
+			promoteFromMetadata(e)
 
 			metaStr := e.MetadataJSON
 			if metaStr == "" {
@@ -68,12 +70,15 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []store.LogEntry) (i
 				return fmt.Errorf("inserting log entry: %w", err)
 			}
 
-			if e.RequestSummary != nil {
-				logID, err := res.LastInsertId()
-				if err != nil {
-					return fmt.Errorf("getting last insert id: %w", err)
-				}
+			// Always capture the auto-generated ID so downstream consumers
+			// (processAfterInsert, deep capture, etc.) can reference it.
+			logID, err := res.LastInsertId()
+			if err != nil {
+				return fmt.Errorf("getting last insert id: %w", err)
+			}
+			e.ID = logID
 
+			if e.RequestSummary != nil {
 				if summaryStmt == nil {
 					summaryStmt, err = tx.PrepareContext(ctx,
 						`INSERT INTO request_summaries (
@@ -109,6 +114,22 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []store.LogEntry) (i
 				)
 				if err != nil {
 					return fmt.Errorf("inserting request summary: %w", err)
+				}
+			}
+
+			// Process deep capture detail rows within the same transaction.
+			if len(e.DeepCapture) > 0 {
+				var doc deepcapture.Document
+				if err := json.Unmarshal(e.DeepCapture, &doc); err != nil {
+					slog.Warn("deepcapture: invalid document JSON",
+						"error", err,
+						"log_id", logID,
+					)
+				} else if err := deepcapture.ProcessDocument(tx.Tx, &doc, logID); err != nil {
+					slog.Warn("deepcapture: processing failed",
+						"error", err,
+						"log_id", logID,
+					)
 				}
 			}
 		}

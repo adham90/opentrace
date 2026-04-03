@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -28,6 +29,7 @@ type LogEntry struct {
 	SourceLine     int             `bun:"source_line" json:"source_line,omitempty"`
 	Metadata       map[string]any  `bun:"metadata" json:"metadata,omitempty"`
 	MetadataJSON   string          `bun:"-" json:"-"` // pre-marshaled metadata; avoids double marshal on hot path
+	DeepCapture    json.RawMessage `bun:"-" json:"-"` // carrier field: raw deep capture document for in-tx processing
 	RequestSummary *RequestSummary `bun:"rel:has-one,join:id=log_id" json:"request_summary,omitempty"`
 	CreatedAt      time.Time       `bun:"created_at" json:"created_at"`
 }
