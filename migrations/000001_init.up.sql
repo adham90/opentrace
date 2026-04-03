@@ -823,3 +823,139 @@ CREATE TABLE IF NOT EXISTS uncovered_error_paths (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_uncovered_paths_fingerprint ON uncovered_error_paths(error_fingerprint);
 CREATE INDEX IF NOT EXISTS idx_uncovered_paths_priority ON uncovered_error_paths(service, priority_score DESC);
+
+-- ============================================================================
+-- Deep Capture Detail Tables
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS request_captures (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    log_id            INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
+    request_headers   TEXT,
+    request_body      TEXT,
+    request_size      INTEGER,
+    content_type      TEXT,
+    ip_address        TEXT,
+    user_agent        TEXT,
+    referer           TEXT,
+    cookies           TEXT,
+    session_data      TEXT,
+    response_headers  TEXT,
+    response_body     TEXT,
+    response_size     INTEGER,
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_request_captures_log ON request_captures(log_id);
+
+CREATE TABLE IF NOT EXISTS sql_captures (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    log_id          INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
+    raw_sql         TEXT,
+    normalized_sql  TEXT,
+    bind_values     TEXT,
+    row_count       INTEGER,
+    duration_ms     REAL,
+    cached          INTEGER DEFAULT 0,
+    in_transaction  INTEGER DEFAULT 0,
+    explain_plan    TEXT,
+    pool_size       INTEGER,
+    pool_busy       INTEGER,
+    pool_waiting    INTEGER,
+    caller_location TEXT,
+    fingerprint     TEXT,
+    table_name      TEXT,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_sql_captures_log ON sql_captures(log_id);
+CREATE INDEX IF NOT EXISTS idx_sql_captures_fingerprint ON sql_captures(fingerprint);
+CREATE INDEX IF NOT EXISTS idx_sql_captures_duration ON sql_captures(duration_ms);
+
+CREATE TABLE IF NOT EXISTS http_captures (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    log_id            INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
+    method            TEXT,
+    url               TEXT,
+    host              TEXT,
+    vendor            TEXT,
+    status            INTEGER,
+    duration_ms       REAL,
+    request_headers   TEXT,
+    request_body      TEXT,
+    response_headers  TEXT,
+    response_body     TEXT,
+    response_size     INTEGER,
+    retry_attempt     INTEGER DEFAULT 0,
+    error_class       TEXT,
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_http_captures_log ON http_captures(log_id);
+CREATE INDEX IF NOT EXISTS idx_http_captures_vendor ON http_captures(vendor);
+
+CREATE TABLE IF NOT EXISTS email_captures (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    log_id          INTEGER REFERENCES logs(id) ON DELETE CASCADE,
+    mailer_class    TEXT,
+    mailer_action   TEXT,
+    from_address    TEXT,
+    to_addresses    TEXT,
+    cc_addresses    TEXT,
+    bcc_addresses   TEXT,
+    subject         TEXT,
+    body_html       TEXT,
+    body_text       TEXT,
+    template_name   TEXT,
+    template_vars   TEXT,
+    attachments     TEXT,
+    delivery_status TEXT,
+    smtp_response   TEXT,
+    duration_ms     REAL,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_captures_log ON email_captures(log_id);
+
+CREATE TABLE IF NOT EXISTS audit_captures (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    log_id          INTEGER REFERENCES logs(id) ON DELETE CASCADE,
+    record_type     TEXT,
+    record_id       TEXT,
+    action          TEXT,
+    actor_id        TEXT,
+    actor_type      TEXT,
+    changed_fields  TEXT,
+    full_before     TEXT,
+    full_after      TEXT,
+    request_id      TEXT,
+    ip_address      TEXT,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_captures_log ON audit_captures(log_id);
+CREATE INDEX IF NOT EXISTS idx_audit_captures_record ON audit_captures(record_type, record_id);
+CREATE INDEX IF NOT EXISTS idx_audit_captures_actor ON audit_captures(actor_id);
+
+CREATE TABLE IF NOT EXISTS file_captures (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    log_id          INTEGER REFERENCES logs(id) ON DELETE CASCADE,
+    action          TEXT,
+    filename        TEXT,
+    size_bytes      INTEGER,
+    content_type    TEXT,
+    storage_service TEXT,
+    key             TEXT,
+    duration_ms     REAL,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_captures_log ON file_captures(log_id);
+
+-- ============================================================================
+-- Default Configuration
+-- ============================================================================
+
+INSERT OR IGNORE INTO app_config (key, value) VALUES ('pii_scrubbing', '{"enabled":true,"builtin":{"credit_cards":true,"emails":true,"phone_numbers":true,"ssn":true,"ip_addresses":false},"sensitive_fields":["password","token","secret","authorization","api_key"],"custom_patterns":[],"skip_domains":[],"skip_services":[]}');
+
+INSERT OR IGNORE INTO app_config (key, value) VALUES ('retention_policy', '{"logs":"30d","request_captures":"7d","sql_captures":"14d","http_captures":"7d","email_captures":"14d","audit_captures":"365d","request_summaries":"90d","error_groups":"never","metric_buckets":"180d","deploy_markers":"never"}');

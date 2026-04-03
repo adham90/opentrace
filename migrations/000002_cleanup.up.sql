@@ -5,6 +5,9 @@
 -- Phase 2: Journey store
 -- Phase 3: Deploys table (deploy_markers remains as single source of truth)
 -- Phase 4: Events table (dead infrastructure — no MCP tool reads from it)
+--
+-- NOTE: Deep capture tables (request_captures, sql_captures, http_captures,
+--       email_captures, audit_captures, file_captures) are NOT dropped here.
 -- ============================================================================
 
 -- Investigation intelligence layer
