@@ -51,8 +51,8 @@ func (s *Service) Create(ctx context.Context, params store.CreateWatchParams) (*
 	if s.repo == nil {
 		return nil, fmt.Errorf("create watch: %w", domain.ErrNotConfigured)
 	}
-	if params.Metric == "" {
-		return nil, fmt.Errorf("metric: %w", domain.ErrInvalidInput)
+	if len(params.ConditionsJSON) == 0 || string(params.ConditionsJSON) == "null" {
+		return nil, fmt.Errorf("conditions_json: %w", domain.ErrInvalidInput)
 	}
 	w, err := s.repo.Create(ctx, params)
 	if err != nil {

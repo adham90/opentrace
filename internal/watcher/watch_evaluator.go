@@ -30,40 +30,47 @@ func NewWatchEvaluator(metrics *WatchMetrics, watchStore store.WatchStore) *Watc
 	}
 }
 
-// Evaluate measures the watch's metric and determines if an alert should fire.
+// Evaluate measures the watch's conditions and determines if an alert should fire.
+// If the watch has a JSON conditions tree, it uses the tree evaluator.
+// Otherwise, it falls back to the flat metric/operator/threshold fields.
 func (e *WatchEvaluator) Evaluate(ctx context.Context, w *store.Watch) (*WatchEvalResult, error) {
-	// Parse the check interval for the measurement window
+	// Parse the check interval for the measurement window.
 	window, err := time.ParseDuration(w.CheckInterval)
 	if err != nil {
 		window = 30 * time.Second
 	}
-	// Use baseline window for measurement if larger
 	bw, err := time.ParseDuration(w.BaselineWindow)
 	if err == nil && bw > window {
 		window = bw
 	}
 
-	value, err := e.metrics.Measure(ctx, w.Metric, w.Service, w.Endpoint, window)
+	// Parse and evaluate the conditions tree.
+	cond, err := ParseCondition(w.ConditionsJSON)
 	if err != nil {
-		return nil, fmt.Errorf("measuring %s: %w", w.Metric, err)
+		return nil, fmt.Errorf("parsing conditions: %w", err)
 	}
+	condResult, err := EvaluateCondition(ctx, cond, e.metrics, w.BaselineJSON, window)
+	if err != nil {
+		return nil, fmt.Errorf("evaluating conditions: %w", err)
+	}
+	value := condResult.Value
+	breached := condResult.Breached
+	summary := condResult.Summary
 
-	breached := compare(value, w.Operator, w.Threshold)
-
-	// Update consecutive breaches
+	// Update consecutive breaches.
 	breaches := 0
 	if breached {
 		breaches = w.ConsecutiveBreaches + 1
 	}
 
-	// Calculate next check time
+	// Calculate next check time.
 	ci, err := time.ParseDuration(w.CheckInterval)
 	if err != nil {
 		ci = 30 * time.Second
 	}
 	nextCheck := time.Now().UTC().Add(ci)
 
-	// Persist the check result
+	// Persist the check result.
 	if err := e.watchStore.UpdateAfterCheck(ctx, w.ID, value, breaches, nextCheck); err != nil {
 		return nil, fmt.Errorf("updating after check: %w", err)
 	}
@@ -71,31 +78,30 @@ func (e *WatchEvaluator) Evaluate(ctx context.Context, w *store.Watch) (*WatchEv
 	result := &WatchEvalResult{
 		Value:    value,
 		Breached: breached,
+		Summary:  summary,
 	}
 
-	// Determine if alert should fire
+	// Not breached → no alert.
 	if !breached {
-		result.Summary = fmt.Sprintf("%s = %.4f (within threshold %.4f)", w.Metric, value, w.Threshold)
 		return result, nil
 	}
 
-	// Check consecutive breach requirement
+	// Check consecutive breach requirement.
 	if breaches < w.MinConsecutive {
-		result.Summary = fmt.Sprintf("%s = %.4f breached (%d/%d consecutive)", w.Metric, value, breaches, w.MinConsecutive)
+		result.Summary = fmt.Sprintf("%s (%d/%d consecutive)", summary, breaches, w.MinConsecutive)
 		return result, nil
 	}
 
-	// Alert suppression: don't re-alert if already triggered
+	// Alert suppression: don't re-alert if already triggered.
 	if w.Status == store.WatchStatusTriggered {
-		result.Summary = fmt.Sprintf("%s = %.4f (already triggered, suppressing duplicate alert)", w.Metric, value)
+		result.Summary = fmt.Sprintf("%s (already triggered, suppressing)", summary)
 		return result, nil
 	}
 
-	// Fire alert
+	// Fire alert.
 	result.HasAlert = true
-	result.Summary = fmt.Sprintf("%s = %.4f exceeds threshold %.4f (%d consecutive breaches)", w.Metric, value, w.Threshold, breaches)
+	result.Summary = fmt.Sprintf("%s (%d consecutive breaches)", summary, breaches)
 
-	// Transition watch to triggered state
 	if err := e.watchStore.UpdateStatus(ctx, w.ID, store.WatchStatusTriggered); err != nil {
 		return nil, fmt.Errorf("updating watch to triggered: %w", err)
 	}

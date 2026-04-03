@@ -72,6 +72,9 @@ func (m *queueMockLogStore) GetByID(context.Context, int64) (*store.LogEntry, er
 func (m *queueMockLogStore) SearchRequestSummaries(context.Context, store.RequestSummarySearchParams) ([]store.RequestSummaryResult, error) {
 	return nil, nil
 }
+func (m *queueMockLogStore) AggregateRequestSummaries(context.Context, store.RequestSummaryAggregateParams) (*store.RequestSummaryAggregates, error) {
+	return &store.RequestSummaryAggregates{}, nil
+}
 func (m *queueMockLogStore) RecordBatch(context.Context, string, int) error        { return nil }
 func (m *queueMockLogStore) GetBatch(context.Context, string) (*store.BatchRecord, error) {
 	return nil, store.ErrNotFound

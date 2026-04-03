@@ -153,5 +153,5 @@ func LogsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*
 	if len(perfEntries) > 0 {
 		suggestions = append(suggestions, Suggest("overview", "Get full system overview", map[string]any{"action": "diagnose"}))
 	}
-	return JSONResultRanked(resp, deps.Ranker, suggestions...)
+	return JSONResult(resp, suggestions...)
 }

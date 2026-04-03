@@ -103,55 +103,6 @@ func TestJSONResult_NoSuggestions(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// JSONResultRanked
-// ---------------------------------------------------------------------------
-
-type mockRanker struct {
-	called bool
-}
-
-func (m *mockRanker) RankAndTrack(suggestions []ToolSuggestion) []ToolSuggestion {
-	m.called = true
-	// Reverse order to prove ranking happened.
-	out := make([]ToolSuggestion, len(suggestions))
-	for i, s := range suggestions {
-		out[len(suggestions)-1-i] = s
-	}
-	return out
-}
-
-func TestJSONResultRanked_CallsRanker(t *testing.T) {
-	ranker := &mockRanker{}
-	resp := map[string]any{"data": "test"}
-	_, err := JSONResultRanked(resp, ranker,
-		Suggest("a", "first", nil),
-		Suggest("b", "second", nil),
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !ranker.called {
-		t.Error("expected ranker to be called")
-	}
-}
-
-func TestJSONResultRanked_NilRanker(t *testing.T) {
-	resp := map[string]any{"data": "test"}
-	result, err := JSONResultRanked(resp, nil,
-		Suggest("a", "first", nil),
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	text := extractTextContent(t, result)
-	var parsed map[string]any
-	json.Unmarshal([]byte(text), &parsed)
-	if _, ok := parsed["suggested_tools"]; !ok {
-		t.Error("suggestions should still be added with nil ranker")
-	}
-}
-
-// ---------------------------------------------------------------------------
 // EmptyResult
 // ---------------------------------------------------------------------------
 

@@ -69,37 +69,51 @@ func (m *WatchMetrics) measureErrorRate(ctx context.Context, service string, win
 	return float64(errors) / float64(total), nil
 }
 
+// measureResponseTime uses SQL aggregation — no row loading.
 func (m *WatchMetrics) measureResponseTime(ctx context.Context, service, endpoint string, window time.Duration) (float64, error) {
-	summaries, err := m.getRequestSummaries(ctx, service, endpoint, window)
+	agg, err := m.aggregate(ctx, service, endpoint, window)
 	if err != nil {
 		return 0, err
 	}
-	if len(summaries) == 0 {
+	if agg.Count == 0 {
 		return 0, nil
 	}
-
-	var total float64
-	for _, s := range summaries {
-		total += s.DurationMs
-	}
-	return total / float64(len(summaries)), nil
+	return agg.AvgDuration, nil
 }
 
+// measureP95Response loads a limited set of durations for percentile calculation.
+// SQLite has no native percentile function, so we sort in Go.
 func (m *WatchMetrics) measureP95Response(ctx context.Context, service, endpoint string, window time.Duration) (float64, error) {
-	summaries, err := m.getRequestSummaries(ctx, service, endpoint, window)
-	if err != nil {
-		return 0, err
+	now := time.Now().UTC()
+	start := now.Add(-window)
+
+	params := store.RequestSummarySearchParams{
+		Start:  &start,
+		End:    &now,
+		SortBy: "duration_ms",
+		Limit:  200,
 	}
-	if len(summaries) == 0 {
+	if endpoint != "" {
+		params.Path = endpoint
+	}
+
+	summaries, err := m.logStore.SearchRequestSummaries(ctx, params)
+	if err != nil {
+		return 0, fmt.Errorf("searching for P95: %w", err)
+	}
+
+	// Filter by service in Go (SearchRequestSummaries has no service param).
+	var durations []float64
+	for _, s := range summaries {
+		if service == "" || s.Service == service {
+			durations = append(durations, s.DurationMs)
+		}
+	}
+	if len(durations) == 0 {
 		return 0, nil
 	}
 
-	durations := make([]float64, len(summaries))
-	for i, s := range summaries {
-		durations[i] = s.DurationMs
-	}
 	sort.Float64s(durations)
-
 	idx := int(math.Ceil(float64(len(durations))*0.95)) - 1
 	if idx < 0 {
 		idx = 0
@@ -160,76 +174,48 @@ func (m *WatchMetrics) measureHeartbeat(ctx context.Context, service string, win
 		return 0, fmt.Errorf("searching for heartbeat: %w", err)
 	}
 	if len(entries) == 0 {
-		// No logs in window — return seconds since window start (high = no heartbeat)
 		return window.Seconds(), nil
 	}
-	// Return seconds since last log (low = healthy)
 	return now.Sub(entries[0].Timestamp).Seconds(), nil
 }
 
+// measureSQLCount uses SQL aggregation — no row loading.
 func (m *WatchMetrics) measureSQLCount(ctx context.Context, service, endpoint string, window time.Duration) (float64, error) {
-	summaries, err := m.getRequestSummaries(ctx, service, endpoint, window)
+	agg, err := m.aggregate(ctx, service, endpoint, window)
 	if err != nil {
 		return 0, err
 	}
-	if len(summaries) == 0 {
+	if agg.Count == 0 {
 		return 0, nil
 	}
-
-	var total float64
-	for _, s := range summaries {
-		total += float64(s.SQLCount)
-	}
-	return total / float64(len(summaries)), nil
+	return agg.AvgSQLCount, nil
 }
 
+// measureCacheHitRate uses SQL aggregation — no row loading.
 func (m *WatchMetrics) measureCacheHitRate(ctx context.Context, service, endpoint string, window time.Duration) (float64, error) {
-	summaries, err := m.getRequestSummaries(ctx, service, endpoint, window)
+	agg, err := m.aggregate(ctx, service, endpoint, window)
 	if err != nil {
 		return 0, err
 	}
-	if len(summaries) == 0 {
+	if agg.TotalReads == 0 {
 		return 0, nil
 	}
-
-	var totalReads, totalHits int
-	for _, s := range summaries {
-		totalReads += s.CacheReads
-		totalHits += s.CacheHits
-	}
-	if totalReads == 0 {
-		return 0, nil
-	}
-	return float64(totalHits) / float64(totalReads), nil
+	return agg.CacheHitRate, nil
 }
 
-func (m *WatchMetrics) getRequestSummaries(ctx context.Context, service, endpoint string, window time.Duration) ([]store.RequestSummaryResult, error) {
+// aggregate runs a single SQL aggregation query for response time, SQL count, and cache metrics.
+func (m *WatchMetrics) aggregate(ctx context.Context, service, endpoint string, window time.Duration) (*store.RequestSummaryAggregates, error) {
 	now := time.Now().UTC()
 	start := now.Add(-window)
 
-	params := store.RequestSummarySearchParams{
-		Start: &start,
-		End:   &now,
-		Limit: 1000,
-	}
-	if endpoint != "" {
-		params.Path = endpoint
-	}
-
-	summaries, err := m.logStore.SearchRequestSummaries(ctx, params)
+	agg, err := m.logStore.AggregateRequestSummaries(ctx, store.RequestSummaryAggregateParams{
+		Start:    &start,
+		End:      &now,
+		Service:  service,
+		Endpoint: endpoint,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("searching request summaries: %w", err)
+		return nil, fmt.Errorf("aggregating summaries: %w", err)
 	}
-
-	// Filter by service if specified (SearchRequestSummaries doesn't have service filter)
-	if service != "" {
-		filtered := make([]store.RequestSummaryResult, 0, len(summaries))
-		for _, s := range summaries {
-			if s.Service == service {
-				filtered = append(filtered, s)
-			}
-		}
-		return filtered, nil
-	}
-	return summaries, nil
+	return agg, nil
 }

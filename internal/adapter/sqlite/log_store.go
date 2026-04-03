@@ -36,10 +36,10 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []store.LogEntry) (i
 		stmt, err := tx.PrepareContext(ctx,
 			`INSERT INTO logs (timestamp, level, service, environment, commit_hash,
 			                   trace_id, span_id, parent_span_id, request_id,
-			                   user_id, session_id,
+			                   user_id,
 			                   message, event_type, exception_class, error_fingerprint,
 			                   source_file, source_line, metadata)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 		if err != nil {
 			return fmt.Errorf("prepare insert: %w", err)
 		}
@@ -61,7 +61,7 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []store.LogEntry) (i
 			ts := e.Timestamp.UTC().Format(time.RFC3339Nano)
 			res, err := stmt.ExecContext(ctx, ts, e.Level, e.Service, e.Environment, e.CommitHash,
 				e.TraceID, e.SpanID, e.ParentSpanID, e.RequestID,
-				e.UserID, e.SessionID,
+				e.UserID,
 				e.Message, e.EventType, e.ExceptionClass, e.ErrorFingerprint,
 				e.SourceFile, e.SourceLine, metaStr)
 			if err != nil {
@@ -139,11 +139,6 @@ func promoteFromMetadata(e *store.LogEntry) {
 			e.ExceptionClass = v
 		}
 	}
-	if e.ErrorFingerprint == "" {
-		if v, ok := e.Metadata["error_fingerprint"].(string); ok && v != "" {
-			e.ErrorFingerprint = v
-		}
-	}
 	if e.SourceFile == "" {
 		if bt, ok := e.Metadata["backtrace"].([]any); ok && len(bt) > 0 {
 			if line, ok := bt[0].(string); ok {
@@ -156,11 +151,6 @@ func promoteFromMetadata(e *store.LogEntry) {
 			e.UserID = v
 		} else if v, ok := e.Metadata["user_id"].(float64); ok {
 			e.UserID = strconv.FormatInt(int64(v), 10)
-		}
-	}
-	if e.SessionID == "" {
-		if v, ok := e.Metadata["session_id"].(string); ok && v != "" {
-			e.SessionID = v
 		}
 	}
 }
@@ -272,7 +262,7 @@ func (s *logStore) Search(ctx context.Context, params store.LogSearchParams) ([]
 
 	const selectCols = `l.id, l.timestamp, l.level, l.service, l.environment, l.commit_hash,
 		l.trace_id, l.span_id, l.parent_span_id, l.request_id,
-		l.user_id, l.session_id,
+		l.user_id,
 		l.message, l.event_type, l.exception_class, l.error_fingerprint,
 		l.source_file, l.source_line, l.metadata`
 
@@ -338,13 +328,13 @@ func scanLogRow(rows *sql.Rows) (*store.LogEntry, error) {
 	var tsStr string
 	var metaJSON sql.NullString
 	var environment, commitHash, spanID, parentSpanID, requestID sql.NullString
-	var userID, sessionID sql.NullString
+	var userID sql.NullString
 	var eventType, exceptionClass, errorFingerprint, sourceFile sql.NullString
 	var sourceLine sql.NullInt64
 	if err := rows.Scan(
 		&entry.ID, &tsStr, &entry.Level, &entry.Service, &environment, &commitHash,
 		&entry.TraceID, &spanID, &parentSpanID, &requestID,
-		&userID, &sessionID,
+		&userID,
 		&entry.Message, &eventType, &exceptionClass, &errorFingerprint,
 		&sourceFile, &sourceLine, &metaJSON,
 	); err != nil {
@@ -368,9 +358,6 @@ func scanLogRow(rows *sql.Rows) (*store.LogEntry, error) {
 	}
 	if userID.Valid {
 		entry.UserID = userID.String
-	}
-	if sessionID.Valid {
-		entry.SessionID = sessionID.String
 	}
 	if eventType.Valid {
 		entry.EventType = eventType.String
@@ -582,7 +569,7 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*store.LogEntry, erro
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, timestamp, level, service, environment, commit_hash,
 			trace_id, span_id, parent_span_id, request_id,
-			user_id, session_id,
+			user_id,
 			message, event_type, exception_class, error_fingerprint,
 			source_file, source_line, metadata
 		FROM logs WHERE id = ?`, id)
@@ -591,14 +578,14 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*store.LogEntry, erro
 	var tsStr string
 	var metaJSON sql.NullString
 	var environment, commitHash, spanID, parentSpanID, requestID sql.NullString
-	var userID, sessionID sql.NullString
+	var userID sql.NullString
 	var eventType, exceptionClass, errorFingerprint, sourceFile sql.NullString
 	var sourceLine sql.NullInt64
 
 	err := row.Scan(
 		&entry.ID, &tsStr, &entry.Level, &entry.Service, &environment, &commitHash,
 		&entry.TraceID, &spanID, &parentSpanID, &requestID,
-		&userID, &sessionID,
+		&userID,
 		&entry.Message, &eventType, &exceptionClass, &errorFingerprint,
 		&sourceFile, &sourceLine, &metaJSON,
 	)
@@ -627,9 +614,6 @@ func (s *logStore) GetByID(ctx context.Context, id int64) (*store.LogEntry, erro
 	}
 	if userID.Valid {
 		entry.UserID = userID.String
-	}
-	if sessionID.Valid {
-		entry.SessionID = sessionID.String
 	}
 	if eventType.Valid {
 		entry.EventType = eventType.String
@@ -779,6 +763,47 @@ func (s *logStore) SearchRequestSummaries(ctx context.Context, params store.Requ
 	}
 
 	return results, rows.Err()
+}
+
+// AggregateRequestSummaries computes aggregate metrics in a single SQL query
+// instead of loading all rows into memory. Used by the watch metrics system.
+func (s *logStore) AggregateRequestSummaries(ctx context.Context, params store.RequestSummaryAggregateParams) (*store.RequestSummaryAggregates, error) {
+	query := `SELECT
+		COUNT(*) AS cnt,
+		COALESCE(AVG(rs.duration_ms), 0) AS avg_dur,
+		COALESCE(AVG(rs.sql_count), 0) AS avg_sql,
+		COALESCE(SUM(rs.cache_reads), 0) AS total_reads,
+		COALESCE(SUM(rs.cache_hits), 0) AS total_hits
+	FROM request_summaries rs
+	JOIN logs l ON l.id = rs.log_id`
+
+	var qb queryBuilder
+	if params.Start != nil {
+		qb.where("l.timestamp >= ?", params.Start.UTC().Format(time.RFC3339Nano))
+	}
+	if params.End != nil {
+		qb.where("l.timestamp <= ?", params.End.UTC().Format(time.RFC3339Nano))
+	}
+	if params.Service != "" {
+		qb.where("l.service = ?", params.Service)
+	}
+	if params.Endpoint != "" {
+		qb.where("rs.path LIKE ?", "%"+params.Endpoint+"%")
+	}
+
+	fullQuery, args := qb.build(query)
+
+	var agg store.RequestSummaryAggregates
+	err := s.db.QueryRowContext(ctx, fullQuery, args...).Scan(
+		&agg.Count, &agg.AvgDuration, &agg.AvgSQLCount, &agg.TotalReads, &agg.TotalHits,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("aggregating request summaries: %w", err)
+	}
+	if agg.TotalReads > 0 {
+		agg.CacheHitRate = float64(agg.TotalHits) / float64(agg.TotalReads)
+	}
+	return &agg, nil
 }
 
 func (s *logStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {

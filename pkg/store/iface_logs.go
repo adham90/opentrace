@@ -18,6 +18,7 @@ type LogStore interface {
 	GetByID(ctx context.Context, id int64) (*LogEntry, error)
 	// Request performance
 	SearchRequestSummaries(ctx context.Context, params RequestSummarySearchParams) ([]RequestSummaryResult, error)
+	AggregateRequestSummaries(ctx context.Context, params RequestSummaryAggregateParams) (*RequestSummaryAggregates, error)
 	// Batch deduplication
 	RecordBatch(ctx context.Context, batchID string, logCount int) error
 	GetBatch(ctx context.Context, batchID string) (*BatchRecord, error)

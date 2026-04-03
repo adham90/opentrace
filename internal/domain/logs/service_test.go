@@ -59,6 +59,10 @@ func (f *fake) SearchRequestSummaries(_ context.Context, _ store.RequestSummaryS
 	return f.summaries, nil
 }
 
+func (f *fake) AggregateRequestSummaries(_ context.Context, _ store.RequestSummaryAggregateParams) (*store.RequestSummaryAggregates, error) {
+	return &store.RequestSummaryAggregates{}, nil
+}
+
 // Compile-time check.
 var _ Repository = (*fake)(nil)
 

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -32,6 +33,72 @@ const (
 	WatchOpNotEqual         WatchOperator = "neq"
 )
 
+// ConditionsSummary returns a short human-readable description of a watch's
+// conditions_json. For simple single-condition watches it extracts the metric;
+// for compound conditions it returns a generic summary.
+func ConditionsSummary(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "unknown"
+	}
+	var peek struct {
+		Type   string `json:"type,omitempty"`
+		Metric string `json:"metric,omitempty"`
+		All    []any  `json:"all,omitempty"`
+		Any    []any  `json:"any,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &peek); err != nil {
+		return "conditions"
+	}
+	if peek.Type != "" && peek.Metric != "" {
+		return peek.Metric
+	}
+	if len(peek.All) > 0 {
+		return "compound(all)"
+	}
+	if len(peek.Any) > 0 {
+		return "compound(any)"
+	}
+	return "conditions"
+}
+
+// ConditionsMetric extracts the primary metric from a simple single-condition
+// watch. Returns an empty WatchMetric for compound conditions.
+func ConditionsMetric(raw json.RawMessage) WatchMetric {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var peek struct {
+		Type   string      `json:"type,omitempty"`
+		Metric WatchMetric `json:"metric,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &peek); err != nil {
+		return ""
+	}
+	if peek.Type != "" {
+		return peek.Metric
+	}
+	return ""
+}
+
+// ConditionsThreshold extracts the threshold value from a simple threshold
+// condition. Returns 0 for compound or non-threshold conditions.
+func ConditionsThreshold(raw json.RawMessage) float64 {
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0
+	}
+	var peek struct {
+		Type  string  `json:"type,omitempty"`
+		Value float64 `json:"value,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &peek); err != nil {
+		return 0
+	}
+	if peek.Type == "threshold" {
+		return peek.Value
+	}
+	return 0
+}
+
 // WatchStatus represents the lifecycle state of a watch.
 type WatchStatus string
 
@@ -52,51 +119,53 @@ const (
 	WatchUrgencyCritical WatchUrgency = "critical"
 )
 
-// Watch represents a simplified metric threshold monitor.
+// Watch represents a metric threshold monitor using a JSON condition tree.
+//
+// The ConditionsJSON field stores the full rule definition as a JSON condition
+// tree which supports AND/OR/NOT combinators and multiple condition types
+// (threshold, relative, delta, count). The Service, Endpoint, Environment, and
+// CommitHash fields are kept for filtering/display and stream matching.
 type Watch struct {
 	bun.BaseModel       `bun:"table:watches" json:"-"`
-	ID                  string         `bun:"id,pk" json:"id"`
-	Metric              WatchMetric    `bun:"metric" json:"metric"`
-	Operator            WatchOperator  `bun:"operator" json:"operator"`
-	Threshold           float64        `bun:"threshold" json:"threshold"`
-	Service             string         `bun:"service" json:"service,omitempty"`
-	Endpoint            string         `bun:"endpoint" json:"endpoint,omitempty"`
-	Environment         string         `bun:"environment" json:"environment,omitempty"`
-	CommitHash          string         `bun:"commit_hash" json:"commit_hash,omitempty"`
-	Duration            string         `bun:"duration" json:"duration"`
-	Urgency             WatchUrgency   `bun:"urgency" json:"urgency"`
-	CheckInterval       string         `bun:"check_interval" json:"check_interval"`
-	BaselineWindow      string         `bun:"baseline_window" json:"baseline_window"`
-	MinConsecutive      int            `bun:"min_consecutive" json:"min_consecutive"`
-	Status              WatchStatus    `bun:"status" json:"status"`
-	BaselineJSON        *WatchBaseline `bun:"baseline_json" json:"baseline,omitempty"`
-	ConsecutiveBreaches int            `bun:"consecutive_breaches" json:"consecutive_breaches"`
-	CurrentValue        *float64       `bun:"current_value" json:"current_value,omitempty"`
-	ExpiresAt           *time.Time     `bun:"expires_at" json:"expires_at,omitempty"`
-	CreatedBy           string         `bun:"created_by" json:"created_by,omitempty"`
-	SessionID           string         `bun:"session_id" json:"session_id,omitempty"`
-	LastCheckedAt       *time.Time     `bun:"last_checked_at" json:"last_checked_at,omitempty"`
-	NextCheckAt         *time.Time     `bun:"next_check_at" json:"next_check_at,omitempty"`
-	CreatedAt           time.Time      `bun:"created_at" json:"created_at"`
-	UpdatedAt           time.Time      `bun:"updated_at" json:"updated_at"`
+	ID                  string              `bun:"id,pk" json:"id"`
+	ConditionsJSON      json.RawMessage     `bun:"conditions_json" json:"conditions"`
+	Service             string              `bun:"service" json:"service,omitempty"`
+	Endpoint            string              `bun:"endpoint" json:"endpoint,omitempty"`
+	Environment         string              `bun:"environment" json:"environment,omitempty"`
+	CommitHash          string              `bun:"commit_hash" json:"commit_hash,omitempty"`
+	Duration            string              `bun:"duration" json:"duration"`
+	Urgency             WatchUrgency        `bun:"urgency" json:"urgency"`
+	CheckInterval       string              `bun:"check_interval" json:"check_interval"`
+	BaselineWindow      string              `bun:"baseline_window" json:"baseline_window"`
+	MinConsecutive      int                 `bun:"min_consecutive" json:"min_consecutive"`
+	Status              WatchStatus         `bun:"status" json:"status"`
+	BaselineJSON        *WatchBaseline      `bun:"baseline_json" json:"baseline,omitempty"`
+	ConsecutiveBreaches int                 `bun:"consecutive_breaches" json:"consecutive_breaches"`
+	CurrentValue        *float64            `bun:"current_value" json:"current_value,omitempty"`
+	ExpiresAt           *time.Time          `bun:"expires_at" json:"expires_at,omitempty"`
+	CreatedBy           string              `bun:"created_by" json:"created_by,omitempty"`
+	SessionID           string              `bun:"session_id" json:"session_id,omitempty"`
+	LastCheckedAt       *time.Time          `bun:"last_checked_at" json:"last_checked_at,omitempty"`
+	NextCheckAt         *time.Time          `bun:"next_check_at" json:"next_check_at,omitempty"`
+	CreatedAt           time.Time           `bun:"created_at" json:"created_at"`
+	UpdatedAt           time.Time           `bun:"updated_at" json:"updated_at"`
 }
 
 // CreateWatchParams defines the input for creating a watch.
+// ConditionsJSON is required and contains the full condition tree.
 type CreateWatchParams struct {
-	Metric         WatchMetric   `json:"metric"`
-	Operator       WatchOperator `json:"operator"`
-	Threshold      float64       `json:"threshold"`
-	Service        string        `json:"service,omitempty"`
-	Endpoint       string        `json:"endpoint,omitempty"`
-	Environment    string        `json:"environment,omitempty"`
-	CommitHash     string        `json:"commit_hash,omitempty"`
-	Duration       string        `json:"duration,omitempty"`
-	Urgency        WatchUrgency  `json:"urgency,omitempty"`
-	CheckInterval  string        `json:"check_interval,omitempty"`
-	BaselineWindow string        `json:"baseline_window,omitempty"`
-	MinConsecutive int           `json:"min_consecutive,omitempty"`
-	CreatedBy      string        `json:"created_by,omitempty"`
-	SessionID      string        `json:"session_id,omitempty"`
+	ConditionsJSON json.RawMessage `json:"conditions"`
+	Service        string          `json:"service,omitempty"`
+	Endpoint       string          `json:"endpoint,omitempty"`
+	Environment    string          `json:"environment,omitempty"`
+	CommitHash     string          `json:"commit_hash,omitempty"`
+	Duration       string          `json:"duration,omitempty"`
+	Urgency        WatchUrgency    `json:"urgency,omitempty"`
+	CheckInterval  string          `json:"check_interval,omitempty"`
+	BaselineWindow string          `json:"baseline_window,omitempty"`
+	MinConsecutive int             `json:"min_consecutive,omitempty"`
+	CreatedBy      string          `json:"created_by,omitempty"`
+	SessionID      string          `json:"session_id,omitempty"`
 }
 
 // ListWatchParams defines filters for listing watches.

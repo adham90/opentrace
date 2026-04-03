@@ -34,10 +34,9 @@ func testAlert() *store.WatchAlert {
 // testWatch returns a sample Watch for notification tests.
 func testWatch() *store.Watch {
 	return &store.Watch{
-		ID:       "watch-1",
-		Metric:   store.WatchMetricErrorRate,
-		Operator: store.WatchOpGreaterThan,
-		Service:  "web",
+		ID:             "watch-1",
+		ConditionsJSON: json.RawMessage(`{"type":"threshold","metric":"error_rate","op":"gt","value":0.10,"service":"web"}`),
+		Service:        "web",
 	}
 }
 

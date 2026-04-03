@@ -24,3 +24,31 @@ DROP TABLE IF EXISTS deploys;
 
 -- Events (unused — no MCP tool consumed this data)
 DROP TABLE IF EXISTS events;
+
+-- ============================================================================
+-- Drop redundant/unused indexes on logs table to improve write throughput.
+-- Every query filters by timestamp, usually with service/level.
+-- The compound indexes already cover all query patterns.
+-- ============================================================================
+
+-- Redundant: covered by idx_logs_service_timestamp, idx_logs_ts_service_env, idx_logs_ts_level
+DROP INDEX IF EXISTS idx_logs_timestamp;
+
+-- Redundant: covered by idx_logs_service_timestamp, idx_logs_service_level_timestamp
+DROP INDEX IF EXISTS idx_logs_service;
+
+-- Redundant: covered by idx_logs_level_timestamp, idx_logs_service_level_timestamp
+DROP INDEX IF EXISTS idx_logs_level;
+
+-- Redundant: idx_logs_level_timestamp covers (level, timestamp) queries
+DROP INDEX IF EXISTS idx_logs_ts_level;
+
+-- Redundant: idx_logs_service_timestamp covers (service, timestamp); environment rarely filtered alone
+DROP INDEX IF EXISTS idx_logs_ts_service_env;
+
+-- Unused: no MCP tool queries by session_id (journey store removed)
+DROP INDEX IF EXISTS idx_logs_session_service_ts;
+DROP INDEX IF EXISTS idx_logs_session_id;
+
+-- Redundant: covered by idx_logs_event_type_timestamp
+DROP INDEX IF EXISTS idx_logs_event_type;

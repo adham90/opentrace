@@ -91,14 +91,14 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 				ErrorImpactStore: deps.ErrorImpactStore,
 			})),
 			GatewayEntry{
-				Description: "Error management: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, new",
-				Actions:     []string{"list", "detail", "investigate", "impact", "user_errors", "ranking", "resolve", "ignore", "new"},
+				Description: "Error management: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, reopen, new",
+				Actions:     []string{"list", "detail", "investigate", "impact", "user_errors", "ranking", "resolve", "ignore", "reopen", "new"},
 				Category:    "Errors",
 				Access:      "read",
 				ReadOnly:    false,
 				Params:      map[string]string{"fingerprint": "Error fingerprint", "service": "Filter by service", "status": "unresolved/resolved/ignored", "limit": "Max results"},
 			})
-		b.Add("errors", "Manage and investigate errors: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, new", "Errors", "read", "")
+		b.Add("errors", "Manage and investigate errors: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, reopen, new", "Errors", "read", "")
 	}
 
 	// --- healthchecks ---

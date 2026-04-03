@@ -325,5 +325,5 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 	if len(slowestEndpoints) > 0 {
 		suggestions = append(suggestions, Suggest("logs", "Investigate slow endpoints", map[string]any{"action": "performance", "sort_by": "duration_ms"}))
 	}
-	return JSONResultRanked(resp, deps.Ranker, suggestions...)
+	return JSONResult(resp, suggestions...)
 }

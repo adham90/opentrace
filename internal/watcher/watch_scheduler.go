@@ -142,7 +142,7 @@ func (s *WatchScheduler) evaluateWatch(ctx context.Context, w *store.Watch) {
 	if err != nil {
 		slog.Warn("watch evaluation failed",
 			"watch_id", w.ID,
-			"metric", w.Metric,
+			"conditions", store.ConditionsSummary(w.ConditionsJSON),
 			"service", w.Service,
 			"error", err,
 		)
@@ -185,9 +185,9 @@ func (s *WatchScheduler) createAlert(ctx context.Context, w *store.Watch, run *s
 		RunID:          run.ID,
 		Urgency:        w.Urgency,
 		Summary:        result.Summary,
-		TriggerMetric:  string(w.Metric),
+		TriggerMetric:  store.ConditionsSummary(w.ConditionsJSON),
 		TriggerValue:   result.Value,
-		ThresholdValue: w.Threshold,
+		ThresholdValue: store.ConditionsThreshold(w.ConditionsJSON),
 		Evidence:       evidence,
 	})
 	if err != nil {
@@ -195,7 +195,7 @@ func (s *WatchScheduler) createAlert(ctx context.Context, w *store.Watch, run *s
 		return
 	}
 
-	slog.Info("watch alert created", "watch_id", w.ID, "metric", w.Metric, "value", result.Value)
+	slog.Info("watch alert created", "watch_id", w.ID, "conditions", store.ConditionsSummary(w.ConditionsJSON), "value", result.Value)
 
 	// Dispatch notifications asynchronously
 	if len(s.notifiers) > 0 {

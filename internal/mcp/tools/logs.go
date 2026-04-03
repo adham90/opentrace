@@ -7,17 +7,11 @@ import (
 	"github.com/adham90/opentrace/pkg/store"
 )
 
-// TraceSessionRecorder is an optional callback for recording trace IDs
-// discovered during trace lookups into the current investigation session.
-type TraceSessionRecorder func(traceID string)
-
 // LogsDeps holds the dependencies for the consolidated logs tool.
 type LogsDeps struct {
-	Logs                 *logs.Service
-	LogStore             store.LogStore       // retained for actions not yet migrated to domain service
-	ErrorGroupStore      store.ErrorGroupStore
-	TraceSessionRecorder TraceSessionRecorder // optional, nil-safe
-	Ranker               SuggestionRanker     // optional, nil-safe
+	Logs            *logs.Service
+	LogStore        store.LogStore       // retained for actions not yet migrated to domain service
+	ErrorGroupStore store.ErrorGroupStore
 }
 
 // LogsCatalogInfo returns the category, description, and access level for catalog registration.

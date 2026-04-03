@@ -193,10 +193,5 @@ func LogsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallTo
 		resp["warnings"] = warnings
 	}
 
-	// Record trace ID in session if callback is provided.
-	if deps.TraceSessionRecorder != nil {
-		deps.TraceSessionRecorder(traceID)
-	}
-
 	return JSONResult(resp)
 }

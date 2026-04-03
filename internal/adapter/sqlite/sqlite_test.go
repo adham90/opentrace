@@ -66,9 +66,9 @@ func TestPerformanceIndexesExist(t *testing.T) {
 
 	indexes := []string{
 		"idx_metrics_server_name_ts",
-		"idx_logs_ts_service_env",
-		"idx_logs_ts_level",
-		"idx_logs_session_service_ts",
+		"idx_logs_service_timestamp",
+		"idx_logs_level_timestamp",
+		"idx_logs_service_level_timestamp",
 	}
 
 	for _, idx := range indexes {

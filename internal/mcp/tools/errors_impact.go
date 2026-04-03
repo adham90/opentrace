@@ -81,7 +81,7 @@ func ErrorsImpact(ctx context.Context, deps ErrorsDeps, args map[string]any) (*C
 	if impact.UniqueUsers > 0 {
 		suggestions = append(suggestions, Suggest("errors", "See all errors ranked by user impact", map[string]any{"action": "ranking"}))
 	}
-	return JSONResultRanked(resp, deps.Ranker, suggestions...)
+	return JSONResult(resp, suggestions...)
 }
 
 // ---------------------------------------------------------------------------
@@ -158,7 +158,7 @@ func ErrorsUserErrors(ctx context.Context, deps ErrorsDeps, args map[string]any)
 		"action":  "user_errors",
 		"user_id": userID,
 	}))
-	return JSONResultRanked(resp, deps.Ranker, suggestions...)
+	return JSONResult(resp, suggestions...)
 }
 
 // ---------------------------------------------------------------------------
@@ -247,5 +247,5 @@ func ErrorsRanking(ctx context.Context, deps ErrorsDeps, args map[string]any) (*
 		"action":      "impact",
 		"fingerprint": entries[0].Fingerprint,
 	}))
-	return JSONResultRanked(resp, deps.Ranker, suggestions...)
+	return JSONResult(resp, suggestions...)
 }

@@ -103,6 +103,10 @@ func (m *mockLogStore) SearchRequestSummaries(_ context.Context, _ store.Request
 	return nil, nil
 }
 
+func (m *mockLogStore) AggregateRequestSummaries(_ context.Context, _ store.RequestSummaryAggregateParams) (*store.RequestSummaryAggregates, error) {
+	return &store.RequestSummaryAggregates{}, nil
+}
+
 // mockServerStore implements store.ServerStore for testing.
 type mockServerStore struct {
 	mu      sync.Mutex

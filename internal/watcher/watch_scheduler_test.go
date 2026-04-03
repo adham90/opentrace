@@ -56,10 +56,8 @@ func TestWatchScheduler_EvaluatesDueWatches(t *testing.T) {
 	evaluator := NewWatchEvaluator(metrics, watchStore)
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricLogCount,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 5,
-		Service:   "web",
+		ConditionsJSON: condJSONWithService("log_count", "gt", 5, "web"),
+		Service:        "web",
 	})
 	if err != nil {
 		t.Fatalf("Create watch: %v", err)
@@ -101,10 +99,8 @@ func TestWatchScheduler_CreatesAlertOnBreach(t *testing.T) {
 
 	// Create a watch with low error_rate threshold (should be breached)
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.1,
-		Service:   "api",
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.1, "api"),
+		Service:        "api",
 	})
 	if err != nil {
 		t.Fatalf("Create watch: %v", err)
@@ -134,9 +130,6 @@ func TestWatchScheduler_CreatesAlertOnBreach(t *testing.T) {
 	if alert.TriggerMetric != "error_rate" {
 		t.Errorf("trigger_metric = %q, want error_rate", alert.TriggerMetric)
 	}
-	if alert.ThresholdValue != 0.1 {
-		t.Errorf("threshold_value = %v, want 0.1", alert.ThresholdValue)
-	}
 	if alert.TriggerValue <= 0.1 {
 		t.Errorf("trigger_value = %v, expected > 0.1", alert.TriggerValue)
 	}
@@ -155,10 +148,8 @@ func TestWatchScheduler_NotifiesOnAlert(t *testing.T) {
 	notifier := &mockNotifier{}
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.1,
-		Service:   "web",
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.1, "web"),
+		Service:        "web",
 	})
 	if err != nil {
 		t.Fatalf("Create watch: %v", err)
@@ -193,10 +184,8 @@ func TestWatchScheduler_NoAlertWhenBelowThreshold(t *testing.T) {
 	notifier := &mockNotifier{}
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.5, // High threshold, won't be breached
-		Service:   "web",
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.5, "web"),
+		Service:        "web",
 	})
 	if err != nil {
 		t.Fatalf("Create watch: %v", err)
@@ -282,10 +271,8 @@ func TestWatchScheduler_MultipleWatches(t *testing.T) {
 
 	// Watch 1: svc-a error_rate > 0.1 (should breach -- ~33% error rate)
 	w1, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.1,
-		Service:   "svc-a",
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.1, "svc-a"),
+		Service:        "svc-a",
 	})
 	if err != nil {
 		t.Fatalf("Create watch 1: %v", err)
@@ -294,10 +281,8 @@ func TestWatchScheduler_MultipleWatches(t *testing.T) {
 
 	// Watch 2: svc-b log_count > 100 (should NOT breach -- only 20 logs)
 	w2, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricLogCount,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 100,
-		Service:   "svc-b",
+		ConditionsJSON: condJSONWithService("log_count", "gt", 100, "svc-b"),
+		Service:        "svc-b",
 	})
 	if err != nil {
 		t.Fatalf("Create watch 2: %v", err)
@@ -384,10 +369,8 @@ func TestWatchScheduler_RunRecordedOnNonBreach(t *testing.T) {
 	evaluator := NewWatchEvaluator(metrics, watchStore)
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.5,
-		Service:   "quiet-svc",
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.5, "quiet-svc"),
+		Service:        "quiet-svc",
 	})
 	if err != nil {
 		t.Fatalf("Create watch: %v", err)

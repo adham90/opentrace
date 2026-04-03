@@ -56,7 +56,8 @@ type ListErrorGroupParams struct {
 	Status      ErrorGroupStatus `json:"status,omitempty"`
 	Service     string           `json:"service,omitempty"`
 	Environment string           `json:"environment,omitempty"`
-	SortBy      string           `json:"sort_by,omitempty"` // "occurrence_count", "last_seen_at", "first_seen_at"
+	Since       *time.Time       `json:"since,omitempty"`       // only groups first seen after this time
+	SortBy      string           `json:"sort_by,omitempty"`     // "occurrence_count", "last_seen_at", "first_seen_at"
 	Limit       int              `json:"limit,omitempty"`
 	Offset      int              `json:"offset,omitempty"`
 }

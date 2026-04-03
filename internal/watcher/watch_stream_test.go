@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -34,10 +33,8 @@ func (m *mockWatchStore) FailRun(_ context.Context, _ string, _ string) error {
 func TestWatchStreamEvaluator_SemaphoreBounded(t *testing.T) {
 	ws := &mockWatchStore{}
 	evaluator := &WatchStreamEvaluator{
-		ctx:      context.Background(),
+		ctx:        context.Background(),
 		watchStore: ws,
-		lastEval:   make(map[string]time.Time),
-		minGap:     10 * time.Second,
 		sem:        make(chan struct{}, 2), // limit to 2 concurrent
 	}
 

@@ -33,10 +33,8 @@ func TestCheckAutoResolve_NotTriggered(t *testing.T) {
 
 	// Create a watch with active status (not triggered)
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.1,
-		Service:   "web",
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.1, "web"),
+		Service:        "web",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -68,10 +66,8 @@ func TestCheckAutoResolve_TriggeredNoBaseline(t *testing.T) {
 
 	// Create and trigger a watch (no baseline set)
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.1,
-		Service:   "web",
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.1, "web"),
+		Service:        "web",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -120,10 +116,8 @@ func TestCheckAutoResolve_TriggeredZeroBaseline(t *testing.T) {
 	mgr := NewWatchSessionManager(watchStore, metrics)
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.1,
-		Service:   "web",
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.1, "web"),
+		Service:        "web",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -160,7 +154,7 @@ func TestCheckAutoResolve_TriggeredWithinBaseline(t *testing.T) {
 	watchStore, logStore := setupWatchTestDB(t)
 	ctx := context.Background()
 
-	// Insert logs: 8 info, 2 error → error_rate ~0.2
+	// Insert logs: 8 info, 2 error -> error_rate ~0.2
 	insertTestLogs(t, logStore, "web", 8, "info")
 	insertTestLogs(t, logStore, "web", 2, "error")
 
@@ -169,10 +163,8 @@ func TestCheckAutoResolve_TriggeredWithinBaseline(t *testing.T) {
 	mgr := NewWatchSessionManager(watchStore, metrics)
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.1,
-		Service:   "web",
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.1, "web"),
+		Service:        "web",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -188,8 +180,6 @@ func TestCheckAutoResolve_TriggeredWithinBaseline(t *testing.T) {
 	}
 
 	// Set baseline to approximately the current error rate (~0.2).
-	// The current measured value should be within 10% of this baseline,
-	// causing auto-resolve.
 	baseline := &store.WatchBaseline{
 		ErrorRate:  0.2,
 		CapturedAt: time.Now().UTC(),
@@ -213,7 +203,7 @@ func TestCheckAutoResolve_TriggeredFarFromBaseline(t *testing.T) {
 	watchStore, logStore := setupWatchTestDB(t)
 	ctx := context.Background()
 
-	// Insert logs: 8 info, 2 error → error_rate ~0.2
+	// Insert logs: 8 info, 2 error -> error_rate ~0.2
 	insertTestLogs(t, logStore, "web", 8, "info")
 	insertTestLogs(t, logStore, "web", 2, "error")
 
@@ -222,10 +212,8 @@ func TestCheckAutoResolve_TriggeredFarFromBaseline(t *testing.T) {
 	mgr := NewWatchSessionManager(watchStore, metrics)
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.05,
-		Service:   "web",
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.05, "web"),
+		Service:        "web",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -241,7 +229,6 @@ func TestCheckAutoResolve_TriggeredFarFromBaseline(t *testing.T) {
 	}
 
 	// Set baseline error rate far from current (~0.2).
-	// 0.05 baseline vs ~0.2 current = ~300% drift, well above 10%.
 	baseline := &store.WatchBaseline{
 		ErrorRate:  0.05,
 		CapturedAt: time.Now().UTC(),
@@ -269,10 +256,8 @@ func TestCheckAutoResolve_ResolvedStatusIsNoOp(t *testing.T) {
 	mgr := NewWatchSessionManager(watchStore, metrics)
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricLogCount,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 100,
-		Service:   "web",
+		ConditionsJSON: condJSON("log_count", "gt", 100),
+		Service:        "web",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -297,10 +282,8 @@ func TestCheckAutoResolve_ExpiredStatusIsNoOp(t *testing.T) {
 	mgr := NewWatchSessionManager(watchStore, metrics)
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricLogCount,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 100,
-		Service:   "web",
+		ConditionsJSON: condJSON("log_count", "gt", 100),
+		Service:        "web",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -329,10 +312,8 @@ func TestCheckAutoResolve_LogCountMetric(t *testing.T) {
 	mgr := NewWatchSessionManager(watchStore, metrics)
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricLogCount,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 30,
-		Service:   "api",
+		ConditionsJSON: condJSONWithService("log_count", "gt", 30, "api"),
+		Service:        "api",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -348,7 +329,6 @@ func TestCheckAutoResolve_LogCountMetric(t *testing.T) {
 	}
 
 	// Set baseline very close to current count (50)
-	// Current log_count is 50, baseline is 50 → 0% drift → should resolve
 	baseline := &store.WatchBaseline{
 		LogCount:   50,
 		CapturedAt: time.Now().UTC(),
@@ -380,9 +360,7 @@ func TestCheckAutoResolve_InvalidBaselineWindow(t *testing.T) {
 	mgr := NewWatchSessionManager(watchStore, metrics)
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:         store.WatchMetricErrorRate,
-		Operator:       store.WatchOpGreaterThan,
-		Threshold:      0.1,
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.1, "web"),
 		Service:        "web",
 		BaselineWindow: "invalid-duration",
 	})
@@ -423,11 +401,9 @@ func TestCleanup_CallsExpireWatches(t *testing.T) {
 
 	// Create a watch with an expiry in the past
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricLogCount,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 100,
-		Service:   "web",
-		Duration:  "1ms", // very short duration
+		ConditionsJSON: condJSON("log_count", "gt", 100),
+		Service:        "web",
+		Duration:       "1ms", // very short duration
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -442,10 +418,8 @@ func TestCleanup_CallsExpireWatches(t *testing.T) {
 	// Verify the watch was expired (if the store supports it)
 	w, err = watchStore.GetByID(ctx, w.ID)
 	if err != nil {
-		// If the watch was expired and then deleted, that is fine
 		return
 	}
-	// Some implementations may set status to expired rather than deleting
 	_ = w
 }
 

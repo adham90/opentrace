@@ -80,6 +80,9 @@ func (m *mockLogStore) GetByID(context.Context, int64) (*store.LogEntry, error) 
 func (m *mockLogStore) SearchRequestSummaries(context.Context, store.RequestSummarySearchParams) ([]store.RequestSummaryResult, error) {
 	return nil, nil
 }
+func (m *mockLogStore) AggregateRequestSummaries(context.Context, store.RequestSummaryAggregateParams) (*store.RequestSummaryAggregates, error) {
+	return &store.RequestSummaryAggregates{}, nil
+}
 func (m *mockLogStore) PruneBatches(context.Context, time.Duration) (int64, error) { return 0, nil }
 
 // mockSettingsStore implements the subset of store.SettingsStore needed by the handler.

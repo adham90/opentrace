@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -11,6 +12,24 @@ import (
 
 	"github.com/adham90/opentrace/pkg/store"
 )
+
+// condJSON is a helper to build a threshold condition JSON for seeding.
+func condJSON(metric, op string, value float64, service, endpoint string) json.RawMessage {
+	cond := map[string]any{
+		"type":   "threshold",
+		"metric": metric,
+		"op":     op,
+		"value":  value,
+	}
+	if service != "" {
+		cond["service"] = service
+	}
+	if endpoint != "" {
+		cond["endpoint"] = endpoint
+	}
+	raw, _ := json.Marshal(cond)
+	return raw
+}
 
 func runSeed() error {
 	ctx := context.Background()
@@ -328,12 +347,12 @@ func runSeed() error {
 	watchStore := deps.WatchStore
 
 	watchDefs := []store.CreateWatchParams{
-		{Metric: store.WatchMetricErrorRate, Operator: store.WatchOpGreaterThan, Threshold: 0.05, Service: "payment-api", Duration: "2h", Urgency: store.WatchUrgencyCritical, CheckInterval: "1m", BaselineWindow: "1h", MinConsecutive: 3, CreatedBy: "claude-code", SessionID: "seed-session-001"},
-		{Metric: store.WatchMetricResponseTime, Operator: store.WatchOpGreaterThan, Threshold: 500, Service: "gateway", Duration: "4h", Urgency: store.WatchUrgencyHigh, CheckInterval: "2m", BaselineWindow: "30m", MinConsecutive: 2, CreatedBy: "claude-code", SessionID: "seed-session-001"},
-		{Metric: store.WatchMetricP95Response, Operator: store.WatchOpGreaterThan, Threshold: 1200, Service: "order-service", Endpoint: "/api/v1/orders", Duration: "1h", Urgency: store.WatchUrgencyNormal, CheckInterval: "5m", BaselineWindow: "1h", MinConsecutive: 2, CreatedBy: "claude-code", SessionID: "seed-session-002"},
-		{Metric: store.WatchMetricErrorCount, Operator: store.WatchOpGreaterThan, Threshold: 50, Service: "notification-service", Duration: "6h", Urgency: store.WatchUrgencyNormal, CheckInterval: "5m", BaselineWindow: "1h", MinConsecutive: 1, CreatedBy: "claude-code", SessionID: "seed-session-002"},
-		{Metric: store.WatchMetricHeartbeat, Operator: store.WatchOpLessThan, Threshold: 1, Service: "payment-api", Duration: "8h", Urgency: store.WatchUrgencyCritical, CheckInterval: "1m", BaselineWindow: "5m", MinConsecutive: 3, CreatedBy: "claude-code", SessionID: "seed-session-001"},
-		{Metric: store.WatchMetricResponseTime, Operator: store.WatchOpGreaterThan, Threshold: 800, Service: "payment-api", Endpoint: "/api/v1/checkout", Duration: "2h", Urgency: store.WatchUrgencyCritical, CheckInterval: "1m", BaselineWindow: "30m", MinConsecutive: 3, CreatedBy: "claude-code", SessionID: "seed-session-001"},
+		{ConditionsJSON: condJSON("error_rate", "gt", 0.05, "payment-api", ""), Service: "payment-api", Duration: "2h", Urgency: store.WatchUrgencyCritical, CheckInterval: "1m", BaselineWindow: "1h", MinConsecutive: 3, CreatedBy: "claude-code", SessionID: "seed-session-001"},
+		{ConditionsJSON: condJSON("response_time", "gt", 500, "gateway", ""), Service: "gateway", Duration: "4h", Urgency: store.WatchUrgencyHigh, CheckInterval: "2m", BaselineWindow: "30m", MinConsecutive: 2, CreatedBy: "claude-code", SessionID: "seed-session-001"},
+		{ConditionsJSON: condJSON("p95_response", "gt", 1200, "order-service", "/api/v1/orders"), Service: "order-service", Endpoint: "/api/v1/orders", Duration: "1h", Urgency: store.WatchUrgencyNormal, CheckInterval: "5m", BaselineWindow: "1h", MinConsecutive: 2, CreatedBy: "claude-code", SessionID: "seed-session-002"},
+		{ConditionsJSON: condJSON("error_count", "gt", 50, "notification-service", ""), Service: "notification-service", Duration: "6h", Urgency: store.WatchUrgencyNormal, CheckInterval: "5m", BaselineWindow: "1h", MinConsecutive: 1, CreatedBy: "claude-code", SessionID: "seed-session-002"},
+		{ConditionsJSON: condJSON("heartbeat", "lt", 1, "payment-api", ""), Service: "payment-api", Duration: "8h", Urgency: store.WatchUrgencyCritical, CheckInterval: "1m", BaselineWindow: "5m", MinConsecutive: 3, CreatedBy: "claude-code", SessionID: "seed-session-001"},
+		{ConditionsJSON: condJSON("response_time", "gt", 800, "payment-api", "/api/v1/checkout"), Service: "payment-api", Endpoint: "/api/v1/checkout", Duration: "2h", Urgency: store.WatchUrgencyCritical, CheckInterval: "1m", BaselineWindow: "30m", MinConsecutive: 3, CreatedBy: "claude-code", SessionID: "seed-session-001"},
 	}
 
 	var watchIDs []string

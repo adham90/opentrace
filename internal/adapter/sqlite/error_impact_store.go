@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -216,19 +217,44 @@ func (s *errorImpactStore) ComputeImpactScores(ctx context.Context) error {
 		impacts = append(impacts, d)
 	}
 
-	// Update each error group
-	for _, d := range impacts {
+	// First pass: compute scores for all error groups (cheap — no extra queries).
+	type scored struct {
+		impactData
+		score float64
+	}
+	scoredImpacts := make([]scored, len(impacts))
+	for i, d := range impacts {
 		recencyWeight := computeRecencyWeight(now, d.lastSeen)
-		score := float64(d.uniqueUsers) * math.Log2(float64(d.totalOccurrences+1)) * recencyWeight
+		scoredImpacts[i] = scored{
+			impactData: d,
+			score:      float64(d.uniqueUsers) * math.Log2(float64(d.totalOccurrences+1)) * recencyWeight,
+		}
+	}
 
-		// Find common traits
-		traits, _ := s.FindCommonTraits(ctx, d.fingerprint)
-		traitsJSON, _ := json.Marshal(traits)
+	// Second pass: update all scores, but only compute expensive common traits
+	// for the top 50 error groups by score (avoids N+1 for long-tail errors).
+	// Sort by score descending.
+	sort.Slice(scoredImpacts, func(i, j int) bool {
+		return scoredImpacts[i].score > scoredImpacts[j].score
+	})
+
+	const maxTraitComputations = 50
+	for i, d := range scoredImpacts {
+		var traitsJSON []byte
+		if i < maxTraitComputations {
+			traits, _ := s.FindCommonTraits(ctx, d.fingerprint)
+			traitsJSON, _ = json.Marshal(traits)
+		}
+
+		traitStr := "{}"
+		if len(traitsJSON) > 0 {
+			traitStr = string(traitsJSON)
+		}
 
 		_, err := s.db.NewRaw(`
 			UPDATE error_groups SET unique_users = ?, impact_score = ?, common_context = ?
 			WHERE fingerprint = ?`,
-			d.uniqueUsers, round2(score), string(traitsJSON), d.fingerprint,
+			d.uniqueUsers, round2(d.score), traitStr, d.fingerprint,
 		).Exec(ctx)
 		if err != nil {
 			return fmt.Errorf("updating impact score for %s: %w", d.fingerprint, err)
@@ -334,7 +360,8 @@ func (s *errorImpactStore) FindCommonTraits(ctx context.Context, fingerprint str
 	var contexts []string
 	err := s.db.NewRaw(`
 		SELECT last_context FROM error_impacts
-		WHERE error_fingerprint = ? AND last_context != '{}'`,
+		WHERE error_fingerprint = ? AND last_context != '{}'
+		ORDER BY last_seen_at DESC LIMIT 100`,
 		fingerprint,
 	).Scan(ctx, &contexts)
 	if err != nil {

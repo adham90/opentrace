@@ -2,12 +2,36 @@ package watcher
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	dbstore "github.com/adham90/opentrace/internal/adapter/sqlite"
 	"github.com/adham90/opentrace/pkg/store"
 )
+
+// condJSON builds a simple threshold condition JSON for tests.
+func condJSON(metric, op string, value float64) json.RawMessage {
+	raw, _ := json.Marshal(map[string]any{
+		"type":   "threshold",
+		"metric": metric,
+		"op":     op,
+		"value":  value,
+	})
+	return raw
+}
+
+// condJSONWithService builds a threshold condition with a service filter.
+func condJSONWithService(metric, op string, value float64, service string) json.RawMessage {
+	raw, _ := json.Marshal(map[string]any{
+		"type":    "threshold",
+		"metric":  metric,
+		"op":      op,
+		"value":   value,
+		"service": service,
+	})
+	return raw
+}
 
 func setupWatchTestDB(t *testing.T) (store.WatchStore, store.LogStore) {
 	t.Helper()
@@ -48,7 +72,7 @@ func TestWatchEvaluator_ErrorRate(t *testing.T) {
 	watchStore, logStore := setupWatchTestDB(t)
 	ctx := context.Background()
 
-	// Insert mixed logs: 8 info, 2 error → error_rate = 0.2
+	// Insert mixed logs: 8 info, 2 error -> error_rate = 0.2
 	insertTestLogs(t, logStore, "web", 8, "info")
 	insertTestLogs(t, logStore, "web", 2, "error")
 
@@ -56,10 +80,8 @@ func TestWatchEvaluator_ErrorRate(t *testing.T) {
 	evaluator := NewWatchEvaluator(metrics, watchStore)
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.1,
-		Service:   "web",
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.1, "web"),
+		Service:        "web",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -91,10 +113,8 @@ func TestWatchEvaluator_LogCount(t *testing.T) {
 	evaluator := NewWatchEvaluator(metrics, watchStore)
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricLogCount,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 30,
-		Service:   "api",
+		ConditionsJSON: condJSONWithService("log_count", "gt", 30, "api"),
+		Service:        "api",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -124,10 +144,8 @@ func TestWatchEvaluator_AlertSuppression(t *testing.T) {
 	evaluator := NewWatchEvaluator(metrics, watchStore)
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.1,
-		Service:   "web",
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.1, "web"),
+		Service:        "web",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -166,9 +184,7 @@ func TestWatchEvaluator_ConsecutiveBreaches(t *testing.T) {
 	evaluator := NewWatchEvaluator(metrics, watchStore)
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:         store.WatchMetricErrorRate,
-		Operator:       store.WatchOpGreaterThan,
-		Threshold:      0.1,
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.1, "web"),
 		Service:        "web",
 		MinConsecutive: 3,
 	})
@@ -203,7 +219,7 @@ func TestWatchEvaluator_ConsecutiveBreaches(t *testing.T) {
 	// Re-fetch
 	w, _ = watchStore.GetByID(ctx, w.ID)
 
-	// Third evaluation: 3/3 → alert!
+	// Third evaluation: 3/3 -> alert!
 	result3, err := evaluator.Evaluate(ctx, w)
 	if err != nil {
 		t.Fatalf("Evaluate 3: %v", err)
@@ -225,10 +241,8 @@ func TestWatchEvaluator_Heartbeat(t *testing.T) {
 
 	// Watch: alert if heartbeat > 60 seconds (i.e., no logs for 60s)
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricHeartbeat,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 60,
-		Service:   "worker",
+		ConditionsJSON: condJSONWithService("heartbeat", "gt", 60, "worker"),
+		Service:        "worker",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -239,7 +253,7 @@ func TestWatchEvaluator_Heartbeat(t *testing.T) {
 		t.Fatalf("Evaluate: %v", err)
 	}
 
-	// Recent log exists → seconds since last log should be small
+	// Recent log exists -> seconds since last log should be small
 	if result.Breached {
 		t.Errorf("expected not breached (recent log exists), value = %v", result.Value)
 	}
@@ -255,10 +269,8 @@ func TestWatchEvidenceBuilder_Build(t *testing.T) {
 	metrics := NewWatchMetrics(logStore)
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.1,
-		Service:   "web",
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.1, "web"),
+		Service:        "web",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -308,10 +320,8 @@ func TestCaptureBaseline(t *testing.T) {
 	metrics := NewWatchMetrics(logStore)
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.15,
-		Service:   "api",
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.15, "api"),
+		Service:        "api",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -348,10 +358,8 @@ func TestWatchSessionManager_AutoResolve(t *testing.T) {
 	evaluator := NewWatchEvaluator(metrics, watchStore)
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.1,
-		Service:   "web",
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.1, "web"),
+		Service:        "web",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -374,7 +382,7 @@ func TestWatchSessionManager_AutoResolve(t *testing.T) {
 	_ = watchStore.UpdateBaseline(ctx, w.ID, baseline)
 	w, _ = watchStore.GetByID(ctx, w.ID)
 
-	// Now check auto-resolve — current error rate should be within 10% of baseline
+	// Now check auto-resolve -- current error rate should be within 10% of baseline
 	sessionMgr := NewWatchSessionManager(watchStore, metrics)
 	err = sessionMgr.CheckAutoResolve(ctx, w)
 	if err != nil {

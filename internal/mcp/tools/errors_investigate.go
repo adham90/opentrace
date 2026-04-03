@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
@@ -47,13 +48,6 @@ func ErrorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 		anchor = picked
 	} else {
 		return NewToolResultError("Either log_id (positive integer) or trace_id (string) is required for the investigate action"), nil
-	}
-
-	// Link investigated error to investigation session.
-	if anchor.ErrorFingerprint != "" && deps.Recurrence != nil && deps.Session != nil {
-		if sid := deps.Session.CurrentSessionID(); sid != "" {
-			deps.Recurrence.LinkInvestigatedError(ctx, sid, anchor.ErrorFingerprint)
-		}
 	}
 
 	resp := make(map[string]any)
@@ -133,18 +127,28 @@ func ErrorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 		}
 	}
 
-	// 5. Related trace entries (SQL queries, views, other logs in same request).
+	// 5-7: Run independent DB queries concurrently.
+	var (
+		traceTimeline  []map[string]any
+		contextEntries []map[string]any
+		errorGroupInfo map[string]any
+	)
+
+	var wg sync.WaitGroup
+
+	// 5. Related trace entries.
 	if anchor.TraceID != "" {
-		traceEntries, _ := deps.LogStore.Search(ctx, store.LogSearchParams{
-			TraceID: anchor.TraceID,
-			Limit:   30,
-			SortAsc: true,
-		})
-		if len(traceEntries) > 1 {
-			var traceTimeline []map[string]any
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			traceEntries, _ := deps.LogStore.Search(ctx, store.LogSearchParams{
+				TraceID: anchor.TraceID,
+				Limit:   30,
+				SortAsc: true,
+			})
 			for _, e := range traceEntries {
 				if e.ID == anchor.ID {
-					continue // skip the anchor itself
+					continue
 				}
 				entry := map[string]any{
 					"id":        e.ID,
@@ -160,86 +164,90 @@ func ErrorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 				}
 				traceTimeline = append(traceTimeline, entry)
 			}
-			if len(traceTimeline) > 0 {
-				resp["trace_timeline"] = traceTimeline
+		}()
+	}
+
+	// 6. Surrounding logs (before + after context).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		beforeEntries, _ := deps.LogStore.Search(ctx, store.LogSearchParams{
+			End:     &anchor.Timestamp,
+			Service: anchor.Service,
+			Limit:   5,
+			SortAsc: false,
+		})
+		afterStart := anchor.Timestamp.Add(time.Millisecond)
+		afterEntries, _ := deps.LogStore.Search(ctx, store.LogSearchParams{
+			Start:   &afterStart,
+			Service: anchor.Service,
+			Limit:   5,
+			SortAsc: true,
+		})
+
+		for i := len(beforeEntries) - 1; i >= 0; i-- {
+			e := beforeEntries[i]
+			if e.ID == anchor.ID {
+				continue
 			}
+			entry := map[string]any{
+				"id":        e.ID,
+				"timestamp": e.Timestamp.Format(time.RFC3339Nano),
+				"level":     e.Level,
+				"message":   Truncate(e.Message, 200),
+				"position":  "before",
+			}
+			if e.ExceptionClass != "" {
+				entry["exception_class"] = e.ExceptionClass
+			}
+			contextEntries = append(contextEntries, entry)
 		}
+		for _, e := range afterEntries {
+			if e.ID == anchor.ID {
+				continue
+			}
+			entry := map[string]any{
+				"id":        e.ID,
+				"timestamp": e.Timestamp.Format(time.RFC3339Nano),
+				"level":     e.Level,
+				"message":   Truncate(e.Message, 200),
+				"position":  "after",
+			}
+			if e.ExceptionClass != "" {
+				entry["exception_class"] = e.ExceptionClass
+			}
+			contextEntries = append(contextEntries, entry)
+		}
+	}()
+
+	// 7. Error group lookup.
+	if anchor.ErrorFingerprint != "" && deps.ErrorGroupStore != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if eg, egErr := deps.ErrorGroupStore.Get(ctx, anchor.ErrorFingerprint); egErr == nil {
+				errorGroupInfo = map[string]any{
+					"fingerprint":      eg.Fingerprint,
+					"status":           string(eg.Status),
+					"occurrence_count": eg.OccurrenceCount,
+					"first_seen_at":    eg.FirstSeenAt.Format(time.RFC3339),
+					"last_seen_at":     eg.LastSeenAt.Format(time.RFC3339),
+					"reopened_count":   eg.ReopenedCount,
+				}
+			}
+		}()
 	}
 
-	// 6. Surrounding logs (context window).
-	beforeEntries, _ := deps.LogStore.Search(ctx, store.LogSearchParams{
-		End:     &anchor.Timestamp,
-		Service: anchor.Service,
-		Limit:   5,
-		SortAsc: false,
-	})
-	afterStart := anchor.Timestamp.Add(time.Millisecond) // avoid self
-	afterEntries, _ := deps.LogStore.Search(ctx, store.LogSearchParams{
-		Start:   &afterStart,
-		Service: anchor.Service,
-		Limit:   5,
-		SortAsc: true,
-	})
+	wg.Wait()
 
-	var contextEntries []map[string]any
-	// Reverse before entries to show chronological order.
-	for i := len(beforeEntries) - 1; i >= 0; i-- {
-		e := beforeEntries[i]
-		if e.ID == anchor.ID {
-			continue
-		}
-		entry := map[string]any{
-			"id":        e.ID,
-			"timestamp": e.Timestamp.Format(time.RFC3339Nano),
-			"level":     e.Level,
-			"message":   Truncate(e.Message, 200),
-			"position":  "before",
-		}
-		if e.ExceptionClass != "" {
-			entry["exception_class"] = e.ExceptionClass
-		}
-		contextEntries = append(contextEntries, entry)
-	}
-	for _, e := range afterEntries {
-		if e.ID == anchor.ID {
-			continue
-		}
-		entry := map[string]any{
-			"id":        e.ID,
-			"timestamp": e.Timestamp.Format(time.RFC3339Nano),
-			"level":     e.Level,
-			"message":   Truncate(e.Message, 200),
-			"position":  "after",
-		}
-		if e.ExceptionClass != "" {
-			entry["exception_class"] = e.ExceptionClass
-		}
-		contextEntries = append(contextEntries, entry)
+	if len(traceTimeline) > 0 {
+		resp["trace_timeline"] = traceTimeline
 	}
 	if len(contextEntries) > 0 {
 		resp["surrounding_logs"] = contextEntries
 	}
-
-	// 7. Error group (if fingerprint exists).
-	if anchor.ErrorFingerprint != "" && deps.ErrorGroupStore != nil {
-		if eg, egErr := deps.ErrorGroupStore.Get(ctx, anchor.ErrorFingerprint); egErr == nil {
-			resp["error_group"] = map[string]any{
-				"fingerprint":      eg.Fingerprint,
-				"status":           string(eg.Status),
-				"occurrence_count": eg.OccurrenceCount,
-				"first_seen_at":    eg.FirstSeenAt.Format(time.RFC3339),
-				"last_seen_at":     eg.LastSeenAt.Format(time.RFC3339),
-				"reopened_count":   eg.ReopenedCount,
-			}
-
-			// Detect and inject recurrence context for reopened errors.
-			if eg.ReopenedCount > 0 && deps.Recurrence != nil && deps.Session != nil {
-				if sid := deps.Session.CurrentSessionID(); sid != "" {
-					deps.Recurrence.DetectErrorRecurrence(ctx, sid, anchor.ErrorFingerprint, eg.ReopenedCount)
-					deps.Recurrence.InjectRecurrenceContext(ctx, sid, resp)
-				}
-			}
-		}
+	if errorGroupInfo != nil {
+		resp["error_group"] = errorGroupInfo
 	}
 
 	// Suggested next steps.
@@ -266,5 +274,5 @@ func ErrorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 			"fingerprint": anchor.ErrorFingerprint,
 		}))
 	}
-	return JSONResultRanked(resp, deps.Ranker, suggestions...)
+	return JSONResult(resp, suggestions...)
 }

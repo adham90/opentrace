@@ -447,10 +447,8 @@ func TestCaptureBaseline_WithMixedLogs(t *testing.T) {
 	insertTestLogs(t, logStore, "api", 20, "error")
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.3,
-		Service:   "api",
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.3, "api"),
+		Service:        "api",
 	})
 	if err != nil {
 		t.Fatalf("Create watch: %v", err)
@@ -492,10 +490,8 @@ func TestCaptureBaseline_WithRequestSummaries(t *testing.T) {
 	})
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricResponseTime,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 500,
-		Service:   "api",
+		ConditionsJSON: condJSONWithService("response_time", "gt", 500, "api"),
+		Service:        "api",
 	})
 	if err != nil {
 		t.Fatalf("Create watch: %v", err)
@@ -664,10 +660,8 @@ func TestCaptureBaseline_EmptyDB(t *testing.T) {
 	metrics := NewWatchMetrics(logStore)
 
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.5,
-		Service:   "empty-service",
+		ConditionsJSON: condJSONWithService("error_rate", "gt", 0.5, "empty-service"),
+		Service:        "empty-service",
 	})
 	if err != nil {
 		t.Fatalf("Create watch: %v", err)

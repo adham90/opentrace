@@ -2,11 +2,23 @@ package sqlite
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
+
+// condJSON builds a simple threshold condition JSON for tests.
+func condJSON(metric, op string, value float64) json.RawMessage {
+	raw, _ := json.Marshal(map[string]any{
+		"type":   "threshold",
+		"metric": metric,
+		"op":     op,
+		"value":  value,
+	})
+	return raw
+}
 
 func TestWatchStore_CRUD(t *testing.T) {
 	db := setupTestDB(t)
@@ -15,10 +27,8 @@ func TestWatchStore_CRUD(t *testing.T) {
 
 	// Create
 	w, err := ws.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.05,
-		Service:   "web",
+		ConditionsJSON: condJSON("error_rate", "gt", 0.05),
+		Service:        "web",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -26,14 +36,15 @@ func TestWatchStore_CRUD(t *testing.T) {
 	if w.ID == "" {
 		t.Fatal("expected non-empty ID")
 	}
-	if w.Metric != store.WatchMetricErrorRate {
-		t.Errorf("metric = %q, want %q", w.Metric, store.WatchMetricErrorRate)
-	}
 	if w.Status != store.WatchStatusActive {
 		t.Errorf("status = %q, want active", w.Status)
 	}
 	if w.ExpiresAt == nil {
 		t.Error("expected expires_at to be set for duration=1h")
+	}
+	// Verify conditions round-trip
+	if len(w.ConditionsJSON) == 0 {
+		t.Error("expected conditions_json to be populated")
 	}
 
 	// GetByID
@@ -41,8 +52,8 @@ func TestWatchStore_CRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if got.Threshold != 0.05 {
-		t.Errorf("threshold = %v, want 0.05", got.Threshold)
+	if len(got.ConditionsJSON) == 0 {
+		t.Error("expected conditions_json in fetched watch")
 	}
 
 	// List
@@ -90,9 +101,7 @@ func TestWatchStore_Defaults(t *testing.T) {
 	ctx := context.Background()
 
 	w, err := ws.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricLogCount,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 100,
+		ConditionsJSON: condJSON("log_count", "gt", 100),
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -118,10 +127,8 @@ func TestWatchStore_GetDueWatches(t *testing.T) {
 
 	// Create a watch with short check interval
 	w, err := ws.Create(ctx, store.CreateWatchParams{
-		Metric:        store.WatchMetricErrorRate,
-		Operator:      store.WatchOpGreaterThan,
-		Threshold:     0.1,
-		CheckInterval: "1ms",
+		ConditionsJSON: condJSON("error_rate", "gt", 0.1),
+		CheckInterval:  "1ms",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -149,10 +156,8 @@ func TestWatchStore_ExpireWatches(t *testing.T) {
 
 	// Create a watch with very short duration
 	_, err := ws.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.1,
-		Duration:  "1ms",
+		ConditionsJSON: condJSON("error_rate", "gt", 0.1),
+		Duration:       "1ms",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -180,9 +185,7 @@ func TestWatchStore_UpdateAfterCheck(t *testing.T) {
 	ctx := context.Background()
 
 	w, err := ws.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.05,
+		ConditionsJSON: condJSON("error_rate", "gt", 0.05),
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -209,21 +212,19 @@ func TestWatchStore_BaselineRoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	w, err := ws.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricResponseTime,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 200,
-		Service:   "api",
+		ConditionsJSON: condJSON("response_time", "gt", 200),
+		Service:        "api",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
 	baseline := &store.WatchBaseline{
-		ErrorRate:      0.02,
-		AvgResponseMs:  150,
-		P95ResponseMs:  300,
-		LogCount:       1000,
-		ErrorCount:     20,
+		ErrorRate:        0.02,
+		AvgResponseMs:    150,
+		P95ResponseMs:    300,
+		LogCount:         1000,
+		ErrorCount:       20,
 		ExceptionClasses: []string{"NoMethodError", "ActiveRecord::RecordNotFound"},
 		Endpoints: []store.WatchEndpointBaseline{
 			{Path: "/api/users", AvgDurationMs: 120, AvgSQLCount: 5, RequestCount: 100},
@@ -258,9 +259,7 @@ func TestWatchStore_RunCRUD(t *testing.T) {
 	ctx := context.Background()
 
 	w, _ := ws.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.1,
+		ConditionsJSON: condJSON("error_rate", "gt", 0.1),
 	})
 
 	// Create run
@@ -311,9 +310,7 @@ func TestWatchStore_AlertCRUD(t *testing.T) {
 	ctx := context.Background()
 
 	w, _ := ws.Create(ctx, store.CreateWatchParams{
-		Metric:    store.WatchMetricErrorRate,
-		Operator:  store.WatchOpGreaterThan,
-		Threshold: 0.05,
+		ConditionsJSON: condJSON("error_rate", "gt", 0.05),
 	})
 
 	// Create alert
@@ -406,11 +403,9 @@ func TestWatchStore_List_Pagination(t *testing.T) {
 	// Create 4 watches
 	for _, svc := range []string{"api", "web", "worker", "scheduler"} {
 		_, err := ws.Create(ctx, store.CreateWatchParams{
-			Metric:    "error_rate",
-			Operator:  ">",
-			Threshold: 5.0,
-			Service:   svc,
-			Duration:  "24h",
+			ConditionsJSON: condJSON("error_rate", "gt", 5.0),
+			Service:        svc,
+			Duration:       "24h",
 		})
 		if err != nil {
 			t.Fatalf("Create %s: %v", svc, err)
@@ -477,5 +472,18 @@ func TestWatchStore_NotFound(t *testing.T) {
 	err = ws.UpdateStatus(ctx, "nonexistent", store.WatchStatusTriggered)
 	if err != store.ErrNotFound {
 		t.Errorf("UpdateStatus: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestWatchStore_MissingConditions(t *testing.T) {
+	db := setupTestDB(t)
+	ws := NewWatchStore(db)
+	ctx := context.Background()
+
+	_, err := ws.Create(ctx, store.CreateWatchParams{
+		Service: "web",
+	})
+	if err == nil {
+		t.Fatal("expected error when conditions_json is missing")
 	}
 }

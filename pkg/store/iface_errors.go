@@ -13,6 +13,7 @@ type ErrorGroupStore interface {
 	Count(ctx context.Context, status ErrorGroupStatus) (int, error)
 	Resolve(ctx context.Context, fingerprint string, reason string) error
 	Ignore(ctx context.Context, fingerprint string, reason string) error
+	Reopen(ctx context.Context, fingerprint string, reason string) error
 	ListEvents(ctx context.Context, fingerprint string, limit int) ([]ErrorGroupEvent, error)
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
 }

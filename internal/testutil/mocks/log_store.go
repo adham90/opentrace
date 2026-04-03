@@ -86,6 +86,10 @@ func (m *LogStore) SearchRequestSummaries(_ context.Context, _ store.RequestSumm
 	return nil, nil
 }
 
+func (m *LogStore) AggregateRequestSummaries(_ context.Context, _ store.RequestSummaryAggregateParams) (*store.RequestSummaryAggregates, error) {
+	return &store.RequestSummaryAggregates{}, nil
+}
+
 func (m *LogStore) RecordBatch(_ context.Context, batchID string, logCount int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

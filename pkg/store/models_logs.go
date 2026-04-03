@@ -20,7 +20,6 @@ type LogEntry struct {
 	ParentSpanID   string          `bun:"parent_span_id" json:"parent_span_id,omitempty"`
 	RequestID      string          `bun:"request_id" json:"request_id,omitempty"`
 	UserID         string          `bun:"user_id" json:"user_id,omitempty"`
-	SessionID      string          `bun:"session_id" json:"session_id,omitempty"`
 	Message        string          `bun:"message" json:"message"`
 	EventType      string          `bun:"event_type" json:"event_type,omitempty"`
 	ExceptionClass string          `bun:"exception_class" json:"exception_class,omitempty"`
@@ -148,6 +147,24 @@ type RequestSummaryResult struct {
 	Timestamp time.Time `json:"timestamp"`
 	Service   string    `json:"service,omitempty"`
 	TraceID   string    `json:"trace_id,omitempty"`
+}
+
+// RequestSummaryAggregateParams defines filters for SQL-level aggregation.
+type RequestSummaryAggregateParams struct {
+	Start    *time.Time
+	End      *time.Time
+	Service  string
+	Endpoint string
+}
+
+// RequestSummaryAggregates holds pre-computed aggregate metrics.
+type RequestSummaryAggregates struct {
+	Count        int     `json:"count"`
+	AvgDuration  float64 `json:"avg_duration_ms"`
+	AvgSQLCount  float64 `json:"avg_sql_count"`
+	TotalReads   int     `json:"total_cache_reads"`
+	TotalHits    int     `json:"total_cache_hits"`
+	CacheHitRate float64 `json:"cache_hit_rate"`
 }
 
 // SamplingRule defines a per-service log sampling policy.

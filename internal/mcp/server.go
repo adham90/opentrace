@@ -30,7 +30,7 @@ const mcpInstructions = `OpenTrace is a self-hosted observability engine. You ha
 
 - overview: status, triage, diagnose, timeline, investigate, changes, settings, notes, delete_note
 - logs: search, context, attributes, stats, summary, performance, trace, compare
-- errors: list, detail, investigate, impact, user_errors, ranking, resolve, ignore
+- errors: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, reopen, new
 - database: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions
 - watches: status, create, delete, alerts, dismiss, acknowledge, investigate
 - analytics: traffic, endpoints, heatmap, trends, movers
@@ -44,6 +44,25 @@ const mcpInstructions = `OpenTrace is a self-hosted observability engine. You ha
 ## Follow suggested_tools
 
 Most tool responses include a "suggested_tools" array with pre-filled arguments for the next step. Always prefer following these suggestions over manually constructing the next call — the args are already filled in from the response data.
+
+## Watch conditions
+
+Watches support complex conditions via the "conditions" parameter (JSON object). Condition types:
+
+- threshold: {"type":"threshold","metric":"error_rate","op":"gt","value":0.05,"service":"api"}
+- relative: {"type":"relative","metric":"error_rate","op":"gt","baseline_multiple":2.0} (vs baseline)
+- delta: {"type":"delta","metric":"error_rate","op":"gt","change_pct":50,"compare_window":"1h"} (rate of change)
+- count: {"type":"count","field":"error_fingerprint","distinct":true,"op":"gt","value":10,"window":"1h"} (count distinct values)
+
+Combine with all (AND), any (OR), not:
+- {"all":[condition1, condition2]} — all must be true
+- {"any":[condition1, condition2]} — at least one must be true
+- {"not":condition} — inverts the result
+
+Metrics: error_rate, response_time, p95_response, log_count, error_count, heartbeat, sql_count, cache_hit_rate
+Operators: gt, gte, lt, lte, eq, neq
+
+Simple watches still work: watches(action:"create", metric:"error_rate", operator:"gt", threshold:0.05, service:"api")
 
 ## Agent memory
 

@@ -27,16 +27,6 @@ func ErrorsDetail(ctx context.Context, deps ErrorsDeps, args map[string]any) (*C
 		return NewToolResultError(fmt.Sprintf("error group not found: %v", err)), nil
 	}
 
-	// Link investigated error to investigation session.
-	if deps.Recurrence != nil && deps.Session != nil {
-		if sid := deps.Session.CurrentSessionID(); sid != "" {
-			deps.Recurrence.LinkInvestigatedError(ctx, sid, fingerprint)
-			if eg.ReopenedCount > 0 {
-				deps.Recurrence.DetectErrorRecurrence(ctx, sid, fingerprint, eg.ReopenedCount)
-			}
-		}
-	}
-
 	// Fetch lifecycle events.
 	events, _ := deps.ErrorGroupStore.ListEvents(ctx, fingerprint, 10)
 
@@ -103,13 +93,6 @@ func ErrorsDetail(ctx context.Context, deps ErrorsDeps, args map[string]any) (*C
 		}
 	}
 
-	// Inject recurrence context for reopened errors.
-	if eg.ReopenedCount > 0 && deps.Recurrence != nil && deps.Session != nil {
-		if sid := deps.Session.CurrentSessionID(); sid != "" {
-			deps.Recurrence.InjectRecurrenceContext(ctx, sid, resp)
-		}
-	}
-
 	// Suggest next steps.
 	var suggestions []ToolSuggestion
 	if eg.ExceptionClass != "" {
@@ -126,5 +109,5 @@ func ErrorsDetail(ctx context.Context, deps ErrorsDeps, args map[string]any) (*C
 			"fingerprint": eg.Fingerprint,
 		}))
 	}
-	return JSONResultRanked(resp, deps.Ranker, suggestions...)
+	return JSONResult(resp, suggestions...)
 }

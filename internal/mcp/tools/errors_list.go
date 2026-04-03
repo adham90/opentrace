@@ -95,5 +95,5 @@ func ErrorsList(ctx context.Context, deps ErrorsDeps, args map[string]any) (*Cal
 	if unresolvedCount > 5 {
 		suggestions = append(suggestions, Suggest("overview", "Get full system health overview", map[string]any{"action": "diagnose"}))
 	}
-	return JSONResultRanked(resp, deps.Ranker, suggestions...)
+	return JSONResult(resp, suggestions...)
 }

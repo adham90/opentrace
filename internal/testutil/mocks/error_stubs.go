@@ -48,6 +48,7 @@ func (m *ErrorGroupStore) Count(_ context.Context, _ store.ErrorGroupStatus) (in
 }
 func (m *ErrorGroupStore) Resolve(_ context.Context, _ string, _ string) error { return nil }
 func (m *ErrorGroupStore) Ignore(_ context.Context, _ string, _ string) error  { return nil }
+func (m *ErrorGroupStore) Reopen(_ context.Context, _ string, _ string) error  { return nil }
 func (m *ErrorGroupStore) ListEvents(_ context.Context, _ string, _ int) ([]store.ErrorGroupEvent, error) {
 	return nil, nil
 }

@@ -161,9 +161,12 @@ func (b *WatchEvidenceBuilder) Build(ctx context.Context, w *store.Watch, result
 
 	// 5. Baseline diff
 	if w.BaselineJSON != nil {
+		metric := store.ConditionsMetric(w.ConditionsJSON)
+		metricName := store.ConditionsSummary(w.ConditionsJSON)
+		bVal := baselineValueForMetric(w.BaselineJSON, metric)
 		evidence.BaselineDiff = &store.WatchBaselineDiff{
-			MetricName:    string(w.Metric),
-			BaselineValue: baselineMetricValue(w),
+			MetricName:    metricName,
+			BaselineValue: bVal,
 			CurrentValue:  result.Value,
 		}
 		if evidence.BaselineDiff.BaselineValue != 0 {
@@ -185,7 +188,7 @@ func (b *WatchEvidenceBuilder) Build(ctx context.Context, w *store.Watch, result
 	val := result.Value
 	evidence.Timeline = append(evidence.Timeline, store.WatchTimelineEvent{
 		Timestamp: now,
-		Event:     fmt.Sprintf("alert_triggered: %s = %.4f", w.Metric, result.Value),
+		Event:     fmt.Sprintf("alert_triggered: %s = %.4f", store.ConditionsSummary(w.ConditionsJSON), result.Value),
 		Value:     &val,
 	})
 

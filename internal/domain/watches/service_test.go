@@ -2,6 +2,7 @@ package watches
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -71,8 +72,8 @@ func TestList_NilRepo(t *testing.T) {
 func TestList_HappyPath(t *testing.T) {
 	f := &fake{
 		watches: []store.Watch{
-			{ID: "w1", Metric: store.WatchMetricErrorRate},
-			{ID: "w2", Metric: store.WatchMetricResponseTime},
+			{ID: "w1", ConditionsJSON: json.RawMessage(`{"type":"threshold","metric":"error_rate","op":"gt","value":0.05}`)},
+			{ID: "w2", ConditionsJSON: json.RawMessage(`{"type":"threshold","metric":"response_time","op":"gt","value":500}`)},
 		},
 	}
 	svc := NewService(f)
@@ -89,13 +90,15 @@ func TestList_HappyPath(t *testing.T) {
 
 func TestCreate_NilRepo(t *testing.T) {
 	svc := &Service{}
-	_, err := svc.Create(context.Background(), store.CreateWatchParams{Metric: store.WatchMetricErrorRate})
+	_, err := svc.Create(context.Background(), store.CreateWatchParams{
+		ConditionsJSON: json.RawMessage(`{"type":"threshold","metric":"error_rate","op":"gt","value":0.05}`),
+	})
 	if !errors.Is(err, domain.ErrNotConfigured) {
 		t.Errorf("expected ErrNotConfigured, got %v", err)
 	}
 }
 
-func TestCreate_MissingMetric(t *testing.T) {
+func TestCreate_MissingConditions(t *testing.T) {
 	svc := NewService(&fake{})
 	_, err := svc.Create(context.Background(), store.CreateWatchParams{})
 	if !errors.Is(err, domain.ErrInvalidInput) {
@@ -104,10 +107,11 @@ func TestCreate_MissingMetric(t *testing.T) {
 }
 
 func TestCreate_HappyPath(t *testing.T) {
-	w := &store.Watch{ID: "w1", Metric: store.WatchMetricErrorRate}
+	cond := json.RawMessage(`{"type":"threshold","metric":"error_rate","op":"gt","value":0.05}`)
+	w := &store.Watch{ID: "w1", ConditionsJSON: cond}
 	f := &fake{watch: w}
 	svc := NewService(f)
-	result, err := svc.Create(context.Background(), store.CreateWatchParams{Metric: store.WatchMetricErrorRate})
+	result, err := svc.Create(context.Background(), store.CreateWatchParams{ConditionsJSON: cond})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

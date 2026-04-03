@@ -154,28 +154,6 @@ func TestLogsTrace_WithIncludeContext(t *testing.T) {
 	}
 }
 
-func TestLogsTrace_SessionRecorderCalled(t *testing.T) {
-	ls := mocks.NewLogStore()
-	ls.Entries = []store.LogEntry{
-		{ID: 1, Timestamp: time.Now().UTC(), Level: "info", Service: "svc", Message: "test", TraceID: "rec-trace"},
-	}
-
-	var recorded string
-	deps := LogsDeps{
-		LogStore:             ls,
-		ErrorGroupStore:      mocks.NewErrorGroupStore(),
-		TraceSessionRecorder: func(traceID string) { recorded = traceID },
-	}
-
-	args := map[string]any{"action": "trace", "trace_id": "rec-trace"}
-	_, err := LogsTrace(context.Background(), args, deps)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if recorded != "rec-trace" {
-		t.Errorf("TraceSessionRecorder called with %q, want %q", recorded, "rec-trace")
-	}
-}
 
 // ===========================================================================
 // LogsCompare — additional action-branch tests

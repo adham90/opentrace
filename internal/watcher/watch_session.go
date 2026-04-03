@@ -38,12 +38,33 @@ func (m *WatchSessionManager) CheckAutoResolve(ctx context.Context, w *store.Wat
 		window = 1 * time.Hour
 	}
 
-	value, err := m.metrics.Measure(ctx, w.Metric, w.Service, w.Endpoint, window)
+	// Extract the primary metric from the conditions tree for baseline comparison.
+	metric := store.ConditionsMetric(w.ConditionsJSON)
+	if metric == "" {
+		// Compound condition: re-evaluate the full tree. If it no longer breaches,
+		// auto-resolve.
+		cond, err := ParseCondition(w.ConditionsJSON)
+		if err != nil {
+			return err
+		}
+		result, err := EvaluateCondition(ctx, cond, m.metrics, w.BaselineJSON, window)
+		if err != nil {
+			return err
+		}
+		if !result.Breached {
+			slog.Info("auto-resolving watch (compound condition no longer breached)",
+				"watch_id", w.ID)
+			return m.watchStore.UpdateStatus(ctx, w.ID, store.WatchStatusResolved)
+		}
+		return nil
+	}
+
+	value, err := m.metrics.Measure(ctx, metric, w.Service, w.Endpoint, window)
 	if err != nil {
 		return err
 	}
 
-	baselineValue := baselineMetricValue(w)
+	baselineValue := baselineValueForMetric(w.BaselineJSON, metric)
 	if baselineValue == 0 {
 		// Can't compare to zero baseline
 		return nil
@@ -52,8 +73,8 @@ func (m *WatchSessionManager) CheckAutoResolve(ctx context.Context, w *store.Wat
 	// If current value is within 10% of baseline, auto-resolve
 	drift := math.Abs(value-baselineValue) / math.Abs(baselineValue)
 	if drift <= 0.10 {
-		slog.Info("auto-resolving watch", "watch_id", w.ID, "metric", w.Metric,
-			"value", value, "baseline", baselineValue, "drift_pct", drift*100)
+		slog.Info("auto-resolving watch", "watch_id", w.ID,
+			"metric", metric, "value", value, "baseline", baselineValue, "drift_pct", drift*100)
 		return m.watchStore.UpdateStatus(ctx, w.ID, store.WatchStatusResolved)
 	}
 	return nil

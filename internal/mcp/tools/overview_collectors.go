@@ -168,10 +168,9 @@ func collectWatchAlerts(ctx context.Context, d OverviewDeps, service string) map
 	alerts := make([]map[string]any, 0, len(triggered))
 	for _, w := range triggered {
 		entry := map[string]any{
-			"id":        w.ID,
-			"metric":    string(w.Metric),
-			"threshold": w.Threshold,
-			"urgency":   string(w.Urgency),
+			"id":         w.ID,
+			"conditions": store.ConditionsSummary(w.ConditionsJSON),
+			"urgency":    string(w.Urgency),
 		}
 		if w.CurrentValue != nil {
 			entry["current_value"] = *w.CurrentValue

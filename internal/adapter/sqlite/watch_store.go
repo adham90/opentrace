@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -25,9 +24,9 @@ func NewWatchStore(db *bun.DB) store.WatchStore {
 }
 
 func (s *watchStore) Create(ctx context.Context, params store.CreateWatchParams) (*store.Watch, error) {
-	// Validate threshold is a finite number
-	if math.IsNaN(params.Threshold) || math.IsInf(params.Threshold, 0) {
-		return nil, fmt.Errorf("threshold must be a finite number")
+	// Validate conditions_json is present.
+	if len(params.ConditionsJSON) == 0 || string(params.ConditionsJSON) == "null" {
+		return nil, fmt.Errorf("conditions_json is required")
 	}
 
 	id := uuid.New().String()
@@ -76,12 +75,14 @@ func (s *watchStore) Create(ctx context.Context, params store.CreateWatchParams)
 		nextCheckAt = nullString(now.Add(ci).Format(time.RFC3339))
 	}
 
+	conditionsStr := string(params.ConditionsJSON)
+
 	_, err = s.db.NewRaw(`
-		INSERT INTO watches (id, metric, operator, threshold, service, endpoint, environment,
+		INSERT INTO watches (id, conditions_json, service, endpoint, environment,
 			commit_hash, duration, urgency, check_interval, baseline_window, min_consecutive,
 			status, expires_at, created_by, session_id, next_check_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, string(params.Metric), string(params.Operator), params.Threshold,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, conditionsStr,
 		params.Service, params.Endpoint, params.Environment, params.CommitHash,
 		duration, string(urgency), checkInterval, baselineWindow, minConsecutive,
 		string(store.WatchStatusActive), expiresAt, params.CreatedBy, params.SessionID,
@@ -96,7 +97,7 @@ func (s *watchStore) Create(ctx context.Context, params store.CreateWatchParams)
 
 func (s *watchStore) GetByID(ctx context.Context, id string) (*store.Watch, error) {
 	w, err := s.scanSingleWatch(ctx, `
-		SELECT id, metric, operator, threshold, service, endpoint, environment, commit_hash,
+		SELECT id, conditions_json, service, endpoint, environment, commit_hash,
 			duration, urgency, check_interval, baseline_window, min_consecutive, status,
 			baseline_json, consecutive_breaches, current_value, expires_at, created_by,
 			session_id, last_checked_at, next_check_at, created_at, updated_at
@@ -127,7 +128,7 @@ func (s *watchStore) List(ctx context.Context, params store.ListWatchParams) ([]
 		args = append(args, params.SessionID)
 	}
 
-	query := `SELECT id, metric, operator, threshold, service, endpoint, environment, commit_hash,
+	query := `SELECT id, conditions_json, service, endpoint, environment, commit_hash,
 		duration, urgency, check_interval, baseline_window, min_consecutive, status,
 		baseline_json, consecutive_breaches, current_value, expires_at, created_by,
 		session_id, last_checked_at, next_check_at, created_at, updated_at
@@ -244,7 +245,7 @@ func (s *watchStore) GetDueWatches(ctx context.Context) ([]store.Watch, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, metric, operator, threshold, service, endpoint, environment, commit_hash,
+		SELECT id, conditions_json, service, endpoint, environment, commit_hash,
 			duration, urgency, check_interval, baseline_window, min_consecutive, status,
 			baseline_json, consecutive_breaches, current_value, expires_at, created_by,
 			session_id, last_checked_at, next_check_at, created_at, updated_at
@@ -533,13 +534,14 @@ func (s *watchStore) CountPendingAlerts(ctx context.Context) (int, error) {
 // scanWatch and scanWatchAlert kept for dynamic queries
 func scanWatch(sc interface{ Scan(...any) error }) (*store.Watch, error) {
 	w := &store.Watch{}
+	var conditionsStr string
 	var baselineStr sql.NullString
 	var currentVal sql.NullFloat64
 	var expiresAt, lastChecked, nextCheck sql.NullString
 	var createdAt, updatedAt string
 
 	err := sc.Scan(
-		&w.ID, &w.Metric, &w.Operator, &w.Threshold,
+		&w.ID, &conditionsStr,
 		&w.Service, &w.Endpoint, &w.Environment, &w.CommitHash,
 		&w.Duration, &w.Urgency, &w.CheckInterval, &w.BaselineWindow,
 		&w.MinConsecutive, &w.Status,
@@ -551,6 +553,9 @@ func scanWatch(sc interface{ Scan(...any) error }) (*store.Watch, error) {
 		return nil, err
 	}
 
+	if conditionsStr != "" {
+		w.ConditionsJSON = json.RawMessage(conditionsStr)
+	}
 	if baselineStr.Valid {
 		var b store.WatchBaseline
 		if err := json.Unmarshal([]byte(baselineStr.String), &b); err == nil {

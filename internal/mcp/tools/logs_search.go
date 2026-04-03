@@ -320,5 +320,5 @@ func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallT
 			}
 		}
 	}
-	return JSONResultRanked(resp, deps.Ranker, suggestions...)
+	return JSONResult(resp, suggestions...)
 }

@@ -14,23 +14,9 @@ import "encoding/json"
 // added inline under "suggested_tools". For struct types, resp is wrapped
 // in a map so suggestions can be appended.
 func JSONResult(resp any, suggestions ...ToolSuggestion) (*CallToolResult, error) {
-	return jsonResult(resp, nil, suggestions)
-}
-
-// JSONResultRanked is like JSONResult but re-ranks suggestions through the
-// provided SuggestionRanker before attaching them.
-func JSONResultRanked(resp any, ranker SuggestionRanker, suggestions ...ToolSuggestion) (*CallToolResult, error) {
-	return jsonResult(resp, ranker, suggestions)
-}
-
-func jsonResult(resp any, ranker SuggestionRanker, suggestions []ToolSuggestion) (*CallToolResult, error) {
 	// If resp is already a map, add suggestions inline.
 	if m, ok := resp.(map[string]any); ok {
-		if ranker != nil {
-			withSuggestionsRanked(m, ranker, suggestions...)
-		} else {
-			WithSuggestions(m, suggestions...)
-		}
+		WithSuggestions(m, suggestions...)
 		data, _ := json.Marshal(m)
 		return NewToolResultText(string(data)), nil
 	}
@@ -49,11 +35,7 @@ func jsonResult(resp any, ranker SuggestionRanker, suggestions []ToolSuggestion)
 		// Fallback: return without suggestions.
 		return NewToolResultText(string(data)), nil
 	}
-	if ranker != nil {
-		withSuggestionsRanked(m, ranker, suggestions...)
-	} else {
-		WithSuggestions(m, suggestions...)
-	}
+	WithSuggestions(m, suggestions...)
 	data, _ = json.Marshal(m)
 	return NewToolResultText(string(data)), nil
 }

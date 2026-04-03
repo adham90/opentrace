@@ -3,13 +3,15 @@ package watcher
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 // WatchStreamEvaluator reactively checks watches when new logs arrive.
+// It coordinates with the WatchScheduler through the DB — both paths
+// use last_checked_at as the single source of truth to prevent duplicate
+// evaluations.
 type WatchStreamEvaluator struct {
 	watchStore      store.WatchStore
 	evaluator       *WatchEvaluator
@@ -17,20 +19,13 @@ type WatchStreamEvaluator struct {
 	notifiers       []WatchAlertNotifier
 
 	// Parent context for deriving per-evaluation timeouts.
-	// When cancelled (e.g. app shutdown), in-flight evaluations stop promptly.
 	ctx context.Context
 
-	// Sliding window: per-watch counters to avoid over-evaluation
-	mu       sync.Mutex
-	lastEval map[string]time.Time // watch ID → last evaluation time
-	minGap   time.Duration        // minimum gap between evaluations for the same watch
-
-	// Semaphore to limit concurrent evaluations
+	// Semaphore to limit concurrent evaluations.
 	sem chan struct{}
 }
 
 // NewWatchStreamEvaluator creates a reactive stream evaluator.
-// The provided ctx is used as the parent for all evaluation timeouts.
 func NewWatchStreamEvaluator(
 	ctx context.Context,
 	watchStore store.WatchStore,
@@ -47,8 +42,6 @@ func NewWatchStreamEvaluator(
 		evaluator:       evaluator,
 		evidenceBuilder: evidenceBuilder,
 		notifiers:       notifiers,
-		lastEval:        make(map[string]time.Time),
-		minGap:          10 * time.Second,
 		sem:             make(chan struct{}, 16),
 	}
 }
@@ -61,7 +54,7 @@ func (s *WatchStreamEvaluator) OnLogsReceived(entries []store.LogEntry) {
 		return
 	}
 
-	// Collect unique services from entries
+	// Collect unique services from entries.
 	services := make(map[string]bool)
 	for _, e := range entries {
 		if e.Service != "" {
@@ -76,7 +69,7 @@ func (s *WatchStreamEvaluator) OnLogsReceived(entries []store.LogEntry) {
 			s.evaluateMatching(services)
 		}()
 	default:
-		// Semaphore full — skip evaluation to prevent goroutine explosion
+		// Semaphore full — skip to prevent goroutine explosion.
 	}
 }
 
@@ -92,34 +85,27 @@ func (s *WatchStreamEvaluator) evaluateMatching(services map[string]bool) {
 
 	now := time.Now()
 
-	// Clean up stale entries from lastEval for deleted watches
-	s.mu.Lock()
-	activeIDs := make(map[string]bool, len(watches))
 	for _, w := range watches {
-		activeIDs[w.ID] = true
-	}
-	for id, t := range s.lastEval {
-		if !activeIDs[id] || time.Since(t) > 5*time.Minute {
-			delete(s.lastEval, id)
-		}
-	}
-	s.mu.Unlock()
-
-	for _, w := range watches {
-		// Only evaluate watches matching incoming services
+		// Only evaluate watches matching incoming services.
 		if w.Service != "" && !services[w.Service] {
 			continue
 		}
 
-		// Throttle: skip if evaluated recently
-		s.mu.Lock()
-		last, ok := s.lastEval[w.ID]
-		if ok && now.Sub(last) < s.minGap {
-			s.mu.Unlock()
-			continue
+		// Coordination: skip if recently checked (by scheduler or a previous stream eval).
+		// Both paths write last_checked_at via UpdateAfterCheck, so this is the single
+		// source of truth — no in-memory state needed.
+		if w.LastCheckedAt != nil {
+			ci, err := time.ParseDuration(w.CheckInterval)
+			if err != nil {
+				ci = 30 * time.Second
+			}
+			// Use half the check interval as the minimum gap for reactive checks.
+			// This gives the stream evaluator a chance to fire mid-cycle while
+			// still preventing duplicate evaluations.
+			if now.Sub(*w.LastCheckedAt) < ci/2 {
+				continue
+			}
 		}
-		s.lastEval[w.ID] = now
-		s.mu.Unlock()
 
 		s.evaluateOne(ctx, &w)
 	}
@@ -154,9 +140,9 @@ func (s *WatchStreamEvaluator) evaluateOne(ctx context.Context, w *store.Watch) 
 			RunID:          run.ID,
 			Urgency:        w.Urgency,
 			Summary:        result.Summary,
-			TriggerMetric:  string(w.Metric),
+			TriggerMetric:  store.ConditionsSummary(w.ConditionsJSON),
 			TriggerValue:   result.Value,
-			ThresholdValue: w.Threshold,
+			ThresholdValue: store.ConditionsThreshold(w.ConditionsJSON),
 			Evidence:       evidence,
 		})
 		if err != nil {

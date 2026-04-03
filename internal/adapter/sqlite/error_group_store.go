@@ -24,6 +24,9 @@ func NewErrorGroupStore(db *bun.DB) store.ErrorGroupStore {
 
 // Upsert inserts or updates an error group from an ingested log entry.
 // If the fingerprint already exists AND is resolved, it reopens the group.
+//
+// Fast path: a single INSERT ON CONFLICT handles new + existing (non-resolved)
+// without a transaction. Only the rare reopen case needs a second statement.
 func (s *errorGroupStore) Upsert(ctx context.Context, entry store.LogEntry) error {
 	if entry.ErrorFingerprint == "" {
 		return nil
@@ -33,72 +36,55 @@ func (s *errorGroupStore) Upsert(ctx context.Context, entry store.LogEntry) erro
 		return nil
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
 	ts := entry.Timestamp.UTC().Format(time.RFC3339)
 
-	// Use NULL for last_log_id when the log entry ID is zero (not yet persisted).
 	var lastLogID sql.NullInt64
 	if entry.ID > 0 {
 		lastLogID = sql.NullInt64{Int64: entry.ID, Valid: true}
 	}
 
-	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		// Check if error group exists and its current status.
-		var existingStatus string
-		err := tx.NewRaw(`SELECT status FROM error_groups WHERE fingerprint = ?`, entry.ErrorFingerprint).Scan(ctx, &existingStatus)
-		if err == sql.ErrNoRows {
-			// New error group.
-			_, err = tx.NewRaw(`
-				INSERT INTO error_groups (fingerprint, service, environment, exception_class, message,
-					source_file, source_line, first_seen_at, last_seen_at, last_log_id)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				entry.ErrorFingerprint, entry.Service, entry.Environment,
-				entry.ExceptionClass, truncate(entry.Message, 500),
-				entry.SourceFile, entry.SourceLine, ts, ts, lastLogID,
-			).Exec(ctx)
-			if err != nil {
-				return fmt.Errorf("insert error group: %w", err)
-			}
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("check existing: %w", err)
-		}
+	// Fast path: single statement, no transaction needed.
+	// Inserts new groups with occurrence_count=1, or increments existing ones.
+	_, err := s.db.NewRaw(`
+		INSERT INTO error_groups (fingerprint, service, environment, exception_class, message,
+			source_file, source_line, first_seen_at, last_seen_at, last_log_id, occurrence_count)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+		ON CONFLICT(fingerprint) DO UPDATE SET
+			occurrence_count = occurrence_count + 1,
+			last_seen_at = excluded.last_seen_at,
+			last_log_id = excluded.last_log_id`,
+		entry.ErrorFingerprint, entry.Service, entry.Environment,
+		entry.ExceptionClass, truncate(entry.Message, 500),
+		entry.SourceFile, entry.SourceLine, ts, ts, lastLogID,
+	).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("upsert error group: %w", err)
+	}
 
-		// Existing error group -- update counts.
-		_, err = tx.NewRaw(`
-			UPDATE error_groups SET
-				occurrence_count = occurrence_count + 1,
-				last_seen_at = ?,
-				last_log_id = ?
-			WHERE fingerprint = ?`, ts, lastLogID, entry.ErrorFingerprint,
+	// Slow path: reopen resolved errors. Only fires when status='resolved',
+	// which is rare — most errors are unresolved or ignored.
+	res, err := s.db.NewRaw(`
+		UPDATE error_groups SET status = 'unresolved', reopened_count = reopened_count + 1
+		WHERE fingerprint = ? AND status = 'resolved'`,
+		entry.ErrorFingerprint,
+	).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("reopen check: %w", err)
+	}
+	reopened, _ := res.RowsAffected()
+	if reopened > 0 {
+		now := time.Now().UTC().Format(time.RFC3339)
+		_, err = s.db.NewRaw(`
+			INSERT INTO error_group_events (fingerprint, action, reason, created_at)
+			VALUES (?, ?, ?, ?)`,
+			entry.ErrorFingerprint, "reopened", "New occurrence after resolution", now,
 		).Exec(ctx)
 		if err != nil {
-			return fmt.Errorf("update error group: %w", err)
+			return fmt.Errorf("insert reopen event: %w", err)
 		}
+	}
 
-		// Reopen if it was resolved (not ignored -- ignored stays ignored).
-		if existingStatus == string(store.ErrorGroupResolved) {
-			_, err = tx.NewRaw(`
-				UPDATE error_groups SET status = 'unresolved', reopened_count = reopened_count + 1
-				WHERE fingerprint = ?`, entry.ErrorFingerprint,
-			).Exec(ctx)
-			if err != nil {
-				return fmt.Errorf("reopen error group: %w", err)
-			}
-
-			_, err = tx.NewRaw(`
-				INSERT INTO error_group_events (fingerprint, action, reason, created_at)
-				VALUES (?, ?, ?, ?)`,
-				entry.ErrorFingerprint, "reopened", "New occurrence after resolution", now,
-			).Exec(ctx)
-			if err != nil {
-				return fmt.Errorf("insert reopen event: %w", err)
-			}
-		}
-
-		return nil
-	})
+	return nil
 }
 
 func (s *errorGroupStore) Get(ctx context.Context, fingerprint string) (*store.ErrorGroup, error) {
@@ -135,6 +121,9 @@ func (s *errorGroupStore) List(ctx context.Context, params store.ListErrorGroupP
 	}
 	if params.Environment != "" {
 		qb.where("environment = ?", params.Environment)
+	}
+	if params.Since != nil {
+		qb.where("first_seen_at >= ?", params.Since.UTC().Format(time.RFC3339))
 	}
 
 	orderBy := "last_seen_at DESC"
@@ -253,6 +242,36 @@ func (s *errorGroupStore) Ignore(ctx context.Context, fingerprint string, reason
 	})
 }
 
+func (s *errorGroupStore) Reopen(ctx context.Context, fingerprint string, reason string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		res, err := tx.NewRaw(`
+			UPDATE error_groups SET status = 'unresolved'
+			WHERE fingerprint = ? AND status IN ('resolved', 'ignored')`,
+			fingerprint,
+		).Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("reopen: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return store.ErrNotFound
+		}
+
+		_, err = tx.NewRaw(`
+			INSERT INTO error_group_events (fingerprint, action, reason, created_at)
+			VALUES (?, ?, ?, ?)`,
+			fingerprint, "reopened", reason, now,
+		).Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("insert reopen event: %w", err)
+		}
+
+		return nil
+	})
+}
+
 func (s *errorGroupStore) ListEvents(ctx context.Context, fingerprint string, limit int) ([]store.ErrorGroupEvent, error) {
 	if limit <= 0 {
 		limit = 20
@@ -296,6 +315,12 @@ func (s *errorGroupStore) Prune(ctx context.Context, olderThan time.Duration) (i
 		return 0, err
 	}
 	n, _ := res.RowsAffected()
+
+	// Clean up orphaned error_impacts rows whose fingerprint no longer exists.
+	if n > 0 {
+		s.db.NewRaw(`DELETE FROM error_impacts WHERE error_fingerprint NOT IN (SELECT fingerprint FROM error_groups)`).Exec(ctx)
+	}
+
 	return n, nil
 }
 

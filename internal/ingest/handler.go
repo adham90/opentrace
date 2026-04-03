@@ -209,25 +209,32 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		logEntries[i] = store.LogEntry{
-			Timestamp:        e.Timestamp,
-			Level:            e.Level,
-			Service:          e.Service,
-			Environment:      e.Environment,
-			CommitHash:       e.CommitHash,
-			TraceID:          e.TraceID,
-			SpanID:           e.SpanID,
-			ParentSpanID:     e.ParentSpanID,
-			RequestID:        e.RequestID,
-			Message:          e.Message,
-			EventType:        e.EventType,
-			ExceptionClass:   e.ExceptionClass,
-			ErrorFingerprint: e.ErrorFingerprint,
-			SourceFile:       e.SourceFile,
-			SourceLine:       e.SourceLine,
-			Metadata:         e.Metadata,
-			MetadataJSON:     metadataJSON,
+		entry := store.LogEntry{
+			Timestamp:      e.Timestamp,
+			Level:          e.Level,
+			Service:        e.Service,
+			Environment:    e.Environment,
+			CommitHash:     e.CommitHash,
+			TraceID:        e.TraceID,
+			SpanID:         e.SpanID,
+			ParentSpanID:   e.ParentSpanID,
+			RequestID:      e.RequestID,
+			Message:        e.Message,
+			EventType:      e.EventType,
+			ExceptionClass: e.ExceptionClass,
+			SourceFile:     e.SourceFile,
+			SourceLine:     e.SourceLine,
+			Metadata:       e.Metadata,
+			MetadataJSON:   metadataJSON,
 		}
+
+		// Server-side fingerprinting: always compute on the server,
+		// ignoring any SDK-provided value for consistency across languages.
+		if fp := GenerateErrorFingerprint(&entry); fp != "" {
+			entry.ErrorFingerprint = fp
+		}
+
+		logEntries[i] = entry
 		if e.RequestSummary != nil {
 			rs := e.RequestSummary
 			logEntries[i].RequestSummary = &store.RequestSummary{
@@ -301,37 +308,10 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 
 	if count > 0 {
 		h.ensureLogsConnector(r.Context())
-		if h.WatchStream != nil {
-			go h.WatchStream.OnLogsReceived(logEntries)
-		}
-		// Upsert error groups and track impact for entries with error_fingerprint.
-		if h.ErrorGroupStore != nil {
-			for _, e := range logEntries {
-				if e.ErrorFingerprint != "" {
-					_ = h.ErrorGroupStore.Upsert(r.Context(), e)
-					// Track user impact if we have a user ID
-					if h.ErrorImpactStore != nil && e.UserID != "" {
-						_ = h.ErrorImpactStore.TrackImpact(r.Context(), e.ErrorFingerprint, e.UserID, e.Metadata, e.ID, e.Service)
-					}
-					}
-			}
-		}
-		// Populate code entities from error log stack traces (Stage 5).
-		if h.CodeEntityStore != nil {
-			for _, e := range logEntries {
-				if e.Level == "error" || e.Level == "fatal" {
-					go mcpserver.PopulateFromErrorLog(context.Background(), h.CodeEntityStore, e)
-				}
-			}
-		}
-		// Update distributed trace reassembly status for entries with a trace_id.
-		if h.TraceStore != nil {
-			for _, e := range logEntries {
-				if e.TraceID != "" {
-					_ = h.TraceStore.UpsertTraceStatus(r.Context(), e.TraceID, e)
-				}
-			}
-		}
+
+		// All post-insert side-effects run async to keep the HTTP response fast.
+		// They use context.Background() since r.Context() is canceled after response.
+		go h.processAfterInsert(logEntries)
 	}
 
 	status := http.StatusCreated
@@ -401,4 +381,46 @@ func (h *Handler) ensureLogsConnector(ctx context.Context) {
 	}
 
 	slog.Info("auto-registered logs connector", "data_source_id", dsID.ID)
+}
+
+// processAfterInsert runs all post-ingestion side-effects in a single goroutine.
+// Uses context.Background() since the HTTP request context is already done.
+func (h *Handler) processAfterInsert(entries []store.LogEntry) {
+	ctx := context.Background()
+
+	// Evaluate watch rules reactively.
+	if h.WatchStream != nil {
+		h.WatchStream.OnLogsReceived(entries)
+	}
+
+	// Upsert error groups and track user impact.
+	if h.ErrorGroupStore != nil {
+		for _, e := range entries {
+			if e.ErrorFingerprint == "" {
+				continue
+			}
+			_ = h.ErrorGroupStore.Upsert(ctx, e)
+			if h.ErrorImpactStore != nil && e.UserID != "" {
+				_ = h.ErrorImpactStore.TrackImpact(ctx, e.ErrorFingerprint, e.UserID, e.Metadata, e.ID, e.Service)
+			}
+		}
+	}
+
+	// Populate code entities from error stack traces.
+	if h.CodeEntityStore != nil {
+		for _, e := range entries {
+			if e.Level == "error" || e.Level == "fatal" {
+				mcpserver.PopulateFromErrorLog(ctx, h.CodeEntityStore, e)
+			}
+		}
+	}
+
+	// Update distributed trace reassembly status.
+	if h.TraceStore != nil {
+		for _, e := range entries {
+			if e.TraceID != "" {
+				_ = h.TraceStore.UpsertTraceStatus(ctx, e.TraceID, e)
+			}
+		}
+	}
 }

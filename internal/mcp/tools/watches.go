@@ -2,12 +2,12 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
-
-	"github.com/adham90/opentrace/pkg/store"
 	"github.com/adham90/opentrace/internal/watcher"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // WatchesDeps holds the stores needed by the watches tool.
@@ -82,26 +82,22 @@ func HandleWatchStatus(ctx context.Context, d WatchesDeps, args map[string]any) 
 	pendingCount, _ := d.WatchStore.CountPendingAlerts(ctx)
 
 	type watchSummary struct {
-		ID            string              `json:"id"`
-		Metric        store.WatchMetric   `json:"metric"`
-		Operator      store.WatchOperator `json:"operator"`
-		Threshold     float64             `json:"threshold"`
-		Service       string              `json:"service,omitempty"`
-		Status        store.WatchStatus   `json:"status"`
-		CurrentValue  *float64            `json:"current_value,omitempty"`
-		Urgency       store.WatchUrgency  `json:"urgency"`
-		ExpiresAt     *time.Time          `json:"expires_at,omitempty"`
-		LastCheckedAt *time.Time          `json:"last_checked_at,omitempty"`
-		CreatedAt     time.Time           `json:"created_at"`
+		ID            string             `json:"id"`
+		Conditions    string             `json:"conditions"`
+		Service       string             `json:"service,omitempty"`
+		Status        store.WatchStatus  `json:"status"`
+		CurrentValue  *float64           `json:"current_value,omitempty"`
+		Urgency       store.WatchUrgency `json:"urgency"`
+		ExpiresAt     *time.Time         `json:"expires_at,omitempty"`
+		LastCheckedAt *time.Time         `json:"last_checked_at,omitempty"`
+		CreatedAt     time.Time          `json:"created_at"`
 	}
 
 	summaries := make([]watchSummary, len(watches))
 	for i, w := range watches {
 		summaries[i] = watchSummary{
 			ID:            w.ID,
-			Metric:        w.Metric,
-			Operator:      w.Operator,
-			Threshold:     w.Threshold,
+			Conditions:    store.ConditionsSummary(w.ConditionsJSON),
 			Service:       w.Service,
 			Status:        w.Status,
 			CurrentValue:  w.CurrentValue,
@@ -136,10 +132,37 @@ func HandleWatchStatus(ctx context.Context, d WatchesDeps, args map[string]any) 
 }
 
 func HandleWatchCreate(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
-	params := store.CreateWatchParams{
-		Metric:    store.WatchMetric(ArgString(args, "metric")),
-		Operator:  store.WatchOperator(ArgString(args, "operator")),
-		Threshold: ArgFloat(args, "threshold", 0),
+	params := store.CreateWatchParams{}
+
+	// The agent passes conditions as a JSON condition tree.
+	// If the agent passes the old flat metric/operator/threshold fields instead,
+	// convert them into a threshold condition internally.
+	if conditions, ok := args["conditions"]; ok && conditions != nil {
+		raw, err := json.Marshal(conditions)
+		if err != nil {
+			return NewToolResultError(fmt.Sprintf("invalid conditions JSON: %v", err)), nil
+		}
+		params.ConditionsJSON = raw
+	} else if metric := ArgString(args, "metric"); metric != "" {
+		// Legacy flat field compatibility: convert to a threshold condition.
+		cond := map[string]any{
+			"type":   "threshold",
+			"metric": metric,
+			"op":     ArgString(args, "operator"),
+			"value":  ArgFloat(args, "threshold", 0),
+		}
+		if svc := ArgString(args, "service"); svc != "" {
+			cond["service"] = svc
+		}
+		if ep := ArgString(args, "endpoint"); ep != "" {
+			cond["endpoint"] = ep
+		}
+		raw, _ := json.Marshal(cond)
+		params.ConditionsJSON = raw
+	}
+
+	if len(params.ConditionsJSON) == 0 {
+		return NewToolResultError("conditions is required (pass a condition tree or metric/operator/threshold)"), nil
 	}
 
 	params.Service = ArgString(args, "service")

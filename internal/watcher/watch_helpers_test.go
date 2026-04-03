@@ -75,7 +75,7 @@ func TestCompare(t *testing.T) {
 	}
 }
 
-func TestGetBaselineMetricValue(t *testing.T) {
+func TestBaselineValueForMetric(t *testing.T) {
 	baseline := &store.WatchBaseline{
 		ErrorRate:     0.15,
 		AvgResponseMs: 250.5,
@@ -88,121 +88,34 @@ func TestGetBaselineMetricValue(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		watch  *store.Watch
+		metric store.WatchMetric
 		want   float64
 	}{
-		{
-			name: "ErrorRate returns BaselineJSON.ErrorRate",
-			watch: &store.Watch{
-				Metric:       store.WatchMetricErrorRate,
-				BaselineJSON: baseline,
-			},
-			want: 0.15,
-		},
-		{
-			name: "ResponseTime returns BaselineJSON.AvgResponseMs",
-			watch: &store.Watch{
-				Metric:       store.WatchMetricResponseTime,
-				BaselineJSON: baseline,
-			},
-			want: 250.5,
-		},
-		{
-			name: "P95Response returns BaselineJSON.P95ResponseMs",
-			watch: &store.Watch{
-				Metric:       store.WatchMetricP95Response,
-				BaselineJSON: baseline,
-			},
-			want: 800.3,
-		},
-		{
-			name: "LogCount returns float64(BaselineJSON.LogCount)",
-			watch: &store.Watch{
-				Metric:       store.WatchMetricLogCount,
-				BaselineJSON: baseline,
-			},
-			want: 1500.0,
-		},
-		{
-			name: "ErrorCount returns float64(BaselineJSON.ErrorCount)",
-			watch: &store.Watch{
-				Metric:       store.WatchMetricErrorCount,
-				BaselineJSON: baseline,
-			},
-			want: 75.0,
-		},
-		{
-			name: "SQLCount returns BaselineJSON.SQLCount",
-			watch: &store.Watch{
-				Metric:       store.WatchMetricSQLCount,
-				BaselineJSON: baseline,
-			},
-			want: 12.4,
-		},
-		{
-			name: "CacheHitRate returns BaselineJSON.CacheHitRate",
-			watch: &store.Watch{
-				Metric:       store.WatchMetricCacheHitRate,
-				BaselineJSON: baseline,
-			},
-			want: 0.85,
-		},
-		{
-			name: "nil BaselineJSON returns 0",
-			watch: &store.Watch{
-				Metric:       store.WatchMetricErrorRate,
-				BaselineJSON: nil,
-			},
-			want: 0,
-		},
-		{
-			name: "unknown metric returns 0",
-			watch: &store.Watch{
-				Metric:       store.WatchMetric("unknown_metric"),
-				BaselineJSON: baseline,
-			},
-			want: 0,
-		},
-		{
-			name: "heartbeat metric returns 0 (not in baseline)",
-			watch: &store.Watch{
-				Metric:       store.WatchMetricHeartbeat,
-				BaselineJSON: baseline,
-			},
-			want: 0,
-		},
-		{
-			name: "empty metric string returns 0",
-			watch: &store.Watch{
-				Metric:       store.WatchMetric(""),
-				BaselineJSON: baseline,
-			},
-			want: 0,
-		},
+		{"ErrorRate", store.WatchMetricErrorRate, 0.15},
+		{"ResponseTime", store.WatchMetricResponseTime, 250.5},
+		{"P95Response", store.WatchMetricP95Response, 800.3},
+		{"LogCount", store.WatchMetricLogCount, 1500.0},
+		{"ErrorCount", store.WatchMetricErrorCount, 75.0},
+		{"SQLCount", store.WatchMetricSQLCount, 12.4},
+		{"CacheHitRate", store.WatchMetricCacheHitRate, 0.85},
+		{"Unknown metric", store.WatchMetric("unknown_metric"), 0},
+		{"Heartbeat (not in baseline)", store.WatchMetricHeartbeat, 0},
+		{"Empty metric", store.WatchMetric(""), 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := baselineMetricValue(tt.watch)
+			got := baselineValueForMetric(baseline, tt.metric)
 			if got != tt.want {
-				t.Errorf("baselineMetricValue() = %v, want %v", got, tt.want)
+				t.Errorf("baselineValueForMetric() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestGetBaselineMetricValue_ZeroBaseline(t *testing.T) {
-	// Test with a baseline where all values are zero
-	baseline := &store.WatchBaseline{
-		ErrorRate:     0,
-		AvgResponseMs: 0,
-		P95ResponseMs: 0,
-		LogCount:      0,
-		ErrorCount:    0,
-		SQLCount:      0,
-		CacheHitRate:  0,
-	}
-
+func TestBaselineValueForMetric_NilBaseline(t *testing.T) {
+	// baselineValueForMetric should handle being called with a valid baseline that has all zeros
+	baseline := &store.WatchBaseline{}
 	metrics := []store.WatchMetric{
 		store.WatchMetricErrorRate,
 		store.WatchMetricResponseTime,
@@ -215,13 +128,9 @@ func TestGetBaselineMetricValue_ZeroBaseline(t *testing.T) {
 
 	for _, metric := range metrics {
 		t.Run(string(metric)+"_zero_baseline", func(t *testing.T) {
-			w := &store.Watch{
-				Metric:       metric,
-				BaselineJSON: baseline,
-			}
-			got := baselineMetricValue(w)
+			got := baselineValueForMetric(baseline, metric)
 			if got != 0 {
-				t.Errorf("baselineMetricValue() for %s with zero baseline = %v, want 0", metric, got)
+				t.Errorf("baselineValueForMetric() for %s with zero baseline = %v, want 0", metric, got)
 			}
 		})
 	}

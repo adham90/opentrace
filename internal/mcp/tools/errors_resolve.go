@@ -31,13 +31,6 @@ func ErrorsResolve(ctx context.Context, deps ErrorsDeps, args map[string]any) (*
 		return NewToolResultError(fmt.Sprintf("failed to resolve: %v", err)), nil
 	}
 
-	// Link resolved error to investigation session.
-	if deps.Recurrence != nil && deps.Session != nil {
-		if sid := deps.Session.CurrentSessionID(); sid != "" {
-			deps.Recurrence.LinkResolvedError(ctx, sid, fingerprint)
-		}
-	}
-
 	resp := map[string]any{
 		"status":      "resolved",
 		"fingerprint": fingerprint,
@@ -70,18 +63,43 @@ func ErrorsIgnore(ctx context.Context, deps ErrorsDeps, args map[string]any) (*C
 		return NewToolResultError(fmt.Sprintf("failed to ignore: %v", err)), nil
 	}
 
-	// Link resolved (ignored) error to investigation session.
-	if deps.Recurrence != nil && deps.Session != nil {
-		if sid := deps.Session.CurrentSessionID(); sid != "" {
-			deps.Recurrence.LinkResolvedError(ctx, sid, fingerprint)
-		}
-	}
-
 	resp := map[string]any{
 		"status":      "ignored",
 		"fingerprint": fingerprint,
 		"reason":      reason,
 		"message":     "Error group permanently ignored. New occurrences will still be counted but won't reopen the group.",
+	}
+	return JSONResult(resp)
+}
+
+// ---------------------------------------------------------------------------
+// Action: reopen — move an error from ignored/resolved back to unresolved
+// ---------------------------------------------------------------------------
+
+func ErrorsReopen(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
+	if deps.ErrorGroupStore == nil {
+		return NewToolResultError("ErrorGroupStore not configured"), nil
+	}
+
+	fingerprint := ArgString(args, "fingerprint")
+	if fingerprint == "" {
+		return NewToolResultError("fingerprint is required"), nil
+	}
+
+	reason := ArgString(args, "reason")
+	if reason == "" {
+		return NewToolResultError("reason is required (e.g. 'Error is still occurring, undo ignore')"), nil
+	}
+
+	if err := deps.ErrorGroupStore.Reopen(ctx, fingerprint, reason); err != nil {
+		return NewToolResultError(fmt.Sprintf("failed to reopen: %v", err)), nil
+	}
+
+	resp := map[string]any{
+		"status":      "unresolved",
+		"fingerprint": fingerprint,
+		"reason":      reason,
+		"message":     "Error group reopened. It is now active and will appear in unresolved error lists.",
 	}
 	return JSONResult(resp)
 }
@@ -100,6 +118,7 @@ func HandleNewErrors(ctx context.Context, deps ErrorsDeps, args map[string]any) 
 
 	groups, err := deps.ErrorGroupStore.List(ctx, store.ListErrorGroupParams{
 		Service: service,
+		Since:   &since,
 		Limit:   20,
 		SortBy:  "first_seen_at",
 	})
@@ -107,7 +126,6 @@ func HandleNewErrors(ctx context.Context, deps ErrorsDeps, args map[string]any) 
 		return NewToolResultError(fmt.Sprintf("failed to list error groups: %v", err)), nil
 	}
 
-	// Filter to only errors first seen after the since cutoff.
 	type newError struct {
 		Fingerprint     string `json:"fingerprint"`
 		ExceptionClass  string `json:"exception_class,omitempty"`
@@ -117,18 +135,16 @@ func HandleNewErrors(ctx context.Context, deps ErrorsDeps, args map[string]any) 
 		FirstSeenAt     string `json:"first_seen_at"`
 	}
 
-	var newErrors []newError
+	newErrors := make([]newError, 0, len(groups))
 	for _, g := range groups {
-		if g.FirstSeenAt.After(since) {
-			newErrors = append(newErrors, newError{
-				Fingerprint:     g.Fingerprint,
-				ExceptionClass:  g.ExceptionClass,
-				Message:         Truncate(g.Message, 100),
-				Service:         g.Service,
-				OccurrenceCount: g.OccurrenceCount,
-				FirstSeenAt:     g.FirstSeenAt.Format(time.RFC3339),
-			})
-		}
+		newErrors = append(newErrors, newError{
+			Fingerprint:     g.Fingerprint,
+			ExceptionClass:  g.ExceptionClass,
+			Message:         Truncate(g.Message, 100),
+			Service:         g.Service,
+			OccurrenceCount: g.OccurrenceCount,
+			FirstSeenAt:     g.FirstSeenAt.Format(time.RFC3339),
+		})
 	}
 
 	if len(newErrors) == 0 {
@@ -147,5 +163,5 @@ func HandleNewErrors(ctx context.Context, deps ErrorsDeps, args map[string]any) 
 		"action":      "detail",
 		"fingerprint": newErrors[0].Fingerprint,
 	}))
-	return JSONResultRanked(resp, deps.Ranker, suggestions...)
+	return JSONResult(resp, suggestions...)
 }

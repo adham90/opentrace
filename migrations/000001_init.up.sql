@@ -144,32 +144,28 @@ CREATE TABLE IF NOT EXISTS logs (
     error_fingerprint TEXT,
     source_file       TEXT,
     source_line       INTEGER,
-    user_id           TEXT DEFAULT '',
-    session_id        TEXT DEFAULT ''
+    user_id           TEXT DEFAULT ''
 );
 
-CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp);
-CREATE INDEX IF NOT EXISTS idx_logs_service ON logs(service);
-CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level);
-CREATE INDEX IF NOT EXISTS idx_logs_trace_id ON logs(trace_id) WHERE trace_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_logs_event_type ON logs(event_type) WHERE event_type != '';
-CREATE INDEX IF NOT EXISTS idx_logs_span_id ON logs(span_id) WHERE span_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_logs_parent_span_id ON logs(parent_span_id) WHERE parent_span_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_logs_commit_hash ON logs(commit_hash) WHERE commit_hash IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_logs_request_id ON logs(request_id) WHERE request_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_logs_environment ON logs(environment) WHERE environment != '';
-CREATE INDEX IF NOT EXISTS idx_logs_exception_class ON logs(exception_class) WHERE exception_class IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_logs_error_fingerprint ON logs(error_fingerprint) WHERE error_fingerprint IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_logs_source_file ON logs(source_file) WHERE source_file IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_logs_user_id ON logs(user_id) WHERE user_id != '';
-CREATE INDEX IF NOT EXISTS idx_logs_session_id ON logs(session_id) WHERE session_id != '';
-CREATE INDEX IF NOT EXISTS idx_logs_ts_service_env ON logs(timestamp, service, environment);
-CREATE INDEX IF NOT EXISTS idx_logs_ts_level ON logs(timestamp, level);
-CREATE INDEX IF NOT EXISTS idx_logs_session_service_ts ON logs(session_id, service, timestamp) WHERE session_id != '';
+-- Compound indexes (cover all query patterns — most queries filter by timestamp + service/level)
 CREATE INDEX IF NOT EXISTS idx_logs_service_timestamp ON logs(service, timestamp);
 CREATE INDEX IF NOT EXISTS idx_logs_level_timestamp ON logs(level, timestamp);
 CREATE INDEX IF NOT EXISTS idx_logs_service_level_timestamp ON logs(service, level, timestamp);
 CREATE INDEX IF NOT EXISTS idx_logs_event_type_timestamp ON logs(event_type, timestamp) WHERE event_type != '';
+
+-- Point-lookup indexes (trace assembly, request lookup, error investigation)
+CREATE INDEX IF NOT EXISTS idx_logs_trace_id ON logs(trace_id) WHERE trace_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_logs_span_id ON logs(span_id) WHERE span_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_logs_parent_span_id ON logs(parent_span_id) WHERE parent_span_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_logs_commit_hash ON logs(commit_hash) WHERE commit_hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_logs_request_id ON logs(request_id) WHERE request_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_logs_error_fingerprint ON logs(error_fingerprint) WHERE error_fingerprint IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_logs_user_id ON logs(user_id) WHERE user_id != '';
+
+-- Sparse indexes (rarely filtered alone, but cheap since partial)
+CREATE INDEX IF NOT EXISTS idx_logs_environment ON logs(environment) WHERE environment != '';
+CREATE INDEX IF NOT EXISTS idx_logs_exception_class ON logs(exception_class) WHERE exception_class IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_logs_source_file ON logs(source_file) WHERE source_file IS NOT NULL;
 
 -- FTS5 virtual table for full-text search on log messages
 CREATE VIRTUAL TABLE IF NOT EXISTS logs_fts USING fts5(message, content=logs, content_rowid=id);
@@ -352,9 +348,7 @@ CREATE INDEX IF NOT EXISTS idx_hc_results_id_time ON healthcheck_results(healthc
 
 CREATE TABLE IF NOT EXISTS watches (
     id                   TEXT PRIMARY KEY,
-    metric               TEXT NOT NULL,
-    operator             TEXT NOT NULL,
-    threshold            REAL NOT NULL,
+    conditions_json      TEXT NOT NULL,
     service              TEXT NOT NULL DEFAULT '',
     endpoint             TEXT NOT NULL DEFAULT '',
     environment          TEXT NOT NULL DEFAULT '',
