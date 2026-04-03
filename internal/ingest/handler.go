@@ -20,6 +20,7 @@ import (
 	"github.com/adham90/opentrace/internal/metrics"
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 const (
@@ -60,60 +61,60 @@ func IsValidBatchID(id string) bool {
 }
 
 type ingestLogEntry struct {
-	Timestamp        time.Time              `json:"timestamp"`
-	Level            string                 `json:"level"`
-	Service          string                 `json:"service"`
-	Environment      string                 `json:"environment"`
-	CommitHash       string                 `json:"commit_hash"`
-	TraceID          string                 `json:"trace_id"`
-	SpanID           string                 `json:"span_id"`
-	ParentSpanID     string                 `json:"parent_span_id"`
-	RequestID        string                 `json:"request_id"`
-	Message          string                 `json:"message"`
-	EventType        string                 `json:"event_type"`
-	ExceptionClass   string                 `json:"exception_class"`
-	ErrorFingerprint string                 `json:"error_fingerprint"`
-	SourceFile       string                 `json:"source_file"`
-	SourceLine       int                    `json:"source_line"`
-	Metadata         map[string]any         `json:"metadata"`
-	DeepCapture      json.RawMessage        `json:"deep_capture,omitempty"`
-	RequestSummary   *ingestRequestSummary  `json:"request_summary,omitempty"`
+	Timestamp        time.Time              `json:"timestamp" msgpack:"timestamp"`
+	Level            string                 `json:"level" msgpack:"level"`
+	Service          string                 `json:"service" msgpack:"service"`
+	Environment      string                 `json:"environment" msgpack:"environment"`
+	CommitHash       string                 `json:"commit_hash" msgpack:"commit_hash"`
+	TraceID          string                 `json:"trace_id" msgpack:"trace_id"`
+	SpanID           string                 `json:"span_id" msgpack:"span_id"`
+	ParentSpanID     string                 `json:"parent_span_id" msgpack:"parent_span_id"`
+	RequestID        string                 `json:"request_id" msgpack:"request_id"`
+	Message          string                 `json:"message" msgpack:"message"`
+	EventType        string                 `json:"event_type" msgpack:"event_type"`
+	ExceptionClass   string                 `json:"exception_class" msgpack:"exception_class"`
+	ErrorFingerprint string                 `json:"error_fingerprint" msgpack:"error_fingerprint"`
+	SourceFile       string                 `json:"source_file" msgpack:"source_file"`
+	SourceLine       int                    `json:"source_line" msgpack:"source_line"`
+	Metadata         map[string]any         `json:"metadata" msgpack:"metadata"`
+	DeepCapture      json.RawMessage        `json:"deep_capture,omitempty" msgpack:"deep_capture,omitempty"`
+	RequestSummary   *ingestRequestSummary  `json:"request_summary,omitempty" msgpack:"request_summary,omitempty"`
 }
 
 type ingestRequestSummary struct {
-	Controller          string  `json:"controller"`
-	Action              string  `json:"action"`
-	Method              string  `json:"method"`
-	Path                string  `json:"path"`
-	Status              int     `json:"status"`
-	DurationMs          float64 `json:"duration_ms"`
-	DBTimeMs            float64 `json:"db_time_ms"`
-	ViewTimeMs          float64 `json:"view_time_ms"`
-	SQLCount            int     `json:"sql_count"`
-	SQLTotalMs          float64 `json:"sql_total_ms"`
-	SQLSlowestMs        float64 `json:"sql_slowest_ms"`
-	SQLSlowestName      string  `json:"sql_slowest_name"`
-	NPlusOne            bool    `json:"n_plus_one"`
-	ViewCount           int     `json:"view_count"`
-	ViewTotalMs         float64 `json:"view_total_ms"`
-	ViewSlowestMs       float64 `json:"view_slowest_ms"`
-	ViewSlowestTemplate string  `json:"view_slowest_template"`
-	CacheReads          int     `json:"cache_reads"`
-	CacheHits           int     `json:"cache_hits"`
-	CacheWrites         int     `json:"cache_writes"`
-	CacheHitRatio       float64 `json:"cache_hit_ratio"`
-	HTTPExternalCount   int     `json:"http_external_count"`
-	HTTPExternalTotalMs float64 `json:"http_external_total_ms"`
-	HTTPSlowestMs       float64 `json:"http_slowest_ms"`
-	HTTPSlowestHost     string  `json:"http_slowest_host"`
-	MemoryBeforeMb      float64         `json:"memory_before_mb"`
-	MemoryAfterMb       float64         `json:"memory_after_mb"`
-	MemoryDeltaMb       float64         `json:"memory_delta_mb"`
-	Timeline            json.RawMessage `json:"timeline,omitempty"`
-	TimeBreakdown       json.RawMessage `json:"time_breakdown,omitempty"`
-	DuplicateQueries    int             `json:"duplicate_queries"`
-	WorstDuplicateCount int             `json:"worst_duplicate_count"`
-	TopDuplicates       json.RawMessage `json:"top_duplicates,omitempty"`
+	Controller          string  `json:"controller" msgpack:"controller"`
+	Action              string  `json:"action" msgpack:"action"`
+	Method              string  `json:"method" msgpack:"method"`
+	Path                string  `json:"path" msgpack:"path"`
+	Status              int     `json:"status" msgpack:"status"`
+	DurationMs          float64 `json:"duration_ms" msgpack:"duration_ms"`
+	DBTimeMs            float64 `json:"db_time_ms" msgpack:"db_time_ms"`
+	ViewTimeMs          float64 `json:"view_time_ms" msgpack:"view_time_ms"`
+	SQLCount            int     `json:"sql_count" msgpack:"sql_count"`
+	SQLTotalMs          float64 `json:"sql_total_ms" msgpack:"sql_total_ms"`
+	SQLSlowestMs        float64 `json:"sql_slowest_ms" msgpack:"sql_slowest_ms"`
+	SQLSlowestName      string  `json:"sql_slowest_name" msgpack:"sql_slowest_name"`
+	NPlusOne            bool    `json:"n_plus_one" msgpack:"n_plus_one"`
+	ViewCount           int     `json:"view_count" msgpack:"view_count"`
+	ViewTotalMs         float64 `json:"view_total_ms" msgpack:"view_total_ms"`
+	ViewSlowestMs       float64 `json:"view_slowest_ms" msgpack:"view_slowest_ms"`
+	ViewSlowestTemplate string  `json:"view_slowest_template" msgpack:"view_slowest_template"`
+	CacheReads          int     `json:"cache_reads" msgpack:"cache_reads"`
+	CacheHits           int     `json:"cache_hits" msgpack:"cache_hits"`
+	CacheWrites         int     `json:"cache_writes" msgpack:"cache_writes"`
+	CacheHitRatio       float64 `json:"cache_hit_ratio" msgpack:"cache_hit_ratio"`
+	HTTPExternalCount   int     `json:"http_external_count" msgpack:"http_external_count"`
+	HTTPExternalTotalMs float64 `json:"http_external_total_ms" msgpack:"http_external_total_ms"`
+	HTTPSlowestMs       float64 `json:"http_slowest_ms" msgpack:"http_slowest_ms"`
+	HTTPSlowestHost     string  `json:"http_slowest_host" msgpack:"http_slowest_host"`
+	MemoryBeforeMb      float64         `json:"memory_before_mb" msgpack:"memory_before_mb"`
+	MemoryAfterMb       float64         `json:"memory_after_mb" msgpack:"memory_after_mb"`
+	MemoryDeltaMb       float64         `json:"memory_delta_mb" msgpack:"memory_delta_mb"`
+	Timeline            json.RawMessage `json:"timeline,omitempty" msgpack:"timeline,omitempty"`
+	TimeBreakdown       json.RawMessage `json:"time_breakdown,omitempty" msgpack:"time_breakdown,omitempty"`
+	DuplicateQueries    int             `json:"duplicate_queries" msgpack:"duplicate_queries"`
+	WorstDuplicateCount int             `json:"worst_duplicate_count" msgpack:"worst_duplicate_count"`
+	TopDuplicates       json.RawMessage `json:"top_duplicates,omitempty" msgpack:"top_duplicates,omitempty"`
 }
 
 // HandleIngestLogs is the HTTP handler for POST /api/logs.
@@ -140,19 +141,36 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	contentType := r.Header.Get("Content-Type")
+
 	var entries []ingestLogEntry
-	trimmed := bytes.TrimSpace(body)
-	if len(trimmed) > 0 && trimmed[0] == '{' {
-		var single ingestLogEntry
-		if err := json.Unmarshal(trimmed, &single); err != nil {
-			server.WriteError(w, http.StatusBadRequest, server.FormatJSONError(err, "object"))
-			return
+	switch {
+	case strings.Contains(contentType, "application/msgpack"):
+		// MessagePack decoding
+		if err := msgpack.Unmarshal(body, &entries); err != nil {
+			// Try single object
+			var single ingestLogEntry
+			if err2 := msgpack.Unmarshal(body, &single); err2 != nil {
+				server.WriteError(w, http.StatusBadRequest, fmt.Sprintf("invalid msgpack: %v", err2))
+				return
+			}
+			entries = []ingestLogEntry{single}
 		}
-		entries = []ingestLogEntry{single}
-	} else {
-		if err := json.Unmarshal(trimmed, &entries); err != nil {
-			server.WriteError(w, http.StatusBadRequest, server.FormatJSONError(err, "array"))
-			return
+	default:
+		// JSON decoding (existing behavior, default for all other content types)
+		trimmed := bytes.TrimSpace(body)
+		if len(trimmed) > 0 && trimmed[0] == '{' {
+			var single ingestLogEntry
+			if err := json.Unmarshal(trimmed, &single); err != nil {
+				server.WriteError(w, http.StatusBadRequest, server.FormatJSONError(err, "object"))
+				return
+			}
+			entries = []ingestLogEntry{single}
+		} else {
+			if err := json.Unmarshal(trimmed, &entries); err != nil {
+				server.WriteError(w, http.StatusBadRequest, server.FormatJSONError(err, "array"))
+				return
+			}
 		}
 	}
 

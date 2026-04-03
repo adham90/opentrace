@@ -125,11 +125,21 @@ func (s *logStore) BatchInsert(ctx context.Context, entries []store.LogEntry) (i
 						"error", err,
 						"log_id", logID,
 					)
-				} else if err := deepcapture.ProcessDocument(tx.Tx, &doc, logID); err != nil {
-					slog.Warn("deepcapture: processing failed",
-						"error", err,
-						"log_id", logID,
-					)
+				} else {
+					// PII scrubbing — load config from app_config and scrub
+					// the document before any detail rows are extracted.
+					piiCfg := deepcapture.LoadPIIConfig(ctx, tx.Tx)
+					deepcapture.ScrubDocument(&doc, piiCfg)
+
+					if err := deepcapture.ProcessDocument(tx.Tx, &doc, logID); err != nil {
+						slog.Warn("deepcapture: processing failed",
+							"error", err,
+							"log_id", logID,
+						)
+					}
+
+					// Process in-request log entries (event.logs) as separate rows.
+					deepcapture.ProcessInRequestLogs(tx.Tx, &doc, logID)
 				}
 			}
 		}

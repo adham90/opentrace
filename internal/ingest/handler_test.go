@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/vmihailenco/msgpack/v5"
 
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
@@ -742,5 +743,110 @@ func TestHandleIngestLogs_EmptyArray(t *testing.T) {
 	count, _ := resp["count"].(float64)
 	if count != 0 {
 		t.Errorf("expected count=0 for empty array, got %v", count)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: MessagePack ingest
+// ---------------------------------------------------------------------------
+
+// makeMsgpackRequest builds an httptest request with a MessagePack-encoded body.
+func makeMsgpackRequest(t *testing.T, body any, headers map[string]string) *http.Request {
+	t.Helper()
+	data, err := msgpack.Marshal(body)
+	if err != nil {
+		t.Fatalf("encoding msgpack body: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewReader(data))
+	req.Header.Set("Content-Type", "application/msgpack")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	return req
+}
+
+func TestHandleIngestLogs_MsgpackSingleEntry(t *testing.T) {
+	logStore := &mockLogStore{}
+	h := newTestHandler(logStore)
+
+	entry := ingestLogEntry{
+		Timestamp: time.Now().UTC().Truncate(time.Second),
+		Level:     "info",
+		Message:   "msgpack single entry",
+		Service:   "test-svc",
+	}
+	req := makeMsgpackRequest(t, entry, nil)
+	rec := httptest.NewRecorder()
+
+	h.HandleIngestLogs(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeResponse(t, rec)
+	count, ok := resp["count"].(float64)
+	if !ok || count != 1 {
+		t.Errorf("expected count=1, got %v", resp["count"])
+	}
+	if len(logStore.insertedEntries) != 1 {
+		t.Fatalf("expected 1 inserted entry, got %d", len(logStore.insertedEntries))
+	}
+	if logStore.insertedEntries[0].Message != "msgpack single entry" {
+		t.Errorf("expected message 'msgpack single entry', got %q", logStore.insertedEntries[0].Message)
+	}
+}
+
+func TestHandleIngestLogs_MsgpackBatch(t *testing.T) {
+	logStore := &mockLogStore{}
+	h := newTestHandler(logStore)
+
+	batch := []ingestLogEntry{
+		{
+			Timestamp: time.Now().UTC().Truncate(time.Second),
+			Level:     "info",
+			Message:   "first msgpack",
+			Service:   "test-svc",
+		},
+		{
+			Timestamp: time.Now().UTC().Truncate(time.Second),
+			Level:     "warn",
+			Message:   "second msgpack",
+			Service:   "test-svc",
+		},
+	}
+	req := makeMsgpackRequest(t, batch, nil)
+	rec := httptest.NewRecorder()
+
+	h.HandleIngestLogs(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeResponse(t, rec)
+	count, ok := resp["count"].(float64)
+	if !ok || count != 2 {
+		t.Errorf("expected count=2, got %v", resp["count"])
+	}
+	if len(logStore.insertedEntries) != 2 {
+		t.Errorf("expected 2 inserted entries, got %d", len(logStore.insertedEntries))
+	}
+}
+
+func TestHandleIngestLogs_MsgpackInvalidPayload(t *testing.T) {
+	h := newTestHandler(nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewReader([]byte{0xff, 0xfe}))
+	req.Header.Set("Content-Type", "application/msgpack")
+	rec := httptest.NewRecorder()
+
+	h.HandleIngestLogs(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeResponse(t, rec)
+	errMsg, _ := resp["error"].(string)
+	if !bytes.Contains([]byte(errMsg), []byte("invalid msgpack")) {
+		t.Errorf("expected error to mention 'invalid msgpack', got: %s", errMsg)
 	}
 }
