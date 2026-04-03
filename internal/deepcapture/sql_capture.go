@@ -5,11 +5,13 @@ import (
 )
 
 // sqlQuery represents a single SQL query from the DB section.
+// Supports both wire format field names (sql, binds, table, rows_returned)
+// and the detail table column names (raw_sql, bind_values, table_name, row_count).
 type sqlQuery struct {
-	RawSQL         string          `json:"raw_sql"`
+	RawSQL         string          `json:"sql"`
 	NormalizedSQL  string          `json:"normalized_sql"`
-	BindValues     json.RawMessage `json:"bind_values"`
-	RowCount       int             `json:"row_count"`
+	BindValues     json.RawMessage `json:"binds"`
+	RowCount       int             `json:"rows_returned"`
 	DurationMs     float64         `json:"duration_ms"`
 	Cached         bool            `json:"cached"`
 	InTransaction  bool            `json:"in_transaction"`
@@ -19,7 +21,7 @@ type sqlQuery struct {
 	PoolWaiting    int             `json:"pool_waiting"`
 	CallerLocation string          `json:"caller_location"`
 	Fingerprint    string          `json:"fingerprint"`
-	TableName      string          `json:"table_name"`
+	TableName      string          `json:"table"`
 }
 
 // SQLCaptureHandler extracts SQL captures from doc.Event.DB.Queries into
