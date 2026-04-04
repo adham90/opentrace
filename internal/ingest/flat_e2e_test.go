@@ -45,7 +45,7 @@ func TestFlatE2E_SDKToQueryRoundTrip(t *testing.T) {
 			"trace_id": "trace-pay-001",
 			"request_id": "req-001",
 			"user_id": "42",
-			"exception_class": "PaymentError",
+			"error_class": "PaymentError",
 			"source_file": "app/services/billing.rb",
 			"source_line": 99,
 			"body": {
@@ -70,8 +70,7 @@ func TestFlatE2E_SDKToQueryRoundTrip(t *testing.T) {
 			"path": "/api/orders",
 			"status": 201,
 			"duration_ms": 1243,
-			"controller": "OrdersController",
-			"action": "create",
+			"handler": "OrdersController#create",
 			"db_ms": 312,
 			"db_count": 8,
 			"body": {
@@ -134,8 +133,8 @@ func TestFlatE2E_SDKToQueryRoundTrip(t *testing.T) {
 	if res.Total > 0 {
 		errEntry := res.Entries[0]
 		// Error fields extracted by pipeline
-		if errEntry.ExceptionClass != "PaymentError" {
-			t.Errorf("exception_class: %q", errEntry.ExceptionClass)
+		if errEntry.ErrorClass != "PaymentError" {
+			t.Errorf("error_class: %q", errEntry.ErrorClass)
 		}
 		if errEntry.ErrorFingerprint == "" {
 			t.Error("fingerprint should be computed")

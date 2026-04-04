@@ -13,11 +13,11 @@ import (
 // The fingerprint groups "same error, different occurrence" using a language-agnostic
 // algorithm inspired by Bugsnag's default grouping:
 //
-//	MD5(service + exception_class + source_file)[:16]
+//	MD5(service + error_class + source_file)[:16]
 //
 // When source_file is absent, falls back to:
 //
-//	MD5(service + exception_class + normalized_message)[:16]
+//	MD5(service + error_class + normalized_message)[:16]
 //
 // This replaces SDK-side fingerprinting for consistency across all languages.
 func GenerateErrorFingerprint(e *store.LogEntry) string {
@@ -30,7 +30,7 @@ func GenerateErrorFingerprint(e *store.LogEntry) string {
 	if exceptionClass == "" {
 		// Try metadata
 		if e.Metadata != nil {
-			if v, ok := e.Metadata["exception_class"].(string); ok {
+			if v, ok := e.Metadata["error_class"].(string); ok {
 				exceptionClass = v
 			}
 		}

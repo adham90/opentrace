@@ -206,11 +206,11 @@ func scrubValue(key string, val any, patterns []*regexp.Regexp, sensitiveFields 
 // --- Error Fingerprint Computation ---
 
 // computeErrorFingerprint sets the error_fingerprint from SDK-provided flat fields.
-// The SDK sends exception_class, source_file, source_line as top-level fields.
+// The SDK sends error_class, source_file, source_line as top-level fields.
 // The server only computes the fingerprint hash — no body parsing needed.
 func computeErrorFingerprint(e *chunk.Entry) {
-	if e.ExceptionClass != "" || e.SourceFile != "" {
-		e.ErrorFingerprint = computeFingerprint(e.ExceptionClass, e.SourceFile, e.SourceLine)
+	if e.ErrorClass != "" || e.SourceFile != "" {
+		e.ErrorFingerprint = computeFingerprint(e.ErrorClass, e.SourceFile, e.SourceLine)
 	}
 }
 

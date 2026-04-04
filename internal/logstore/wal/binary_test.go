@@ -51,7 +51,6 @@ func TestMarshalUnmarshalStructuredLog(t *testing.T) {
 }
 
 func TestMarshalUnmarshalRichRequest(t *testing.T) {
-	fa := false
 	body := json.RawMessage(`{"queries":[{"sql":"SELECT 1"}],"timeline":[{"t":"db","ms":1.2}]}`)
 
 	e := &chunk.Entry{
@@ -71,14 +70,12 @@ func TestMarshalUnmarshalRichRequest(t *testing.T) {
 		Path:             "/api/orders",
 		Status:           201,
 		DurationMs:       1243,
-		Controller:       "Api::OrdersController",
-		Action:           "create",
+		Handler:       "Api::OrdersController#create",
 		DbMs:             312,
 		DbCount:          8,
-		NPlusOne:         &fa,
 		SlowQueries:      1,
 		DupQueries:       3,
-		ExceptionClass:   "",
+		ErrorClass:       "",
 		SourceFile:       "",
 		SourceLine:       0,
 		ErrorFingerprint: "",
@@ -108,7 +105,7 @@ func TestMarshalUnmarshalErrorEntry(t *testing.T) {
 		Message:          "NoMethodError: undefined method 'name' for nil",
 		TraceID:          "trace-xyz789",
 		RequestID:        "req-abc123",
-		ExceptionClass:   "NoMethodError",
+		ErrorClass:   "NoMethodError",
 		SourceFile:       "app/models/order.rb",
 		SourceLine:       42,
 		ErrorFingerprint: "a8f3c2d1",
@@ -173,7 +170,6 @@ func TestReadEntries(t *testing.T) {
 
 func TestSizeComparison(t *testing.T) {
 	// Compare binary format size vs JSON for the same entries
-	fa := false
 	body := json.RawMessage(`{"queries":[{"sql":"SELECT * FROM users WHERE id = ?","duration_ms":1.2}]}`)
 
 	entries := []*chunk.Entry{
@@ -188,8 +184,7 @@ func TestSizeComparison(t *testing.T) {
 			Version: "a1b2c3d", Message: "POST /api/orders 201 1243ms",
 			EventType: "http.request", TraceID: "trace-xyz789",
 			RequestID: "req-abc123", Method: "POST", Path: "/api/orders",
-			Status: 201, DurationMs: 1243, Controller: "Api::OrdersController",
-			Action: "create", DbMs: 312, DbCount: 8, NPlusOne: &fa,
+			Status: 201, DurationMs: 1243, Handler:       "Api::OrdersController#create",
 			Body: body,
 		},
 	}
@@ -265,11 +260,8 @@ func assertEntryEqual(t *testing.T, want, got *chunk.Entry) {
 	if want.DurationMs != got.DurationMs {
 		t.Errorf("DurationMs: want %d, got %d", want.DurationMs, got.DurationMs)
 	}
-	if want.Controller != got.Controller {
-		t.Errorf("Controller: want %q, got %q", want.Controller, got.Controller)
-	}
-	if want.Action != got.Action {
-		t.Errorf("Action: want %q, got %q", want.Action, got.Action)
+	if want.Handler != got.Handler {
+		t.Errorf("Handler: want %q, got %q", want.Handler, got.Handler)
 	}
 	if want.DbMs != got.DbMs {
 		t.Errorf("DbMs: want %d, got %d", want.DbMs, got.DbMs)
@@ -288,8 +280,8 @@ func assertEntryEqual(t *testing.T, want, got *chunk.Entry) {
 	if want.DupQueries != got.DupQueries {
 		t.Errorf("DupQueries: want %d, got %d", want.DupQueries, got.DupQueries)
 	}
-	if want.ExceptionClass != got.ExceptionClass {
-		t.Errorf("ExceptionClass: want %q, got %q", want.ExceptionClass, got.ExceptionClass)
+	if want.ErrorClass != got.ErrorClass {
+		t.Errorf("ErrorClass: want %q, got %q", want.ErrorClass, got.ErrorClass)
 	}
 	if want.SourceFile != got.SourceFile {
 		t.Errorf("SourceFile: want %q, got %q", want.SourceFile, got.SourceFile)

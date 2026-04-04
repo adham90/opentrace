@@ -325,7 +325,7 @@ func testSealEntries(segHour int64) []chunk.Entry {
 			Level: "error", Service: "billing-api", Env: "production",
 			Message:          "Failed to charge customer: card declined",
 			TraceID:          "trace-xyz",
-			ExceptionClass:   "PaymentError",
+			ErrorClass:   "PaymentError",
 			ErrorFingerprint: "abc123",
 		},
 		{

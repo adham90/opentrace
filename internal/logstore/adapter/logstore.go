@@ -60,7 +60,7 @@ func (a *LogStore) Search(ctx context.Context, params store.LogSearchParams) ([]
 		TraceID:          params.TraceID,
 		RequestID:        params.RequestID,
 		EventType:        params.EventType,
-		ExceptionClass:   params.ExceptionClass,
+		ErrorClass:   params.ExceptionClass,
 		ErrorFingerprint: params.ErrorFingerprint,
 		Start:            params.Start,
 		End:              params.End,
@@ -184,7 +184,7 @@ func (a *LogStore) SearchRequestSummaries(ctx context.Context, params store.Requ
 			continue
 		}
 
-		if params.Controller != "" && e.Controller != params.Controller {
+		if params.Controller != "" && e.Handler != params.Controller {
 			continue
 		}
 		if params.NPlusOneOnly && (e.NPlusOne == nil || !*e.NPlusOne) {
@@ -205,8 +205,7 @@ func (a *LogStore) SearchRequestSummaries(ctx context.Context, params store.Requ
 		summaries = append(summaries, store.RequestSummaryResult{
 			RequestSummary: store.RequestSummary{
 				LogID:            e.ID,
-				Controller:       e.Controller,
-				Action:           e.Action,
+				Controller:       e.Handler,
 				Method:           e.Method,
 				Path:             e.Path,
 				Status:           e.Status,
@@ -308,7 +307,7 @@ func oldToNew(e store.LogEntry) chunk.Entry {
 		ParentSpanID:     e.ParentSpanID,
 		RequestID:        e.RequestID,
 		UserID:           e.UserID,
-		ExceptionClass:   e.ExceptionClass,
+		ErrorClass:       e.ExceptionClass,
 		SourceFile:       e.SourceFile,
 		SourceLine:       e.SourceLine,
 		ErrorFingerprint: e.ErrorFingerprint,
@@ -325,8 +324,7 @@ func oldToNew(e store.LogEntry) chunk.Entry {
 	if e.RequestSummary != nil {
 		rs := e.RequestSummary
 		ne.EventType = "http.request"
-		ne.Controller = rs.Controller
-		ne.Action = rs.Action
+		ne.Handler = rs.Controller
 		ne.Method = rs.Method
 		ne.Path = rs.Path
 		ne.Status = rs.Status
@@ -361,7 +359,7 @@ func newToOld(e chunk.Entry) store.LogEntry {
 		ParentSpanID:     e.ParentSpanID,
 		RequestID:        e.RequestID,
 		UserID:           e.UserID,
-		ExceptionClass:   e.ExceptionClass,
+		ExceptionClass:   e.ErrorClass,
 		SourceFile:       e.SourceFile,
 		SourceLine:       e.SourceLine,
 		ErrorFingerprint: e.ErrorFingerprint,
@@ -386,8 +384,7 @@ func newToOld(e chunk.Entry) store.LogEntry {
 		}
 		old.RequestSummary = &store.RequestSummary{
 			LogID:            e.ID,
-			Controller:       e.Controller,
-			Action:           e.Action,
+			Controller:       e.Handler,
 			Method:           e.Method,
 			Path:             e.Path,
 			Status:           e.Status,

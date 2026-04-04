@@ -94,8 +94,7 @@ func TestFlatIngest_RichRequest(t *testing.T) {
 		"path": "/api/orders",
 		"status": 201,
 		"duration_ms": 1243,
-		"controller": "OrdersController",
-		"action": "create",
+		"handler": "OrdersController#create",
 		"db_ms": 312,
 		"db_count": 8,
 		"body": {

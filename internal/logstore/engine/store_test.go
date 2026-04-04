@@ -384,7 +384,7 @@ func TestStoreIngestWithPipeline(t *testing.T) {
 	// SDK sends error fields flat
 	entries := []chunk.Entry{
 		{Ts: now.UnixMilli(), Level: "error", Service: "api",
-			Message: "NoMethodError", ExceptionClass: "NoMethodError",
+			Message: "NoMethodError", ErrorClass: "NoMethodError",
 			SourceFile: "app/models/order.rb", SourceLine: 42, Body: body},
 	}
 
@@ -398,8 +398,8 @@ func TestStoreIngestWithPipeline(t *testing.T) {
 	}
 
 	// Error fields should be extracted
-	if result[0].ExceptionClass != "NoMethodError" {
-		t.Errorf("exception_class: %q", result[0].ExceptionClass)
+	if result[0].ErrorClass != "NoMethodError" {
+		t.Errorf("error_class: %q", result[0].ErrorClass)
 	}
 	if result[0].ErrorFingerprint == "" {
 		t.Error("fingerprint should be set")

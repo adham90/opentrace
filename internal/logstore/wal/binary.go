@@ -25,14 +25,13 @@ const (
 	FlagPath           uint32 = 1 << 11
 	FlagStatus         uint32 = 1 << 12
 	FlagDurationMs     uint32 = 1 << 13
-	FlagController     uint32 = 1 << 14
-	FlagAction         uint32 = 1 << 15
+	FlagHandler     uint32 = 1 << 14
 	FlagDbMs           uint32 = 1 << 16
 	FlagDbCount        uint32 = 1 << 17
 	FlagNPlusOne       uint32 = 1 << 18
 	FlagSlowQueries    uint32 = 1 << 19
 	FlagDupQueries     uint32 = 1 << 20
-	FlagExceptionClass uint32 = 1 << 21
+	FlagErrorClass uint32 = 1 << 21
 	FlagSourceFile     uint32 = 1 << 22
 	FlagSourceLine     uint32 = 1 << 23
 	FlagErrFingerprint uint32 = 1 << 24
@@ -114,11 +113,8 @@ func MarshalEntry(e *chunk.Entry) []byte {
 	if e.DurationMs > 0 {
 		flags |= FlagDurationMs
 	}
-	if e.Controller != "" {
-		flags |= FlagController
-	}
-	if e.Action != "" {
-		flags |= FlagAction
+	if e.Handler != "" {
+		flags |= FlagHandler
 	}
 	if e.DbMs > 0 {
 		flags |= FlagDbMs
@@ -135,8 +131,8 @@ func MarshalEntry(e *chunk.Entry) []byte {
 	if e.DupQueries > 0 {
 		flags |= FlagDupQueries
 	}
-	if e.ExceptionClass != "" {
-		flags |= FlagExceptionClass
+	if e.ErrorClass != "" {
+		flags |= FlagErrorClass
 	}
 	if e.SourceFile != "" {
 		flags |= FlagSourceFile
@@ -199,11 +195,8 @@ func MarshalEntry(e *chunk.Entry) []byte {
 	if flags&FlagDurationMs != 0 {
 		buf = enc.PutUvarint(buf, uint64(e.DurationMs))
 	}
-	if flags&FlagController != 0 {
-		buf = appendString(buf, e.Controller)
-	}
-	if flags&FlagAction != 0 {
-		buf = appendString(buf, e.Action)
+	if flags&FlagHandler != 0 {
+		buf = appendString(buf, e.Handler)
 	}
 	if flags&FlagDbMs != 0 {
 		buf = enc.PutUvarint(buf, uint64(e.DbMs))
@@ -224,8 +217,8 @@ func MarshalEntry(e *chunk.Entry) []byte {
 	if flags&FlagDupQueries != 0 {
 		buf = enc.PutUvarint(buf, uint64(e.DupQueries))
 	}
-	if flags&FlagExceptionClass != 0 {
-		buf = appendString(buf, e.ExceptionClass)
+	if flags&FlagErrorClass != 0 {
+		buf = appendString(buf, e.ErrorClass)
 	}
 	if flags&FlagSourceFile != 0 {
 		buf = appendString(buf, e.SourceFile)
@@ -374,16 +367,10 @@ func UnmarshalEntry(data []byte) (*chunk.Entry, error) {
 		e.DurationMs = int(v)
 		off += n
 	}
-	if flags&FlagController != 0 {
-		e.Controller, off, err = readString(data, off)
+	if flags&FlagHandler != 0 {
+		e.Handler, off, err = readString(data, off)
 		if err != nil {
-			return nil, fmt.Errorf("read controller: %w", err)
-		}
-	}
-	if flags&FlagAction != 0 {
-		e.Action, off, err = readString(data, off)
-		if err != nil {
-			return nil, fmt.Errorf("read action: %w", err)
+			return nil, fmt.Errorf("read handler: %w", err)
 		}
 	}
 	if flags&FlagDbMs != 0 {
@@ -426,10 +413,10 @@ func UnmarshalEntry(data []byte) (*chunk.Entry, error) {
 		e.DupQueries = int(v)
 		off += n
 	}
-	if flags&FlagExceptionClass != 0 {
-		e.ExceptionClass, off, err = readString(data, off)
+	if flags&FlagErrorClass != 0 {
+		e.ErrorClass, off, err = readString(data, off)
 		if err != nil {
-			return nil, fmt.Errorf("read exception_class: %w", err)
+			return nil, fmt.Errorf("read error_class: %w", err)
 		}
 	}
 	if flags&FlagSourceFile != 0 {

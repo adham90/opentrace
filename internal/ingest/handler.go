@@ -72,7 +72,7 @@ type ingestLogEntry struct {
 	RequestID        string                 `json:"request_id" msgpack:"request_id"`
 	Message          string                 `json:"message" msgpack:"message"`
 	EventType        string                 `json:"event_type" msgpack:"event_type"`
-	ExceptionClass   string                 `json:"exception_class" msgpack:"exception_class"`
+	ExceptionClass   string                 `json:"error_class" msgpack:"error_class"`
 	ErrorFingerprint string                 `json:"error_fingerprint" msgpack:"error_fingerprint"`
 	SourceFile       string                 `json:"source_file" msgpack:"source_file"`
 	SourceLine       int                    `json:"source_line" msgpack:"source_line"`

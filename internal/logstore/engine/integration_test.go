@@ -48,7 +48,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 			TraceID:        "trace-payment-123",
 			RequestID:      "req-abc",
 			UserID:         "42",
-			ExceptionClass: "PaymentError",
+			ErrorClass: "PaymentError",
 			SourceFile:     "app/services/billing.rb",
 			SourceLine:     99,
 			Body:           body},
@@ -72,8 +72,8 @@ func TestIntegrationEndToEnd(t *testing.T) {
 
 	// Verify PII was scrubbed
 	errorEntry := result[3]
-	if errorEntry.ExceptionClass != "PaymentError" {
-		t.Errorf("exception_class: %q", errorEntry.ExceptionClass)
+	if errorEntry.ErrorClass != "PaymentError" {
+		t.Errorf("error_class: %q", errorEntry.ErrorClass)
 	}
 	if errorEntry.ErrorFingerprint == "" {
 		t.Error("fingerprint should be set")
@@ -161,8 +161,8 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if entry.ExceptionClass != "PaymentError" {
-		t.Errorf("GetByID exception_class: %q", entry.ExceptionClass)
+	if entry.ErrorClass != "PaymentError" {
+		t.Errorf("GetByID error_class: %q", entry.ErrorClass)
 	}
 	if len(entry.Body) == 0 {
 		t.Error("GetByID should include body")

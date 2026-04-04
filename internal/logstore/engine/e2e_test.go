@@ -33,10 +33,10 @@ func TestE2E_FullLifecycle(t *testing.T) {
 		`{"ts":"` + now.Format(time.RFC3339Nano) + `","level":"info","service":"billing-api","env":"production","message":"Cache hit for user 42","trace_id":"trace-001","user_id":"42","tenant_id":"7"}`,
 
 		// Error log with exception in body
-		`{"ts":"` + now.Format(time.RFC3339Nano) + `","level":"error","service":"billing-api","env":"production","message":"NoMethodError: undefined method name","trace_id":"trace-002","request_id":"req-001","user_id":"42","exception_class":"NoMethodError","source_file":"app/models/order.rb","source_line":42,"body":{"exception":{"backtrace":["app/models/order.rb:42"]},"request":{"params":{"email":"user@secret.com","password":"hunter2"}}}}`,
+		`{"ts":"` + now.Format(time.RFC3339Nano) + `","level":"error","service":"billing-api","env":"production","message":"NoMethodError: undefined method name","trace_id":"trace-002","request_id":"req-001","user_id":"42","error_class":"NoMethodError","source_file":"app/models/order.rb","source_line":42,"body":{"exception":{"backtrace":["app/models/order.rb:42"]},"request":{"params":{"email":"user@secret.com","password":"hunter2"}}}}`,
 
 		// Rich request with performance data
-		`{"ts":"` + now.Format(time.RFC3339Nano) + `","level":"info","service":"billing-api","env":"production","version":"a1b2c3d","message":"POST /api/orders 201 1243ms","event_type":"http.request","trace_id":"trace-003","span_id":"span-001","request_id":"req-002","user_id":"42","tenant_id":"7","session_id":"sess-001","method":"POST","path":"/api/orders","status":201,"duration_ms":1243,"controller":"Api::OrdersController","action":"create","db_ms":312,"db_count":8,"n_plus_one":false,"slow_queries":1,"dup_queries":0,"body":{"queries":[{"sql":"SELECT * FROM users WHERE id = ?","duration_ms":1.2}],"timeline":[{"t":"db","n":"User Load","ms":1.2,"at":0}],"logs":[{"level":"debug","message":"Charging card","at":5}]}}`,
+		`{"ts":"` + now.Format(time.RFC3339Nano) + `","level":"info","service":"billing-api","env":"production","version":"a1b2c3d","message":"POST /api/orders 201 1243ms","event_type":"http.request","trace_id":"trace-003","span_id":"span-001","request_id":"req-002","user_id":"42","tenant_id":"7","session_id":"sess-001","method":"POST","path":"/api/orders","status":201,"duration_ms":1243,"handler":"Api::OrdersController#create","db_ms":312,"db_count":8,"n_plus_one":false,"slow_queries":1,"dup_queries":0,"body":{"queries":[{"sql":"SELECT * FROM users WHERE id = ?","duration_ms":1.2}],"timeline":[{"t":"db","n":"User Load","ms":1.2,"at":0}],"logs":[{"level":"debug","message":"Charging card","at":5}]}}`,
 
 		// Structured warning
 		`{"ts":"` + now.Format(time.RFC3339Nano) + `","level":"warn","service":"auth","env":"production","message":"Slow query detected: 287ms","event_type":"db.slow_query","trace_id":"trace-004"}`,
@@ -64,14 +64,13 @@ func TestE2E_FullLifecycle(t *testing.T) {
 		Path         string          `json:"path"`
 		Status       int             `json:"status"`
 		DurationMs   int             `json:"duration_ms"`
-		Controller   string          `json:"controller"`
-		Action       string          `json:"action"`
+		Handler      string          `json:"handler"`
 		DbMs         int             `json:"db_ms"`
 		DbCount      int             `json:"db_count"`
 		NPlusOne     *bool           `json:"n_plus_one"`
 		SlowQueries  int             `json:"slow_queries"`
 		DupQueries     int             `json:"dup_queries"`
-		ExceptionClass string          `json:"exception_class"`
+		ErrorClass string          `json:"error_class"`
 		SourceFile     string          `json:"source_file"`
 		SourceLine     int             `json:"source_line"`
 		Body           json.RawMessage `json:"body"`
@@ -90,10 +89,9 @@ func TestE2E_FullLifecycle(t *testing.T) {
 			EventType: se.EventType, TraceID: se.TraceID, SpanID: se.SpanID,
 			RequestID: se.RequestID, UserID: se.UserID, TenantID: se.TenantID,
 			SessionID: se.SessionID, Method: se.Method, Path: se.Path,
-			Status: se.Status, DurationMs: se.DurationMs, Controller: se.Controller,
-			Action: se.Action, DbMs: se.DbMs, DbCount: se.DbCount,
+			Status: se.Status, DurationMs: se.DurationMs, Handler: se.Handler,
 			NPlusOne: se.NPlusOne, SlowQueries: se.SlowQueries,
-			DupQueries: se.DupQueries, ExceptionClass: se.ExceptionClass,
+			DupQueries: se.DupQueries, ErrorClass: se.ErrorClass,
 			SourceFile: se.SourceFile, SourceLine: se.SourceLine, Body: se.Body,
 		})
 	}
@@ -117,8 +115,8 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	if errorEntry == nil {
 		t.Fatal("error entry not found")
 	}
-	if errorEntry.ExceptionClass != "NoMethodError" {
-		t.Errorf("exception_class: want NoMethodError, got %q", errorEntry.ExceptionClass)
+	if errorEntry.ErrorClass != "NoMethodError" {
+		t.Errorf("error_class: want NoMethodError, got %q", errorEntry.ErrorClass)
 	}
 	if errorEntry.SourceFile != "app/models/order.rb" {
 		t.Errorf("source_file: want app/models/order.rb, got %q", errorEntry.SourceFile)
@@ -232,7 +230,7 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	}
 
 	// Search by exception class
-	res, err = store.Search(SearchParams{ExceptionClass: "NoMethodError", Start: &start, End: &end})
+	res, err = store.Search(SearchParams{ErrorClass: "NoMethodError", Start: &start, End: &end})
 	if err != nil {
 		t.Fatalf("Search exception: %v", err)
 	}
@@ -259,8 +257,8 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	if fetched.DurationMs != 1243 {
 		t.Errorf("GetByID duration_ms: want 1243, got %d", fetched.DurationMs)
 	}
-	if fetched.Controller != "Api::OrdersController" {
-		t.Errorf("GetByID controller: %q", fetched.Controller)
+	if fetched.Handler != "Api::OrdersController#create" {
+		t.Errorf("GetByID handler: %q", fetched.Handler)
 	}
 	if len(fetched.Body) == 0 {
 		t.Error("GetByID should include body")

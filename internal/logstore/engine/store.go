@@ -114,7 +114,7 @@ type SearchParams struct {
 	UserID           string     // exact match
 	TenantID         string     // exact match
 	EventType        string     // exact match
-	ExceptionClass   string     // exact match
+	ErrorClass   string     // exact match
 	ErrorFingerprint string     // exact match
 	Method           string     // exact match
 	Path             string     // substring match
@@ -460,7 +460,7 @@ func (s *Store) searchChunk(chunkPath, idxPath string, entryCount int, params Se
 	if err != nil {
 		return nil, err
 	}
-	matchingRows, err = filterBySparseColumn(r, "exception_class", params.ExceptionClass, matchingRows)
+	matchingRows, err = filterBySparseColumn(r, "error_class", params.ErrorClass, matchingRows)
 	if err != nil {
 		return nil, err
 	}
@@ -727,8 +727,8 @@ func readEntryFromChunk(r *chunkpkg.Reader, row int) (*chunk.Entry, error) {
 		"parent_span_id": &e.ParentSpanID, "request_id": &e.RequestID,
 		"user_id": &e.UserID, "tenant_id": &e.TenantID,
 		"session_id": &e.SessionID, "method": &e.Method,
-		"path": &e.Path, "controller": &e.Controller,
-		"action": &e.Action, "exception_class": &e.ExceptionClass,
+		"path": &e.Path, "handler": &e.Handler,
+		"error_class": &e.ErrorClass,
 		"source_file": &e.SourceFile, "error_fingerprint": &e.ErrorFingerprint,
 		"status": nil, // handled separately
 	}
@@ -794,7 +794,7 @@ func matchesParams(e *chunk.Entry, p SearchParams) bool {
 	if p.EventType != "" && !strings.EqualFold(e.EventType, p.EventType) {
 		return false
 	}
-	if p.ExceptionClass != "" && !strings.EqualFold(e.ExceptionClass, p.ExceptionClass) {
+	if p.ErrorClass != "" && !strings.EqualFold(e.ErrorClass, p.ErrorClass) {
 		return false
 	}
 	if p.ErrorFingerprint != "" && e.ErrorFingerprint != p.ErrorFingerprint {

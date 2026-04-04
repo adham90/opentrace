@@ -175,13 +175,13 @@ func TestChunkWriteReadRoundTrip(t *testing.T) {
 	}
 
 	// Verify error tracking fields
-	excClasses, err := r.ReadSparseStrings("exception_class")
+	excClasses, err := r.ReadSparseStrings("error_class")
 	if err != nil {
-		t.Fatalf("ReadSparseStrings(exception_class): %v", err)
+		t.Fatalf("ReadSparseStrings(error_class): %v", err)
 	}
 	for i, e := range entries {
-		if excClasses[i] != e.ExceptionClass {
-			t.Errorf("exception_class[%d]: want %q, got %q", i, e.ExceptionClass, excClasses[i])
+		if excClasses[i] != e.ErrorClass {
+			t.Errorf("error_class[%d]: want %q, got %q", i, e.ErrorClass, excClasses[i])
 		}
 	}
 
@@ -346,7 +346,7 @@ func makeTestEntries() []Entry {
 			RequestID:        "req-abc123",
 			UserID:           "42",
 			TenantID:         "7",
-			ExceptionClass:   "PaymentError",
+			ErrorClass:   "PaymentError",
 			SourceFile:       "app/services/billing.rb",
 			SourceLine:       42,
 			ErrorFingerprint: "a8f3c2",
@@ -377,8 +377,8 @@ func makeTestEntries() []Entry {
 			Path:        "/api/orders",
 			Status:      201,
 			DurationMs:  1243,
-			Controller:  "Api::OrdersController",
-			Action:      "create",
+			Handler: "Api::OrdersController#create",
+			
 			DbMs:        312,
 			DbCount:     8,
 			NPlusOne:    &fa,
@@ -403,8 +403,8 @@ func makeTestEntries() []Entry {
 			Path:       "/api/users",
 			Status:     200,
 			DurationMs: 456,
-			Controller: "Api::UsersController",
-			Action:     "index",
+			Handler: "Api::UsersController#index",
+			
 			DbMs:       300,
 			DbCount:    42,
 			NPlusOne:   &tr,

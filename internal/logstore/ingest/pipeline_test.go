@@ -97,7 +97,7 @@ func TestErrorFingerprintComputation(t *testing.T) {
 	entries := []chunk.Entry{{
 		Ts: 1000, Level: "error", Service: "api",
 		Message:        "NoMethodError: undefined method",
-		ExceptionClass: "NoMethodError",
+		ErrorClass: "NoMethodError",
 		SourceFile:     "app/models/order.rb",
 		SourceLine:     42,
 		Body:           json.RawMessage(`{"exception":{"backtrace":["app/models/order.rb:42"]}}`),
@@ -109,8 +109,8 @@ func TestErrorFingerprintComputation(t *testing.T) {
 	}
 
 	e := result[0]
-	if e.ExceptionClass != "NoMethodError" {
-		t.Errorf("exception_class: want %q, got %q", "NoMethodError", e.ExceptionClass)
+	if e.ErrorClass != "NoMethodError" {
+		t.Errorf("error_class: want %q, got %q", "NoMethodError", e.ErrorClass)
 	}
 	if e.SourceFile != "app/models/order.rb" {
 		t.Errorf("source_file: want %q, got %q", "app/models/order.rb", e.SourceFile)
@@ -128,11 +128,11 @@ func TestErrorFingerprintComputation(t *testing.T) {
 func TestErrorFingerprintNotOnInfo(t *testing.T) {
 	pipeline := NewPipeline(nil, PIIConfig{})
 
-	// Even if SDK sends exception_class on an info entry, fingerprint should not be computed
+	// Even if SDK sends error_class on an info entry, fingerprint should not be computed
 	entries := []chunk.Entry{{
 		Ts: 1000, Level: "info", Service: "api",
 		Message:        "test",
-		ExceptionClass: "SomeError",
+		ErrorClass: "SomeError",
 	}}
 
 	result := pipeline.Process(entries)
@@ -141,10 +141,10 @@ func TestErrorFingerprintNotOnInfo(t *testing.T) {
 	}
 }
 
-func TestErrorFingerprintNoExceptionClass(t *testing.T) {
+func TestErrorFingerprintNoErrorClass(t *testing.T) {
 	pipeline := NewPipeline(nil, PIIConfig{})
 
-	// Error level but no exception_class → no fingerprint
+	// Error level but no error_class → no fingerprint
 	entries := []chunk.Entry{{
 		Ts: 1000, Level: "error", Service: "api",
 		Message: "Something went wrong",
@@ -152,7 +152,7 @@ func TestErrorFingerprintNoExceptionClass(t *testing.T) {
 
 	result := pipeline.Process(entries)
 	if result[0].ErrorFingerprint != "" {
-		t.Error("should not compute fingerprint when no exception_class")
+		t.Error("should not compute fingerprint when no error_class")
 	}
 }
 
@@ -303,7 +303,7 @@ func TestFullPipeline(t *testing.T) {
 		Message:        "PaymentError: card declined",
 		TraceID:        "trace-123",
 		RequestID:      "req-456",
-		ExceptionClass: "PaymentError",
+		ErrorClass: "PaymentError",
 		SourceFile:     "app/services/billing.rb",
 		SourceLine:     99,
 		Body:           body,
@@ -319,8 +319,8 @@ func TestFullPipeline(t *testing.T) {
 	parent := result[0]
 
 	// Error fields stay as sent by SDK
-	if parent.ExceptionClass != "PaymentError" {
-		t.Errorf("exception_class: %q", parent.ExceptionClass)
+	if parent.ErrorClass != "PaymentError" {
+		t.Errorf("error_class: %q", parent.ErrorClass)
 	}
 	if parent.SourceFile != "app/services/billing.rb" {
 		t.Errorf("source_file: %q", parent.SourceFile)

@@ -299,6 +299,6 @@ func TestGenerateErrorFingerprint_ConsistentAcrossLanguages(t *testing.T) {
 	fpNode := GenerateErrorFingerprint(nodeEntry)
 
 	if fpRuby != fpNode {
-		t.Errorf("same service + exception_class + source_file should produce same fingerprint across languages: ruby=%q node=%q", fpRuby, fpNode)
+		t.Errorf("same service + error_class + source_file should produce same fingerprint across languages: ruby=%q node=%q", fpRuby, fpNode)
 	}
 }

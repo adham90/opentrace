@@ -264,12 +264,10 @@ func (w *Writer) extractString(name string) []string {
 			if e.Status > 0 {
 				values[i] = fmt.Sprintf("%d", e.Status)
 			}
-		case "controller":
-			values[i] = e.Controller
-		case "action":
-			values[i] = e.Action
-		case "exception_class":
-			values[i] = e.ExceptionClass
+		case "handler":
+			values[i] = e.Handler
+		case "error_class":
+			values[i] = e.ErrorClass
 		case "source_file":
 			values[i] = e.SourceFile
 		case "error_fingerprint":
