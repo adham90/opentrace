@@ -7,8 +7,8 @@ import (
 func TestSQLiteMigrations(t *testing.T) {
 	db := setupTestDB(t)
 
-	// Verify all tables exist (watchers/watcher_runs/alerts dropped in migration 26)
-	tables := []string{"data_sources", "logs", "app_config"}
+	// Verify key tables exist (logs table removed — now in segmented store)
+	tables := []string{"data_sources", "app_config", "users", "error_groups", "watches", "metric_buckets"}
 	for _, table := range tables {
 		var name string
 		err := db.QueryRow(
@@ -19,18 +19,16 @@ func TestSQLiteMigrations(t *testing.T) {
 		}
 	}
 
-	// Verify FTS5 virtual table
-	var ftsName string
-	err := db.QueryRow(
-		`SELECT name FROM sqlite_master WHERE type='table' AND name='logs_fts'`,
-	).Scan(&ftsName)
-	if err != nil {
-		t.Fatalf("logs_fts virtual table not found: %v", err)
+	// Verify logs table does NOT exist (moved to segmented store)
+	var count int
+	db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='logs'`).Scan(&count)
+	if count > 0 {
+		t.Error("logs table should not exist — log storage is in segmented store")
 	}
 
 	// Verify schema_version was recorded
 	var version int
-	err = db.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version)
+	err := db.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version)
 	if err != nil {
 		t.Fatalf("schema_version: %v", err)
 	}

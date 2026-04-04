@@ -1,4 +1,11 @@
 -- ============================================================================
+-- OpenTrace Schema
+-- NOTE: Log storage (logs, request_summaries, deep captures) is handled by
+-- the segmented log store engine, NOT SQLite. Only platform, monitoring,
+-- error tracking, analytics, and intelligence tables live here.
+-- ============================================================================
+
+-- ============================================================================
 -- Platform
 -- ============================================================================
 
@@ -71,7 +78,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_type ON jobs(job_type);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 
 -- ============================================================================
--- Data Sources
+-- Data Sources & Infrastructure
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS data_sources (
@@ -123,142 +130,6 @@ CREATE INDEX IF NOT EXISTS idx_metrics_server_name_ts ON metrics(server_id, metr
 CREATE INDEX IF NOT EXISTS idx_metrics_ts ON metrics(timestamp);
 
 -- ============================================================================
--- Logging
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS logs (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp         TEXT NOT NULL,
-    level             TEXT NOT NULL DEFAULT 'info',
-    service           TEXT NOT NULL DEFAULT '',
-    trace_id          TEXT,
-    message           TEXT NOT NULL DEFAULT '',
-    environment       TEXT,
-    metadata          TEXT DEFAULT '{}',
-    event_type        TEXT NOT NULL DEFAULT '',
-    span_id           TEXT,
-    parent_span_id    TEXT,
-    commit_hash       TEXT,
-    request_id        TEXT,
-    exception_class   TEXT,
-    error_fingerprint TEXT,
-    source_file       TEXT,
-    source_line       INTEGER,
-    user_id           TEXT DEFAULT ''
-);
-
--- Compound indexes (cover all query patterns — most queries filter by timestamp + service/level)
-CREATE INDEX IF NOT EXISTS idx_logs_service_timestamp ON logs(service, timestamp);
-CREATE INDEX IF NOT EXISTS idx_logs_level_timestamp ON logs(level, timestamp);
-CREATE INDEX IF NOT EXISTS idx_logs_service_level_timestamp ON logs(service, level, timestamp);
-CREATE INDEX IF NOT EXISTS idx_logs_event_type_timestamp ON logs(event_type, timestamp) WHERE event_type != '';
-
--- Point-lookup indexes (trace assembly, request lookup, error investigation)
-CREATE INDEX IF NOT EXISTS idx_logs_trace_id ON logs(trace_id) WHERE trace_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_logs_span_id ON logs(span_id) WHERE span_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_logs_parent_span_id ON logs(parent_span_id) WHERE parent_span_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_logs_commit_hash ON logs(commit_hash) WHERE commit_hash IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_logs_request_id ON logs(request_id) WHERE request_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_logs_error_fingerprint ON logs(error_fingerprint) WHERE error_fingerprint IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_logs_user_id ON logs(user_id) WHERE user_id != '';
-
--- Sparse indexes (rarely filtered alone, but cheap since partial)
-CREATE INDEX IF NOT EXISTS idx_logs_environment ON logs(environment) WHERE environment != '';
-CREATE INDEX IF NOT EXISTS idx_logs_exception_class ON logs(exception_class) WHERE exception_class IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_logs_source_file ON logs(source_file) WHERE source_file IS NOT NULL;
-
--- FTS5 virtual table for full-text search on log messages
-CREATE VIRTUAL TABLE IF NOT EXISTS logs_fts USING fts5(message, content=logs, content_rowid=id);
-
-CREATE TRIGGER IF NOT EXISTS logs_ai AFTER INSERT ON logs BEGIN
-    INSERT INTO logs_fts(rowid, message) VALUES (new.id, new.message);
-END;
-
-CREATE TRIGGER IF NOT EXISTS logs_ad AFTER DELETE ON logs BEGIN
-    INSERT INTO logs_fts(logs_fts, rowid, message) VALUES('delete', old.id, old.message);
-END;
-
-CREATE TRIGGER IF NOT EXISTS logs_au AFTER UPDATE ON logs BEGIN
-    INSERT INTO logs_fts(logs_fts, rowid, message) VALUES('delete', old.id, old.message);
-    INSERT INTO logs_fts(rowid, message) VALUES (new.id, new.message);
-END;
-
-CREATE TABLE IF NOT EXISTS ingest_batches (
-    batch_id    TEXT PRIMARY KEY,
-    log_count   INTEGER NOT NULL,
-    received_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_ingest_batches_received ON ingest_batches(received_at);
-
-CREATE TABLE IF NOT EXISTS request_summaries (
-    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-    log_id               INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
-
-    -- Request identity
-    controller           TEXT,
-    action               TEXT,
-    method               TEXT,
-    path                 TEXT,
-    status               INTEGER,
-
-    -- Timing
-    duration_ms          REAL,
-    db_time_ms           REAL,
-    view_time_ms         REAL,
-
-    -- SQL metrics
-    sql_count            INTEGER DEFAULT 0,
-    sql_total_ms         REAL DEFAULT 0,
-    sql_slowest_ms       REAL DEFAULT 0,
-    sql_slowest_name     TEXT,
-    n_plus_one           INTEGER DEFAULT 0,
-
-    -- View metrics
-    view_count           INTEGER DEFAULT 0,
-    view_total_ms        REAL DEFAULT 0,
-    view_slowest_ms      REAL DEFAULT 0,
-    view_slowest_template TEXT,
-
-    -- Cache metrics
-    cache_reads          INTEGER DEFAULT 0,
-    cache_hits           INTEGER DEFAULT 0,
-    cache_writes         INTEGER DEFAULT 0,
-    cache_hit_ratio      REAL,
-
-    -- External HTTP metrics
-    http_external_count  INTEGER DEFAULT 0,
-    http_external_total_ms REAL DEFAULT 0,
-    http_slowest_ms      REAL DEFAULT 0,
-    http_slowest_host    TEXT,
-
-    -- Memory
-    memory_before_mb     REAL,
-    memory_after_mb      REAL,
-    memory_delta_mb      REAL,
-
-    -- Timeline (JSON array, only loaded when needed)
-    timeline             TEXT,
-
-    -- Timestamps
-    created_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-
-    -- Duplicate query tracking
-    time_breakdown       TEXT,
-    duplicate_queries    INTEGER DEFAULT 0,
-    worst_duplicate_count INTEGER DEFAULT 0,
-    top_duplicates       TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_req_summary_log_id ON request_summaries(log_id);
-CREATE INDEX IF NOT EXISTS idx_req_summary_controller ON request_summaries(controller, action);
-CREATE INDEX IF NOT EXISTS idx_req_summary_duration ON request_summaries(duration_ms);
-CREATE INDEX IF NOT EXISTS idx_req_summary_sql_count ON request_summaries(sql_count);
-CREATE INDEX IF NOT EXISTS idx_req_summary_status ON request_summaries(status);
-CREATE INDEX IF NOT EXISTS idx_req_summary_created ON request_summaries(created_at);
-CREATE INDEX IF NOT EXISTS idx_req_summary_n_plus_one ON request_summaries(n_plus_one) WHERE n_plus_one = 1;
-
--- ============================================================================
 -- Error Tracking
 -- ============================================================================
 
@@ -275,7 +146,7 @@ CREATE TABLE IF NOT EXISTS error_groups (
     first_seen_at    TEXT NOT NULL,
     last_seen_at     TEXT NOT NULL,
     occurrence_count INTEGER NOT NULL DEFAULT 1,
-    last_log_id      INTEGER REFERENCES logs(id),
+    last_log_id      INTEGER DEFAULT 0,
     reopened_count   INTEGER NOT NULL DEFAULT 0,
     resolved_at      TEXT,
     ignored_at       TEXT,
@@ -346,6 +217,10 @@ CREATE TABLE IF NOT EXISTS healthcheck_results (
 
 CREATE INDEX IF NOT EXISTS idx_hc_results_id_time ON healthcheck_results(healthcheck_id, checked_at DESC);
 
+-- ============================================================================
+-- Watches (agent-first alerting)
+-- ============================================================================
+
 CREATE TABLE IF NOT EXISTS watches (
     id                   TEXT PRIMARY KEY,
     conditions_json      TEXT NOT NULL,
@@ -409,6 +284,10 @@ CREATE TABLE IF NOT EXISTS watch_alerts (
 CREATE INDEX IF NOT EXISTS idx_watch_alerts_watch_id ON watch_alerts(watch_id);
 CREATE INDEX IF NOT EXISTS idx_watch_alerts_status ON watch_alerts(status);
 
+-- ============================================================================
+-- Agent Notes
+-- ============================================================================
+
 CREATE TABLE IF NOT EXISTS agent_notes (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     entity_type TEXT NOT NULL,
@@ -421,7 +300,7 @@ CREATE TABLE IF NOT EXISTS agent_notes (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_notes_entity ON agent_notes(entity_type, entity_id);
 
 -- ============================================================================
--- Analytics
+-- Analytics (pre-aggregated — populated by background jobs)
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS metric_buckets (
@@ -504,44 +383,6 @@ CREATE TABLE IF NOT EXISTS traffic_heatmap (
 );
 
 -- ============================================================================
--- Journeys
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS user_sessions (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id        TEXT NOT NULL,
-    user_id           TEXT NOT NULL DEFAULT '',
-    service           TEXT NOT NULL DEFAULT '',
-    environment       TEXT NOT NULL DEFAULT '',
-    started_at        TEXT NOT NULL,
-    ended_at          TEXT NOT NULL,
-    request_count     INTEGER NOT NULL DEFAULT 0,
-    error_count       INTEGER NOT NULL DEFAULT 0,
-    total_duration_ms REAL NOT NULL DEFAULT 0,
-    entry_path        TEXT NOT NULL DEFAULT '',
-    exit_path         TEXT NOT NULL DEFAULT '',
-    exit_status       INTEGER NOT NULL DEFAULT 0,
-    has_error         INTEGER NOT NULL DEFAULT 0,
-    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-
-    UNIQUE(session_id, service)
-);
-
-CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id) WHERE user_id != '';
-CREATE INDEX IF NOT EXISTS idx_user_sessions_time ON user_sessions(started_at);
-CREATE INDEX IF NOT EXISTS idx_user_sessions_errors ON user_sessions(has_error) WHERE has_error = 1;
-CREATE INDEX IF NOT EXISTS idx_user_sessions_user_service_started ON user_sessions(user_id, service, started_at DESC);
-
-CREATE TABLE IF NOT EXISTS funnels (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT NOT NULL,
-    service    TEXT NOT NULL DEFAULT '',
-    steps      TEXT NOT NULL DEFAULT '[]',
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-);
-
--- ============================================================================
 -- Tracing
 -- ============================================================================
 
@@ -562,107 +403,8 @@ CREATE INDEX IF NOT EXISTS idx_trace_status_status ON trace_status(status);
 CREATE INDEX IF NOT EXISTS idx_trace_status_first_seen ON trace_status(first_seen_at);
 
 -- ============================================================================
--- Investigation Memory
+-- MCP Activity
 -- ============================================================================
-
-CREATE TABLE IF NOT EXISTS investigation_sessions (
-    id                              TEXT PRIMARY KEY,
-
-    -- Identity
-    user_id                         TEXT NOT NULL DEFAULT '',
-    user_email                      TEXT NOT NULL DEFAULT '',
-    user_role                       TEXT NOT NULL DEFAULT '',
-
-    -- Client Info
-    client_name                     TEXT NOT NULL DEFAULT '',
-    client_version                  TEXT NOT NULL DEFAULT '',
-    workspace                       TEXT NOT NULL DEFAULT '',
-    transport                       TEXT NOT NULL DEFAULT '',
-    connection_id                   TEXT NOT NULL DEFAULT '',
-
-    -- Session Classification
-    intent                          TEXT NOT NULL DEFAULT '',
-    intent_detail                   TEXT NOT NULL DEFAULT '',
-    primary_service                 TEXT NOT NULL DEFAULT '',
-    primary_datasource_id           INTEGER DEFAULT NULL,
-
-    -- Outcome
-    status                          TEXT NOT NULL DEFAULT 'open'
-        CHECK(status IN ('open', 'resolved', 'unresolved', 'abandoned')),
-    summary                         TEXT NOT NULL DEFAULT '',
-    root_cause                      TEXT NOT NULL DEFAULT '',
-    fix_description                 TEXT NOT NULL DEFAULT '',
-
-    -- Watcher Links
-    created_watcher_ids             TEXT NOT NULL DEFAULT '[]',
-    triggered_by_alert_id           TEXT DEFAULT NULL,
-    triggered_by_watcher_id         TEXT DEFAULT NULL,
-
-    -- Error Group Links
-    resolved_error_group_ids        TEXT NOT NULL DEFAULT '[]',
-    investigated_error_fingerprints TEXT NOT NULL DEFAULT '[]',
-
-    -- Health Check Links
-    created_healthcheck_ids         TEXT NOT NULL DEFAULT '[]',
-    triggered_by_healthcheck_id     TEXT DEFAULT NULL,
-
-    -- Agent Note Links
-    created_note_ids                TEXT NOT NULL DEFAULT '[]',
-    auto_note_ids                   TEXT NOT NULL DEFAULT '[]',
-
-    -- Runbook Links
-    runbooks_executed               TEXT NOT NULL DEFAULT '[]',
-
-    -- Database Diagnostic Links
-    explained_queries               TEXT NOT NULL DEFAULT '[]',
-    killed_queries                  TEXT NOT NULL DEFAULT '[]',
-
-    -- Trace Links
-    trace_ids                       TEXT NOT NULL DEFAULT '[]',
-
-    -- Deploy Correlation
-    correlated_deploy               TEXT NOT NULL DEFAULT '',
-
-    -- Metrics Snapshots
-    pre_investigation_snapshot      TEXT NOT NULL DEFAULT '{}',
-    post_investigation_snapshot     TEXT NOT NULL DEFAULT '{}',
-
-    -- Metrics
-    total_steps                     INTEGER NOT NULL DEFAULT 0,
-    total_errors                    INTEGER NOT NULL DEFAULT 0,
-    tool_sequence                   TEXT NOT NULL DEFAULT '[]',
-    tool_fingerprint                TEXT NOT NULL DEFAULT '',
-    arg_signature                   TEXT NOT NULL DEFAULT '',
-
-    -- Timing
-    started_at                      TEXT NOT NULL DEFAULT (datetime('now')),
-    last_activity_at                TEXT NOT NULL DEFAULT (datetime('now')),
-    ended_at                        TEXT DEFAULT NULL,
-    duration_seconds                INTEGER NOT NULL DEFAULT 0,
-
-    -- Recurrence Tracking
-    recurrence_group                TEXT DEFAULT NULL,
-    recurrence_count                INTEGER NOT NULL DEFAULT 0,
-    previous_session_id             TEXT DEFAULT NULL,
-    fix_durability_seconds          INTEGER DEFAULT NULL,
-
-    -- File Links
-    files_modified                  TEXT NOT NULL DEFAULT '[]',
-    files_read                      TEXT NOT NULL DEFAULT '[]',
-    linked_deploy_id                INTEGER DEFAULT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_inv_sessions_user ON investigation_sessions(user_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_inv_sessions_status ON investigation_sessions(status, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_inv_sessions_intent ON investigation_sessions(intent, intent_detail);
-CREATE INDEX IF NOT EXISTS idx_inv_sessions_service ON investigation_sessions(primary_service);
-CREATE INDEX IF NOT EXISTS idx_inv_sessions_connection ON investigation_sessions(connection_id);
-CREATE INDEX IF NOT EXISTS idx_inv_sessions_watcher ON investigation_sessions(triggered_by_watcher_id);
-CREATE INDEX IF NOT EXISTS idx_inv_sessions_healthcheck ON investigation_sessions(triggered_by_healthcheck_id);
-CREATE INDEX IF NOT EXISTS idx_inv_sessions_recurrence ON investigation_sessions(recurrence_group);
-CREATE INDEX IF NOT EXISTS idx_inv_sessions_fingerprint ON investigation_sessions(tool_fingerprint);
-CREATE INDEX IF NOT EXISTS idx_inv_sessions_deploy ON investigation_sessions(correlated_deploy);
-CREATE INDEX IF NOT EXISTS idx_inv_sessions_linked_deploy ON investigation_sessions(linked_deploy_id);
 
 CREATE TABLE IF NOT EXISTS mcp_activity (
     id                       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -687,57 +429,6 @@ CREATE INDEX IF NOT EXISTS idx_mcp_activity_created ON mcp_activity(created_at D
 CREATE INDEX IF NOT EXISTS idx_mcp_activity_session ON mcp_activity(session_id);
 CREATE INDEX IF NOT EXISTS idx_mcp_activity_inv_session ON mcp_activity(investigation_session_id, step_index);
 
-CREATE TABLE IF NOT EXISTS tool_transitions (
-    from_tool       TEXT NOT NULL,
-    to_tool         TEXT NOT NULL,
-    intent          TEXT NOT NULL DEFAULT '',
-    total_count     INTEGER NOT NULL DEFAULT 0,
-    resolved_count  INTEGER NOT NULL DEFAULT 0,
-    abandoned_count INTEGER NOT NULL DEFAULT 0,
-    avg_duration_ms INTEGER NOT NULL DEFAULT 0,
-    last_seen_at    TEXT NOT NULL DEFAULT (datetime('now')),
-
-    PRIMARY KEY (from_tool, to_tool, intent)
-);
-
-CREATE TABLE IF NOT EXISTS workflow_templates (
-    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
-    intent                 TEXT NOT NULL,
-    name                   TEXT NOT NULL DEFAULT '',
-    step_order             INTEGER NOT NULL,
-    tool_name              TEXT NOT NULL,
-    args_hint              TEXT NOT NULL DEFAULT '{}',
-    source                 TEXT NOT NULL DEFAULT 'curated' CHECK(source IN ('curated', 'learned')),
-    resolved_session_count INTEGER NOT NULL DEFAULT 0,
-    created_at             TEXT NOT NULL DEFAULT (datetime('now')),
-
-    UNIQUE(intent, name, step_order)
-);
-
-CREATE INDEX IF NOT EXISTS idx_workflow_templates_intent ON workflow_templates(intent, step_order);
-
-CREATE TABLE IF NOT EXISTS query_memory (
-    fingerprint                  TEXT PRIMARY KEY,
-    last_investigation_session_id TEXT NOT NULL DEFAULT '',
-    investigation_count          INTEGER NOT NULL DEFAULT 0,
-    last_root_cause              TEXT NOT NULL DEFAULT '',
-    last_fix                     TEXT NOT NULL DEFAULT '',
-    avg_duration_before_ms       INTEGER DEFAULT NULL,
-    avg_duration_after_ms        INTEGER DEFAULT NULL,
-    first_seen_at                TEXT NOT NULL DEFAULT (datetime('now')),
-    last_seen_at                 TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS runbook_effectiveness (
-    runbook_name                 TEXT PRIMARY KEY,
-    total_executions             INTEGER NOT NULL DEFAULT 0,
-    resolved_sessions            INTEGER NOT NULL DEFAULT 0,
-    abandoned_sessions           INTEGER NOT NULL DEFAULT 0,
-    avg_steps_after              INTEGER NOT NULL DEFAULT 0,
-    avg_session_duration_seconds INTEGER NOT NULL DEFAULT 0,
-    last_executed_at             TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
 -- ============================================================================
 -- Intelligence
 -- ============================================================================
@@ -761,201 +452,10 @@ CREATE TABLE IF NOT EXISTS code_entities (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_code_entities_type_name_service ON code_entities(entity_type, entity_name, service);
 CREATE INDEX IF NOT EXISTS idx_code_entities_risk ON code_entities(service, risk_score DESC);
 
-CREATE TABLE IF NOT EXISTS deploys (
-    id                           INTEGER PRIMARY KEY AUTOINCREMENT,
-    service                      TEXT NOT NULL DEFAULT '',
-    environment                  TEXT NOT NULL DEFAULT '',
-    commit_hash                  TEXT NOT NULL DEFAULT '',
-    branch                       TEXT NOT NULL DEFAULT '',
-    author                       TEXT NOT NULL DEFAULT '',
-    files_changed_json           TEXT NOT NULL DEFAULT '[]',
-    deploy_source                TEXT NOT NULL DEFAULT 'webhook'
-        CHECK(deploy_source IN ('webhook', 'auto-detected', 'manual')),
-    pre_error_rate               REAL DEFAULT NULL,
-    post_error_rate              REAL DEFAULT NULL,
-    pre_avg_duration_ms          REAL DEFAULT NULL,
-    post_avg_duration_ms         REAL DEFAULT NULL,
-    impact_measured_at           TEXT DEFAULT NULL,
-    linked_investigation_ids_json TEXT NOT NULL DEFAULT '[]',
-    status                       TEXT NOT NULL DEFAULT 'pending'
-        CHECK(status IN ('pending', 'measured', 'incident')),
-    deployed_at                  TEXT NOT NULL DEFAULT (datetime('now')),
-    created_at                   TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_deploys_service ON deploys(service, deployed_at DESC);
-CREATE INDEX IF NOT EXISTS idx_deploys_commit ON deploys(commit_hash);
-CREATE INDEX IF NOT EXISTS idx_deploys_status ON deploys(status, deployed_at DESC);
-
-CREATE TABLE IF NOT EXISTS events (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_type    TEXT NOT NULL DEFAULT ''
-        CHECK(event_type IN ('deploy', 'pr', 'test', 'alert', 'commit', 'custom')),
-    source        TEXT NOT NULL DEFAULT '',
-    service       TEXT NOT NULL DEFAULT '',
-    title         TEXT NOT NULL DEFAULT '',
-    description   TEXT NOT NULL DEFAULT '',
-    metadata_json TEXT NOT NULL DEFAULT '{}',
-    external_id   TEXT NOT NULL DEFAULT '',
-    external_url  TEXT NOT NULL DEFAULT '',
-    author        TEXT NOT NULL DEFAULT '',
-    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_events_type_service ON events(event_type, service, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_events_external_id ON events(event_type, external_id);
-
-CREATE TABLE IF NOT EXISTS uncovered_error_paths (
-    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-    service              TEXT NOT NULL DEFAULT '',
-    error_fingerprint    TEXT NOT NULL DEFAULT '',
-    error_class          TEXT NOT NULL DEFAULT '',
-    source_file          TEXT NOT NULL DEFAULT '',
-    endpoint             TEXT NOT NULL DEFAULT '',
-    error_count          INTEGER NOT NULL DEFAULT 0,
-    user_impact_score    REAL NOT NULL DEFAULT 0.0,
-    investigation_count  INTEGER NOT NULL DEFAULT 0,
-    priority_score       REAL NOT NULL DEFAULT 0.0,
-    last_seen_at         TEXT NOT NULL DEFAULT (datetime('now')),
-    created_at           TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at           TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_uncovered_paths_fingerprint ON uncovered_error_paths(error_fingerprint);
-CREATE INDEX IF NOT EXISTS idx_uncovered_paths_priority ON uncovered_error_paths(service, priority_score DESC);
-
--- ============================================================================
--- Deep Capture Detail Tables
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS request_captures (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    log_id            INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
-    request_headers   TEXT,
-    request_body      TEXT,
-    request_size      INTEGER,
-    content_type      TEXT,
-    ip_address        TEXT,
-    user_agent        TEXT,
-    referer           TEXT,
-    cookies           TEXT,
-    session_data      TEXT,
-    response_headers  TEXT,
-    response_body     TEXT,
-    response_size     INTEGER,
-    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_request_captures_log ON request_captures(log_id);
-
-CREATE TABLE IF NOT EXISTS sql_captures (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    log_id          INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
-    raw_sql         TEXT,
-    normalized_sql  TEXT,
-    bind_values     TEXT,
-    row_count       INTEGER,
-    duration_ms     REAL,
-    cached          INTEGER DEFAULT 0,
-    in_transaction  INTEGER DEFAULT 0,
-    explain_plan    TEXT,
-    pool_size       INTEGER,
-    pool_busy       INTEGER,
-    pool_waiting    INTEGER,
-    caller_location TEXT,
-    fingerprint     TEXT,
-    table_name      TEXT,
-    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_sql_captures_log ON sql_captures(log_id);
-CREATE INDEX IF NOT EXISTS idx_sql_captures_fingerprint ON sql_captures(fingerprint);
-CREATE INDEX IF NOT EXISTS idx_sql_captures_duration ON sql_captures(duration_ms);
-
-CREATE TABLE IF NOT EXISTS http_captures (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    log_id            INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
-    method            TEXT,
-    url               TEXT,
-    host              TEXT,
-    vendor            TEXT,
-    status            INTEGER,
-    duration_ms       REAL,
-    request_headers   TEXT,
-    request_body      TEXT,
-    response_headers  TEXT,
-    response_body     TEXT,
-    response_size     INTEGER,
-    retry_attempt     INTEGER DEFAULT 0,
-    error_class       TEXT,
-    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_http_captures_log ON http_captures(log_id);
-CREATE INDEX IF NOT EXISTS idx_http_captures_vendor ON http_captures(vendor);
-
-CREATE TABLE IF NOT EXISTS email_captures (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    log_id          INTEGER REFERENCES logs(id) ON DELETE CASCADE,
-    mailer_class    TEXT,
-    mailer_action   TEXT,
-    from_address    TEXT,
-    to_addresses    TEXT,
-    cc_addresses    TEXT,
-    bcc_addresses   TEXT,
-    subject         TEXT,
-    body_html       TEXT,
-    body_text       TEXT,
-    template_name   TEXT,
-    template_vars   TEXT,
-    attachments     TEXT,
-    delivery_status TEXT,
-    smtp_response   TEXT,
-    duration_ms     REAL,
-    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_email_captures_log ON email_captures(log_id);
-
-CREATE TABLE IF NOT EXISTS audit_captures (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    log_id          INTEGER REFERENCES logs(id) ON DELETE CASCADE,
-    record_type     TEXT,
-    record_id       TEXT,
-    action          TEXT,
-    actor_id        TEXT,
-    actor_type      TEXT,
-    changed_fields  TEXT,
-    full_before     TEXT,
-    full_after      TEXT,
-    request_id      TEXT,
-    ip_address      TEXT,
-    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_audit_captures_log ON audit_captures(log_id);
-CREATE INDEX IF NOT EXISTS idx_audit_captures_record ON audit_captures(record_type, record_id);
-CREATE INDEX IF NOT EXISTS idx_audit_captures_actor ON audit_captures(actor_id);
-
-CREATE TABLE IF NOT EXISTS file_captures (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    log_id          INTEGER REFERENCES logs(id) ON DELETE CASCADE,
-    action          TEXT,
-    filename        TEXT,
-    size_bytes      INTEGER,
-    content_type    TEXT,
-    storage_service TEXT,
-    key             TEXT,
-    duration_ms     REAL,
-    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_file_captures_log ON file_captures(log_id);
-
 -- ============================================================================
 -- Default Configuration
 -- ============================================================================
 
 INSERT OR IGNORE INTO app_config (key, value) VALUES ('pii_scrubbing', '{"enabled":true,"builtin":{"credit_cards":true,"emails":true,"phone_numbers":true,"ssn":true,"ip_addresses":false},"sensitive_fields":["password","token","secret","authorization","api_key"],"custom_patterns":[],"skip_domains":[],"skip_services":[]}');
 
-INSERT OR IGNORE INTO app_config (key, value) VALUES ('retention_policy', '{"logs":"30d","request_captures":"7d","sql_captures":"14d","http_captures":"7d","email_captures":"14d","audit_captures":"365d","request_summaries":"90d","error_groups":"never","metric_buckets":"180d","deploy_markers":"never"}');
+INSERT OR IGNORE INTO app_config (key, value) VALUES ('retention_policy', '{"logs":"30d","error_groups":"never","metric_buckets":"180d","deploy_markers":"never"}');

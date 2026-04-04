@@ -10,33 +10,23 @@ import (
 	"time"
 )
 
-// RetentionConfig maps table names to TTL strings like "30d", "7d", "never"
+// RetentionConfig maps table names to TTL strings like "30d", "7d", "never".
+// NOTE: Log retention is handled by the segmented log store engine (engine.Store.Prune).
+// This config only covers SQLite-resident tables.
 type RetentionConfig struct {
-	Logs             string `json:"logs"`
-	RequestCaptures  string `json:"request_captures"`
-	SQLCaptures      string `json:"sql_captures"`
-	HTTPCaptures     string `json:"http_captures"`
-	EmailCaptures    string `json:"email_captures"`
-	AuditCaptures    string `json:"audit_captures"`
-	RequestSummaries string `json:"request_summaries"`
-	ErrorGroups      string `json:"error_groups"`
-	MetricBuckets    string `json:"metric_buckets"`
-	DeployMarkers    string `json:"deploy_markers"`
+	Logs          string `json:"logs"`           // used by engine.Store.Prune, not SQLite
+	ErrorGroups   string `json:"error_groups"`
+	MetricBuckets string `json:"metric_buckets"`
+	DeployMarkers string `json:"deploy_markers"`
 }
 
 // DefaultRetentionConfig returns sensible defaults matching the migration seed.
 func DefaultRetentionConfig() RetentionConfig {
 	return RetentionConfig{
-		Logs:             "30d",
-		RequestCaptures:  "7d",
-		SQLCaptures:      "14d",
-		HTTPCaptures:     "7d",
-		EmailCaptures:    "14d",
-		AuditCaptures:    "365d",
-		RequestSummaries: "90d",
-		ErrorGroups:      "never",
-		MetricBuckets:    "180d",
-		DeployMarkers:    "never",
+		Logs:          "30d",
+		ErrorGroups:   "never",
+		MetricBuckets: "180d",
+		DeployMarkers: "never",
 	}
 }
 
@@ -56,7 +46,8 @@ func parseTTL(ttl string) time.Duration {
 	return d
 }
 
-// RunRetentionCleanup deletes expired rows from all tables according to the retention config.
+// RunRetentionCleanup deletes expired rows from SQLite tables according to the retention config.
+// Log retention is handled separately by engine.Store.Prune (called via background_jobs.go).
 func RunRetentionCleanup(ctx context.Context, db *sql.DB) error {
 	slog.Info("retention cleanup: starting")
 
@@ -68,21 +59,13 @@ func RunRetentionCleanup(ctx context.Context, db *sql.DB) error {
 		_ = json.Unmarshal([]byte(configJSON), &cfg)
 	}
 
-	// Define table -> TTL -> time-column mapping
+	// Only SQLite-resident tables with time-based retention
 	tables := []struct {
 		name    string
 		ttl     string
 		timeCol string
 	}{
-		{"request_captures", cfg.RequestCaptures, "created_at"},
-		{"sql_captures", cfg.SQLCaptures, "created_at"},
-		{"http_captures", cfg.HTTPCaptures, "created_at"},
-		{"email_captures", cfg.EmailCaptures, "created_at"},
-		{"audit_captures", cfg.AuditCaptures, "created_at"},
-		{"file_captures", cfg.RequestCaptures, "created_at"}, // same TTL as request_captures
-		{"request_summaries", cfg.RequestSummaries, "created_at"},
 		{"metric_buckets", cfg.MetricBuckets, "created_at"},
-		{"logs", cfg.Logs, "timestamp"},
 	}
 
 	totalDeleted := 0
@@ -104,11 +87,9 @@ func RunRetentionCleanup(ctx context.Context, db *sql.DB) error {
 		}
 	}
 
-	// Run VACUUM only if we deleted something
 	if totalDeleted > 0 {
 		slog.Info("retention cleanup: running VACUUM", "total_deleted", totalDeleted)
-		_, err := db.ExecContext(ctx, "VACUUM")
-		if err != nil {
+		if _, err := db.ExecContext(ctx, "VACUUM"); err != nil {
 			slog.Warn("retention cleanup: VACUUM failed", "error", err)
 		}
 	}
@@ -121,7 +102,6 @@ func RunRetentionCleanup(ctx context.Context, db *sql.DB) error {
 func deleteInBatches(ctx context.Context, db *sql.DB, table, timeCol, cutoff string, batchSize int) (int, error) {
 	total := 0
 	for {
-		// Use a subquery to limit the batch size
 		query := fmt.Sprintf(
 			"DELETE FROM %s WHERE rowid IN (SELECT rowid FROM %s WHERE %s < ? LIMIT ?)",
 			table, table, timeCol,
@@ -133,7 +113,7 @@ func deleteInBatches(ctx context.Context, db *sql.DB, table, timeCol, cutoff str
 		affected, _ := result.RowsAffected()
 		total += int(affected)
 		if affected < int64(batchSize) {
-			break // No more rows to delete
+			break
 		}
 	}
 	return total, nil
