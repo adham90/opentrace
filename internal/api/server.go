@@ -282,6 +282,12 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	return srv
 }
 
+// IngestHandler returns the log ingestion handler so it can be reused by
+// non-HTTP transports (e.g. Unix socket listener).
+func (s *Server) IngestHandler() *ingest.Handler {
+	return s.ingestHandler
+}
+
 // Shutdown gracefully shuts down SSE connections and other resources.
 func (s *Server) Shutdown(ctx context.Context) error {
 	if s.loginLimiter != nil {

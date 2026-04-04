@@ -31,6 +31,12 @@ type Config struct {
 
 	// DevMode enables development mode (verbose logging, relaxed security).
 	DevMode bool
+
+	// SocketPath is the path for a Unix domain socket listener.
+	// When set, the server accepts log ingestion over a length-prefixed
+	// binary protocol, bypassing HTTP overhead for local apps.
+	// Empty string (default) disables the listener.
+	SocketPath string
 }
 
 // LoadEnvFile reads a .env file and sets any variables not already in the environment.
@@ -102,6 +108,7 @@ func Load() (*Config, error) {
 		TrustedProxies:     parseCommaSeparated(os.Getenv("OPENTRACE_TRUSTED_PROXIES")),
 		CORSAllowedOrigins: parseCommaSeparated(os.Getenv("OPENTRACE_CORS_ORIGINS")),
 		DevMode:            os.Getenv("OPENTRACE_DEV") == "true",
+		SocketPath:         os.Getenv("OPENTRACE_SOCKET_PATH"),
 	}, nil
 }
 

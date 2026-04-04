@@ -1,19 +1,27 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/adham90/opentrace/internal/api"
 	"github.com/adham90/opentrace/internal/backup"
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/healthcheck"
+	"github.com/adham90/opentrace/internal/ingest"
 	"github.com/adham90/opentrace/internal/jobs"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	dbstore "github.com/adham90/opentrace/internal/adapter/sqlite"
@@ -21,7 +29,6 @@ import (
 	"github.com/adham90/opentrace/pkg/store"
 	"github.com/adham90/opentrace/internal/version"
 	"github.com/adham90/opentrace/internal/watcher"
-	"github.com/adham90/opentrace/internal/api"
 )
 
 func main() {
@@ -156,6 +163,7 @@ func runMCP() error {
 		MCPToken:     os.Getenv("OPENTRACE_MCP_TOKEN"),
 		ServerName:   mcpName,
 		Config:       deps.Cfg,
+		DB:           deps.DB,
 		Stores:       deps.Stores,
 		WatchMetrics: watchMetrics,
 	})
@@ -304,10 +312,28 @@ func run() error {
 		}
 	}()
 
+	// Start Unix socket listener for local log ingestion (skip HTTP overhead)
+	var unixListener net.Listener
+	if deps.Cfg.SocketPath != "" {
+		var err error
+		unixListener, err = startUnixSocketListener(deps.Cfg.SocketPath, srv.IngestHandler())
+		if err != nil {
+			slog.Error("failed to start unix socket listener", "path", deps.Cfg.SocketPath, "error", err)
+		}
+	}
+
 	<-done
 	slog.Info("shutting down")
 
 	cancelCtx()
+
+	// Close Unix socket listener first so no new connections arrive
+	if unixListener != nil {
+		unixListener.Close()
+		os.Remove(deps.Cfg.SocketPath)
+		slog.Info("unix socket listener stopped")
+	}
+
 	watchSched.Stop()
 	hcSched.Stop()
 	jobWorker.Stop()
@@ -434,4 +460,102 @@ func reconnectConnectors(ctx context.Context, dsStore store.DataSourceStore, log
 		registry.Register(c)
 		slog.Info("reconnected connector", "connector", ds.Name, "type", string(ds.Type))
 	}
+}
+
+// maxUnixPayloadBytes is the maximum payload size accepted over the Unix socket (10 MB).
+const maxUnixPayloadBytes = 10 << 20
+
+// startUnixSocketListener creates a Unix domain socket at socketPath and
+// spawns a goroutine that accepts connections. Each connection uses a simple
+// length-prefixed binary protocol (4-byte big-endian length + payload).
+// Returns the listener so the caller can close it during shutdown.
+func startUnixSocketListener(socketPath string, handler *ingest.Handler) (net.Listener, error) {
+	// Remove stale socket file from a previous run
+	os.Remove(socketPath)
+
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return nil, fmt.Errorf("listen unix %s: %w", socketPath, err)
+	}
+
+	// Set permissions so any local user can connect
+	if err := os.Chmod(socketPath, 0666); err != nil {
+		slog.Warn("failed to chmod unix socket", "path", socketPath, "error", err)
+	}
+
+	slog.Info("unix socket listener started", "path", socketPath)
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				// Accept returns an error when the listener is closed during shutdown
+				return
+			}
+			go handleUnixConnection(conn, handler)
+		}
+	}()
+
+	return listener, nil
+}
+
+// handleUnixConnection processes a single connection on the Unix socket.
+//
+// Protocol:
+//
+//	Request:  [4 bytes: big-endian payload length] [payload bytes]
+//	Response: [4 bytes: big-endian HTTP status code]
+//
+// The payload is JSON (or gzip-compressed JSON). It is routed through the
+// existing HandleIngestLogs handler via a synthetic httptest request.
+func handleUnixConnection(conn net.Conn, handler *ingest.Handler) {
+	defer conn.Close()
+
+	// Read 4-byte length prefix
+	lenBuf := make([]byte, 4)
+	if _, err := io.ReadFull(conn, lenBuf); err != nil {
+		return
+	}
+	payloadLen := binary.BigEndian.Uint32(lenBuf)
+
+	// Guard against oversized payloads
+	if payloadLen > maxUnixPayloadBytes {
+		writeUnixStatus(conn, http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	// Read payload
+	payload := make([]byte, payloadLen)
+	if _, err := io.ReadFull(conn, payload); err != nil {
+		writeUnixStatus(conn, http.StatusBadRequest)
+		return
+	}
+
+	// Decompress gzip if the payload starts with the gzip magic bytes
+	if len(payload) > 2 && payload[0] == 0x1f && payload[1] == 0x8b {
+		reader, err := gzip.NewReader(bytes.NewReader(payload))
+		if err == nil {
+			decompressed, err := io.ReadAll(io.LimitReader(reader, int64(maxUnixPayloadBytes)+1))
+			reader.Close()
+			if err == nil && len(decompressed) <= maxUnixPayloadBytes {
+				payload = decompressed
+			}
+		}
+	}
+
+	// Build a synthetic HTTP request and route through the existing handler
+	req := httptest.NewRequest(http.MethodPost, "/api/logs", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	handler.HandleIngestLogs(rec, req)
+
+	writeUnixStatus(conn, rec.Code)
+}
+
+// writeUnixStatus writes a 4-byte big-endian status code to the connection.
+func writeUnixStatus(conn net.Conn, code int) {
+	var buf [4]byte
+	binary.BigEndian.PutUint32(buf[:], uint32(code))
+	conn.Write(buf[:])
 }
