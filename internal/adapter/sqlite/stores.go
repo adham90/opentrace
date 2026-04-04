@@ -23,8 +23,8 @@ func NewStores(db *bun.DB, logStore store.LogStore) store.Stores {
 		ErrorGroupStore:  NewErrorGroupStore(db),
 		HealthCheckStore: NewHealthCheckStore(db),
 		AgentNoteStore:   NewAgentNoteStore(db),
-		TrendStore:       NewTrendStore(db),
-		AnalyticsStore:   NewAnalyticsStore(db),
+		TrendStore:       NewTrendStore(db),     // aggregation disabled — logs table removed
+		AnalyticsStore:   NewAnalyticsStore(db), // aggregation disabled — request_summaries removed
 		ErrorImpactStore: NewErrorImpactStore(db),
 		TraceStore:       NewTraceStore(db),
 		CodeEntityStore:  NewCodeEntityStore(db),

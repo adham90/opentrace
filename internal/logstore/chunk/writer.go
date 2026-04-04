@@ -264,14 +264,28 @@ func (w *Writer) extractString(name string) []string {
 			if e.Status > 0 {
 				values[i] = fmt.Sprintf("%d", e.Status)
 			}
+		case "host":
+			values[i] = e.Host
+		case "kind":
+			values[i] = e.Kind
+		case "route":
+			values[i] = e.Route
 		case "handler":
 			values[i] = e.Handler
 		case "error_class":
 			values[i] = e.ErrorClass
+		case "error_message":
+			values[i] = e.ErrorMessage
 		case "source_file":
 			values[i] = e.SourceFile
 		case "error_fingerprint":
 			values[i] = e.ErrorFingerprint
+		case "job_class":
+			values[i] = e.JobClass
+		case "job_queue":
+			values[i] = e.JobQueue
+		case "job_id":
+			values[i] = e.JobID
 		}
 	}
 	return values
@@ -297,6 +311,24 @@ func (w *Writer) extractOptionalInt64(name string) []*int64 {
 			v, present = int64(e.DupQueries), e.DupQueries > 0
 		case "source_line":
 			v, present = int64(e.SourceLine), e.SourceLine > 0
+		case "cache_ms":
+			v, present = int64(e.CacheMs), e.CacheMs > 0
+		case "cache_hits":
+			v, present = int64(e.CacheHits), e.CacheHits > 0
+		case "cache_misses":
+			v, present = int64(e.CacheMisses), e.CacheMisses > 0
+		case "ext_ms":
+			v, present = int64(e.ExtMs), e.ExtMs > 0
+		case "ext_count":
+			v, present = int64(e.ExtCount), e.ExtCount > 0
+		case "render_ms":
+			v, present = int64(e.RenderMs), e.RenderMs > 0
+		case "alloc_count":
+			v, present = int64(e.AllocCount), e.AllocCount > 0
+		case "mem_delta_mb":
+			v, present = int64(e.MemDeltaMb), e.MemDeltaMb > 0
+		case "queue_ms":
+			v, present = int64(e.QueueMs), e.QueueMs > 0
 		}
 		if present {
 			val := v

@@ -9,33 +9,60 @@ import (
 	enc "github.com/adham90/opentrace/internal/logstore/encoding"
 )
 
-// Flag bits indicating which optional fields are present.
+// Flag bits indicating which optional fields are present (uint64 = 64 bits).
 const (
-	FlagEnv            uint32 = 1 << 0
-	FlagVersion        uint32 = 1 << 1
-	FlagEventType      uint32 = 1 << 2
-	FlagTraceID        uint32 = 1 << 3
-	FlagSpanID         uint32 = 1 << 4
-	FlagParentSpanID   uint32 = 1 << 5
-	FlagRequestID      uint32 = 1 << 6
-	FlagUserID         uint32 = 1 << 7
-	FlagTenantID       uint32 = 1 << 8
-	FlagSessionID      uint32 = 1 << 9
-	FlagMethod         uint32 = 1 << 10
-	FlagPath           uint32 = 1 << 11
-	FlagStatus         uint32 = 1 << 12
-	FlagDurationMs     uint32 = 1 << 13
-	FlagHandler     uint32 = 1 << 14
-	FlagDbMs           uint32 = 1 << 16
-	FlagDbCount        uint32 = 1 << 17
-	FlagNPlusOne       uint32 = 1 << 18
-	FlagSlowQueries    uint32 = 1 << 19
-	FlagDupQueries     uint32 = 1 << 20
-	FlagErrorClass uint32 = 1 << 21
-	FlagSourceFile     uint32 = 1 << 22
-	FlagSourceLine     uint32 = 1 << 23
-	FlagErrFingerprint uint32 = 1 << 24
-	FlagBody           uint32 = 1 << 25
+	// Common context
+	FlagEnv          uint64 = 1 << 0
+	FlagVersion      uint64 = 1 << 1
+	FlagHost         uint64 = 1 << 2
+	FlagKind         uint64 = 1 << 3
+	FlagEventType    uint64 = 1 << 4
+	FlagTraceID      uint64 = 1 << 5
+	FlagSpanID       uint64 = 1 << 6
+	FlagParentSpanID uint64 = 1 << 7
+	FlagRequestID    uint64 = 1 << 8
+	FlagUserID       uint64 = 1 << 9
+	FlagTenantID     uint64 = 1 << 10
+	FlagSessionID    uint64 = 1 << 11
+
+	// HTTP request
+	FlagMethod     uint64 = 1 << 12
+	FlagPath       uint64 = 1 << 13
+	FlagRoute      uint64 = 1 << 14
+	FlagHandler    uint64 = 1 << 15
+	FlagStatus     uint64 = 1 << 16
+	FlagDurationMs uint64 = 1 << 17
+
+	// Performance
+	FlagDbMs        uint64 = 1 << 18
+	FlagDbCount     uint64 = 1 << 19
+	FlagCacheMs     uint64 = 1 << 20
+	FlagCacheHits   uint64 = 1 << 21
+	FlagCacheMisses uint64 = 1 << 22
+	FlagExtMs       uint64 = 1 << 23
+	FlagExtCount    uint64 = 1 << 24
+	FlagRenderMs    uint64 = 1 << 25
+	FlagAllocCount  uint64 = 1 << 26
+	FlagMemDeltaMb  uint64 = 1 << 27
+	FlagNPlusOne    uint64 = 1 << 28
+	FlagSlowQueries uint64 = 1 << 29
+	FlagDupQueries  uint64 = 1 << 30
+
+	// Error tracking
+	FlagErrorClass      uint64 = 1 << 31
+	FlagErrorMessage    uint64 = 1 << 32
+	FlagSourceFile      uint64 = 1 << 33
+	FlagSourceLine      uint64 = 1 << 34
+	FlagErrFingerprint  uint64 = 1 << 35
+
+	// Job
+	FlagJobClass uint64 = 1 << 36
+	FlagJobQueue uint64 = 1 << 37
+	FlagJobID    uint64 = 1 << 38
+	FlagQueueMs  uint64 = 1 << 39
+
+	// Body
+	FlagBody uint64 = 1 << 40
 )
 
 // Level enum values (1 byte in binary format).
@@ -48,11 +75,10 @@ var enumToLevel = []string{"trace", "debug", "info", "warn", "error", "fatal"}
 // MarshalEntry serializes a chunk.Entry to compact binary format.
 // Format: [4 bytes total_len] [8 bytes id] [8 bytes ts] [8 bytes received_at]
 //
-//	[1 byte level_enum] [4 bytes flags] [2+N service] [2+N message]
+//	[1 byte level_enum] [8 bytes flags] [2+N service] [2+N message]
 //	[optional fields based on flags]
 func MarshalEntry(e *chunk.Entry) []byte {
-	// Pre-allocate estimate
-	buf := make([]byte, 0, 128)
+	buf := make([]byte, 0, 256)
 
 	// Placeholder for total length (filled at end)
 	buf = append(buf, 0, 0, 0, 0)
@@ -62,401 +88,228 @@ func MarshalEntry(e *chunk.Entry) []byte {
 	buf = binary.LittleEndian.AppendUint64(buf, uint64(e.Ts))
 	buf = binary.LittleEndian.AppendUint64(buf, uint64(e.ReceivedAt))
 
-	// Level as 1-byte enum
 	lvl, ok := levelToEnum[e.Level]
 	if !ok {
-		lvl = 2 // default to "info"
+		lvl = 2
 	}
 	buf = append(buf, lvl)
 
-	// Compute flags
-	var flags uint32
-	if e.Env != "" {
-		flags |= FlagEnv
-	}
-	if e.Version != "" {
-		flags |= FlagVersion
-	}
-	if e.EventType != "" {
-		flags |= FlagEventType
-	}
-	if e.TraceID != "" {
-		flags |= FlagTraceID
-	}
-	if e.SpanID != "" {
-		flags |= FlagSpanID
-	}
-	if e.ParentSpanID != "" {
-		flags |= FlagParentSpanID
-	}
-	if e.RequestID != "" {
-		flags |= FlagRequestID
-	}
-	if e.UserID != "" {
-		flags |= FlagUserID
-	}
-	if e.TenantID != "" {
-		flags |= FlagTenantID
-	}
-	if e.SessionID != "" {
-		flags |= FlagSessionID
-	}
-	if e.Method != "" {
-		flags |= FlagMethod
-	}
-	if e.Path != "" {
-		flags |= FlagPath
-	}
-	if e.Status > 0 {
-		flags |= FlagStatus
-	}
-	if e.DurationMs > 0 {
-		flags |= FlagDurationMs
-	}
-	if e.Handler != "" {
-		flags |= FlagHandler
-	}
-	if e.DbMs > 0 {
-		flags |= FlagDbMs
-	}
-	if e.DbCount > 0 {
-		flags |= FlagDbCount
-	}
-	if e.NPlusOne != nil {
-		flags |= FlagNPlusOne
-	}
-	if e.SlowQueries > 0 {
-		flags |= FlagSlowQueries
-	}
-	if e.DupQueries > 0 {
-		flags |= FlagDupQueries
-	}
-	if e.ErrorClass != "" {
-		flags |= FlagErrorClass
-	}
-	if e.SourceFile != "" {
-		flags |= FlagSourceFile
-	}
-	if e.SourceLine > 0 {
-		flags |= FlagSourceLine
-	}
-	if e.ErrorFingerprint != "" {
-		flags |= FlagErrFingerprint
-	}
-	if len(e.Body) > 0 {
-		flags |= FlagBody
-	}
-	buf = binary.LittleEndian.AppendUint32(buf, flags)
+	// Compute flags (uint64)
+	var flags uint64
+	setStr := func(f uint64, v string) { if v != "" { flags |= f } }
+	setInt := func(f uint64, v int) { if v > 0 { flags |= f } }
+
+	setStr(FlagEnv, e.Env)
+	setStr(FlagVersion, e.Version)
+	setStr(FlagHost, e.Host)
+	setStr(FlagKind, e.Kind)
+	setStr(FlagEventType, e.EventType)
+	setStr(FlagTraceID, e.TraceID)
+	setStr(FlagSpanID, e.SpanID)
+	setStr(FlagParentSpanID, e.ParentSpanID)
+	setStr(FlagRequestID, e.RequestID)
+	setStr(FlagUserID, e.UserID)
+	setStr(FlagTenantID, e.TenantID)
+	setStr(FlagSessionID, e.SessionID)
+	setStr(FlagMethod, e.Method)
+	setStr(FlagPath, e.Path)
+	setStr(FlagRoute, e.Route)
+	setStr(FlagHandler, e.Handler)
+	setInt(FlagStatus, e.Status)
+	setInt(FlagDurationMs, e.DurationMs)
+	setInt(FlagDbMs, e.DbMs)
+	setInt(FlagDbCount, e.DbCount)
+	setInt(FlagCacheMs, e.CacheMs)
+	setInt(FlagCacheHits, e.CacheHits)
+	setInt(FlagCacheMisses, e.CacheMisses)
+	setInt(FlagExtMs, e.ExtMs)
+	setInt(FlagExtCount, e.ExtCount)
+	setInt(FlagRenderMs, e.RenderMs)
+	setInt(FlagAllocCount, e.AllocCount)
+	setInt(FlagMemDeltaMb, e.MemDeltaMb)
+	if e.NPlusOne != nil { flags |= FlagNPlusOne }
+	setInt(FlagSlowQueries, e.SlowQueries)
+	setInt(FlagDupQueries, e.DupQueries)
+	setStr(FlagErrorClass, e.ErrorClass)
+	setStr(FlagErrorMessage, e.ErrorMessage)
+	setStr(FlagSourceFile, e.SourceFile)
+	setInt(FlagSourceLine, e.SourceLine)
+	setStr(FlagErrFingerprint, e.ErrorFingerprint)
+	setStr(FlagJobClass, e.JobClass)
+	setStr(FlagJobQueue, e.JobQueue)
+	setStr(FlagJobID, e.JobID)
+	setInt(FlagQueueMs, e.QueueMs)
+	if len(e.Body) > 0 { flags |= FlagBody }
+
+	buf = binary.LittleEndian.AppendUint64(buf, flags)
 
 	// Required string fields
 	buf = appendString(buf, e.Service)
 	buf = appendString(buf, e.Message)
 
-	// Optional fields (in flag order)
-	if flags&FlagEnv != 0 {
-		buf = appendString(buf, e.Env)
-	}
-	if flags&FlagVersion != 0 {
-		buf = appendString(buf, e.Version)
-	}
-	if flags&FlagEventType != 0 {
-		buf = appendString(buf, e.EventType)
-	}
-	if flags&FlagTraceID != 0 {
-		buf = appendString(buf, e.TraceID)
-	}
-	if flags&FlagSpanID != 0 {
-		buf = appendString(buf, e.SpanID)
-	}
-	if flags&FlagParentSpanID != 0 {
-		buf = appendString(buf, e.ParentSpanID)
-	}
-	if flags&FlagRequestID != 0 {
-		buf = appendString(buf, e.RequestID)
-	}
-	if flags&FlagUserID != 0 {
-		buf = appendString(buf, e.UserID)
-	}
-	if flags&FlagTenantID != 0 {
-		buf = appendString(buf, e.TenantID)
-	}
-	if flags&FlagSessionID != 0 {
-		buf = appendString(buf, e.SessionID)
-	}
-	if flags&FlagMethod != 0 {
-		buf = appendString(buf, e.Method)
-	}
-	if flags&FlagPath != 0 {
-		buf = appendString(buf, e.Path)
-	}
+	// Optional string fields
+	writeStr := func(f uint64, v string) { if flags&f != 0 { buf = appendString(buf, v) } }
+	writeUvar := func(f uint64, v int) { if flags&f != 0 { buf = enc.PutUvarint(buf, uint64(v)) } }
+
+	writeStr(FlagEnv, e.Env)
+	writeStr(FlagVersion, e.Version)
+	writeStr(FlagHost, e.Host)
+	writeStr(FlagKind, e.Kind)
+	writeStr(FlagEventType, e.EventType)
+	writeStr(FlagTraceID, e.TraceID)
+	writeStr(FlagSpanID, e.SpanID)
+	writeStr(FlagParentSpanID, e.ParentSpanID)
+	writeStr(FlagRequestID, e.RequestID)
+	writeStr(FlagUserID, e.UserID)
+	writeStr(FlagTenantID, e.TenantID)
+	writeStr(FlagSessionID, e.SessionID)
+	writeStr(FlagMethod, e.Method)
+	writeStr(FlagPath, e.Path)
+	writeStr(FlagRoute, e.Route)
+	writeStr(FlagHandler, e.Handler)
 	if flags&FlagStatus != 0 {
 		buf = binary.LittleEndian.AppendUint16(buf, uint16(e.Status))
 	}
-	if flags&FlagDurationMs != 0 {
-		buf = enc.PutUvarint(buf, uint64(e.DurationMs))
-	}
-	if flags&FlagHandler != 0 {
-		buf = appendString(buf, e.Handler)
-	}
-	if flags&FlagDbMs != 0 {
-		buf = enc.PutUvarint(buf, uint64(e.DbMs))
-	}
-	if flags&FlagDbCount != 0 {
-		buf = enc.PutUvarint(buf, uint64(e.DbCount))
-	}
+	writeUvar(FlagDurationMs, e.DurationMs)
+	writeUvar(FlagDbMs, e.DbMs)
+	writeUvar(FlagDbCount, e.DbCount)
+	writeUvar(FlagCacheMs, e.CacheMs)
+	writeUvar(FlagCacheHits, e.CacheHits)
+	writeUvar(FlagCacheMisses, e.CacheMisses)
+	writeUvar(FlagExtMs, e.ExtMs)
+	writeUvar(FlagExtCount, e.ExtCount)
+	writeUvar(FlagRenderMs, e.RenderMs)
+	writeUvar(FlagAllocCount, e.AllocCount)
+	writeUvar(FlagMemDeltaMb, e.MemDeltaMb)
 	if flags&FlagNPlusOne != 0 {
-		if *e.NPlusOne {
-			buf = append(buf, 1)
-		} else {
-			buf = append(buf, 0)
-		}
+		if *e.NPlusOne { buf = append(buf, 1) } else { buf = append(buf, 0) }
 	}
-	if flags&FlagSlowQueries != 0 {
-		buf = enc.PutUvarint(buf, uint64(e.SlowQueries))
-	}
-	if flags&FlagDupQueries != 0 {
-		buf = enc.PutUvarint(buf, uint64(e.DupQueries))
-	}
-	if flags&FlagErrorClass != 0 {
-		buf = appendString(buf, e.ErrorClass)
-	}
-	if flags&FlagSourceFile != 0 {
-		buf = appendString(buf, e.SourceFile)
-	}
-	if flags&FlagSourceLine != 0 {
-		buf = enc.PutUvarint(buf, uint64(e.SourceLine))
-	}
-	if flags&FlagErrFingerprint != 0 {
-		buf = appendString(buf, e.ErrorFingerprint)
-	}
+	writeUvar(FlagSlowQueries, e.SlowQueries)
+	writeUvar(FlagDupQueries, e.DupQueries)
+	writeStr(FlagErrorClass, e.ErrorClass)
+	writeStr(FlagErrorMessage, e.ErrorMessage)
+	writeStr(FlagSourceFile, e.SourceFile)
+	writeUvar(FlagSourceLine, e.SourceLine)
+	writeStr(FlagErrFingerprint, e.ErrorFingerprint)
+	writeStr(FlagJobClass, e.JobClass)
+	writeStr(FlagJobQueue, e.JobQueue)
+	writeStr(FlagJobID, e.JobID)
+	writeUvar(FlagQueueMs, e.QueueMs)
+
 	if flags&FlagBody != 0 {
-		// Body stored as zstd-compressed JSON
 		compressed := enc.Compress(e.Body)
 		buf = binary.LittleEndian.AppendUint32(buf, uint32(len(compressed)))
 		buf = append(buf, compressed...)
 	}
 
-	// Write total length at the beginning (excludes the 4-byte length prefix itself)
 	binary.LittleEndian.PutUint32(buf[:4], uint32(len(buf)-4))
 	return buf
 }
 
 // UnmarshalEntry deserializes a chunk.Entry from compact binary format.
 func UnmarshalEntry(data []byte) (*chunk.Entry, error) {
-	if len(data) < 29 { // minimum: id(8) + ts(8) + received_at(8) + level(1) + flags(4)
+	if len(data) < 33 { // id(8) + ts(8) + received_at(8) + level(1) + flags(8)
 		return nil, fmt.Errorf("entry data too short: %d bytes", len(data))
 	}
 
 	e := &chunk.Entry{}
 	off := 0
 
-	e.ID = int64(binary.LittleEndian.Uint64(data[off:]))
-	off += 8
-	e.Ts = int64(binary.LittleEndian.Uint64(data[off:]))
-	off += 8
-	e.ReceivedAt = int64(binary.LittleEndian.Uint64(data[off:]))
-	off += 8
+	e.ID = int64(binary.LittleEndian.Uint64(data[off:])); off += 8
+	e.Ts = int64(binary.LittleEndian.Uint64(data[off:])); off += 8
+	e.ReceivedAt = int64(binary.LittleEndian.Uint64(data[off:])); off += 8
 
-	lvlEnum := data[off]
-	off++
-	if int(lvlEnum) < len(enumToLevel) {
-		e.Level = enumToLevel[lvlEnum]
-	} else {
-		e.Level = "info"
-	}
+	lvlEnum := data[off]; off++
+	if int(lvlEnum) < len(enumToLevel) { e.Level = enumToLevel[lvlEnum] } else { e.Level = "info" }
 
-	flags := binary.LittleEndian.Uint32(data[off:])
-	off += 4
+	flags := binary.LittleEndian.Uint64(data[off:]); off += 8
 
-	// Required strings
 	var err error
 	e.Service, off, err = readString(data, off)
-	if err != nil {
-		return nil, fmt.Errorf("read service: %w", err)
-	}
+	if err != nil { return nil, fmt.Errorf("read service: %w", err) }
 	e.Message, off, err = readString(data, off)
-	if err != nil {
-		return nil, fmt.Errorf("read message: %w", err)
+	if err != nil { return nil, fmt.Errorf("read message: %w", err) }
+
+	// String reader helper
+	rStr := func(f uint64, dest *string, name string) error {
+		if flags&f == 0 { return nil }
+		var v string
+		var e error
+		v, off, e = readString(data, off)
+		if e != nil { return fmt.Errorf("read %s: %w", name, e) }
+		*dest = v
+		return nil
+	}
+	// Uvarint reader helper
+	rUvar := func(f uint64, dest *int, name string) error {
+		if flags&f == 0 { return nil }
+		v, n := binary.Uvarint(data[off:])
+		if n <= 0 { return fmt.Errorf("read %s: invalid uvarint", name) }
+		*dest = int(v); off += n
+		return nil
 	}
 
-	// Optional fields
-	if flags&FlagEnv != 0 {
-		e.Env, off, err = readString(data, off)
-		if err != nil {
-			return nil, fmt.Errorf("read env: %w", err)
-		}
-	}
-	if flags&FlagVersion != 0 {
-		e.Version, off, err = readString(data, off)
-		if err != nil {
-			return nil, fmt.Errorf("read version: %w", err)
-		}
-	}
-	if flags&FlagEventType != 0 {
-		e.EventType, off, err = readString(data, off)
-		if err != nil {
-			return nil, fmt.Errorf("read event_type: %w", err)
-		}
-	}
-	if flags&FlagTraceID != 0 {
-		e.TraceID, off, err = readString(data, off)
-		if err != nil {
-			return nil, fmt.Errorf("read trace_id: %w", err)
-		}
-	}
-	if flags&FlagSpanID != 0 {
-		e.SpanID, off, err = readString(data, off)
-		if err != nil {
-			return nil, fmt.Errorf("read span_id: %w", err)
-		}
-	}
-	if flags&FlagParentSpanID != 0 {
-		e.ParentSpanID, off, err = readString(data, off)
-		if err != nil {
-			return nil, fmt.Errorf("read parent_span_id: %w", err)
-		}
-	}
-	if flags&FlagRequestID != 0 {
-		e.RequestID, off, err = readString(data, off)
-		if err != nil {
-			return nil, fmt.Errorf("read request_id: %w", err)
-		}
-	}
-	if flags&FlagUserID != 0 {
-		e.UserID, off, err = readString(data, off)
-		if err != nil {
-			return nil, fmt.Errorf("read user_id: %w", err)
-		}
-	}
-	if flags&FlagTenantID != 0 {
-		e.TenantID, off, err = readString(data, off)
-		if err != nil {
-			return nil, fmt.Errorf("read tenant_id: %w", err)
-		}
-	}
-	if flags&FlagSessionID != 0 {
-		e.SessionID, off, err = readString(data, off)
-		if err != nil {
-			return nil, fmt.Errorf("read session_id: %w", err)
-		}
-	}
-	if flags&FlagMethod != 0 {
-		e.Method, off, err = readString(data, off)
-		if err != nil {
-			return nil, fmt.Errorf("read method: %w", err)
-		}
-	}
-	if flags&FlagPath != 0 {
-		e.Path, off, err = readString(data, off)
-		if err != nil {
-			return nil, fmt.Errorf("read path: %w", err)
-		}
-	}
+	if err = rStr(FlagEnv, &e.Env, "env"); err != nil { return nil, err }
+	if err = rStr(FlagVersion, &e.Version, "version"); err != nil { return nil, err }
+	if err = rStr(FlagHost, &e.Host, "host"); err != nil { return nil, err }
+	if err = rStr(FlagKind, &e.Kind, "kind"); err != nil { return nil, err }
+	if err = rStr(FlagEventType, &e.EventType, "event_type"); err != nil { return nil, err }
+	if err = rStr(FlagTraceID, &e.TraceID, "trace_id"); err != nil { return nil, err }
+	if err = rStr(FlagSpanID, &e.SpanID, "span_id"); err != nil { return nil, err }
+	if err = rStr(FlagParentSpanID, &e.ParentSpanID, "parent_span_id"); err != nil { return nil, err }
+	if err = rStr(FlagRequestID, &e.RequestID, "request_id"); err != nil { return nil, err }
+	if err = rStr(FlagUserID, &e.UserID, "user_id"); err != nil { return nil, err }
+	if err = rStr(FlagTenantID, &e.TenantID, "tenant_id"); err != nil { return nil, err }
+	if err = rStr(FlagSessionID, &e.SessionID, "session_id"); err != nil { return nil, err }
+	if err = rStr(FlagMethod, &e.Method, "method"); err != nil { return nil, err }
+	if err = rStr(FlagPath, &e.Path, "path"); err != nil { return nil, err }
+	if err = rStr(FlagRoute, &e.Route, "route"); err != nil { return nil, err }
+	if err = rStr(FlagHandler, &e.Handler, "handler"); err != nil { return nil, err }
+
 	if flags&FlagStatus != 0 {
-		if off+2 > len(data) {
-			return nil, fmt.Errorf("read status: truncated")
-		}
-		e.Status = int(binary.LittleEndian.Uint16(data[off:]))
-		off += 2
-	}
-	if flags&FlagDurationMs != 0 {
-		v, n := binary.Uvarint(data[off:])
-		if n <= 0 {
-			return nil, fmt.Errorf("read duration_ms: invalid uvarint")
-		}
-		e.DurationMs = int(v)
-		off += n
-	}
-	if flags&FlagHandler != 0 {
-		e.Handler, off, err = readString(data, off)
-		if err != nil {
-			return nil, fmt.Errorf("read handler: %w", err)
-		}
-	}
-	if flags&FlagDbMs != 0 {
-		v, n := binary.Uvarint(data[off:])
-		if n <= 0 {
-			return nil, fmt.Errorf("read db_ms: invalid uvarint")
-		}
-		e.DbMs = int(v)
-		off += n
-	}
-	if flags&FlagDbCount != 0 {
-		v, n := binary.Uvarint(data[off:])
-		if n <= 0 {
-			return nil, fmt.Errorf("read db_count: invalid uvarint")
-		}
-		e.DbCount = int(v)
-		off += n
-	}
-	if flags&FlagNPlusOne != 0 {
-		if off >= len(data) {
-			return nil, fmt.Errorf("read n_plus_one: truncated")
-		}
-		v := data[off] != 0
-		e.NPlusOne = &v
-		off++
-	}
-	if flags&FlagSlowQueries != 0 {
-		v, n := binary.Uvarint(data[off:])
-		if n <= 0 {
-			return nil, fmt.Errorf("read slow_queries: invalid uvarint")
-		}
-		e.SlowQueries = int(v)
-		off += n
-	}
-	if flags&FlagDupQueries != 0 {
-		v, n := binary.Uvarint(data[off:])
-		if n <= 0 {
-			return nil, fmt.Errorf("read dup_queries: invalid uvarint")
-		}
-		e.DupQueries = int(v)
-		off += n
-	}
-	if flags&FlagErrorClass != 0 {
-		e.ErrorClass, off, err = readString(data, off)
-		if err != nil {
-			return nil, fmt.Errorf("read error_class: %w", err)
-		}
-	}
-	if flags&FlagSourceFile != 0 {
-		e.SourceFile, off, err = readString(data, off)
-		if err != nil {
-			return nil, fmt.Errorf("read source_file: %w", err)
-		}
-	}
-	if flags&FlagSourceLine != 0 {
-		v, n := binary.Uvarint(data[off:])
-		if n <= 0 {
-			return nil, fmt.Errorf("read source_line: invalid uvarint")
-		}
-		e.SourceLine = int(v)
-		off += n
-	}
-	if flags&FlagErrFingerprint != 0 {
-		e.ErrorFingerprint, off, err = readString(data, off)
-		if err != nil {
-			return nil, fmt.Errorf("read error_fingerprint: %w", err)
-		}
-	}
-	if flags&FlagBody != 0 {
-		if off+4 > len(data) {
-			return nil, fmt.Errorf("read body length: truncated")
-		}
-		bodyLen := int(binary.LittleEndian.Uint32(data[off:]))
-		off += 4
-		if off+bodyLen > len(data) {
-			return nil, fmt.Errorf("read body: truncated (need %d, have %d)", bodyLen, len(data)-off)
-		}
-		decompressed, err := enc.Decompress(data[off : off+bodyLen])
-		if err != nil {
-			return nil, fmt.Errorf("decompress body: %w", err)
-		}
-		e.Body = decompressed
-		off += bodyLen
+		if off+2 > len(data) { return nil, fmt.Errorf("read status: truncated") }
+		e.Status = int(binary.LittleEndian.Uint16(data[off:])); off += 2
 	}
 
-	_ = off // suppress unused variable warning
+	if err = rUvar(FlagDurationMs, &e.DurationMs, "duration_ms"); err != nil { return nil, err }
+	if err = rUvar(FlagDbMs, &e.DbMs, "db_ms"); err != nil { return nil, err }
+	if err = rUvar(FlagDbCount, &e.DbCount, "db_count"); err != nil { return nil, err }
+	if err = rUvar(FlagCacheMs, &e.CacheMs, "cache_ms"); err != nil { return nil, err }
+	if err = rUvar(FlagCacheHits, &e.CacheHits, "cache_hits"); err != nil { return nil, err }
+	if err = rUvar(FlagCacheMisses, &e.CacheMisses, "cache_misses"); err != nil { return nil, err }
+	if err = rUvar(FlagExtMs, &e.ExtMs, "ext_ms"); err != nil { return nil, err }
+	if err = rUvar(FlagExtCount, &e.ExtCount, "ext_count"); err != nil { return nil, err }
+	if err = rUvar(FlagRenderMs, &e.RenderMs, "render_ms"); err != nil { return nil, err }
+	if err = rUvar(FlagAllocCount, &e.AllocCount, "alloc_count"); err != nil { return nil, err }
+	if err = rUvar(FlagMemDeltaMb, &e.MemDeltaMb, "mem_delta_mb"); err != nil { return nil, err }
+
+	if flags&FlagNPlusOne != 0 {
+		if off >= len(data) { return nil, fmt.Errorf("read n_plus_one: truncated") }
+		v := data[off] != 0; e.NPlusOne = &v; off++
+	}
+
+	if err = rUvar(FlagSlowQueries, &e.SlowQueries, "slow_queries"); err != nil { return nil, err }
+	if err = rUvar(FlagDupQueries, &e.DupQueries, "dup_queries"); err != nil { return nil, err }
+	if err = rStr(FlagErrorClass, &e.ErrorClass, "error_class"); err != nil { return nil, err }
+	if err = rStr(FlagErrorMessage, &e.ErrorMessage, "error_message"); err != nil { return nil, err }
+	if err = rStr(FlagSourceFile, &e.SourceFile, "source_file"); err != nil { return nil, err }
+	if err = rUvar(FlagSourceLine, &e.SourceLine, "source_line"); err != nil { return nil, err }
+	if err = rStr(FlagErrFingerprint, &e.ErrorFingerprint, "error_fingerprint"); err != nil { return nil, err }
+	if err = rStr(FlagJobClass, &e.JobClass, "job_class"); err != nil { return nil, err }
+	if err = rStr(FlagJobQueue, &e.JobQueue, "job_queue"); err != nil { return nil, err }
+	if err = rStr(FlagJobID, &e.JobID, "job_id"); err != nil { return nil, err }
+	if err = rUvar(FlagQueueMs, &e.QueueMs, "queue_ms"); err != nil { return nil, err }
+
+	if flags&FlagBody != 0 {
+		if off+4 > len(data) { return nil, fmt.Errorf("read body length: truncated") }
+		bodyLen := int(binary.LittleEndian.Uint32(data[off:])); off += 4
+		if off+bodyLen > len(data) { return nil, fmt.Errorf("read body: truncated") }
+		decompressed, err := enc.Decompress(data[off : off+bodyLen])
+		if err != nil { return nil, fmt.Errorf("decompress body: %w", err) }
+		e.Body = decompressed; off += bodyLen
+	}
+
+	_ = off
 	return e, nil
 }
 
@@ -467,35 +320,22 @@ func ReadEntries(r io.Reader) ([]chunk.Entry, error) {
 
 	for {
 		_, err := io.ReadFull(r, lenBuf)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return entries, fmt.Errorf("read entry length: %w", err)
-		}
+		if err == io.EOF { break }
+		if err != nil { return entries, fmt.Errorf("read entry length: %w", err) }
 
 		entryLen := int(binary.LittleEndian.Uint32(lenBuf))
-		if entryLen <= 0 || entryLen > 10<<20 { // 10MB max entry
-			return entries, fmt.Errorf("invalid entry length: %d", entryLen)
-		}
+		if entryLen <= 0 || entryLen > 10<<20 { return entries, fmt.Errorf("invalid entry length: %d", entryLen) }
 
 		entryData := make([]byte, entryLen)
-		_, err = io.ReadFull(r, entryData)
-		if err != nil {
-			return entries, fmt.Errorf("read entry data: %w", err)
-		}
+		if _, err = io.ReadFull(r, entryData); err != nil { return entries, fmt.Errorf("read entry data: %w", err) }
 
 		entry, err := UnmarshalEntry(entryData)
-		if err != nil {
-			return entries, fmt.Errorf("unmarshal entry: %w", err)
-		}
+		if err != nil { return entries, fmt.Errorf("unmarshal entry: %w", err) }
 		entries = append(entries, *entry)
 	}
 
 	return entries, nil
 }
-
-// --- helpers ---
 
 func appendString(buf []byte, s string) []byte {
 	buf = binary.LittleEndian.AppendUint16(buf, uint16(len(s)))
@@ -503,14 +343,8 @@ func appendString(buf []byte, s string) []byte {
 }
 
 func readString(data []byte, off int) (string, int, error) {
-	if off+2 > len(data) {
-		return "", off, fmt.Errorf("truncated string length at offset %d", off)
-	}
-	sLen := int(binary.LittleEndian.Uint16(data[off:]))
-	off += 2
-	if off+sLen > len(data) {
-		return "", off, fmt.Errorf("truncated string data at offset %d (need %d)", off, sLen)
-	}
-	s := string(data[off : off+sLen])
-	return s, off + sLen, nil
+	if off+2 > len(data) { return "", off, fmt.Errorf("truncated string length at offset %d", off) }
+	sLen := int(binary.LittleEndian.Uint16(data[off:])); off += 2
+	if off+sLen > len(data) { return "", off, fmt.Errorf("truncated string data at offset %d", off) }
+	return string(data[off : off+sLen]), off + sLen, nil
 }

@@ -19,36 +19,52 @@ type FlatHandler struct {
 	Engine *engine.Store
 }
 
-// flatEntry is the JSON structure sent by the new SDK.
+// flatEntry is the JSON structure sent by the new SDK (45 fields).
 type flatEntry struct {
-	Ts               string          `json:"ts"`
-	Level            string          `json:"level"`
-	Service          string          `json:"service"`
-	Env              string          `json:"env,omitempty"`
-	Version          string          `json:"version,omitempty"`
-	Message          string          `json:"message"`
-	EventType        string          `json:"event_type,omitempty"`
-	TraceID          string          `json:"trace_id,omitempty"`
-	SpanID           string          `json:"span_id,omitempty"`
-	ParentSpanID     string          `json:"parent_span_id,omitempty"`
-	RequestID        string          `json:"request_id,omitempty"`
-	UserID           string          `json:"user_id,omitempty"`
-	TenantID         string          `json:"tenant_id,omitempty"`
-	SessionID        string          `json:"session_id,omitempty"`
-	Method           string          `json:"method,omitempty"`
-	Path             string          `json:"path,omitempty"`
-	Status           int             `json:"status,omitempty"`
-	DurationMs       int             `json:"duration_ms,omitempty"`
-	Handler       string          `json:"handler,omitempty"`
-	DbMs             int             `json:"db_ms,omitempty"`
-	DbCount          int             `json:"db_count,omitempty"`
-	NPlusOne         *bool           `json:"n_plus_one,omitempty"`
-	SlowQueries      int             `json:"slow_queries,omitempty"`
-	DupQueries       int             `json:"dup_queries,omitempty"`
-	ErrorClass   string          `json:"error_class,omitempty"`
-	SourceFile       string          `json:"source_file,omitempty"`
-	SourceLine       int             `json:"source_line,omitempty"`
-	Body             json.RawMessage `json:"body,omitempty"`
+	Ts           string `json:"ts"`
+	Level        string `json:"level"`
+	Service      string `json:"service"`
+	Message      string `json:"message"`
+	Env          string `json:"env,omitempty"`
+	Version      string `json:"version,omitempty"`
+	Host         string `json:"host,omitempty"`
+	Kind         string `json:"kind,omitempty"`
+	EventType    string `json:"event_type,omitempty"`
+	TraceID      string `json:"trace_id,omitempty"`
+	SpanID       string `json:"span_id,omitempty"`
+	ParentSpanID string `json:"parent_span_id,omitempty"`
+	RequestID    string `json:"request_id,omitempty"`
+	UserID       string `json:"user_id,omitempty"`
+	TenantID     string `json:"tenant_id,omitempty"`
+	SessionID    string `json:"session_id,omitempty"`
+	Method       string `json:"method,omitempty"`
+	Path         string `json:"path,omitempty"`
+	Route        string `json:"route,omitempty"`
+	Handler      string `json:"handler,omitempty"`
+	Status       int    `json:"status,omitempty"`
+	DurationMs   int    `json:"duration_ms,omitempty"`
+	DbMs         int    `json:"db_ms,omitempty"`
+	DbCount      int    `json:"db_count,omitempty"`
+	CacheMs      int    `json:"cache_ms,omitempty"`
+	CacheHits    int    `json:"cache_hits,omitempty"`
+	CacheMisses  int    `json:"cache_misses,omitempty"`
+	ExtMs        int    `json:"ext_ms,omitempty"`
+	ExtCount     int    `json:"ext_count,omitempty"`
+	RenderMs     int    `json:"render_ms,omitempty"`
+	AllocCount   int    `json:"alloc_count,omitempty"`
+	MemDeltaMb   int    `json:"mem_delta_mb,omitempty"`
+	NPlusOne     *bool  `json:"n_plus_one,omitempty"`
+	SlowQueries  int    `json:"slow_queries,omitempty"`
+	DupQueries   int    `json:"dup_queries,omitempty"`
+	ErrorClass   string `json:"error_class,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
+	SourceFile   string `json:"source_file,omitempty"`
+	SourceLine   int    `json:"source_line,omitempty"`
+	JobClass     string `json:"job_class,omitempty"`
+	JobQueue     string `json:"job_queue,omitempty"`
+	JobID        string `json:"job_id,omitempty"`
+	QueueMs      int    `json:"queue_ms,omitempty"`
+	Body         json.RawMessage `json:"body,omitempty"`
 }
 
 // HandleFlatIngest is the HTTP handler for POST /api/v2/logs.
@@ -100,34 +116,24 @@ func (h *FlatHandler) HandleFlatIngest(w http.ResponseWriter, r *http.Request) {
 		}
 
 		entries = append(entries, chunk.Entry{
-			Ts:           tsMs,
-			Level:        strings.ToLower(fe.Level),
-			Service:      fe.Service,
-			Env:          fe.Env,
-			Version:      fe.Version,
-			Message:      fe.Message,
-			EventType:    fe.EventType,
-			TraceID:      fe.TraceID,
-			SpanID:       fe.SpanID,
-			ParentSpanID: fe.ParentSpanID,
-			RequestID:    fe.RequestID,
-			UserID:       fe.UserID,
-			TenantID:     fe.TenantID,
-			SessionID:    fe.SessionID,
-			Method:       fe.Method,
-			Path:         fe.Path,
-			Status:       fe.Status,
-			DurationMs:   fe.DurationMs,
-			Handler:      fe.Handler,
-			DbMs:         fe.DbMs,
-			DbCount:      fe.DbCount,
-			NPlusOne:     fe.NPlusOne,
-			SlowQueries:    fe.SlowQueries,
-			DupQueries:     fe.DupQueries,
-			ErrorClass: fe.ErrorClass,
-			SourceFile:     fe.SourceFile,
-			SourceLine:     fe.SourceLine,
-			Body:           fe.Body,
+			Ts: tsMs, Level: strings.ToLower(fe.Level),
+			Service: fe.Service, Message: fe.Message,
+			Env: fe.Env, Version: fe.Version, Host: fe.Host,
+			Kind: fe.Kind, EventType: fe.EventType,
+			TraceID: fe.TraceID, SpanID: fe.SpanID,
+			ParentSpanID: fe.ParentSpanID, RequestID: fe.RequestID,
+			UserID: fe.UserID, TenantID: fe.TenantID, SessionID: fe.SessionID,
+			Method: fe.Method, Path: fe.Path, Route: fe.Route,
+			Handler: fe.Handler, Status: fe.Status, DurationMs: fe.DurationMs,
+			DbMs: fe.DbMs, DbCount: fe.DbCount,
+			CacheMs: fe.CacheMs, CacheHits: fe.CacheHits, CacheMisses: fe.CacheMisses,
+			ExtMs: fe.ExtMs, ExtCount: fe.ExtCount, RenderMs: fe.RenderMs,
+			AllocCount: fe.AllocCount, MemDeltaMb: fe.MemDeltaMb,
+			NPlusOne: fe.NPlusOne, SlowQueries: fe.SlowQueries, DupQueries: fe.DupQueries,
+			ErrorClass: fe.ErrorClass, ErrorMessage: fe.ErrorMessage,
+			SourceFile: fe.SourceFile, SourceLine: fe.SourceLine,
+			JobClass: fe.JobClass, JobQueue: fe.JobQueue, JobID: fe.JobID, QueueMs: fe.QueueMs,
+			Body: fe.Body,
 		})
 	}
 

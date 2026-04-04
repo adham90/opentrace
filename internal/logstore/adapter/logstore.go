@@ -324,7 +324,11 @@ func oldToNew(e store.LogEntry) chunk.Entry {
 	if e.RequestSummary != nil {
 		rs := e.RequestSummary
 		ne.EventType = "http.request"
-		ne.Handler = rs.Controller
+		if rs.Action != "" {
+			ne.Handler = rs.Controller + "#" + rs.Action
+		} else {
+			ne.Handler = rs.Controller
+		}
 		ne.Method = rs.Method
 		ne.Path = rs.Path
 		ne.Status = rs.Status

@@ -45,9 +45,10 @@ func runSeed() error {
 	slog.Info("seeding database (idempotent — clears old seed data)")
 
 	// Clear old seed data for idempotency.
-	tables := []string{"watch_alerts", "watch_runs", "watches", "request_summaries",
-		"error_group_events", "error_groups", "logs", "data_sources",
-		"metric_points", "servers"}
+	// Only clear SQLite tables (logs are in segmented store, not SQLite)
+	tables := []string{"watch_alerts", "watch_runs", "watches",
+		"error_group_events", "error_groups", "data_sources",
+		"servers"}
 	for _, t := range tables {
 		deps.DB.ExecContext(ctx, "DELETE FROM "+t)
 	}

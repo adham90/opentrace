@@ -722,14 +722,16 @@ func readEntryFromChunk(r *chunkpkg.Reader, row int) (*chunk.Entry, error) {
 
 	// Sparse string columns
 	sparseStrings := map[string]*string{
-		"version": &e.Version, "event_type": &e.EventType,
+		"version": &e.Version, "host": &e.Host, "kind": &e.Kind,
+		"event_type": &e.EventType,
 		"trace_id": &e.TraceID, "span_id": &e.SpanID,
 		"parent_span_id": &e.ParentSpanID, "request_id": &e.RequestID,
 		"user_id": &e.UserID, "tenant_id": &e.TenantID,
 		"session_id": &e.SessionID, "method": &e.Method,
-		"path": &e.Path, "handler": &e.Handler,
-		"error_class": &e.ErrorClass,
+		"path": &e.Path, "route": &e.Route, "handler": &e.Handler,
+		"error_class": &e.ErrorClass, "error_message": &e.ErrorMessage,
 		"source_file": &e.SourceFile, "error_fingerprint": &e.ErrorFingerprint,
+		"job_class": &e.JobClass, "job_queue": &e.JobQueue, "job_id": &e.JobID,
 		"status": nil, // handled separately
 	}
 	for col, dest := range sparseStrings {
@@ -749,8 +751,13 @@ func readEntryFromChunk(r *chunkpkg.Reader, row int) (*chunk.Entry, error) {
 	// Sparse int64 columns
 	sparseInts := map[string]*int{
 		"duration_ms": &e.DurationMs, "db_ms": &e.DbMs,
-		"db_count": &e.DbCount, "slow_queries": &e.SlowQueries,
-		"dup_queries": &e.DupQueries, "source_line": &e.SourceLine,
+		"db_count": &e.DbCount, "cache_ms": &e.CacheMs,
+		"cache_hits": &e.CacheHits, "cache_misses": &e.CacheMisses,
+		"ext_ms": &e.ExtMs, "ext_count": &e.ExtCount,
+		"render_ms": &e.RenderMs, "alloc_count": &e.AllocCount,
+		"mem_delta_mb": &e.MemDeltaMb,
+		"slow_queries": &e.SlowQueries, "dup_queries": &e.DupQueries,
+		"source_line": &e.SourceLine, "queue_ms": &e.QueueMs,
 	}
 	for col, dest := range sparseInts {
 		if vals, err := r.ReadSparseInt64(col); err == nil && row < len(vals) && vals[row] != nil {
