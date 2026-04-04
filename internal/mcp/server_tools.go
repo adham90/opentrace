@@ -246,6 +246,40 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 			Idempotent:  true,
 		})
 	b.Add("setup", "Onboarding assistant: check status, detect framework, get SDK guide, verify data flow", "Setup", "read", "")
+
+	// --- deep_capture ---
+	if deps.DB != nil {
+		gw.Register("deep_capture",
+			wrapHandler(deps, "deep_capture", tools.DeepCaptureHandler(tools.DeepCaptureDeps{
+				DB: deps.DB,
+			})),
+			GatewayEntry{
+				Description: "Deep capture data: request/response details, SQL queries, HTTP calls, emails, audit trail, file operations, PII config, retention policy",
+				Actions: []string{
+					"request_capture", "sql_captures", "http_captures", "email_captures",
+					"audit_trail", "search_audit", "search_sql", "file_captures",
+					"get_pii_config", "update_pii_config", "get_retention", "update_retention",
+				},
+				Category:   "Deep Capture",
+				Access:     "read",
+				ReadOnly:   false,
+				Idempotent: false,
+				Params: map[string]string{
+					"log_id":         "Log entry ID (for per-request captures)",
+					"record_type":    "Record type (audit_trail)",
+					"record_id":      "Record ID (audit_trail)",
+					"actor_id":       "Actor ID (search_audit)",
+					"action":         "Action filter (search_audit)",
+					"fingerprint":    "SQL fingerprint (search_sql)",
+					"table_name":     "Table name (search_sql)",
+					"min_duration_ms": "Minimum SQL duration in ms (search_sql)",
+					"last":           "Time window: 1h, 24h, 7d (email_captures, search_audit, search_sql)",
+					"limit":          "Max results (search_sql, default 50)",
+					"config":         "JSON config object (update_pii_config, update_retention)",
+				},
+			})
+		b.Add("deep_capture", "Deep capture data: request/response, SQL, HTTP, emails, audit, files, PII config, retention", "Deep Capture", "read", "")
+	}
 }
 
 // registerWriteTools adds write/admin tools to the gateway.

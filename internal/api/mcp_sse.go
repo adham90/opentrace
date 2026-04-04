@@ -76,6 +76,7 @@ func (s *Server) setupMCPStreamableHTTP() *mcp.StreamableHTTPHandler {
 		Ctx:      s.auditCtx,
 		Registry: s.registry,
 		Config:   s.cfg,
+		DB:       s.db,
 		Stores: store.Stores{
 			DSStore:          s.dsStore,
 			LogStore:         s.logStore,
@@ -115,6 +116,7 @@ func (s *Server) setupMCPSSE() *mcp.SSEHandler {
 		Ctx:      s.auditCtx,
 		Registry: s.registry,
 		Config:   s.cfg,
+		DB:       s.db,
 		Stores: store.Stores{
 			DSStore:          s.dsStore,
 			LogStore:         s.logStore,

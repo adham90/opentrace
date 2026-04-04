@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -79,6 +80,10 @@ type Deps struct {
 
 	// Stores — embedded so callers can access deps.LogStore directly.
 	store.Stores
+
+	// DB is the raw *sql.DB connection for deep capture queries
+	// (tables without a formal store interface).
+	DB *sql.DB
 
 	// WatchMetrics is not a store — it's a runtime metrics collector.
 	WatchMetrics *watcher.WatchMetrics

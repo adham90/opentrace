@@ -71,6 +71,7 @@ var categoryDescriptions = map[string]string{
 	"Uptime":                 "Monitor HTTP endpoint availability, response times, and uptime percentage",
 	"Overview":               "High-level system health summaries and multi-source investigation",
 	"Agent Memory":           "Persistent notes for the AI agent to carry context across sessions",
+	"Deep Capture":           "Query deep capture data: request/response details, SQL queries, HTTP calls, emails, audit trail, file operations",
 }
 
 // CatalogBuilder accumulates tool entries and builds a ToolCatalog.
