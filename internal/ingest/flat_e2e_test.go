@@ -45,11 +45,12 @@ func TestFlatE2E_SDKToQueryRoundTrip(t *testing.T) {
 			"trace_id": "trace-pay-001",
 			"request_id": "req-001",
 			"user_id": "42",
+			"exception_class": "PaymentError",
+			"source_file": "app/services/billing.rb",
+			"source_line": 99,
 			"body": {
 				"exception": {
-					"class": "PaymentError",
-					"file": "app/services/billing.rb",
-					"line": 99
+					"backtrace": ["app/services/billing.rb:99"]
 				},
 				"request": {
 					"params": {"email": "secret@example.com", "card": "4111111111111111"}

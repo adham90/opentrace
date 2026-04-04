@@ -90,22 +90,17 @@ func TestPIIDisabled(t *testing.T) {
 	}
 }
 
-func TestErrorFieldExtraction(t *testing.T) {
+func TestErrorFingerprintComputation(t *testing.T) {
 	pipeline := NewPipeline(nil, PIIConfig{})
 
-	body := json.RawMessage(`{
-		"exception": {
-			"class": "NoMethodError",
-			"file": "app/models/order.rb",
-			"line": 42,
-			"backtrace": ["app/models/order.rb:42"]
-		}
-	}`)
-
+	// SDK sends error fields as flat top-level fields (not extracted from body)
 	entries := []chunk.Entry{{
 		Ts: 1000, Level: "error", Service: "api",
-		Message: "NoMethodError: undefined method",
-		Body:    body,
+		Message:        "NoMethodError: undefined method",
+		ExceptionClass: "NoMethodError",
+		SourceFile:     "app/models/order.rb",
+		SourceLine:     42,
+		Body:           json.RawMessage(`{"exception":{"backtrace":["app/models/order.rb:42"]}}`),
 	}}
 
 	result := pipeline.Process(entries)
@@ -130,36 +125,34 @@ func TestErrorFieldExtraction(t *testing.T) {
 	t.Logf("fingerprint: %s", e.ErrorFingerprint)
 }
 
-func TestErrorFieldExtractionNotOnInfo(t *testing.T) {
+func TestErrorFingerprintNotOnInfo(t *testing.T) {
 	pipeline := NewPipeline(nil, PIIConfig{})
 
-	body := json.RawMessage(`{"exception": {"class": "SomeError"}}`)
+	// Even if SDK sends exception_class on an info entry, fingerprint should not be computed
 	entries := []chunk.Entry{{
 		Ts: 1000, Level: "info", Service: "api",
-		Message: "test", Body: body,
+		Message:        "test",
+		ExceptionClass: "SomeError",
 	}}
 
 	result := pipeline.Process(entries)
-	if result[0].ExceptionClass != "" {
-		t.Error("should not extract error fields from info-level entries")
+	if result[0].ErrorFingerprint != "" {
+		t.Error("should not compute fingerprint for info-level entries")
 	}
 }
 
-func TestErrorFieldExtractionNoException(t *testing.T) {
+func TestErrorFingerprintNoExceptionClass(t *testing.T) {
 	pipeline := NewPipeline(nil, PIIConfig{})
 
-	body := json.RawMessage(`{"queries": [{"sql": "SELECT 1"}]}`)
+	// Error level but no exception_class → no fingerprint
 	entries := []chunk.Entry{{
 		Ts: 1000, Level: "error", Service: "api",
-		Message: "Something went wrong", Body: body,
+		Message: "Something went wrong",
 	}}
 
 	result := pipeline.Process(entries)
-	if result[0].ExceptionClass != "" {
-		t.Error("should not extract error fields when no exception in body")
-	}
 	if result[0].ErrorFingerprint != "" {
-		t.Error("should not compute fingerprint when no exception in body")
+		t.Error("should not compute fingerprint when no exception_class")
 	}
 }
 
@@ -299,17 +292,21 @@ func TestFullPipeline(t *testing.T) {
 	)
 
 	body := json.RawMessage(`{
-		"exception": {"class": "PaymentError", "file": "app/services/billing.rb", "line": 99},
+		"exception": {"backtrace": ["app/services/billing.rb:99"]},
 		"request": {"params": {"email": "user@example.com", "token": "secret_tok"}},
 		"logs": [{"level": "debug", "message": "Charging card", "at": 5}]
 	}`)
 
+	// SDK sends error fields flat (not extracted from body by server)
 	entries := []chunk.Entry{{
 		Ts: 1743760800000, Level: "error", Service: "billing-api",
-		Message:   "PaymentError: card declined",
-		TraceID:   "trace-123",
-		RequestID: "req-456",
-		Body:      body,
+		Message:        "PaymentError: card declined",
+		TraceID:        "trace-123",
+		RequestID:      "req-456",
+		ExceptionClass: "PaymentError",
+		SourceFile:     "app/services/billing.rb",
+		SourceLine:     99,
+		Body:           body,
 	}}
 
 	result := pipeline.Process(entries)
@@ -321,7 +318,7 @@ func TestFullPipeline(t *testing.T) {
 
 	parent := result[0]
 
-	// Error fields extracted
+	// Error fields stay as sent by SDK
 	if parent.ExceptionClass != "PaymentError" {
 		t.Errorf("exception_class: %q", parent.ExceptionClass)
 	}
@@ -331,6 +328,7 @@ func TestFullPipeline(t *testing.T) {
 	if parent.SourceLine != 99 {
 		t.Errorf("source_line: %d", parent.SourceLine)
 	}
+	// Server computes fingerprint from flat fields
 	if parent.ErrorFingerprint == "" {
 		t.Error("fingerprint should be set")
 	}

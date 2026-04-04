@@ -33,7 +33,7 @@ func TestE2E_FullLifecycle(t *testing.T) {
 		`{"ts":"` + now.Format(time.RFC3339Nano) + `","level":"info","service":"billing-api","env":"production","message":"Cache hit for user 42","trace_id":"trace-001","user_id":"42","tenant_id":"7"}`,
 
 		// Error log with exception in body
-		`{"ts":"` + now.Format(time.RFC3339Nano) + `","level":"error","service":"billing-api","env":"production","message":"NoMethodError: undefined method name","trace_id":"trace-002","request_id":"req-001","user_id":"42","body":{"exception":{"class":"NoMethodError","file":"app/models/order.rb","line":42,"backtrace":["app/models/order.rb:42"]},"request":{"params":{"email":"user@secret.com","password":"hunter2"}}}}`,
+		`{"ts":"` + now.Format(time.RFC3339Nano) + `","level":"error","service":"billing-api","env":"production","message":"NoMethodError: undefined method name","trace_id":"trace-002","request_id":"req-001","user_id":"42","exception_class":"NoMethodError","source_file":"app/models/order.rb","source_line":42,"body":{"exception":{"backtrace":["app/models/order.rb:42"]},"request":{"params":{"email":"user@secret.com","password":"hunter2"}}}}`,
 
 		// Rich request with performance data
 		`{"ts":"` + now.Format(time.RFC3339Nano) + `","level":"info","service":"billing-api","env":"production","version":"a1b2c3d","message":"POST /api/orders 201 1243ms","event_type":"http.request","trace_id":"trace-003","span_id":"span-001","request_id":"req-002","user_id":"42","tenant_id":"7","session_id":"sess-001","method":"POST","path":"/api/orders","status":201,"duration_ms":1243,"controller":"Api::OrdersController","action":"create","db_ms":312,"db_count":8,"n_plus_one":false,"slow_queries":1,"dup_queries":0,"body":{"queries":[{"sql":"SELECT * FROM users WHERE id = ?","duration_ms":1.2}],"timeline":[{"t":"db","n":"User Load","ms":1.2,"at":0}],"logs":[{"level":"debug","message":"Charging card","at":5}]}}`,
@@ -70,8 +70,11 @@ func TestE2E_FullLifecycle(t *testing.T) {
 		DbCount      int             `json:"db_count"`
 		NPlusOne     *bool           `json:"n_plus_one"`
 		SlowQueries  int             `json:"slow_queries"`
-		DupQueries   int             `json:"dup_queries"`
-		Body         json.RawMessage `json:"body"`
+		DupQueries     int             `json:"dup_queries"`
+		ExceptionClass string          `json:"exception_class"`
+		SourceFile     string          `json:"source_file"`
+		SourceLine     int             `json:"source_line"`
+		Body           json.RawMessage `json:"body"`
 	}
 
 	var allEntries []chunk.Entry
@@ -90,7 +93,8 @@ func TestE2E_FullLifecycle(t *testing.T) {
 			Status: se.Status, DurationMs: se.DurationMs, Controller: se.Controller,
 			Action: se.Action, DbMs: se.DbMs, DbCount: se.DbCount,
 			NPlusOne: se.NPlusOne, SlowQueries: se.SlowQueries,
-			DupQueries: se.DupQueries, Body: se.Body,
+			DupQueries: se.DupQueries, ExceptionClass: se.ExceptionClass,
+			SourceFile: se.SourceFile, SourceLine: se.SourceLine, Body: se.Body,
 		})
 	}
 

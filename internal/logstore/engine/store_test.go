@@ -377,13 +377,15 @@ func TestStoreIngestWithPipeline(t *testing.T) {
 
 	now := time.Now().UTC()
 	body := json.RawMessage(`{
-		"exception": {"class": "NoMethodError", "file": "app/models/order.rb", "line": 42},
+		"exception": {"backtrace": ["app/models/order.rb:42"]},
 		"request": {"params": {"email": "user@example.com", "password": "secret"}}
 	}`)
 
+	// SDK sends error fields flat
 	entries := []chunk.Entry{
 		{Ts: now.UnixMilli(), Level: "error", Service: "api",
-			Message: "NoMethodError", Body: body},
+			Message: "NoMethodError", ExceptionClass: "NoMethodError",
+			SourceFile: "app/models/order.rb", SourceLine: 42, Body: body},
 	}
 
 	result, err := s.Ingest(entries)

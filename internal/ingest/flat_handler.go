@@ -46,6 +46,9 @@ type flatEntry struct {
 	NPlusOne         *bool           `json:"n_plus_one,omitempty"`
 	SlowQueries      int             `json:"slow_queries,omitempty"`
 	DupQueries       int             `json:"dup_queries,omitempty"`
+	ExceptionClass   string          `json:"exception_class,omitempty"`
+	SourceFile       string          `json:"source_file,omitempty"`
+	SourceLine       int             `json:"source_line,omitempty"`
 	Body             json.RawMessage `json:"body,omitempty"`
 }
 
@@ -121,9 +124,12 @@ func (h *FlatHandler) HandleFlatIngest(w http.ResponseWriter, r *http.Request) {
 			DbMs:         fe.DbMs,
 			DbCount:      fe.DbCount,
 			NPlusOne:     fe.NPlusOne,
-			SlowQueries:  fe.SlowQueries,
-			DupQueries:   fe.DupQueries,
-			Body:         fe.Body,
+			SlowQueries:    fe.SlowQueries,
+			DupQueries:     fe.DupQueries,
+			ExceptionClass: fe.ExceptionClass,
+			SourceFile:     fe.SourceFile,
+			SourceLine:     fe.SourceLine,
+			Body:           fe.Body,
 		})
 	}
 

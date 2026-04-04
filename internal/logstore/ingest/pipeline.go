@@ -39,14 +39,14 @@ func (p *Pipeline) Process(entries []chunk.Entry) []chunk.Entry {
 	for i := range entries {
 		e := &entries[i]
 
-		if len(e.Body) > 0 {
-			// Step 2: PII scrub body
-			e.Body = p.scrubBody(e.Body)
+		// Step 2: Compute error fingerprint from SDK-provided flat fields
+		if isErrorLevel(e.Level) {
+			computeErrorFingerprint(e)
+		}
 
-			// Step 3: Extract error fields
-			if isErrorLevel(e.Level) {
-				extractErrorFields(e)
-			}
+		if len(e.Body) > 0 {
+			// Step 3: PII scrub body
+			e.Body = p.scrubBody(e.Body)
 
 			// Step 4: Expand in-request logs
 			expanded := expandInRequestLogs(e)
@@ -203,30 +203,12 @@ func scrubValue(key string, val any, patterns []*regexp.Regexp, sensitiveFields 
 	}
 }
 
-// --- Error Field Extraction ---
+// --- Error Fingerprint Computation ---
 
-// extractErrorFields parses body.exception to populate error tracking columns.
-func extractErrorFields(e *chunk.Entry) {
-	if len(e.Body) == 0 {
-		return
-	}
-
-	var body struct {
-		Exception *struct {
-			Class string `json:"class"`
-			File  string `json:"file"`
-			Line  int    `json:"line"`
-		} `json:"exception"`
-	}
-
-	if err := json.Unmarshal(e.Body, &body); err != nil || body.Exception == nil {
-		return
-	}
-
-	e.ExceptionClass = body.Exception.Class
-	e.SourceFile = body.Exception.File
-	e.SourceLine = body.Exception.Line
-
+// computeErrorFingerprint sets the error_fingerprint from SDK-provided flat fields.
+// The SDK sends exception_class, source_file, source_line as top-level fields.
+// The server only computes the fingerprint hash — no body parsing needed.
+func computeErrorFingerprint(e *chunk.Entry) {
 	if e.ExceptionClass != "" || e.SourceFile != "" {
 		e.ErrorFingerprint = computeFingerprint(e.ExceptionClass, e.SourceFile, e.SourceLine)
 	}

@@ -29,7 +29,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 
 	// --- Ingest mix of entry types ---
 	body := json.RawMessage(`{
-		"exception": {"class": "PaymentError", "file": "app/services/billing.rb", "line": 99},
+		"exception": {"backtrace": ["app/services/billing.rb:99"]},
 		"request": {"params": {"email": "user@example.com", "card": "4111111111111111"}},
 		"queries": [{"sql": "SELECT * FROM users WHERE id = 42", "duration_ms": 1.2}],
 		"timeline": [{"t": "db", "n": "User Load", "ms": 1.2, "at": 0}],
@@ -42,13 +42,16 @@ func TestIntegrationEndToEnd(t *testing.T) {
 		{Ts: now.UnixMilli(), Level: "debug", Service: "worker", Message: "Job started: ProcessOrderJob"},
 		{Ts: now.UnixMilli(), Level: "info", Service: "api", Env: "production", Message: "GET /api/users 200 45ms"},
 
-		// Error with body (triggers PII scrub + error extraction + log expansion)
+		// Error with body (triggers PII scrub + fingerprint computation + log expansion)
 		{Ts: now.UnixMilli(), Level: "error", Service: "api", Env: "production",
-			Message:   "PaymentError: card declined",
-			TraceID:   "trace-payment-123",
-			RequestID: "req-abc",
-			UserID:    "42",
-			Body:      body},
+			Message:        "PaymentError: card declined",
+			TraceID:        "trace-payment-123",
+			RequestID:      "req-abc",
+			UserID:         "42",
+			ExceptionClass: "PaymentError",
+			SourceFile:     "app/services/billing.rb",
+			SourceLine:     99,
+			Body:           body},
 
 		// Structured log
 		{Ts: now.UnixMilli(), Level: "warn", Service: "api", Env: "production",
