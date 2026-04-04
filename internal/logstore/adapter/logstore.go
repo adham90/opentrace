@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/adham90/opentrace/internal/logstore/chunk"
@@ -95,7 +96,21 @@ func (a *LogStore) Prune(ctx context.Context, olderThan time.Duration) (int64, e
 }
 
 func (a *LogStore) CountByLevel(ctx context.Context, params store.LogCountParams) (map[string]int, error) {
-	return a.engine.CountByLevel(params.Since, params.Until, params.Service)
+	counts, err := a.engine.CountByLevel(params.Since, params.Until, params.Service)
+	if err != nil {
+		return nil, err
+	}
+	// If a level filter is specified, return only that level's count
+	if params.Level != "" {
+		filtered := make(map[string]int)
+		for level, count := range counts {
+			if strings.EqualFold(level, params.Level) {
+				filtered[level] = count
+			}
+		}
+		return filtered, nil
+	}
+	return counts, nil
 }
 
 func (a *LogStore) CountByService(ctx context.Context, params store.LogCountParams) ([]store.ServiceLogCount, error) {

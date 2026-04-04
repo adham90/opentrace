@@ -33,11 +33,14 @@ func condJSON(metric, op string, value float64, service, endpoint string) json.R
 
 func runSeed() error {
 	ctx := context.Background()
-	deps, err := initApp(ctx)
+	deps, logEngine, err := initApp(ctx)
 	if err != nil {
 		return err
 	}
 	defer deps.DB.Close()
+	if logEngine != nil {
+		defer logEngine.Close()
+	}
 
 	slog.Info("seeding database (idempotent — clears old seed data)")
 

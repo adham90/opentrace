@@ -91,35 +91,35 @@ func main() {
 
 // initApp performs shared initialization: config, SQLite database,
 // migrations, stores, and connector registry.
-func initApp(ctx context.Context) (*server.Deps, error) {
+func initApp(ctx context.Context) (*server.Deps, *engine.Store, error) {
 	config.LoadEnvFile(".env")
 
 	cfg, err := config.Load()
 	if err != nil {
-		return nil, fmt.Errorf("loading config: %w", err)
+		return nil, nil, fmt.Errorf("loading config: %w", err)
 	}
 
 	// Ensure data directory exists
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
-		return nil, fmt.Errorf("creating data directory: %w", err)
+		return nil, nil, fmt.Errorf("creating data directory: %w", err)
 	}
 
 	// Open SQLite database
 	bunDB, err := dbstore.OpenSQLite(cfg.DatabasePath())
 	if err != nil {
-		return nil, fmt.Errorf("opening database: %w", err)
+		return nil, nil, fmt.Errorf("opening database: %w", err)
 	}
 
 	// Run migrations
 	if err := dbstore.RunSQLiteMigrations(bunDB); err != nil {
 		bunDB.Close()
-		return nil, fmt.Errorf("running migrations: %w", err)
+		return nil, nil, fmt.Errorf("running migrations: %w", err)
 	}
 
 	// Verify database is responsive before proceeding
 	if err := bunDB.DB.PingContext(ctx); err != nil {
 		bunDB.Close()
-		return nil, fmt.Errorf("database health check failed: %w", err)
+		return nil, nil, fmt.Errorf("database health check failed: %w", err)
 	}
 	slog.Info("database ready")
 
@@ -128,7 +128,7 @@ func initApp(ctx context.Context) (*server.Deps, error) {
 	logEngine, err := engine.NewStore(logDataDir, nil, logsingest.DefaultPIIConfig())
 	if err != nil {
 		bunDB.Close()
-		return nil, fmt.Errorf("init log store: %w", err)
+		return nil, nil, fmt.Errorf("init log store: %w", err)
 	}
 	logStore := logadapter.New(logEngine)
 
@@ -144,7 +144,7 @@ func initApp(ctx context.Context) (*server.Deps, error) {
 		Cfg:      cfg,
 		Stores:   stores,
 		Registry: registry,
-	}, nil
+	}, logEngine, nil
 }
 
 // runMCP starts the MCP stdio server. All log output goes to stderr to keep
@@ -153,12 +153,15 @@ func runMCP() error {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
 	ctx := context.Background()
-	deps, err := initApp(ctx)
+	deps, logEngine, err := initApp(ctx)
 	if err != nil {
 		return err
 	}
 	defer deps.DB.Close()
 	defer deps.Registry.CloseAll()
+	if logEngine != nil {
+		defer logEngine.Close()
+	}
 
 	watchMetrics := watcher.NewWatchMetrics(deps.LogStore)
 
@@ -206,11 +209,35 @@ func run() error {
 	ctx, cancelCtx := context.WithCancel(context.Background())
 	defer cancelCtx()
 
-	deps, err := initApp(ctx)
+	deps, logEngine, err := initApp(ctx)
 	if err != nil {
 		return err
 	}
 	defer deps.DB.Close()
+	if logEngine != nil {
+		defer logEngine.Close()
+	}
+
+	// Start hourly log seal goroutine
+	go func() {
+		// Calculate time until the next hour boundary
+		now := time.Now().UTC()
+		nextHour := now.Truncate(time.Hour).Add(time.Hour)
+		time.Sleep(time.Until(nextHour))
+
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := logEngine.SealCurrentHour(); err != nil {
+					slog.Error("hourly seal failed", "error", err)
+				}
+			}
+		}
+	}()
 
 	// Agent-first watch components
 	watchMetrics := watcher.NewWatchMetrics(deps.LogStore)

@@ -7,6 +7,9 @@ import (
 	"time"
 
 	dbstore "github.com/adham90/opentrace/internal/adapter/sqlite"
+	logadapter "github.com/adham90/opentrace/internal/logstore/adapter"
+	"github.com/adham90/opentrace/internal/logstore/engine"
+	logsingest "github.com/adham90/opentrace/internal/logstore/ingest"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -46,7 +49,14 @@ func setupWatchTestDB(t *testing.T) (store.WatchStore, store.LogStore) {
 	t.Cleanup(func() { bunDB.Close() })
 
 	watchStore := dbstore.NewWatchStore(bunDB)
-	logStore := dbstore.NewLogStore(bunDB)
+
+	logEngine, err := engine.NewStore(t.TempDir(), nil, logsingest.PIIConfig{})
+	if err != nil {
+		t.Fatalf("init log engine: %v", err)
+	}
+	t.Cleanup(func() { logEngine.Close() })
+	logStore := logadapter.New(logEngine)
+
 	return watchStore, logStore
 }
 

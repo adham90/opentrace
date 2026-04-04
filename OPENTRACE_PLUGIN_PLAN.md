@@ -6,20 +6,49 @@
 
 The Vercel plugin (`vercel/vercel-plugin`) proves that a **skill + hook** architecture can inject domain expertise into AI agents *at exactly the right moment*. OpenTrace should ship a similar plugin — but instead of teaching agents about a platform, it teaches them about **your production systems** by connecting live observability data (errors, traces, deploys, logs, performance) to the agent's coding workflow.
 
-**Key difference from Vercel's approach**: Vercel's plugin is a standalone repo that ships static knowledge via Node.js hooks. OpenTrace's plugin is **built into the same Go binary** — the hooks are `opentrace hook <event>` subcommands that read stdin, call the OpenTrace server API, and write JSON to stdout. No Node.js, no TypeScript, no npm — just the single `opentrace` binary the user already has.
+**Key difference from Vercel's approach**: Vercel's plugin is a standalone repo that ships static knowledge via Node.js hooks. OpenTrace's plugin is **built into the same Go binary** — the hooks are `opentrace hook <event>` subcommands that read stdin, call the OpenTrace server API, and write JSON to stdout. No Node.js, no TypeScript, no npm — just the single `opentrace` binary.
+
+**Two roles, one binary**: The `opentrace` binary serves two roles:
+1. **Server** (`opentrace serve`) — runs on your server, ingests telemetry, serves the web UI and MCP SSE endpoint
+2. **Client CLI** (`opentrace hook`, `opentrace plugin install`) — runs on the developer's machine, provides hooks and plugin management
+
+The connect script auto-downloads the client binary to `~/.opentrace/bin/opentrace` so developers don't need to install anything manually.
 
 ---
 
 ## 2. Architecture Overview
 
 ```
-opentrace/
-├── plugin/                              # Static plugin assets (embedded in binary)
+Developer's machine (client)              Server
+────────────────────────────              ──────
+~/.opentrace/
+├── bin/opentrace                         opentrace serve
+│   ├── hook session-start    ←stdin/stdout→  Claude Code hooks
+│   ├── hook pretooluse-*     ──HTTP/2s──→    GET /api/plugin/*
+│   ├── hook posttooluse-*    ──HTTP/2s──→    GET /api/plugin/*
+│   └── plugin install                        GET /api/plugin/bundle
+├── plugin/                              # Extracted static assets
+│   ├── skills/*/SKILL.md
+│   ├── agents/*.md
+│   ├── commands/*.md
+│   ├── opentrace.md
+│   └── generated/skill-manifest.json
+└── config.json                          # Server URL + auth token
+
+Project directory
+├── .mcp.json                            # MCP SSE connection → server
+├── .opentrace/plugin.json               # Per-project config (server URL + token)
+└── .claude/settings.local.json          # Hook registrations → ~/.opentrace/bin/opentrace
+```
+
+### Source Layout
+
+```
+opentrace/                               # Same repo — server + client in one binary
+├── plugin/                              # Static plugin assets (embedded via go:embed)
 │   ├── .plugin/plugin.json              # Claude Code plugin manifest
 │   ├── opentrace.md                     # Observability knowledge graph
 │   ├── opentrace-session.md             # Thin session context (injected at start)
-│   ├── hooks/
-│   │   └── hooks.json                   # Hook registry → all point to `opentrace hook <event>`
 │   ├── skills/
 │   │   ├── error-investigation/SKILL.md
 │   │   ├── trace-analysis/SKILL.md
@@ -42,40 +71,36 @@ opentrace/
 │   │   ├── deploy-check.md
 │   │   └── connect.md
 │   └── generated/
-│       └── skill-manifest.json          # Pre-compiled skill patterns (built at compile time)
+│       └── skill-manifest.json          # Pre-compiled skill patterns
 ├── internal/hook/                       # Go hook handlers (the core engine)
 │   ├── hook.go                          # Entry point: parse stdin, dispatch to handler
 │   ├── session_start.go                 # SessionStart: profiler + context injection
 │   ├── pretooluse.go                    # PreToolUse: skill injection + error context
 │   ├── posttooluse.go                   # PostToolUse: validation + deploy check
-│   ├── skill_matcher.go                 # Pattern matching engine (path, bash, import, prompt)
-│   ├── skill_matcher_test.go
+│   ├── skill_matcher.go                 # Pattern matching engine
 │   ├── dedup.go                         # Skill deduplication (atomic file claims)
-│   ├── dedup_test.go
 │   ├── client.go                        # HTTP client to OpenTrace server (2s timeout)
-│   ├── client_test.go
 │   ├── profiler.go                      # Project framework detection
-│   ├── profiler_test.go
 │   ├── manifest.go                      # Load/parse skill-manifest.json
-│   ├── manifest_test.go
-│   └── config.go                        # Read .opentrace/plugin.json
+│   └── config.go                        # Read .opentrace/plugin.json + ~/.opentrace/config.json
 ├── internal/api/plugin_endpoint.go      # Server: GET /api/plugin/{context,services,file-errors,deploy-status}
-├── internal/api/plugin_bundle.go        # Server: GET /api/plugin/bundle (tar.gz of plugin/)
+├── internal/api/plugin_bundle.go        # Server: GET /api/plugin/bundle (binary + assets download)
 └── cmd/opentrace/
-    ├── main.go                          # Updated: add "hook" subcommand
-    └── hook.go                          # CLI wiring: opentrace hook <event-name>
+    ├── main.go                          # "hook", "plugin" subcommands
+    ├── hook.go                          # CLI: opentrace hook <event-name>
+    └── plugin.go                        # CLI: opentrace plugin {install,update,doctor}
 ```
 
 ### Why Go Instead of Node.js
 
 Vercel uses TypeScript hooks because that's their ecosystem. OpenTrace is a Go project. Using Go for hooks means:
 
-1. **Zero extra dependencies** — no Node.js required on the user's machine
-2. **Single binary** — `opentrace` is already installed; hooks are just subcommands
+1. **Zero extra dependencies** — no Node.js required on the developer's machine
+2. **Single binary** — same `opentrace` binary runs the server and the client-side hooks
 3. **Fast startup** — Go binary launches in ~5ms vs ~100ms for Node.js
-4. **Shared code** — hooks reuse the same HTTP client, config parsing, and store interfaces as the rest of OpenTrace
-5. **Type safety** — same compile-time guarantees as the server code
-6. **Simple distribution** — `go build` produces everything; no `tsup`, no `package.json`, no build pipeline for hooks
+4. **Shared code** — hooks reuse the same HTTP client, config parsing, and types as the server
+5. **Cross-platform** — `go build` for linux/darwin/windows, same binary serves all roles
+6. **Simple distribution** — server serves its own binary at `/api/plugin/binary` for auto-download
 
 ---
 
@@ -86,27 +111,97 @@ Vercel uses TypeScript hooks because that's their ecosystem. OpenTrace is a Go p
 curl -s http://server:8080/connect | bash
 → Authenticates user
 → Writes .mcp.json with SSE endpoint + token
-→ Done
+→ Done (MCP works, but no hooks/skills)
 ```
 
-### New Flow (MCP + Plugin)
+### New Flow (MCP + Plugin + Binary)
 ```
 curl -s http://server:8080/connect | bash
-→ Authenticates user
-→ Writes .mcp.json with SSE endpoint + token
-→ Extracts plugin assets to ~/.opentrace/plugin/
-→ Writes .opentrace/plugin.json (server URL + token)
-→ Writes hooks into .claude/settings.local.json (pointing to `opentrace hook`)
-→ Done — plugin activates automatically on next Claude Code session
+→ Step 1: Authenticates user, gets MCP token
+→ Step 2: Writes .mcp.json (SSE endpoint + token) — MCP works immediately
+→ Step 3: Downloads opentrace binary to ~/.opentrace/bin/opentrace
+→ Step 4: Runs `opentrace plugin install --server <url> --token <token>`
+    → Extracts embedded plugin assets to ~/.opentrace/plugin/
+    → Writes ~/.opentrace/config.json (global: server URL + token)
+    → Writes .opentrace/plugin.json (per-project: server URL + token)
+    → Writes .claude/settings.local.json (hook registrations)
+    → Adds ~/.opentrace/bin to PATH hint
+→ Done — next Claude Code session has full MCP + hooks + skills
 ```
 
-The static plugin assets (skills, knowledge graph, manifests) are embedded in the `opentrace` binary via `//go:embed`. The connect script calls `opentrace plugin install` which extracts them and writes the hook configuration.
+### Binary Distribution
 
-### Alternative: Direct Hook Registration (No Plugin Directory)
+The OpenTrace server serves its own client binary at:
+```
+GET /api/plugin/binary?os=darwin&arch=arm64
+GET /api/plugin/binary?os=linux&arch=amd64
+GET /api/plugin/binary?os=darwin&arch=amd64
+```
 
-Since hooks are just `opentrace hook <event>` commands, we could skip the plugin directory entirely and write hooks directly into `.claude/settings.local.json`. Skills would be served from the binary or the server API. This is simpler but loses the ability for users to customize skills locally.
+The server cross-compiles all platform binaries at build time (via `go build` with GOOS/GOARCH) and embeds them, OR the server serves a download redirect to GitHub Releases. The connect script auto-detects OS/arch:
 
-**Recommended approach**: Extract static assets (skills, knowledge graph) to `~/.opentrace/plugin/` for customizability, but hooks always call the `opentrace` binary. The binary reads skills from the extracted directory, falling back to its embedded copy.
+```bash
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64) ARCH="amd64" ;;
+  aarch64|arm64) ARCH="arm64" ;;
+esac
+```
+
+### What Gets Installed Where
+
+```
+~/.opentrace/                     # Global (shared across all projects)
+├── bin/opentrace                 # The client binary (downloaded from server)
+├── config.json                   # Global config: default server URL + token
+└── plugin/                       # Extracted static assets
+    ├── skills/*/SKILL.md         # Observability skill guides
+    ├── agents/*.md               # Specialist agent definitions
+    ├── commands/*.md             # Slash command definitions
+    ├── opentrace.md              # Knowledge graph
+    └── generated/
+        └── skill-manifest.json   # Pre-compiled patterns
+
+<project>/.opentrace/             # Per-project (gitignored)
+└── plugin.json                   # Project config: server URL + token
+                                  # (can override global config.json)
+
+<project>/.claude/
+└── settings.local.json           # Hook registrations (gitignored)
+
+<project>/.mcp.json               # MCP SSE connection (gitignored)
+```
+
+### Upgrade Path
+
+```bash
+# User upgrades their server → binary version may drift
+# Option A: Re-run connect (re-downloads matching binary)
+curl -s http://server:8080/connect | bash
+
+# Option B: Explicit update
+~/.opentrace/bin/opentrace plugin update --server http://server:8080
+
+# Option C: Auto-update check (session-start hook checks version once/day)
+# If server version > binary version, inject a one-line notice:
+# "OpenTrace plugin update available. Run: opentrace plugin update"
+```
+
+### Users Without `curl | bash`
+
+For users who prefer manual setup:
+```bash
+# 1. Download binary directly
+curl -Lo ~/.opentrace/bin/opentrace http://server:8080/api/plugin/binary
+chmod +x ~/.opentrace/bin/opentrace
+
+# 2. Install plugin
+~/.opentrace/bin/opentrace plugin install --server http://server:8080 --token <token>
+
+# 3. MCP config is still written by connect, or manually:
+# Create .mcp.json with SSE endpoint
+```
 
 ---
 
@@ -594,13 +689,15 @@ The hooks call back to the OpenTrace server for live data. These are lightweight
 
 ### 8.1 New Endpoints
 
-| Endpoint | Method | Purpose | Hook Consumer |
-|----------|--------|---------|---------------|
-| `/api/plugin/context` | GET | Session context: error count, last deploy, health | `session-start` |
-| `/api/plugin/services` | GET | Match detected service names to known services | `session-start` |
-| `/api/plugin/file-errors` | GET | Errors linked to a specific source file | `pretooluse-error-context` |
-| `/api/plugin/deploy-status` | GET | Post-deploy regression indicators | `posttooluse-deploy-check` |
-| `/api/plugin/bundle` | GET | Download plugin assets as tar.gz | Connect script |
+| Endpoint | Method | Auth | Purpose | Consumer |
+|----------|--------|------|---------|----------|
+| `/api/plugin/binary` | GET | None | Download client binary (OS/arch auto-detect) | Connect script |
+| `/api/plugin/version` | GET | None | Server version + min client version | Client auto-update check |
+| `/api/plugin/context` | GET | Token | Session context: error count, last deploy, health | `session-start` hook |
+| `/api/plugin/services` | GET | Token | Match detected service names to known services | `session-start` hook |
+| `/api/plugin/file-errors` | GET | Token | Errors linked to a specific source file | `pretooluse-error-context` hook |
+| `/api/plugin/deploy-status` | GET | Token | Post-deploy regression indicators | `posttooluse-deploy-check` hook |
+| `/api/plugin/bundle` | GET | Token | Download plugin static assets as tar.gz | `opentrace plugin install` |
 
 ### 8.2 Authentication
 
@@ -848,37 +945,42 @@ func Cleanup(sessionID string) error
 31. Update `posttooluse-deploy-check` hook to call server API
 32. **Test**: Full loop — edit file with prod errors, verify live context injection
 
-### Phase 3: Automated Setup
-**Goal**: `curl -s http://server/connect | bash` sets up MCP + plugin in one step
+### Phase 3: Binary Distribution + Automated Setup
+**Goal**: `curl -s http://server/connect | bash` downloads binary, sets up MCP + plugin
 
-33. Create `internal/api/plugin_bundle.go` — serve plugin assets as tar.gz
-34. Add `opentrace plugin install` subcommand (extract embedded assets)
-35. Add `opentrace plugin update` subcommand (re-extract from binary)
-36. Add `opentrace plugin doctor` subcommand (verify health)
-37. Update `internal/routes/auth/connect_script.go` — add plugin setup steps
-38. **Test**: Fresh `curl | bash` end-to-end
+33. Add `internal/api/plugin_binary.go` — `GET /api/plugin/binary` (GitHub Releases redirect)
+34. Add `internal/api/plugin_version.go` — `GET /api/plugin/version` (server version info)
+35. Add `internal/api/plugin_bundle.go` — `GET /api/plugin/bundle` (plugin assets tar.gz)
+36. Add `cmd/opentrace/plugin.go` — `opentrace plugin install` (extract assets, write configs, register hooks)
+37. Add `opentrace plugin update` subcommand (re-download binary + re-extract assets)
+38. Add `opentrace plugin doctor` subcommand (verify binary version, server connectivity, hook registration)
+39. Update `internal/routes/auth/connect_script.go` — add binary download + plugin install steps
+40. Add GitHub Actions workflow for cross-platform binary builds + releases
+41. **Test**: Fresh `curl | bash` end-to-end on macOS + Linux
 
 ### Phase 4: Specialist Agents + Commands
 **Goal**: Domain-expert agents and quick-access slash commands
 
-39. Write `agents/incident-responder.md`
-40. Write `agents/performance-analyst.md`
-41. Write `agents/reliability-engineer.md`
-42. Write `commands/status.md`
-43. Write `commands/investigate.md`
-44. Write `commands/deploy-check.md`
-45. Write `commands/connect.md`
-46. **Test**: Verify agents and commands work in Claude Code
+42. Write `agents/incident-responder.md`
+43. Write `agents/performance-analyst.md`
+44. Write `agents/reliability-engineer.md`
+45. Write `commands/status.md`
+46. Write `commands/investigate.md`
+47. Write `commands/deploy-check.md`
+48. Write `commands/connect.md`
+49. **Test**: Verify agents and commands work in Claude Code
 
 ### Phase 5: Polish
 **Goal**: Production-ready quality
 
-47. Add `posttooluse-validate` skill validation rules to all skills
-48. Add `prompt-skill-inject` prompt signal scoring
-49. Add version compatibility check (hook binary vs server version)
-50. Performance profiling: ensure all hooks complete < 2s
-51. Add `--debug` flag to `opentrace hook` for troubleshooting
-52. **Test**: Full integration test suite
+50. Add `posttooluse-validate` skill validation rules to all skills
+51. Add `prompt-skill-inject` prompt signal scoring
+52. Add version compatibility check (hook binary vs server version, warn on drift)
+53. Add auto-update hint in `session-start` hook (check once/day, inject notice if outdated)
+54. Performance profiling: ensure all hooks complete < 2s
+55. Add `--debug` flag to `opentrace hook` for troubleshooting
+56. Add `OPENTRACE_PLUGIN_LOG_LEVEL=debug` env var for verbose hook output to stderr
+57. **Test**: Full integration test suite
 
 ---
 
@@ -900,14 +1002,48 @@ func Cleanup(sessionID string) error
 
 | | Node.js (Vercel approach) | Go (our approach) |
 |---|---|---|
-| **Extra dependency** | Node.js 18+ required | None — `opentrace` binary already installed |
+| **Extra dependency** | Node.js 18+ required | None — single binary |
 | **Startup time** | ~100ms | ~5ms |
 | **Build pipeline** | tsup + TypeScript compilation | Already part of `go build` |
 | **Code sharing** | Separate npm package | Same Go packages |
-| **Distribution** | Extract .mjs files + package.json | Single binary |
+| **Distribution** | Extract .mjs files + package.json | Single binary download |
 | **Type safety** | TypeScript (compile-time) | Go (compile-time) |
+| **Cross-platform** | Node.js version differences | One binary per OS/arch |
 
 **How**: `opentrace hook <event-name>` reads JSON from stdin, processes it, writes JSON to stdout. All hook logic lives in `internal/hook/`.
+
+### 11.3 Binary Distribution: Server Serves Its Own Client
+
+**Why**: The OpenTrace server and client hooks must be version-compatible. Having the server serve its own client binary guarantees this — when you upgrade the server, the next `opentrace plugin update` (or `curl | bash`) gets the matching binary.
+
+**How it works**:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Build time (CI / go build)                               │
+│                                                          │
+│  GOOS=darwin GOARCH=arm64 go build → opentrace-darwin-arm64  │
+│  GOOS=darwin GOARCH=amd64 go build → opentrace-darwin-amd64  │
+│  GOOS=linux  GOARCH=amd64 go build → opentrace-linux-amd64   │
+│  GOOS=linux  GOARCH=arm64 go build → opentrace-linux-arm64   │
+│                                                          │
+│  All binaries embedded into server binary via go:embed   │
+│  OR placed in a well-known directory the server reads    │
+└──────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────┐
+│ Runtime                                                  │
+│                                                          │
+│  GET /api/plugin/binary?os=darwin&arch=arm64              │
+│  → Server returns the matching pre-built binary          │
+│  → Content-Disposition: attachment; filename=opentrace   │
+│  → 10-20MB depending on platform                        │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Alternative: GitHub Releases redirect** — instead of embedding binaries in the server, the `/api/plugin/binary` endpoint can redirect to the GitHub Releases URL for the current version. This keeps the server binary small but requires internet access.
+
+**Recommended**: Start with **GitHub Releases redirect** (simpler, smaller server binary). Add embedded binaries later if users need air-gapped installs.
 
 ### 11.3 Skills Are Static Markdown, Data Is Live API
 
@@ -946,30 +1082,104 @@ Server-independent hooks (skill-inject, validate, prompt-inject) always work. Se
 The updated connect script (served at `GET /connect`) adds these steps after MCP token creation:
 
 ```bash
-# --- Plugin setup ---
-echo -n "  Installing plugin... "
+# --- Binary download ---
+BIN_DIR="$HOME/.opentrace/bin"
+BIN_PATH="$BIN_DIR/opentrace"
+mkdir -p "$BIN_DIR"
 
-# Check if opentrace binary is available
-if command -v opentrace &> /dev/null; then
-  opentrace plugin install --server "${SERVER}" --token "${TOKEN}" 2>/dev/null && {
+# Detect platform
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64)  ARCH="amd64" ;;
+  aarch64) ARCH="arm64" ;;
+  arm64)   ARCH="arm64" ;;
+esac
+
+# Download binary (skip if already installed and same version)
+NEED_DOWNLOAD=true
+if [ -x "$BIN_PATH" ]; then
+  LOCAL_VER=$("$BIN_PATH" version 2>/dev/null | awk '{print $2}' || echo "unknown")
+  REMOTE_VER=$(curl -sf "${SERVER}/api/plugin/version" | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || echo "")
+  if [ "$LOCAL_VER" = "$REMOTE_VER" ] && [ -n "$REMOTE_VER" ]; then
+    NEED_DOWNLOAD=false
+    echo "  ✓ opentrace binary up to date (${LOCAL_VER})"
+  fi
+fi
+
+if [ "$NEED_DOWNLOAD" = true ]; then
+  echo -n "  Downloading opentrace binary (${OS}/${ARCH})... "
+  HTTP_CODE=$(curl -sf -w '%{http_code}' \
+    "${SERVER}/api/plugin/binary?os=${OS}&arch=${ARCH}" \
+    -o "$BIN_PATH" 2>/dev/null) || HTTP_CODE="000"
+
+  if [ "$HTTP_CODE" = "200" ] && [ -s "$BIN_PATH" ]; then
+    chmod +x "$BIN_PATH"
     echo "ok"
-    echo "  ✓ Plugin installed"
-  } || echo "skipped (plugin install failed)"
-elif [ -f ./opentrace ]; then
-  ./opentrace plugin install --server "${SERVER}" --token "${TOKEN}" 2>/dev/null && {
+  else
+    rm -f "$BIN_PATH"
+    echo "skipped (binary not available for ${OS}/${ARCH})"
+    echo ""
+    echo "  MCP is connected. For plugin features (hooks, skills),"
+    echo "  build from source: go install github.com/adham90/opentrace/cmd/opentrace@latest"
+    echo ""
+  fi
+fi
+
+# --- Plugin install ---
+if [ -x "$BIN_PATH" ]; then
+  echo -n "  Installing plugin... "
+  "$BIN_PATH" plugin install \
+    --server "${SERVER}" \
+    --token "${TOKEN}" \
+    --project "$(pwd)" 2>/dev/null && {
     echo "ok"
-    echo "  ✓ Plugin installed"
-  } || echo "skipped (plugin install failed)"
-else
-  echo "skipped (opentrace binary not found — install it first)"
+  } || {
+    echo "failed"
+    echo "  MCP is connected. Plugin setup failed — run manually:"
+    echo "  $BIN_PATH plugin install --server ${SERVER} --token ${TOKEN}"
+  }
+
+  # Suggest adding to PATH if not already there
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) ;;
+    *)
+      echo ""
+      echo "  Add to your shell profile:"
+      echo "    export PATH=\"$BIN_DIR:\$PATH\""
+      echo ""
+      ;;
+  esac
 fi
 ```
 
-The `opentrace plugin install` command:
-1. Extracts embedded plugin assets to `~/.opentrace/plugin/`
-2. Writes `.opentrace/plugin.json` with server URL + token
-3. Writes hook configuration into `.claude/settings.local.json`
-4. Adds `.opentrace/` to `.gitignore`
+### What `opentrace plugin install` Does
+
+```
+opentrace plugin install --server <url> --token <token> [--project <path>]
+```
+
+1. **Extracts embedded plugin assets** to `~/.opentrace/plugin/`
+   - Skills, agents, commands, knowledge graph, skill-manifest.json
+   - Skips if already extracted and same version
+2. **Writes global config** at `~/.opentrace/config.json`
+   ```json
+   { "server_url": "http://server:8080", "token": "mcp_...", "version": "0.1.0" }
+   ```
+3. **Writes per-project config** at `<project>/.opentrace/plugin.json`
+   ```json
+   { "server_url": "http://server:8080", "token": "mcp_..." }
+   ```
+4. **Writes hook registrations** into `<project>/.claude/settings.local.json`
+   - All hooks point to `~/.opentrace/bin/opentrace hook <event>`
+5. **Updates `.gitignore`** — adds `.opentrace/` and `.mcp.json`
+6. **Prints summary**:
+   ```
+   ✓ Plugin assets extracted to ~/.opentrace/plugin/
+   ✓ Hooks registered in .claude/settings.local.json
+   ✓ Config written to .opentrace/plugin.json
+   Ready — restart Claude Code to activate.
+   ```
 
 ---
 
@@ -979,59 +1189,109 @@ The `opentrace plugin install` command:
 
 | File | Language | Purpose |
 |------|----------|---------|
-| `internal/hook/hook.go` | Go | Core types + entry point dispatch |
-| `internal/hook/config.go` | Go | Read .opentrace/plugin.json |
-| `internal/hook/session_start.go` | Go | SessionStart handler |
-| `internal/hook/pretooluse.go` | Go | PreToolUse handlers (skill-inject + error-context) |
-| `internal/hook/posttooluse.go` | Go | PostToolUse handlers (validate + deploy-check) |
-| `internal/hook/prompt.go` | Go | UserPromptSubmit handler |
-| `internal/hook/skill_matcher.go` | Go | Pattern matching engine |
+| **Hook engine** | | |
+| `internal/hook/hook.go` | Go | Core types, stdin parsing, handler dispatch |
+| `internal/hook/config.go` | Go | Read .opentrace/plugin.json + ~/.opentrace/config.json |
+| `internal/hook/session_start.go` | Go | SessionStart: profiler + context injection |
+| `internal/hook/pretooluse.go` | Go | PreToolUse: skill-inject + error-context |
+| `internal/hook/posttooluse.go` | Go | PostToolUse: validate + deploy-check |
+| `internal/hook/prompt.go` | Go | UserPromptSubmit: prompt-skill-inject |
+| `internal/hook/skill_matcher.go` | Go | Pattern matching (path, bash, import, prompt signals) |
 | `internal/hook/skill_matcher_test.go` | Go | Matcher tests |
-| `internal/hook/dedup.go` | Go | Atomic skill deduplication |
+| `internal/hook/dedup.go` | Go | Atomic file-based skill deduplication |
 | `internal/hook/dedup_test.go` | Go | Dedup tests |
-| `internal/hook/client.go` | Go | HTTP client to OpenTrace server |
+| `internal/hook/client.go` | Go | HTTP client to OpenTrace server (2s timeout) |
 | `internal/hook/client_test.go` | Go | Client tests |
-| `internal/hook/profiler.go` | Go | Project framework detection |
+| `internal/hook/profiler.go` | Go | Project framework detection (markers + deps) |
 | `internal/hook/profiler_test.go` | Go | Profiler tests |
 | `internal/hook/manifest.go` | Go | Load/parse skill-manifest.json |
 | `internal/hook/manifest_test.go` | Go | Manifest tests |
-| `cmd/opentrace/hook.go` | Go | CLI wiring for `opentrace hook` |
-| `cmd/opentrace/plugin.go` | Go | CLI wiring for `opentrace plugin` |
-| `internal/api/plugin_endpoint.go` | Go | Plugin API endpoints |
-| `internal/api/plugin_bundle.go` | Go | Serve plugin assets as tar.gz |
+| **CLI commands** | | |
+| `cmd/opentrace/hook.go` | Go | `opentrace hook <event>` — dispatch to internal/hook |
+| `cmd/opentrace/plugin.go` | Go | `opentrace plugin {install,update,doctor}` |
+| **Server endpoints** | | |
+| `internal/api/plugin_endpoint.go` | Go | GET /api/plugin/{context,services,file-errors,deploy-status} |
+| `internal/api/plugin_binary.go` | Go | GET /api/plugin/binary — serve/redirect client binary |
+| `internal/api/plugin_version.go` | Go | GET /api/plugin/version — server version info |
+| `internal/api/plugin_bundle.go` | Go | GET /api/plugin/bundle — plugin assets tar.gz |
+| **Plugin static assets** | | |
 | `plugin/.plugin/plugin.json` | JSON | Claude Code plugin manifest |
 | `plugin/opentrace.md` | Markdown | Observability knowledge graph |
 | `plugin/opentrace-session.md` | Markdown | Thin session context template |
 | `plugin/skills/*/SKILL.md` (×11) | Markdown | Skill definitions |
-| `plugin/agents/*.md` (×3) | Markdown | Specialist agents |
-| `plugin/commands/*.md` (×4) | Markdown | Slash commands |
-| `plugin/generated/skill-manifest.json` | JSON | Pre-compiled skill patterns |
+| `plugin/agents/*.md` (×3) | Markdown | Specialist agent definitions |
+| `plugin/commands/*.md` (×4) | Markdown | Slash command definitions |
+| `plugin/generated/skill-manifest.json` | JSON | Pre-compiled skill matching patterns |
+| **CI/CD** | | |
+| `.github/workflows/release.yml` | YAML | Cross-platform binary builds + GitHub Releases |
 
 ### Files to Modify
 
 | File | Change |
 |------|--------|
 | `cmd/opentrace/main.go` | Add "hook" and "plugin" subcommands |
-| `internal/api/server.go` | Mount plugin API endpoints |
-| `internal/routes/auth/connect_script.go` | Add plugin setup to connect script |
+| `internal/api/server.go` | Mount `/api/plugin/*` endpoints |
+| `internal/routes/auth/connect_script.go` | Add binary download + plugin install steps |
+| `internal/version/version.go` | Expose version for binary compatibility checks |
 
 ---
 
 ## 14. Success Metrics
 
-1. **Zero-config activation**: `curl | bash` + `opentrace plugin install` sets up everything
-2. **Zero extra dependencies**: No Node.js, no npm, no TypeScript — just the `opentrace` binary
+1. **One command setup**: `curl -s http://server/connect | bash` downloads binary, connects MCP, installs plugin — done
+2. **Zero extra dependencies**: No Node.js, no npm, no Python — just the auto-downloaded `opentrace` binary
 3. **Sub-2s hook latency**: All hooks complete within timeout budgets (Go binary startup ~5ms helps)
 4. **Relevant injection rate**: > 80% of injected skills are relevant to what the user is doing
 5. **Graceful degradation**: Plugin works with static skills even when server is unreachable
 6. **No noise**: Skills inject only when pattern-matched, not on every tool call
+7. **Seamless upgrades**: Server upgrade → `opentrace plugin update` → matching client binary + assets
 
 ---
 
-## 15. Open Questions
+## 15. End-to-End User Journey
+
+```
+1. User deploys OpenTrace server
+   $ docker run -p 8080:8080 opentrace/opentrace
+
+2. User connects from their project
+   $ curl -s http://server:8080/connect | bash
+     → Prompts for email/password
+     → Creates .mcp.json (MCP works immediately)
+     → Downloads ~/.opentrace/bin/opentrace (client binary)
+     → Runs `opentrace plugin install` (extracts skills, registers hooks)
+     → Prints "Done. Restart Claude Code."
+
+3. User opens Claude Code
+   → SessionStart hook fires
+     → Detects: "This is a Rails app, likely service: web-api"
+     → Calls server: "web-api has 3 errors, last deploy 2h ago"
+     → Injects context into Claude's session
+
+4. User asks Claude: "Fix the payment processing bug"
+   → Claude reads app/controllers/payments_controller.rb
+     → PreToolUse hook fires
+       → Matches: error-investigation skill (source file edit)
+       → Calls server: "This file has 2 prod errors (NoMethodError, TimeoutError)"
+       → Injects skill + error data
+     → Claude now knows about production errors AND the investigation workflow
+
+5. User says "ship it" → Claude runs git push
+   → PostToolUse hook fires
+     → Detects: deploy command
+     → Calls server: "Error rate +15%, 2 new error groups"
+     → Injects warning: "Consider checking opentrace deploys(action:'impact')"
+```
+
+---
+
+## 16. Open Questions
 
 1. **Cursor support**: Should we add `.cursor-plugin/` manifest? Cursor has a different plugin API but similar hook model.
 2. **Skill customization**: Should users be able to add custom skills (e.g., company-specific runbooks) in `~/.opentrace/plugin/skills/` that merge with built-in skills?
-3. **Multi-server**: Can a single plugin connect to multiple OpenTrace instances (e.g., staging + production)?
-4. **Telemetry**: Should hooks report usage metrics back to the OpenTrace server for plugin improvement analytics?
+3. **Multi-server**: Can per-project `.opentrace/plugin.json` point to different servers (staging vs production)?
+4. **Telemetry**: Should hooks report usage metrics back to the OpenTrace server for plugin analytics?
 5. **Skill manifest generation**: Should this be a `go generate` step, a build-time script, or embedded as a Go map?
+6. **Binary size**: Client binary is ~20MB. Should we build a stripped-down "client-only" binary (no server, no SQLite) for faster downloads? Or is the full binary fine since it's a one-time download?
+7. **Windows support**: Should the connect script support PowerShell? Or is WSL sufficient for Windows users?
+8. **Air-gapped installs**: Should the server embed client binaries (adds ~60MB) for environments without internet?

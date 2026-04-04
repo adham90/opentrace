@@ -14,6 +14,9 @@ import (
 	"github.com/adham90/opentrace/internal/connector"
 	dbstore "github.com/adham90/opentrace/internal/adapter/sqlite"
 	"github.com/adham90/opentrace/internal/api"
+	logadapter "github.com/adham90/opentrace/internal/logstore/adapter"
+	"github.com/adham90/opentrace/internal/logstore/engine"
+	logsingest "github.com/adham90/opentrace/internal/logstore/ingest"
 )
 
 func TestAppStartup(t *testing.T) {
@@ -28,7 +31,9 @@ func TestAppStartup(t *testing.T) {
 	}
 
 	dsStore := dbstore.NewDataSourceStore(bunDB)
-	logStore := dbstore.NewLogStore(bunDB)
+	logEngine, _ := engine.NewStore(t.TempDir(), nil, logsingest.PIIConfig{})
+	t.Cleanup(func() { logEngine.Close() })
+	logStore := logadapter.New(logEngine)
 	registry := connector.NewRegistry()
 	srv := api.NewServer(dsStore, logStore, registry, nil)
 
@@ -98,7 +103,9 @@ func TestUnixSocketListener(t *testing.T) {
 	}
 
 	dsStore := dbstore.NewDataSourceStore(bunDB)
-	logStore := dbstore.NewLogStore(bunDB)
+	logEngine, _ := engine.NewStore(t.TempDir(), nil, logsingest.PIIConfig{})
+	t.Cleanup(func() { logEngine.Close() })
+	logStore := logadapter.New(logEngine)
 	registry := connector.NewRegistry()
 	srv := api.NewServer(dsStore, logStore, registry, nil)
 
@@ -156,7 +163,9 @@ func TestUnixSocketListener_InvalidJSON(t *testing.T) {
 	}
 
 	dsStore := dbstore.NewDataSourceStore(bunDB)
-	logStore := dbstore.NewLogStore(bunDB)
+	logEngine, _ := engine.NewStore(t.TempDir(), nil, logsingest.PIIConfig{})
+	t.Cleanup(func() { logEngine.Close() })
+	logStore := logadapter.New(logEngine)
 	registry := connector.NewRegistry()
 	srv := api.NewServer(dsStore, logStore, registry, nil)
 
