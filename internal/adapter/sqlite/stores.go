@@ -7,10 +7,11 @@ import (
 )
 
 // NewStores creates all store implementations backed by the given SQLite database.
-func NewStores(db *bun.DB) store.Stores {
+// logStore is the segmented log store adapter (passed in from main, not created here).
+func NewStores(db *bun.DB, logStore store.LogStore) store.Stores {
 	return store.Stores{
 		DSStore:          NewDataSourceStore(db),
-		LogStore:         NewLogStore(db),
+		LogStore:         logStore,
 		ServerStore:      NewServerStore(db),
 		MetricStore:      NewMetricStore(db),
 		UserStore:        NewUserStore(db),

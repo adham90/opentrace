@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -25,6 +26,9 @@ import (
 	"github.com/adham90/opentrace/internal/jobs"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	dbstore "github.com/adham90/opentrace/internal/adapter/sqlite"
+	logadapter "github.com/adham90/opentrace/internal/logstore/adapter"
+	"github.com/adham90/opentrace/internal/logstore/engine"
+	logsingest "github.com/adham90/opentrace/internal/logstore/ingest"
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
 	"github.com/adham90/opentrace/internal/version"
@@ -119,8 +123,17 @@ func initApp(ctx context.Context) (*server.Deps, error) {
 	}
 	slog.Info("database ready")
 
+	// Initialize segmented log store engine
+	logDataDir := filepath.Join(cfg.DataDir, "logs")
+	logEngine, err := engine.NewStore(logDataDir, nil, logsingest.DefaultPIIConfig())
+	if err != nil {
+		bunDB.Close()
+		return nil, fmt.Errorf("init log store: %w", err)
+	}
+	logStore := logadapter.New(logEngine)
+
 	// Initialize all stores from a single constructor
-	stores := dbstore.NewStores(bunDB)
+	stores := dbstore.NewStores(bunDB, logStore)
 
 	// Initialize registry and reconnect previously-configured connectors
 	registry := connector.NewRegistry()

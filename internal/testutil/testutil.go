@@ -10,6 +10,9 @@ import (
 	"github.com/uptrace/bun"
 
 	dbstore "github.com/adham90/opentrace/internal/adapter/sqlite"
+	logadapter "github.com/adham90/opentrace/internal/logstore/adapter"
+	"github.com/adham90/opentrace/internal/logstore/engine"
+	logsingest "github.com/adham90/opentrace/internal/logstore/ingest"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -40,10 +43,19 @@ func SetupTestDB(t *testing.T) *sql.DB {
 	return SetupTestBunDB(t).DB
 }
 
-// SetupTestStores creates a full Stores instance backed by an in-memory SQLite database.
-// Useful when tests need multiple stores wired together.
+// SetupTestStores creates a full Stores instance backed by an in-memory SQLite database
+// and a temp-directory segmented log store.
 func SetupTestStores(t *testing.T) (*sql.DB, store.Stores) {
 	t.Helper()
 	bunDB := SetupTestBunDB(t)
-	return bunDB.DB, dbstore.NewStores(bunDB)
+
+	logDir := t.TempDir()
+	logEngine, err := engine.NewStore(logDir, nil, logsingest.PIIConfig{})
+	if err != nil {
+		t.Fatalf("init test log store: %v", err)
+	}
+	t.Cleanup(func() { logEngine.Close() })
+	logStore := logadapter.New(logEngine)
+
+	return bunDB.DB, dbstore.NewStores(bunDB, logStore)
 }

@@ -70,7 +70,7 @@ func runInit() error {
 	}
 
 	// Store API key in settings
-	stores := dbstore.NewStores(bunDB)
+	stores := dbstore.NewStores(bunDB, nil) // nil LogStore — only SettingsStore needed here
 	ctx := context.Background()
 	if err := stores.SettingsStore.SetAPIKey(ctx, apiKey); err != nil {
 		return fmt.Errorf("storing API key: %w", err)
