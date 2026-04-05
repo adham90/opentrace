@@ -2,11 +2,11 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
+	"image/color"
 	"strings"
 	"time"
-
-	"image/color"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -796,11 +796,17 @@ func (m Model) fmtLogDetail(e apiclient.LogEntry, maxW int) []string {
 		lines = append(lines, indent+styleDim.Render("loading request details..."))
 	}
 
-	// Metadata
+	// Metadata — render complex values as JSON, skip internal fields
 	if len(e.Metadata) > 0 {
 		for k, val := range e.Metadata {
-			s := fmt.Sprintf("%v", val)
-			lines = append(lines, indent+d.Render(k+" ")+v.Render(truncate(s, maxW-len(k)-10)))
+			// Skip fields already shown above
+			if k == "logs" || k == "timeline" || k == "request_summary" {
+				continue
+			}
+			s := fmtMetaValue(val)
+			if s != "" {
+				lines = append(lines, indent+d.Render(k+" ")+v.Render(truncate(s, maxW-len(k)-10)))
+			}
 		}
 	}
 
@@ -1139,6 +1145,38 @@ func oneLine(s string) string {
 		s = strings.ReplaceAll(s, "  ", " ")
 	}
 	return strings.TrimSpace(s)
+}
+
+// fmtMetaValue renders a metadata value as a readable string.
+// Simple values become strings, complex values become compact JSON.
+func fmtMetaValue(val any) string {
+	switch v := val.(type) {
+	case string:
+		return oneLine(v)
+	case float64:
+		if v == float64(int64(v)) {
+			return fmt.Sprintf("%d", int64(v))
+		}
+		return fmt.Sprintf("%.2f", v)
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	case nil:
+		return ""
+	default:
+		// For maps, slices, etc. — compact JSON
+		b, err := jsonMarshal(v)
+		if err != nil {
+			return fmt.Sprintf("%v", v)
+		}
+		return oneLine(string(b))
+	}
+}
+
+func jsonMarshal(v any) ([]byte, error) {
+	return json.Marshal(v)
 }
 
 func min(a, b int) int {
