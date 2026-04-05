@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"image/color"
+
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -45,7 +47,6 @@ type Model struct {
 	view         viewMode
 	focusedPanel panel
 
-	// Data
 	status    *apiclient.StatusResponse
 	logs      []apiclient.LogEntry
 	logCursor int64
@@ -53,22 +54,18 @@ type Model struct {
 	watches   *apiclient.WatchesResponse
 	stats     *apiclient.IngestionStatsResponse
 
-	// Log list
-	logIndex    int  // selected log
-	logOffset   int  // first visible log
-	logExpanded bool // inline detail expanded
+	logIndex    int
+	logOffset   int
+	logExpanded bool
 
-	// Filters
 	levelFilter   string
 	serviceFilter string
 	searchFilter  string
 	searchActive  bool
 
-	// List views
 	errorIndex int
 	watchIndex int
 
-	// State
 	ready    bool
 	err      error
 	quitting bool
@@ -79,15 +76,14 @@ func New(cfg Config) Model {
 		cfg.RefreshRate = 5 * time.Second
 	}
 	return Model{
-		config:       cfg,
-		view:         viewDashboard,
-		focusedPanel: panelLogs,
-		levelFilter:  cfg.Level,
+		config:        cfg,
+		view:          viewDashboard,
+		focusedPanel:  panelLogs,
+		levelFilter:   cfg.Level,
 		serviceFilter: cfg.Service,
 	}
 }
 
-// Messages
 type (
 	statusMsg  *apiclient.StatusResponse
 	logTailMsg *apiclient.LogTailResponse
@@ -114,7 +110,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
-		// Search input mode
 		if m.searchActive {
 			switch msg.String() {
 			case "enter":
@@ -139,7 +134,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// View-specific keys first (so j/k work in any list view)
+		// View-specific navigation FIRST
 		switch m.view {
 		case viewDashboard:
 			if m.focusedPanel == panelLogs {
@@ -175,7 +170,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 			}
-
 		case viewErrors:
 			switch msg.String() {
 			case "j", "down":
@@ -189,7 +183,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-
 		case viewWatches:
 			switch msg.String() {
 			case "j", "down":
@@ -257,16 +250,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.fetchLogTail
 			}
 		}
-
 		return m, nil
 
 	case statusMsg:
 		m.status = msg
 		return m, nil
-
 	case logTailMsg:
 		if msg != nil && len(msg.Logs) > 0 {
-			wasAtBottom := len(m.logs) == 0 || m.logIndex >= len(m.logs)-1
+			atBottom := len(m.logs) == 0 || m.logIndex >= len(m.logs)-1
 			m.logs = append(m.logs, msg.Logs...)
 			if len(m.logs) > 1000 {
 				m.logs = m.logs[len(m.logs)-1000:]
@@ -274,13 +265,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Cursor > 0 {
 				m.logCursor = msg.Cursor
 			}
-			if wasAtBottom {
+			if atBottom {
 				m.logIndex = len(m.logs) - 1
 				m.ensureLogVisible()
 			}
 		}
 		return m, nil
-
 	case errorsMsg:
 		m.errors = msg
 		return m, nil
@@ -311,7 +301,7 @@ func (m *Model) resetLogs() {
 }
 
 func (m *Model) ensureLogVisible() {
-	h := m.logVisibleLines()
+	h := m.logVisibleH()
 	if m.logIndex < m.logOffset {
 		m.logOffset = m.logIndex
 	}
@@ -323,11 +313,10 @@ func (m *Model) ensureLogVisible() {
 	}
 }
 
-func (m Model) logVisibleLines() int {
-	// header(1) + stats(~8) + log title(1) + log border(2) + statusbar(1) = 13
-	h := m.height - 13
+func (m Model) logVisibleH() int {
+	h := m.height - 14
 	if h < 3 {
-		h = 3
+		return 3
 	}
 	return h
 }
@@ -363,224 +352,268 @@ func (m *Model) cycleServiceFilter() {
 	m.serviceFilter = ""
 }
 
-// ──────────────────────────────────────────────────────────
-// View
-// ──────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// VIEW
+// ═══════════════════════════════════════════════════════════
 
 func (m Model) View() tea.View {
 	if m.quitting {
 		return tea.NewView("")
 	}
 	if !m.ready {
-		v := tea.NewView("\n  " + styleTitle.Render("OpenTrace") + " " + styleLabel.Render("connecting..."))
+		v := tea.NewView("\n " + lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("◆ OpenTrace") +
+			styleDim.Render(" connecting..."))
 		v.AltScreen = true
 		return v
 	}
+
 	var s string
 	switch m.view {
 	case viewDashboard:
-		s = m.viewDashboard()
+		s = m.dashView()
 	case viewErrors:
-		s = m.viewErrors()
+		s = m.errView()
 	case viewWatches:
-		s = m.viewWatches()
+		s = m.watchView()
 	case viewHelp:
-		s = m.viewHelp()
+		s = m.helpView()
 	}
+
 	v := tea.NewView(s)
 	v.AltScreen = true
 	return v
 }
 
-// ──────────────────────────────────────────────────────────
-// Dashboard
-// ──────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// DASHBOARD
+// ═══════════════════════════════════════════════════════════
 
-func (m Model) viewDashboard() string {
-	var parts []string
-	parts = append(parts, m.renderHeader())
-	parts = append(parts, m.renderStats())
-	parts = append(parts, m.renderLogPanel())
-	parts = append(parts, m.renderStatusBar())
-	return strings.Join(parts, "")
+func (m Model) dashView() string {
+	var b strings.Builder
+	b.WriteString(m.header())
+	b.WriteString(m.metricsRow())
+	b.WriteString(m.logList())
+	b.WriteString(m.hotkeys())
+	return b.String()
 }
 
-func (m Model) renderHeader() string {
+func (m Model) header() string {
 	ver := "dev"
-	if m.status != nil && m.status.Version != "" {
-		ver = m.status.Version
+	uptime := ""
+	if m.status != nil {
+		if m.status.Version != "" {
+			ver = m.status.Version
+		}
+		uptime = fmtUptime(m.status.UptimeSeconds)
 	}
 
-	left := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#A78BFA")).
-		Render(" ◆ OpenTrace v" + ver)
+	// Left: branding
+	brand := lipgloss.NewStyle().Bold(true).Foreground(colorAccent).Render("◆ OpenTrace")
+	version := styleDim.Render(" v" + ver)
 
-	var rightParts []string
+	// Center: status pills
+	var pills []string
+	if m.status != nil && m.status.Database != nil {
+		if m.status.Database.Healthy {
+			pills = append(pills, pill("DB", "OK", colorGreen))
+		} else {
+			pills = append(pills, pill("DB", "DOWN", colorRed))
+		}
+	}
+	if m.status != nil && m.status.Servers != nil && m.status.Servers.Total > 0 {
+		s := m.status.Servers
+		c := colorGreen
+		if s.Offline > 0 {
+			c = colorYellow
+		}
+		if s.Online == 0 {
+			c = colorRed
+		}
+		pills = append(pills, pill("SRV", fmt.Sprintf("%d/%d", s.Online, s.Total), c))
+	}
+	if m.status != nil && m.status.Connectors != nil && m.status.Connectors.Total > 0 {
+		pills = append(pills, pill("CONN", fmt.Sprintf("%d", m.status.Connectors.Connected), colorCyan))
+	}
+
+	// Right: uptime + filters
+	var right []string
+	if uptime != "" {
+		right = append(right, styleDim.Render("up "+uptime))
+	}
 	if m.levelFilter != "" {
-		rightParts = append(rightParts, styleLevelWarn.Render("▪ "+strings.ToUpper(m.levelFilter)))
+		right = append(right, lipgloss.NewStyle().Foreground(colorYellow).Render("◉ "+strings.ToUpper(m.levelFilter)))
 	}
 	if m.serviceFilter != "" {
-		rightParts = append(rightParts, lipgloss.NewStyle().Foreground(colorSecondary).Render("▪ "+m.serviceFilter))
+		right = append(right, lipgloss.NewStyle().Foreground(colorCyan).Render("◉ "+m.serviceFilter))
 	}
-	if m.err != nil {
-		rightParts = append(rightParts, styleLevelError.Render("⚠ error"))
-	}
-	right := strings.Join(rightParts, "  ")
 
-	mid := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 1
-	if mid < 0 {
-		mid = 0
+	left := brand + version
+	center := strings.Join(pills, " ")
+	rightStr := strings.Join(right, "  ")
+
+	gap1 := (m.width/2 - lipgloss.Width(left) - lipgloss.Width(center)/2)
+	if gap1 < 1 {
+		gap1 = 1
 	}
+	gap2 := m.width - lipgloss.Width(left) - gap1 - lipgloss.Width(center) - lipgloss.Width(rightStr) - 1
+	if gap2 < 1 {
+		gap2 = 1
+	}
+
 	return lipgloss.NewStyle().
 		Width(m.width).
-		Background(lipgloss.Color("#1a1625")).
-		Render(left + strings.Repeat(" ", mid) + right) + "\n"
+		Background(colorBg).
+		Render(left + strings.Repeat(" ", gap1) + center + strings.Repeat(" ", gap2) + rightStr) + "\n"
 }
 
-func (m Model) renderStats() string {
+func (m Model) metricsRow() string {
 	colW := (m.width - 8) / 3
-	if colW < 15 {
-		colW = 15
+	if colW < 16 {
+		colW = 16
 	}
 
-	c1 := m.colIngestion(colW)
-	c2 := m.colErrors(colW)
-	c3 := m.colWatches(colW)
+	c1 := m.metricIngestion(colW)
+	c2 := m.metricErrors(colW)
+	c3 := m.metricWatches(colW)
 
 	inner := lipgloss.JoinHorizontal(lipgloss.Top, c1, c2, c3)
-
-	border := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#2d2640")).
-		Padding(0, 1).
-		Width(m.width - 2)
-	if m.focusedPanel == panelStats {
-		border = border.BorderForeground(lipgloss.Color("#7c3aed"))
-	}
-
-	return border.Render(inner) + "\n"
+	return panelStyle(m.focusedPanel == panelStats).Width(m.width - 2).Render(inner) + "\n"
 }
 
-func (m Model) colIngestion(w int) string {
+func (m Model) metricIngestion(w int) string {
 	var lines []string
-	lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#60a5fa")).Render("INGESTION"))
+	lines = append(lines, sectionTitle("INGESTION"))
+
 	if m.status != nil && m.status.Logs != nil {
-		lines = append(lines, styleValue.Render(formatNum(m.status.Logs.LastHour))+" "+styleLabel.Render("logs/hr"))
+		n := m.status.Logs.LastHour
+		lines = append(lines, bigNumber(formatNum(n), "logs/hr"))
+		// Rate bar (normalized to an assumed max of 2000/hr)
+		rate := float64(n) / 2000.0
+		if rate > 1 {
+			rate = 1
+		}
+		lines = append(lines, miniBar(rate, w-4, "#22d3ee"))
 	} else {
-		lines = append(lines, styleLabel.Render("—"))
+		lines = append(lines, styleDim.Render("  No data"))
 	}
+
 	if m.stats != nil && len(m.stats.Buckets) > 0 {
-		lines = append(lines, m.sparkline(m.stats.Buckets))
+		lines = append(lines, m.sparkline(m.stats.Buckets, w-4))
 	}
+
 	return lipgloss.NewStyle().Width(w).Padding(0, 1).Render(strings.Join(lines, "\n"))
 }
 
-func (m Model) colErrors(w int) string {
+func (m Model) metricErrors(w int) string {
 	var lines []string
-	lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#60a5fa")).Render("ERRORS"))
+	lines = append(lines, sectionTitle("ERRORS"))
+
 	if m.status != nil && m.status.Logs != nil {
 		n := m.status.Logs.ErrorsLastHour
 		if n > 0 {
-			lines = append(lines, styleLevelError.Render(fmt.Sprintf("%d", n))+" "+styleLabel.Render("last 1h"))
+			lines = append(lines, bigNumber(fmt.Sprintf("%d", n), "last 1h"))
 		} else {
-			lines = append(lines, styleLevelInfo.Render("0")+" "+styleLabel.Render("errors"))
+			lines = append(lines, lipgloss.NewStyle().Foreground(colorGreen).Render("  ✓")+" "+styleDim.Render("clean"))
 		}
 	}
 	if m.status != nil && m.status.ErrorGroups != nil && m.status.ErrorGroups.Unresolved > 0 {
-		lines = append(lines, styleLevelWarn.Render(fmt.Sprintf("%d", m.status.ErrorGroups.Unresolved))+" "+styleLabel.Render("unresolved"))
+		u := m.status.ErrorGroups.Unresolved
+		lines = append(lines, lipgloss.NewStyle().Foreground(colorOrange).Render(fmt.Sprintf("  %d", u))+" "+styleDim.Render("unresolved"))
 	}
+
+	// Top 3 error classes
 	if m.errors != nil {
 		for i, eg := range m.errors.ErrorGroups {
 			if i >= 3 {
 				break
 			}
-			lines = append(lines, fmt.Sprintf(" %s %s",
-				styleLevelError.Render(fmt.Sprintf("%3d", eg.OccurrenceCount)),
-				styleLabel.Render(truncate(eg.ExceptionClass, w-7))))
+			cnt := lipgloss.NewStyle().Foreground(colorRed).Render(fmt.Sprintf(" %3d", eg.OccurrenceCount))
+			cls := styleDim.Render(" " + truncate(eg.ExceptionClass, w-8))
+			lines = append(lines, cnt+cls)
 		}
 	}
+
 	return lipgloss.NewStyle().Width(w).Padding(0, 1).Render(strings.Join(lines, "\n"))
 }
 
-func (m Model) colWatches(w int) string {
+func (m Model) metricWatches(w int) string {
 	var lines []string
-	lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#60a5fa")).Render("WATCHES"))
+	lines = append(lines, sectionTitle("WATCHES"))
+
 	if m.status != nil && m.status.Watches != nil {
 		ws := m.status.Watches
-		line := styleValue.Render(fmt.Sprintf("%d", ws.Active)) + " " + styleLabel.Render("active")
+		lines = append(lines, bigNumber(fmt.Sprintf("%d", ws.Active), "active"))
 		if ws.Triggered > 0 {
-			line += "  " + styleLevelError.Render(fmt.Sprintf("%d triggered", ws.Triggered))
+			lines = append(lines, lipgloss.NewStyle().Foreground(colorRed).Bold(true).
+				Render(fmt.Sprintf("  ▲ %d triggered", ws.Triggered)))
 		}
-		lines = append(lines, line)
 	} else {
-		lines = append(lines, styleLabel.Render("—"))
+		lines = append(lines, styleDim.Render("  No watches"))
 	}
+
 	if m.status != nil && m.status.WatchAlerts != nil && m.status.WatchAlerts.Pending > 0 {
-		lines = append(lines, styleLevelWarn.Render(fmt.Sprintf("⚠ %d pending", m.status.WatchAlerts.Pending)))
+		lines = append(lines, lipgloss.NewStyle().Foreground(colorYellow).
+			Render(fmt.Sprintf("  ⚠ %d pending", m.status.WatchAlerts.Pending)))
 	}
-	if m.status != nil && m.status.Servers != nil && m.status.Servers.Total > 0 {
-		s := m.status.Servers
-		lines = append(lines, styleLabel.Render(fmt.Sprintf("%d/%d servers up", s.Online, s.Total)))
+
+	if m.status != nil && m.status.HealthChecks != nil && m.status.HealthChecks.Total > 0 {
+		hc := m.status.HealthChecks
+		if hc.Down > 0 {
+			lines = append(lines, lipgloss.NewStyle().Foreground(colorRed).
+				Render(fmt.Sprintf("  ✗ %d/%d checks", hc.Down, hc.Total)))
+		} else {
+			lines = append(lines, lipgloss.NewStyle().Foreground(colorGreen).
+				Render(fmt.Sprintf("  ✓ %d checks", hc.Total)))
+		}
 	}
+
 	return lipgloss.NewStyle().Width(w).Padding(0, 1).Render(strings.Join(lines, "\n"))
 }
 
-func (m Model) renderLogPanel() string {
-	maxW := m.width - 6 // border + padding
-	visH := m.logVisibleLines()
+func (m Model) logList() string {
+	maxW := m.width - 6
+	visH := m.logVisibleH()
 
-	// Title
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#60a5fa")).Render("LOGS")
+	// Title with metadata
+	title := sectionTitle("LOGS")
 	if m.searchActive {
-		title += " " + styleLevelWarn.Render("search: "+m.searchFilter+"▌")
+		title += " " + lipgloss.NewStyle().Foreground(colorYellow).Render("/" + m.searchFilter + "▌")
 	} else if m.searchFilter != "" {
-		title += " " + styleLabel.Render("\""+m.searchFilter+"\"")
+		title += " " + styleDim.Render("\"" + m.searchFilter + "\"")
 	}
 	if len(m.logs) > 0 {
-		title += " " + styleLabel.Render(fmt.Sprintf("(%d)", len(m.logs)))
+		title += " " + styleDim.Render(fmt.Sprintf("(%d)", len(m.logs)))
 	}
 
-	// Render visible lines
+	// Render visible log lines
 	var lines []string
 	if len(m.logs) == 0 {
-		lines = append(lines, styleLabel.Render("  Waiting for logs..."))
+		lines = append(lines, styleDim.Render("  Waiting for logs..."))
 	} else {
 		end := m.logOffset + visH
 		if end > len(m.logs) {
 			end = len(m.logs)
 		}
 		for i := m.logOffset; i < end; i++ {
-			lines = append(lines, m.renderLogLine(i, maxW))
-			// Inline expand
+			lines = append(lines, m.fmtLog(i, maxW))
 			if i == m.logIndex && m.logExpanded {
-				lines = append(lines, m.renderLogExpanded(m.logs[i], maxW)...)
+				lines = append(lines, m.fmtLogDetail(m.logs[i], maxW)...)
 			}
 		}
 	}
 
-	// Pad to fill height
 	for len(lines) < visH {
 		lines = append(lines, "")
 	}
-	// Trim if expanded made it too long
 	if len(lines) > visH {
 		lines = lines[:visH]
 	}
 
 	content := title + "\n" + strings.Join(lines, "\n")
-
-	border := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#2d2640")).
-		Padding(0, 1).
-		Width(m.width - 2)
-	if m.focusedPanel == panelLogs {
-		border = border.BorderForeground(lipgloss.Color("#7c3aed"))
-	}
-
-	return border.Render(content) + "\n"
+	return panelStyle(m.focusedPanel == panelLogs).Width(m.width - 2).Render(content) + "\n"
 }
 
-func (m Model) renderLogLine(idx, maxW int) string {
+func (m Model) fmtLog(idx, maxW int) string {
 	e := m.logs[idx]
 	sel := idx == m.logIndex && m.focusedPanel == panelLogs
 
@@ -588,7 +621,6 @@ func (m Model) renderLogLine(idx, maxW int) string {
 	lvl := padRight(strings.ToUpper(e.Level), 5)
 	svc := padRight(e.Service, 14)
 
-	// Calculate available width for message: total - pointer(2) - ts(8) - space - level(5) - space - svc(14) - space
 	msgW := maxW - 32
 	if msgW < 10 {
 		msgW = 10
@@ -596,109 +628,130 @@ func (m Model) renderLogLine(idx, maxW int) string {
 	msg := truncate(e.Message, msgW)
 
 	if sel {
-		ptr := lipgloss.NewStyle().Foreground(lipgloss.Color("#f59e0b")).Bold(true).Render("▸ ")
-		return ptr +
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#9ca3af")).Render(ts) + " " +
-			levelStyle(strings.TrimSpace(lvl)).Bold(true).Render(lvl) + " " +
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#818cf8")).Render(svc) + " " +
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#e5e7eb")).Bold(true).Render(msg)
+		ptr := lipgloss.NewStyle().Foreground(colorYellow).Bold(true).Render("▸ ")
+		tsR := lipgloss.NewStyle().Foreground(colorFgDim).Render(ts)
+		lvlR := levelStyle(strings.TrimSpace(lvl)).Bold(true).Render(lvl)
+		svcR := lipgloss.NewStyle().Foreground(colorCyan).Render(svc)
+		msgR := lipgloss.NewStyle().Foreground(colorFg).Bold(true).Render(msg)
+		return ptr + tsR + " " + lvlR + " " + svcR + " " + msgR
 	}
 
-	return "  " +
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#4b5563")).Render(ts) + " " +
-		levelStyle(strings.TrimSpace(lvl)).Render(lvl) + " " +
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#4b5563")).Render(svc) + " " +
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#9ca3af")).Render(msg)
+	tsR := styleDim.Render(ts)
+	lvlR := levelStyle(strings.TrimSpace(lvl)).Render(lvl)
+	svcR := styleDim.Render(svc)
+	msgR := lipgloss.NewStyle().Foreground(colorFgDim).Render(msg)
+	return "  " + tsR + " " + lvlR + " " + svcR + " " + msgR
 }
 
-func (m Model) renderLogExpanded(e apiclient.LogEntry, maxW int) []string {
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
-	val := lipgloss.NewStyle().Foreground(lipgloss.Color("#d1d5db"))
-	accent := lipgloss.NewStyle().Foreground(lipgloss.Color("#818cf8"))
+func (m Model) fmtLogDetail(e apiclient.LogEntry, maxW int) []string {
+	d := styleDim
+	v := lipgloss.NewStyle().Foreground(colorFgDim)
+	a := lipgloss.NewStyle().Foreground(colorCyan)
+
+	indent := "     "
+	sep := indent + styleDim.Render(strings.Repeat("─", 50))
 
 	var lines []string
-	indent := "     "
+	lines = append(lines, sep)
 
-	lines = append(lines, indent+dim.Render("ID: ")+val.Render(fmt.Sprintf("%d", e.ID))+
-		"   "+dim.Render("Time: ")+val.Render(e.Timestamp.Local().Format("2006-01-02 15:04:05.000")))
+	// Row 1: ID + full timestamp
+	lines = append(lines,
+		indent+d.Render("id ")+v.Render(fmt.Sprintf("%d", e.ID))+
+			"  "+d.Render("time ")+v.Render(e.Timestamp.Local().Format("2006-01-02 15:04:05.000")))
+
+	// Row 2: full message (may be long, but truncated to width)
+	if len(e.Message) > msgW(maxW) {
+		lines = append(lines, indent+d.Render("msg ")+v.Render(truncate(e.Message, maxW-10)))
+	}
 
 	if e.RequestID != "" {
-		lines = append(lines, indent+dim.Render("Request: ")+accent.Render(e.RequestID))
+		lines = append(lines, indent+d.Render("req ")+a.Render(e.RequestID))
 	}
 	if e.ExceptionClass != "" {
-		lines = append(lines, indent+dim.Render("Exception: ")+styleLevelError.Render(e.ExceptionClass))
+		lines = append(lines, indent+d.Render("err ")+styleLevelError.Render(e.ExceptionClass))
 	}
-	if len(e.Metadata) > 0 {
-		for k, v := range e.Metadata {
-			s := fmt.Sprintf("%v", v)
-			lines = append(lines, indent+dim.Render(k+": ")+val.Render(truncate(s, maxW-len(k)-10)))
-		}
+
+	// Metadata
+	for k, val := range e.Metadata {
+		s := fmt.Sprintf("%v", val)
+		lines = append(lines, indent+d.Render(k+" ")+v.Render(truncate(s, maxW-len(k)-10)))
 	}
-	lines = append(lines, indent+dim.Render(strings.Repeat("─", 40)))
+
+	lines = append(lines, sep)
 	return lines
 }
 
-func (m Model) renderStatusBar() string {
+func msgW(maxW int) int {
+	w := maxW - 32
+	if w < 10 {
+		return 10
+	}
+	return w
+}
+
+func (m Model) hotkeys() string {
 	var parts []string
 	if m.focusedPanel == panelLogs {
 		parts = append(parts,
 			hk("↑↓")+"scroll",
-			hk("enter")+"expand",
+			hk("⏎")+"expand",
 			hk("/")+"search",
 			hk("l")+"level",
 			hk("s")+"svc",
 		)
+	} else {
+		parts = append(parts, hk("tab")+"logs")
 	}
 	parts = append(parts, hk("e")+"errors", hk("w")+"watches", hk("?")+"help", hk("q")+"quit")
 
 	return lipgloss.NewStyle().
 		Width(m.width).
-		Background(lipgloss.Color("#1a1625")).
-		Foreground(lipgloss.Color("#6b7280")).
+		Background(colorBg).
+		Foreground(colorFgMuted).
 		Padding(0, 1).
 		Render(strings.Join(parts, "  "))
 }
 
-// ──────────────────────────────────────────────────────────
-// Errors View
-// ──────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// ERRORS VIEW
+// ═══════════════════════════════════════════════════════════
 
-func (m Model) viewErrors() string {
+func (m Model) errView() string {
 	var b strings.Builder
-	b.WriteString(m.renderHeader())
+	b.WriteString(m.header())
 	b.WriteString("\n")
-
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#60a5fa")).Render("  ERROR GROUPS")
-	b.WriteString(title + " " + styleLabel.Render("unresolved") + "\n\n")
+	b.WriteString(" " + sectionTitle("ERROR GROUPS") + " " + styleDim.Render("unresolved") + "\n\n")
 
 	if m.errors == nil || len(m.errors.ErrorGroups) == 0 {
-		b.WriteString(styleLabel.Render("  No error groups.") + "\n")
+		b.WriteString(styleDim.Render("  No errors. ✓") + "\n")
 	} else {
 		for i, eg := range m.errors.ErrorGroups {
 			sel := i == m.errorIndex
 			ptr := "  "
 			if sel {
-				ptr = lipgloss.NewStyle().Foreground(lipgloss.Color("#f59e0b")).Bold(true).Render("▸ ")
+				ptr = lipgloss.NewStyle().Foreground(colorYellow).Bold(true).Render("▸ ")
 			}
 
-			cnt := styleLevelError.Render(fmt.Sprintf("%4d×", eg.OccurrenceCount))
+			cnt := lipgloss.NewStyle().Foreground(colorRed).Bold(true).Render(fmt.Sprintf("%4d×", eg.OccurrenceCount))
 			cls := truncate(eg.ExceptionClass, 28)
-			msgW := m.width - 42
-			if msgW < 10 {
-				msgW = 10
+			mW := m.width - 42
+			if mW < 10 {
+				mW = 10
 			}
 
 			line1 := fmt.Sprintf("%s%s  %-28s  %s", ptr, cnt, cls,
-				styleLabel.Render(truncate(eg.Message, msgW)))
+				styleDim.Render(truncate(eg.Message, mW)))
 			if sel {
 				line1 = lipgloss.NewStyle().Bold(true).Render(line1)
 			}
 			b.WriteString(line1 + "\n")
 
-			b.WriteString(fmt.Sprintf("        %s  last %s  impact %.1f  users %d\n",
-				lipgloss.NewStyle().Foreground(lipgloss.Color("#818cf8")).Render(padRight(eg.Service, 16)),
-				eg.LastSeenAt.Local().Format("15:04"),
-				eg.ImpactScore, eg.UniqueUsers))
+			meta := fmt.Sprintf("        %s  %s  impact %s  users %s",
+				lipgloss.NewStyle().Foreground(colorCyan).Render(padRight(eg.Service, 16)),
+				styleDim.Render("last "+eg.LastSeenAt.Local().Format("15:04")),
+				lipgloss.NewStyle().Foreground(colorOrange).Render(fmt.Sprintf("%.1f", eg.ImpactScore)),
+				lipgloss.NewStyle().Foreground(colorBlue).Render(fmt.Sprintf("%d", eg.UniqueUsers)))
+			b.WriteString(meta + "\n")
 
 			if i < len(m.errors.ErrorGroups)-1 {
 				b.WriteString("\n")
@@ -706,47 +759,43 @@ func (m Model) viewErrors() string {
 		}
 	}
 
-	// Fill remaining height
 	b.WriteString("\n")
-	b.WriteString(m.footerBar("esc back", "↑↓ navigate", "d dashboard", "q quit"))
+	b.WriteString(footer(m.width, "esc back", "↑↓ navigate", "d dashboard", "q quit"))
 	return b.String()
 }
 
-// ──────────────────────────────────────────────────────────
-// Watches View
-// ──────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// WATCHES VIEW
+// ═══════════════════════════════════════════════════════════
 
-func (m Model) viewWatches() string {
+func (m Model) watchView() string {
 	var b strings.Builder
-	b.WriteString(m.renderHeader())
+	b.WriteString(m.header())
 	b.WriteString("\n")
-
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#60a5fa")).Render("  WATCHES")
-	b.WriteString(title + "\n\n")
+	b.WriteString(" " + sectionTitle("WATCHES") + "\n\n")
 
 	if m.watches == nil || len(m.watches.Watches) == 0 {
-		b.WriteString(styleLabel.Render("  No watches.") + "\n")
+		b.WriteString(styleDim.Render("  No watches configured.") + "\n")
 	} else {
 		for i, w := range m.watches.Watches {
 			sel := i == m.watchIndex
 			ptr := "  "
 			if sel {
-				ptr = lipgloss.NewStyle().Foreground(lipgloss.Color("#f59e0b")).Bold(true).Render("▸ ")
+				ptr = lipgloss.NewStyle().Foreground(colorYellow).Bold(true).Render("▸ ")
 			}
 
-			st := styleLabel
+			st := styleDim
 			switch w.Status {
 			case "triggered":
-				st = styleLevelError
+				st = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
 			case "active":
-				st = styleLevelInfo
-			case "expired":
-				st = lipgloss.NewStyle().Foreground(colorDim)
+				st = lipgloss.NewStyle().Foreground(colorGreen)
 			}
 
 			line := fmt.Sprintf("%s%s  %-14s  %-12s  %s",
 				ptr, st.Render(padRight(w.Status, 10)),
-				w.Conditions, w.Service, styleLabel.Render(w.Urgency))
+				w.Conditions, w.Service,
+				styleDim.Render(w.Urgency))
 			if sel {
 				line = lipgloss.NewStyle().Bold(true).Render(line)
 			}
@@ -755,34 +804,32 @@ func (m Model) viewWatches() string {
 
 		if m.watches.Alerts.Pending > 0 {
 			b.WriteString(fmt.Sprintf("\n  %s\n",
-				styleLevelWarn.Render(fmt.Sprintf("⚠ %d pending alerts", m.watches.Alerts.Pending))))
+				lipgloss.NewStyle().Foreground(colorYellow).Render(fmt.Sprintf("⚠ %d pending alerts", m.watches.Alerts.Pending))))
 		}
 	}
 
 	b.WriteString("\n")
-	b.WriteString(m.footerBar("esc back", "↑↓ navigate", "d dashboard", "q quit"))
+	b.WriteString(footer(m.width, "esc back", "↑↓ navigate", "d dashboard", "q quit"))
 	return b.String()
 }
 
-// ──────────────────────────────────────────────────────────
-// Help View
-// ──────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// HELP VIEW
+// ═══════════════════════════════════════════════════════════
 
-func (m Model) viewHelp() string {
+func (m Model) helpView() string {
 	var b strings.Builder
-	b.WriteString(m.renderHeader())
+	b.WriteString(m.header())
 	b.WriteString("\n")
-
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#60a5fa")).Render("  KEYBOARD SHORTCUTS")
-	b.WriteString(title + "\n\n")
+	b.WriteString(" " + sectionTitle("KEYBOARD SHORTCUTS") + "\n\n")
 
 	sections := []struct {
 		name  string
 		items [][2]string
 	}{
 		{"Navigation", [][2]string{
-			{"↑/k ↓/j", "Move selection"},
-			{"enter/space", "Expand/collapse log detail"},
+			{"↑/k  ↓/j", "Move selection"},
+			{"enter/space", "Expand/collapse log inline"},
 			{"g / G", "Jump to top / bottom"},
 			{"tab", "Switch panel focus"},
 			{"esc", "Back to dashboard"},
@@ -791,45 +838,55 @@ func (m Model) viewHelp() string {
 			{"d", "Dashboard"}, {"e", "Errors"}, {"w", "Watches"}, {"?/h", "Help"},
 		}},
 		{"Filters", [][2]string{
-			{"/", "Search logs"}, {"l", "Cycle level"}, {"s", "Cycle service"},
+			{"/", "Search logs"}, {"l", "Cycle log level"}, {"s", "Cycle service"},
 		}},
 	}
 
-	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#f59e0b"))
+	keyCol := lipgloss.NewStyle().Foreground(colorYellow)
 	for _, sec := range sections {
-		b.WriteString("  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#818cf8")).Bold(true).Render(sec.name) + "\n")
+		b.WriteString("  " + lipgloss.NewStyle().Foreground(colorBlue).Bold(true).Render(sec.name) + "\n")
 		for _, e := range sec.items {
-			b.WriteString(fmt.Sprintf("    %s  %s\n", keyStyle.Render(padRight(e[0], 14)), e[1]))
+			b.WriteString(fmt.Sprintf("    %s  %s\n", keyCol.Render(padRight(e[0], 14)), e[1]))
 		}
 		b.WriteString("\n")
 	}
 
-	b.WriteString(m.footerBar("esc back", "q quit"))
+	b.WriteString(footer(m.width, "esc back", "q quit"))
 	return b.String()
 }
 
-// ──────────────────────────────────────────────────────────
-// Shared renderers
-// ──────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// SHARED COMPONENTS
+// ═══════════════════════════════════════════════════════════
 
-func (m Model) footerBar(hints ...string) string {
-	parts := make([]string, len(hints))
-	for i, h := range hints {
-		parts[i] = styleLabel.Render(h)
-	}
-	return lipgloss.NewStyle().
-		Width(m.width).
-		Background(lipgloss.Color("#1a1625")).
-		Foreground(lipgloss.Color("#6b7280")).
-		Padding(0, 1).
-		Render(strings.Join(parts, "    "))
+func sectionTitle(s string) string {
+	return lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render(s)
+}
+
+func bigNumber(num, label string) string {
+	return "  " + lipgloss.NewStyle().Bold(true).Foreground(colorFg).Render(num) +
+		" " + styleDim.Render(label)
+}
+
+func pill(label, value string, c color.Color) string {
+	return lipgloss.NewStyle().Foreground(c).Render(label + ":" + value)
 }
 
 func hk(k string) string {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("#f59e0b")).Render(k) + " "
+	return lipgloss.NewStyle().Foreground(colorYellow).Render(k) + " "
 }
 
-func (m Model) sparkline(buckets []apiclient.HistogramBucket) string {
+func footer(w int, hints ...string) string {
+	parts := make([]string, len(hints))
+	for i, h := range hints {
+		parts[i] = styleDim.Render(h)
+	}
+	return lipgloss.NewStyle().
+		Width(w).Background(colorBg).Foreground(colorFgMuted).Padding(0, 1).
+		Render(strings.Join(parts, "    "))
+}
+
+func (m Model) sparkline(buckets []apiclient.HistogramBucket, w int) string {
 	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
 	maxV := 0
 	for _, b := range buckets {
@@ -838,67 +895,83 @@ func (m Model) sparkline(buckets []apiclient.HistogramBucket) string {
 		}
 	}
 	if maxV == 0 {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#4b5563")).Render(strings.Repeat(string(blocks[0]), len(buckets)))
+		return styleDim.Render(strings.Repeat(string(blocks[0]), min(len(buckets), w)))
+	}
+	n := len(buckets)
+	if n > w {
+		n = w
 	}
 	var sb strings.Builder
-	for _, b := range buckets {
-		idx := b.Total * (len(blocks) - 1) / maxV
+	start := len(buckets) - n
+	for i := start; i < len(buckets); i++ {
+		idx := buckets[i].Total * (len(blocks) - 1) / maxV
 		sb.WriteRune(blocks[idx])
 	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("#818cf8")).Render(sb.String())
+	return lipgloss.NewStyle().Foreground(colorCyan).Render(sb.String())
 }
 
-// ──────────────────────────────────────────────────────────
-// Commands
-// ──────────────────────────────────────────────────────────
+func fmtUptime(sec int64) string {
+	if sec < 60 {
+		return fmt.Sprintf("%ds", sec)
+	}
+	d := sec / 86400
+	h := (sec % 86400) / 3600
+	m := (sec % 3600) / 60
+	if d > 0 {
+		return fmt.Sprintf("%dd%dh", d, h)
+	}
+	if h > 0 {
+		return fmt.Sprintf("%dh%dm", h, m)
+	}
+	return fmt.Sprintf("%dm", m)
+}
+
+// ═══════════════════════════════════════════════════════════
+// COMMANDS
+// ═══════════════════════════════════════════════════════════
 
 func (m Model) tick() tea.Cmd {
 	return tea.Tick(m.config.RefreshRate, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
-
 func (m Model) fetchStatus() tea.Msg {
-	r, err := m.config.Client.Status()
-	if err != nil {
-		return errMsg(err)
+	r, e := m.config.Client.Status()
+	if e != nil {
+		return errMsg(e)
 	}
 	return statusMsg(r)
 }
-
 func (m Model) fetchLogTail() tea.Msg {
-	r, err := m.config.Client.LogTail(m.logCursor, 50, m.levelFilter, m.serviceFilter, m.searchFilter)
-	if err != nil {
-		return errMsg(err)
+	r, e := m.config.Client.LogTail(m.logCursor, 50, m.levelFilter, m.serviceFilter, m.searchFilter)
+	if e != nil {
+		return errMsg(e)
 	}
 	return logTailMsg(r)
 }
-
 func (m Model) fetchErrors() tea.Msg {
-	r, err := m.config.Client.ErrorsTop(10, "1h", m.serviceFilter)
-	if err != nil {
-		return errMsg(err)
+	r, e := m.config.Client.ErrorsTop(10, "1h", m.serviceFilter)
+	if e != nil {
+		return errMsg(e)
 	}
 	return errorsMsg(r)
 }
-
 func (m Model) fetchWatches() tea.Msg {
-	r, err := m.config.Client.Watches()
-	if err != nil {
-		return errMsg(err)
+	r, e := m.config.Client.Watches()
+	if e != nil {
+		return errMsg(e)
 	}
 	return watchesMsg(r)
 }
-
 func (m Model) fetchStats() tea.Msg {
-	r, err := m.config.Client.IngestionStats("1h", "1m", m.serviceFilter)
-	if err != nil {
-		return errMsg(err)
+	r, e := m.config.Client.IngestionStats("1h", "1m", m.serviceFilter)
+	if e != nil {
+		return errMsg(e)
 	}
 	return statsMsg(r)
 }
 
-// ──────────────────────────────────────────────────────────
-// Utilities
-// ──────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// UTILITIES
+// ═══════════════════════════════════════════════════════════
 
 func truncate(s string, max int) string {
 	if max <= 0 {
@@ -910,7 +983,7 @@ func truncate(s string, max int) string {
 	if max <= 3 {
 		return s[:max]
 	}
-	return s[:max-3] + "..."
+	return s[:max-3] + "…"
 }
 
 func padRight(s string, n int) string {
@@ -925,4 +998,11 @@ func formatNum(n int) string {
 		return fmt.Sprintf("%d", n)
 	}
 	return fmt.Sprintf("%d,%03d", n/1000, n%1000)
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
