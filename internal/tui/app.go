@@ -494,26 +494,49 @@ func (m Model) errorsView() string {
 	if m.errors == nil || len(m.errors.ErrorGroups) == 0 {
 		b.WriteString(styleLabel.Render("  No error groups found.") + "\n")
 	} else {
+		// Determine max class width for alignment
+		maxClass := 16
+		for _, eg := range m.errors.ErrorGroups {
+			if l := len(eg.ExceptionClass); l > maxClass && l <= 30 {
+				maxClass = l
+			}
+		}
+		if maxClass > 30 {
+			maxClass = 30
+		}
+
 		for i, eg := range m.errors.ErrorGroups {
-			prefix := "  "
+			pointer := "  "
 			if i == m.errorIndex {
-				prefix = "> "
+				pointer = styleLevelWarn.Render("> ")
 			}
-			status := styleLevelError.Render(fmt.Sprintf("%4d×", eg.OccurrenceCount))
-			line := fmt.Sprintf("%s%s  %-20s %s\n",
-				prefix,
-				status,
-				truncate(eg.ExceptionClass, 20),
-				truncate(eg.Message, m.width-36))
-			if i == m.errorIndex {
-				line = lipgloss.NewStyle().Bold(true).Render(line)
+
+			count := styleLevelError.Render(fmt.Sprintf("%4d×", eg.OccurrenceCount))
+			class := truncate(eg.ExceptionClass, maxClass)
+
+			// First line: count + exception class
+			msgWidth := m.width - maxClass - 12
+			if msgWidth < 10 {
+				msgWidth = 10
 			}
-			b.WriteString(line)
-			b.WriteString(fmt.Sprintf("         %s  last: %s  impact: %.1f  users: %d\n",
-				styleService.Render(eg.Service),
-				eg.LastSeenAt.Format("15:04:05"),
+			msg := truncate(eg.Message, msgWidth)
+
+			b.WriteString(fmt.Sprintf("%s%s  %-*s  %s\n",
+				pointer, count, maxClass, class, styleLabel.Render(msg)))
+
+			// Second line: metadata
+			indent := "        "
+			b.WriteString(fmt.Sprintf("%s%s  last: %s  impact: %.1f  users: %d\n",
+				indent,
+				styleService.Render(padRight(eg.Service, 18)),
+				eg.LastSeenAt.Local().Format("15:04:05"),
 				eg.ImpactScore,
 				eg.UniqueUsers))
+
+			// Separator between entries
+			if i < len(m.errors.ErrorGroups)-1 {
+				b.WriteString("\n")
+			}
 		}
 	}
 
