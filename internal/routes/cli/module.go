@@ -61,6 +61,8 @@ func mount(_ chi.Router, deps *server.Deps) {
 			r.Use(deps.APIKeyAuth)
 
 			r.Get("/status", h.handleStatus)
+			r.Get("/logs/tail", h.handleLogsTail)
+			r.Get("/logs/stream", h.handleLogsStream)
 		})
 	}
 }
