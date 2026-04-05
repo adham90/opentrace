@@ -51,13 +51,19 @@ func main() {
 			err = runBackup()
 		case "restore":
 			err = runRestore()
+		case "status":
+			err = runStatus()
+		case "logs":
+			err = runLogs()
+		case "top":
+			err = runTop()
 		case "version":
 			fmt.Println("opentrace " + version.Full())
 			return
 		case "help", "--help", "-h":
 			fmt.Println("Usage: opentrace [command]")
 			fmt.Println()
-			fmt.Println("Commands:")
+			fmt.Println("Server commands:")
 			fmt.Println("  (none)    Start the server")
 			fmt.Println("  init      Initialize database (first-time setup)")
 			fmt.Println("  serve     Start the server (same as no command)")
@@ -65,6 +71,12 @@ func main() {
 			fmt.Println("  seed      Initialize sample data")
 			fmt.Println("  backup    Create a database backup")
 			fmt.Println("  restore   Restore database from a backup")
+			fmt.Println()
+			fmt.Println("CLI commands (connect to a running server):")
+			fmt.Println("  status    Show server health and summary stats")
+			fmt.Println("  logs      Stream live log tail")
+			fmt.Println("  top       Interactive TUI dashboard")
+			fmt.Println()
 			fmt.Println("  version   Print version information")
 			fmt.Println()
 			fmt.Println("Backup options:")
@@ -140,10 +152,11 @@ func initApp(ctx context.Context) (*server.Deps, *engine.Store, error) {
 	reconnectConnectors(ctx, stores.DSStore, stores.LogStore, registry, cfg, stores.SettingsStore)
 
 	return &server.Deps{
-		DB:       bunDB.DB, // underlying *sql.DB for backward compat
-		Cfg:      cfg,
-		Stores:   stores,
-		Registry: registry,
+		DB:        bunDB.DB, // underlying *sql.DB for backward compat
+		Cfg:       cfg,
+		Stores:    stores,
+		Registry:  registry,
+		StartedAt: time.Now(),
 	}, logEngine, nil
 }
 

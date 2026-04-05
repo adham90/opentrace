@@ -45,6 +45,14 @@
 // │     POST /api/servers/register – server registration    [servers] │
 // │     POST /api/servers/{id}/metrics – metric push        [servers] │
 // │                                                                    │
+// │   CLI API routes (apiLimiter + DynamicAPIKeyAuth):                 │
+// │     GET  /api/cli/status          – server status       [cli]     │
+// │     GET  /api/cli/logs/tail       – paginated log tail  [cli]     │
+// │     GET  /api/cli/logs/stream     – SSE log stream      [cli]     │
+// │     GET  /api/cli/errors/top      – top error groups    [cli]     │
+// │     GET  /api/cli/watches         – watch status        [cli]     │
+// │     GET  /api/cli/ingestion/stats – ingestion histogram [cli]     │
+// │                                                                    │
 // └─────────────────────────────────────────────────────────────────────┘
 //
 // Adding a new domain module:
@@ -56,6 +64,7 @@ package main
 
 import (
 	authmod "github.com/adham90/opentrace/internal/routes/auth"
+	climod "github.com/adham90/opentrace/internal/routes/cli"
 	"github.com/adham90/opentrace/internal/routes/servers"
 	"github.com/adham90/opentrace/pkg/server"
 )
@@ -63,4 +72,5 @@ import (
 var modules = []server.Module{
 	authmod.Module,
 	servers.Module,
+	climod.Module,
 }

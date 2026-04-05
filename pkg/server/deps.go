@@ -6,6 +6,7 @@ package server
 import (
 	"database/sql"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -66,4 +67,6 @@ type Deps struct {
 	// LoginLimiter is rate-limiting middleware for login/register endpoints.
 	LoginLimiter func(http.Handler) http.Handler
 
+	// StartedAt records when the server process started (for uptime calculation).
+	StartedAt time.Time
 }
