@@ -528,7 +528,7 @@ func (m Model) metricErrors(w int) string {
 				break
 			}
 			cnt := lipgloss.NewStyle().Foreground(colorRed).Render(fmt.Sprintf(" %3d", eg.OccurrenceCount))
-			cls := styleDim.Render(" " + truncate(eg.ExceptionClass, w-8))
+			cls := lipgloss.NewStyle().Foreground(colorFgDim).Render(" " + truncate(eg.ExceptionClass, w-8))
 			lines = append(lines, cnt+cls)
 		}
 	}
@@ -625,7 +625,8 @@ func (m Model) fmtLog(idx, maxW int) string {
 	if msgW < 10 {
 		msgW = 10
 	}
-	msg := truncate(e.Message, msgW)
+	// Strip newlines — Rails exception messages are multi-line
+	msg := truncate(oneLine(e.Message), msgW)
 
 	if sel {
 		ptr := lipgloss.NewStyle().Foreground(colorYellow).Bold(true).Render("▸ ")
@@ -740,7 +741,7 @@ func (m Model) errView() string {
 			}
 
 			line1 := fmt.Sprintf("%s%s  %-28s  %s", ptr, cnt, cls,
-				styleDim.Render(truncate(eg.Message, mW)))
+				styleDim.Render(truncate(oneLine(eg.Message), mW)))
 			if sel {
 				line1 = lipgloss.NewStyle().Bold(true).Render(line1)
 			}
@@ -998,6 +999,18 @@ func formatNum(n int) string {
 		return fmt.Sprintf("%d", n)
 	}
 	return fmt.Sprintf("%d,%03d", n/1000, n%1000)
+}
+
+// oneLine strips newlines and collapses whitespace for single-line display.
+func oneLine(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\t", " ")
+	// Collapse multiple spaces
+	for strings.Contains(s, "  ") {
+		s = strings.ReplaceAll(s, "  ", " ")
+	}
+	return strings.TrimSpace(s)
 }
 
 func min(a, b int) int {
