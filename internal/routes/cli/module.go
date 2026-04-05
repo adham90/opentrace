@@ -63,6 +63,9 @@ func mount(_ chi.Router, deps *server.Deps) {
 			r.Get("/status", h.handleStatus)
 			r.Get("/logs/tail", h.handleLogsTail)
 			r.Get("/logs/stream", h.handleLogsStream)
+			r.Get("/errors/top", h.handleErrorsTop)
+			r.Get("/watches", h.handleWatches)
+			r.Get("/ingestion/stats", h.handleIngestionStats)
 		})
 	}
 }
