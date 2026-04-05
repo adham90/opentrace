@@ -23,6 +23,7 @@ const (
 	viewErrors
 	viewWatches
 	viewHelp
+	viewLogDetail
 )
 
 // panel tracks which panel is focused in the dashboard view.
@@ -65,6 +66,15 @@ type Model struct {
 	// Filters
 	levelFilter   string
 	serviceFilter string
+	searchFilter  string
+	searchActive  bool
+
+	// Selection indices for list views
+	errorIndex int
+	watchIndex int
+
+	// Log detail
+	selectedLog *apiclient.LogEntry
 
 	// State
 	ready    bool
@@ -125,6 +135,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
+		// Search input mode — capture typed characters
+		if m.searchActive {
+			switch msg.String() {
+			case "enter":
+				m.searchActive = false
+				m.logs = nil
+				m.logCursor = 0
+				return m, m.fetchLogTail
+			case "esc":
+				m.searchActive = false
+				m.searchFilter = ""
+				m.logs = nil
+				m.logCursor = 0
+				return m, m.fetchLogTail
+			case "backspace":
+				if len(m.searchFilter) > 0 {
+					m.searchFilter = m.searchFilter[:len(m.searchFilter)-1]
+				}
+				return m, nil
+			default:
+				if len(msg.String()) == 1 {
+					m.searchFilter += msg.String()
+				}
+				return m, nil
+			}
+		}
+
 		switch {
 		case key.Matches(msg, keys.Quit):
 			m.quitting = true
@@ -136,11 +173,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focusedPanel = panelStats
 			}
 			return m, nil
+		case key.Matches(msg, keys.Filter):
+			m.searchActive = true
+			return m, nil
 		case key.Matches(msg, keys.Errors):
 			m.view = viewErrors
+			m.errorIndex = 0
 			return m, nil
 		case key.Matches(msg, keys.Watches):
 			m.view = viewWatches
+			m.watchIndex = 0
 			return m, nil
 		case key.Matches(msg, keys.Dashboard):
 			m.view = viewDashboard
@@ -153,7 +195,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case key.Matches(msg, keys.Escape):
-			m.view = viewDashboard
+			if m.view == viewLogDetail {
+				m.view = viewDashboard
+				m.selectedLog = nil
+			} else {
+				m.view = viewDashboard
+			}
 			return m, nil
 		case key.Matches(msg, keys.Level):
 			m.cycleLevelFilter()
@@ -163,8 +210,51 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.fetchLogTail
 		}
 
-		// Scroll viewport in dashboard view
+		// List navigation for errors/watches views
+		switch m.view {
+		case viewErrors:
+			switch {
+			case key.Matches(msg, keys.Up):
+				if m.errorIndex > 0 {
+					m.errorIndex--
+				}
+			case key.Matches(msg, keys.Down):
+				if m.errors != nil && m.errorIndex < len(m.errors.ErrorGroups)-1 {
+					m.errorIndex++
+				}
+			}
+			return m, nil
+
+		case viewWatches:
+			switch {
+			case key.Matches(msg, keys.Up):
+				if m.watchIndex > 0 {
+					m.watchIndex--
+				}
+			case key.Matches(msg, keys.Down):
+				if m.watches != nil && m.watchIndex < len(m.watches.Watches)-1 {
+					m.watchIndex++
+				}
+			}
+			return m, nil
+		}
+
+		// Enter on dashboard log viewport — open log detail
 		if m.view == viewDashboard && m.focusedPanel == panelLogs {
+			if msg.String() == "enter" && len(m.logs) > 0 {
+				// Select the log at the viewport cursor position
+				logIdx := m.logViewport.YOffset() + m.logViewport.Height()/2
+				if logIdx >= len(m.logs) {
+					logIdx = len(m.logs) - 1
+				}
+				if logIdx >= 0 {
+					entry := m.logs[logIdx]
+					m.selectedLog = &entry
+					m.view = viewLogDetail
+				}
+				return m, nil
+			}
+
 			var cmd tea.Cmd
 			m.logViewport, cmd = m.logViewport.Update(msg)
 			return m, cmd
@@ -241,6 +331,8 @@ func (m Model) View() tea.View {
 		content = m.watchesView()
 	case viewHelp:
 		content = m.helpView()
+	case viewLogDetail:
+		content = m.logDetailView()
 	}
 
 	v := tea.NewView(content)
@@ -272,6 +364,11 @@ func (m Model) dashboardView() string {
 	}
 	if m.serviceFilter != "" {
 		logTitle += fmt.Sprintf("[%s] ", m.serviceFilter)
+	}
+	if m.searchActive {
+		logTitle += fmt.Sprintf(" /: %s▌", m.searchFilter)
+	} else if m.searchFilter != "" {
+		logTitle += fmt.Sprintf(" search: %s", m.searchFilter)
 	}
 	logPanel := logBorder.Width(m.width - 2).Render(
 		styleTitle.Render(logTitle) + "\n" + m.logViewport.View(),
@@ -397,16 +494,26 @@ func (m Model) errorsView() string {
 	if m.errors == nil || len(m.errors.ErrorGroups) == 0 {
 		b.WriteString(styleLabel.Render("  No error groups found.") + "\n")
 	} else {
-		for _, eg := range m.errors.ErrorGroups {
+		for i, eg := range m.errors.ErrorGroups {
+			prefix := "  "
+			if i == m.errorIndex {
+				prefix = "> "
+			}
 			status := styleLevelError.Render(fmt.Sprintf("%4d×", eg.OccurrenceCount))
-			b.WriteString(fmt.Sprintf("  %s  %-20s %s\n",
+			line := fmt.Sprintf("%s%s  %-20s %s\n",
+				prefix,
 				status,
 				truncate(eg.ExceptionClass, 20),
-				truncate(eg.Message, m.width-34)))
-			b.WriteString(fmt.Sprintf("         %s  last: %s  impact: %.1f\n",
+				truncate(eg.Message, m.width-36))
+			if i == m.errorIndex {
+				line = lipgloss.NewStyle().Bold(true).Render(line)
+			}
+			b.WriteString(line)
+			b.WriteString(fmt.Sprintf("         %s  last: %s  impact: %.1f  users: %d\n",
 				styleService.Render(eg.Service),
 				eg.LastSeenAt.Format("15:04:05"),
-				eg.ImpactScore))
+				eg.ImpactScore,
+				eg.UniqueUsers))
 		}
 	}
 
@@ -424,7 +531,11 @@ func (m Model) watchesView() string {
 	if m.watches == nil || len(m.watches.Watches) == 0 {
 		b.WriteString(styleLabel.Render("  No watches configured.") + "\n")
 	} else {
-		for _, w := range m.watches.Watches {
+		for i, w := range m.watches.Watches {
+			prefix := "  "
+			if i == m.watchIndex {
+				prefix = "> "
+			}
 			statusStyle := styleLabel
 			switch w.Status {
 			case "triggered":
@@ -432,11 +543,16 @@ func (m Model) watchesView() string {
 			case "active":
 				statusStyle = styleLevelInfo
 			}
-			b.WriteString(fmt.Sprintf("  %s  %-14s %-10s %s\n",
+			line := fmt.Sprintf("%s%s  %-14s %-10s %s\n",
+				prefix,
 				statusStyle.Render(padRight(w.Status, 10)),
 				w.Conditions,
 				w.Service,
-				w.Urgency))
+				w.Urgency)
+			if i == m.watchIndex {
+				line = lipgloss.NewStyle().Bold(true).Render(line)
+			}
+			b.WriteString(line)
 		}
 
 		if m.watches.Alerts.Pending > 0 {
@@ -477,6 +593,59 @@ func (m Model) helpView() string {
 
 	b.WriteString("\n")
 	b.WriteString(styleStatusBar.Width(m.width).Render("esc back  q quit"))
+	return b.String()
+}
+
+func (m Model) logDetailView() string {
+	var b strings.Builder
+	b.WriteString(m.headerView())
+	b.WriteString("\n\n")
+	b.WriteString(styleTitle.Render("  LOG DETAIL") + "\n\n")
+
+	if m.selectedLog == nil {
+		b.WriteString(styleLabel.Render("  No log selected.") + "\n")
+	} else {
+		entry := m.selectedLog
+		b.WriteString(fmt.Sprintf("  %s  %s\n",
+			styleLabel.Render("ID:"),
+			styleValue.Render(fmt.Sprintf("%d", entry.ID))))
+		b.WriteString(fmt.Sprintf("  %s  %s\n",
+			styleLabel.Render("Time:"),
+			entry.Timestamp.Local().Format("2006-01-02 15:04:05.000")))
+		b.WriteString(fmt.Sprintf("  %s  %s\n",
+			styleLabel.Render("Level:"),
+			levelStyle(strings.ToUpper(entry.Level)).Render(strings.ToUpper(entry.Level))))
+		b.WriteString(fmt.Sprintf("  %s  %s\n",
+			styleLabel.Render("Service:"),
+			entry.Service))
+		b.WriteString(fmt.Sprintf("  %s  %s\n",
+			styleLabel.Render("Message:"),
+			entry.Message))
+
+		if entry.RequestID != "" {
+			b.WriteString(fmt.Sprintf("  %s  %s\n",
+				styleLabel.Render("Request:"),
+				entry.RequestID))
+		}
+		if entry.ExceptionClass != "" {
+			b.WriteString(fmt.Sprintf("  %s  %s\n",
+				styleLabel.Render("Exception:"),
+				styleLevelError.Render(entry.ExceptionClass)))
+		}
+
+		if len(entry.Metadata) > 0 {
+			b.WriteString("\n")
+			b.WriteString(styleTitle.Render("  METADATA") + "\n")
+			for k, v := range entry.Metadata {
+				b.WriteString(fmt.Sprintf("    %s: %v\n",
+					styleLabel.Render(k),
+					v))
+			}
+		}
+	}
+
+	b.WriteString("\n")
+	b.WriteString(styleStatusBar.Width(m.width).Render("esc back  d dashboard  q quit"))
 	return b.String()
 }
 
@@ -580,7 +749,7 @@ func (m Model) fetchStatus() tea.Msg {
 }
 
 func (m Model) fetchLogTail() tea.Msg {
-	resp, err := m.config.Client.LogTail(m.logCursor, 50, m.levelFilter, m.serviceFilter, "")
+	resp, err := m.config.Client.LogTail(m.logCursor, 50, m.levelFilter, m.serviceFilter, m.searchFilter)
 	if err != nil {
 		return errMsg(err)
 	}
