@@ -44,27 +44,60 @@ Agent:  Error rate on POST /api/checkout spiked from 0.1% to 4.2%
 ## How It Works
 
 ```
-Your Server                              Your Laptop
-┌──────────────────────┐                ┌──────────────────────┐
-│                      │                │                      │
-│  OpenTrace Server    │◄─── MCP ─────│  Claude Code / Cursor │
-│                      │   over HTTPS  │                      │
-│  Single Go binary    │                │  Reads .mcp.json     │
-│  SQLite database     │                │  Auto-connects       │
-│                      │                │                      │
-└──────┬───────┬───────┘                └──────────────────────┘
-       │       │
-       │       │
-       │       └──── Connects to your Postgres (read-only)
-       │
-       └──── Receives logs from your app via SDK
+Your App                                Your Server
+┌──────────────────────┐               ┌──────────────────────────────────┐
+│                      │               │         OpenTrace Server          │
+│  SDK (Ruby / Node)   │── POST ──────>│                                  │
+│  Thin, async, non-   │  /api/v2/logs │  Ingest Pipeline                 │
+│  blocking. Just      │  flat JSON    │    PII scrub → fingerprint →     │
+│  serialize & send.   │               │    expand in-request logs         │
+│                      │               │                 │                 │
+└──────────────────────┘               │                 ▼                 │
+                                       │  Segmented Log Store             │
+Your Laptop                            │    Binary WAL → hourly seal →    │
+┌──────────────────────┐               │    columnar chunks + FTS index   │
+│                      │               │    45 columns, 6 encoding types  │
+│  Claude Code / Cursor│◄── MCP ──────│    ~260KB runtime memory          │
+│                      │  over HTTPS   │                                  │
+│  Reads .mcp.json     │               │  SQLite (platform data)          │
+│  Auto-connects       │               │    Users, watches, error groups  │
+│                      │               │                                  │
+└──────────────────────┘               │  Connects to your Postgres       │
+                                       │    (read-only)                   │
+                                       └──────────────────────────────────┘
 ```
 
-**The server** ingests logs from your app, connects to your databases, monitors health checks, tracks errors, and runs alert rules.
+**The SDK** captures logs, request performance, SQL queries, external API calls, emails, file operations, and audit trails — then sends everything as flat JSON. Your app never blocks or crashes due to OpenTrace.
+
+**The server** ingests logs into a custom columnar storage engine (no Elasticsearch, no ClickHouse — just files on disk), monitors health checks, tracks errors, and runs alert rules. Runs on a **$4/month VM**.
 
 **The agent** queries all of this through MCP tools — searching logs, investigating errors, explaining slow queries, assessing deploy risk — without you copy-pasting anything.
 
-**The developer** never opens a dashboard. They ask questions in natural language and the agent has the answers.
+---
+
+## Storage Engine
+
+OpenTrace uses a custom **segmented columnar log store** instead of SQLite or Elasticsearch for log data:
+
+- **Write path**: SDK sends flat JSON → server appends to binary WAL → fsync. No indexes on write. **200-500K entries/sec**.
+- **Seal**: Every hour, the WAL is sealed into compressed columnar chunks (45 columns, 6 encoding types: dictionary, sparse, delta, bitpack, varint, zstd). **3-5MB peak memory**.
+- **Query**: Parallel column scans across segments + custom inverted index for full-text search. Most queries complete in **5-50ms**.
+- **Pruning**: `rm -rf` old segment directories. **Instant** — no DELETE queries, no VACUUM.
+- **Storage**: ~76MB/hour at 1M logs/hr (vs ~500GB with SQLite). **Fits on a $4 VM**.
+
+```
+data/logs/
+  2026-04-04T10/
+    chunk_000.col    3MB     ← 45 compressed columns
+    chunk_000.idx    1MB     ← inverted index for FTS
+    meta.json        2KB     ← pre-computed histograms
+  2026-04-04T11/
+    ...
+  2026-04-04T12/
+    active.wal       12MB    ← current hour, accumulating
+```
+
+Every entry captured by the SDK flows through the full pipeline — PII scrubbing, error fingerprinting, in-request log expansion — and lands in the store as a single row with 45 searchable columns plus an opaque body blob for deep details (SQL queries, stack traces, timeline, etc.).
 
 ---
 
@@ -132,25 +165,6 @@ In your project directory, run the connect command the installer printed:
 curl -s https://your-server.com/connect | bash
 ```
 
-```
-  OpenTrace — connect your project
-  Server: https://your-server.com
-
-  Checking server... ok
-
-  No accounts exist yet. Set up your admin account.
-
-  Email: you@company.com
-  Password: ********
-  Confirm:  ********
-
-  Authenticating... admin account created
-  ✓ .mcp.json created
-  ✓ .mcp.json added to .gitignore
-
-  Done. Open Claude Code in this project — OpenTrace is connected.
-```
-
 **No client install needed.** Just curl and bash. The script creates `.mcp.json` in your project — Claude Code reads this file and connects to OpenTrace automatically.
 
 ### 3. Set up the SDK
@@ -166,7 +180,7 @@ The agent detects your framework, installs the SDK, configures it with the corre
 | [opentrace](https://github.com/adham90/opentrace_ruby) | Ruby / Rails | `gem 'opentrace'` |
 | [@opentrace-sdk/node](https://github.com/adham90/opentrace_node) | Node.js | `npm install @opentrace-sdk/node` |
 
-The SDK sends structured logs, error traces, request performance data, and runtime metrics (memory, GC, threads) to OpenTrace automatically. Your app never blocks or crashes due to OpenTrace — all I/O is async with bounded queues.
+The SDK captures structured logs, request lifecycle data (SQL queries, external API calls, cache metrics, view rendering, email delivery), error traces with stack traces, and runtime metrics — all sent as flat JSON with async I/O. Your app never blocks.
 
 ### 4. Ask your agent anything
 
@@ -175,23 +189,25 @@ You're done. Start asking:
 | Question | What happens |
 |---|---|
 | *"What errors are happening in production?"* | Agent searches error groups, shows impact and stack traces |
-| *"Why is the payments endpoint slow?"* | Agent checks request performance, SQL stats, external API times |
-| *"Show me logs from the last hour with level ERROR"* | Agent searches logs with filters |
+| *"Why is the payments endpoint slow?"* | Agent checks request performance — duration, SQL count, external API time, N+1 detection |
+| *"Show me logs from the last hour with level ERROR"* | Agent searches logs with columnar filters |
 | *"Is it safe to deploy this change?"* | Agent checks blast radius, code risk scores, recent errors |
 | *"Generate tests for the most common production errors"* | Agent creates regression tests from real error data |
 | *"Set up a watcher for checkout error rate > 1%"* | Agent creates a threshold alert |
 | *"What happened after the last deploy?"* | Agent checks deploy impact, error rate changes |
-| *"Invite dev@company.com to opentrace"* | Agent creates a user account |
 
 ---
 
 ## What Can the Agent Do?
 
 ### Search & Debug Logs
-Full-text search across all services. Filter by level, service, trace ID, time range. Assemble distributed traces. Compare error rates between time periods.
+Full-text search across all services via custom inverted index. Filter by level, service, trace ID, time range, handler, status code, error class. Assemble distributed traces. Compare error rates between time periods.
+
+### Deep Request Capture
+Every HTTP request captured by the middleware includes: SQL queries with durations and EXPLAIN plans, external API calls, cache hits/misses, view rendering times, email deliveries, file operations, audit trail, and a waterfall timeline — all in one log entry.
 
 ### Investigate Errors
-Errors are automatically grouped by fingerprint. The agent sees occurrence counts, affected users, impact scores, and full stack traces. It can resolve or ignore error groups.
+Errors are automatically grouped by fingerprint (hash of error class + source file + line). The agent sees occurrence counts, affected users, impact scores, and full stack traces. It can resolve or ignore error groups.
 
 ### Query Your Database
 Connect your Postgres databases (read-only). The agent runs `EXPLAIN ANALYZE` on slow queries, checks index health, detects lock contention, and identifies N+1 query patterns. All queries are validated SELECT-only via SQL AST parsing.
@@ -203,37 +219,10 @@ Create HTTP health checks that run on a schedule. The agent sees uptime percenta
 Create threshold watches on error rate, response time, request volume, SQL count, or cache hit rate. The agent can create watches for code it just deployed — self-monitoring its own changes.
 
 ### Assess Code Risk
-Every file and endpoint gets a risk score based on error frequency, investigation history, and change velocity. Before modifying a file, the agent checks its production behavior — call volume, error rate, latency percentiles.
-
-### Generate Tests from Real Errors
-The agent creates regression tests using actual production error data — real inputs, real stack traces, real edge cases. Every test has a story: when the error happened, how many users it affected.
+Every file and endpoint gets a risk score based on error frequency, investigation history, and change velocity. Before modifying a file, the agent checks its production behavior.
 
 ### Track Deploys
 The SDK sends the git commit hash with every log. OpenTrace detects deploys automatically when the commit hash changes. The agent correlates errors to specific commits.
-
-### Manage the Team
-Invite users, revoke access, rotate API keys, view audit logs — all through conversation. No admin panel needed.
-
----
-
-## Adding Team Members
-
-You:
-> "Invite dev@company.com to opentrace"
-
-The agent creates the account and gives you a temporary password. Send it to the developer securely.
-
-The developer runs:
-```bash
-curl -s https://your-server.com/connect | bash
-```
-
-Enters their email and temporary password. They're connected. Each developer gets their own `.mcp.json` with a personal token.
-
-To remove someone:
-> "Remove dev@company.com from opentrace"
-
-Their tokens are invalidated immediately across all projects.
 
 ---
 
@@ -247,10 +236,9 @@ OpenTrace exposes 12 tools with 80+ actions via MCP. Each tool returns `suggeste
 | **errors** | list, detail, investigate, impact, ranking, resolve, ignore | Error grouping by fingerprint, user impact scoring, stack traces |
 | **database** | queries, explain, tables, activity, locks, indexes, schema, runbook | Postgres introspection, EXPLAIN plans, composite investigation runbooks |
 | **watches** | status, create, delete, alerts, dismiss, investigate | Threshold alerts on error rate, latency, request volume |
-| **overview** | status, triage, diagnose, timeline, investigate, changes, settings, notes, session_summary | System health, alerts, incident timeline, settings, agent memory |
+| **overview** | status, triage, diagnose, timeline, investigate, changes, settings, notes | System health, alerts, incident timeline, settings, agent memory |
 | **analytics** | traffic, endpoints, heatmap, trends, movers | Traffic patterns, endpoint performance, time-series analysis |
 | **code** | risk, fragile, test_gaps, annotate_file, gen_context, deps_risk | Code risk scores, test generation, blast radius, production annotations |
-| **deploys** | history, impact, record | Deploy tracking, error rate impact measurement |
 | **healthchecks** | list, uptime, create, delete | HTTP endpoint monitoring with uptime tracking |
 | **servers** | list, query, health | Server and process metrics (CPU, memory, GC) |
 | **admin** | update_retention, users, audit | User management, retention, audit log (admin only) |
@@ -264,9 +252,10 @@ OpenTrace exposes 12 tools with 80+ actions via MCP. Each tool returns `suggeste
 |---|---|
 | **No self-registration** | First `curl .../connect` creates admin. Everyone else needs an invite. |
 | **Per-user tokens** | Each developer gets a personal MCP token, stored in their local `.mcp.json`. Revocable independently. |
-| **HTTPS via Caddy** | The install script sets up [Caddy](https://caddyserver.com) with automatic Let's Encrypt certificates. OpenTrace listens on localhost only. |
-| **Rate limiting** | Auth endpoints are rate-limited — 10 attempts per minute per IP, then blocked. |
-| **Read-only DB access** | All queries against your Postgres are validated SELECT-only via SQL AST parsing, with configurable timeouts and row limits. |
+| **HTTPS via Caddy** | The install script sets up [Caddy](https://caddyserver.com) with automatic Let's Encrypt certificates. |
+| **PII scrubbing** | Credit cards, emails, phone numbers, SSNs, and configurable sensitive fields are scrubbed from request bodies before storage. |
+| **Rate limiting** | Auth endpoints are rate-limited — 10 attempts per minute per IP. |
+| **Read-only DB access** | All queries against your Postgres are validated SELECT-only via SQL AST parsing. |
 | **API key auth** | SDK log ingestion requires a Bearer token. |
 | **No telemetry** | Fully self-hosted. No external calls. No tracking. Your data stays on your server. |
 
@@ -279,38 +268,21 @@ Server-side environment variables (`.env` file):
 | Variable | Default | Description |
 |---|---|---|
 | `OPENTRACE_LISTEN_ADDR` | `127.0.0.1:8080` | HTTP listen address |
-| `OPENTRACE_DATA_DIR` | `~/.opentrace` | SQLite database directory |
+| `OPENTRACE_DATA_DIR` | `~/.opentrace` | Data directory (SQLite + log segments) |
 | `OPENTRACE_API_KEY` | _(auto-generated)_ | Bearer token for SDK log ingestion |
 | `OPENTRACE_MAX_QUERY_ROWS` | `500` | Max rows returned from SQL queries |
 | `OPENTRACE_STATEMENT_TIMEOUT_MS` | `5000` | SQL query timeout in milliseconds |
 | `OPENTRACE_TRUSTED_PROXIES` | _(empty)_ | Comma-separated proxy IPs for rate limiting |
-| `OPENTRACE_CORS_ORIGINS` | _(empty)_ | Allowed origins for browser requests |
 
 See [`.env.example`](.env.example) for all options.
-
----
-
-## Server Commands
-
-Run on the server only:
-
-```
-opentrace init      Initialize the database (first-time setup)
-opentrace serve     Start the server
-opentrace mcp       Start MCP stdio server (for local development)
-opentrace seed      Populate sample data (development only)
-opentrace backup    Create a SQLite database backup
-opentrace restore   Restore from a backup file
-```
-
-No client-side install. Connect with `curl`, manage everything through your AI assistant.
 
 ---
 
 ## How It's Built
 
 - **Go** — single binary, no runtime dependencies, cross-compiled for Linux and macOS
-- **SQLite** — zero-dependency database with WAL mode and FTS5 for full-text log search
+- **Custom columnar storage** — 45-column format with 6 encoding types (dictionary, sparse, delta, bitpack, varint, zstd). Binary WAL for writes, hourly seal into compressed chunks, custom inverted index for FTS.
+- **SQLite** — for platform data (users, watches, error groups, health checks). Not used for log storage.
 - **MCP** — native Model Context Protocol with Streamable HTTP and SSE transports
 - **Pure Go** — no CGO, no system dependencies, `go build` and ship
 
@@ -326,7 +298,7 @@ go build -o opentrace ./cmd/opentrace
 ```
 
 ```bash
-go test -short -race ./...    # unit tests
+go test -short -race ./...    # unit tests (44 packages)
 go vet ./...                  # linting
 ```
 
