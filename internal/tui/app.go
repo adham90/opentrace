@@ -54,9 +54,10 @@ type Model struct {
 	watches   *apiclient.WatchesResponse
 	stats     *apiclient.IngestionStatsResponse
 
-	logIndex    int
-	logOffset   int
-	logExpanded bool
+	logIndex       int
+	logOffset      int
+	logExpanded    bool
+	expandedDetail *apiclient.LogEntry // full log with RequestSummary
 
 	levelFilter   string
 	serviceFilter string
@@ -90,8 +91,9 @@ type (
 	errorsMsg  *apiclient.ErrorGroupsResponse
 	watchesMsg *apiclient.WatchesResponse
 	statsMsg   *apiclient.IngestionStatsResponse
-	tickMsg    time.Time
-	errMsg     error
+	logDetailMsg *apiclient.LogEntry
+	tickMsg      time.Time
+	errMsg       error
 )
 
 func (m Model) Init() tea.Cmd {
@@ -167,6 +169,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				case "enter", " ":
 					m.logExpanded = !m.logExpanded
+					if m.logExpanded && m.logIndex < len(m.logs) {
+						m.expandedDetail = nil // clear previous
+						return m, m.fetchLogDetail(m.logs[m.logIndex].ID)
+					}
+					m.expandedDetail = nil
 					return m, nil
 				}
 			}
@@ -270,6 +277,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ensureLogVisible()
 			}
 		}
+		return m, nil
+	case logDetailMsg:
+		m.expandedDetail = msg
 		return m, nil
 	case errorsMsg:
 		m.errors = msg
@@ -648,22 +658,16 @@ func (m Model) fmtLogDetail(e apiclient.LogEntry, maxW int) []string {
 	d := styleDim
 	v := lipgloss.NewStyle().Foreground(colorFgDim)
 	a := lipgloss.NewStyle().Foreground(colorCyan)
-
 	indent := "     "
-	sep := indent + styleDim.Render(strings.Repeat("─", 50))
+	sep := indent + styleDim.Render(strings.Repeat("─", min(60, maxW-8)))
 
 	var lines []string
 	lines = append(lines, sep)
 
-	// Row 1: ID + full timestamp
+	// Basic info row
 	lines = append(lines,
 		indent+d.Render("id ")+v.Render(fmt.Sprintf("%d", e.ID))+
 			"  "+d.Render("time ")+v.Render(e.Timestamp.Local().Format("2006-01-02 15:04:05.000")))
-
-	// Row 2: full message (may be long, but truncated to width)
-	if len(e.Message) > msgW(maxW) {
-		lines = append(lines, indent+d.Render("msg ")+v.Render(truncate(e.Message, maxW-10)))
-	}
 
 	if e.RequestID != "" {
 		lines = append(lines, indent+d.Render("req ")+a.Render(e.RequestID))
@@ -672,22 +676,136 @@ func (m Model) fmtLogDetail(e apiclient.LogEntry, maxW int) []string {
 		lines = append(lines, indent+d.Render("err ")+styleLevelError.Render(e.ExceptionClass))
 	}
 
+	// Full message if truncated in list
+	cleanMsg := oneLine(e.Message)
+	listMsgW := maxW - 32
+	if listMsgW < 10 {
+		listMsgW = 10
+	}
+	if len(cleanMsg) > listMsgW {
+		lines = append(lines, indent+d.Render("msg ")+v.Render(truncate(cleanMsg, maxW-12)))
+	}
+
+	// ─── Request Waterfall ───────────────────────────────
+	// Use the async-fetched detail with RequestSummary if available
+	detail := m.expandedDetail
+	if detail != nil && detail.ID == e.ID && detail.RequestSummary != nil {
+		rs := detail.RequestSummary
+		lines = append(lines, "")
+		lines = append(lines, indent+lipgloss.NewStyle().Bold(true).Foreground(colorBlue).
+			Render(fmt.Sprintf("▼ %s %s → %d  (%.0fms)",
+				rs.Method, truncate(rs.Path, 30), rs.Status, rs.DurationMs)))
+
+		// Waterfall bars — proportional to total duration
+		barW := min(40, maxW-25)
+		if barW < 10 {
+			barW = 10
+		}
+		total := rs.DurationMs
+		if total <= 0 {
+			total = 1
+		}
+
+		type segment struct {
+			label string
+			ms    float64
+			color string
+			extra string
+		}
+		var segs []segment
+
+		if rs.SQLTotalMs > 0 {
+			extra := fmt.Sprintf("%d queries", rs.SQLCount)
+			if rs.NPlusOne {
+				extra += " ⚠ N+1"
+			}
+			if rs.DuplicateQueries > 0 {
+				extra += fmt.Sprintf(" %d dups", rs.DuplicateQueries)
+			}
+			segs = append(segs, segment{"SQL", rs.SQLTotalMs, "#f87171", extra})
+		}
+		if rs.ViewTotalMs > 0 {
+			extra := fmt.Sprintf("%d views", rs.ViewCount)
+			if rs.ViewSlowestTemplate != "" {
+				extra += " slowest:" + truncate(rs.ViewSlowestTemplate, 20)
+			}
+			segs = append(segs, segment{"View", rs.ViewTotalMs, "#34d399", extra})
+		}
+		if rs.HTTPExternalTotalMs > 0 {
+			segs = append(segs, segment{"HTTP", rs.HTTPExternalTotalMs, "#fbbf24",
+				fmt.Sprintf("%d calls", rs.HTTPExternalCount)})
+		}
+		if rs.CacheReads > 0 {
+			segs = append(segs, segment{"Cache", 0, "#22d3ee",
+				fmt.Sprintf("r:%d h:%d w:%d (%.0f%%)", rs.CacheReads, rs.CacheHits, rs.CacheWrites, rs.CacheHitRatio*100)})
+		}
+
+		// Other time = total - SQL - view - HTTP
+		other := total - rs.SQLTotalMs - rs.ViewTotalMs - rs.HTTPExternalTotalMs
+		if other > 0.5 {
+			segs = append(segs, segment{"App", other, "#a78bfa", ""})
+		}
+
+		for _, seg := range segs {
+			ratio := seg.ms / total
+			filled := int(ratio * float64(barW))
+			if filled < 1 && seg.ms > 0 {
+				filled = 1
+			}
+
+			bar := lipgloss.NewStyle().Foreground(lipgloss.Color(seg.color)).Render(repeatStr("█", filled))
+			empty := styleDim.Render(repeatStr("░", barW-filled))
+
+			timing := ""
+			if seg.ms > 0 {
+				timing = lipgloss.NewStyle().Foreground(lipgloss.Color(seg.color)).Bold(true).
+					Render(fmt.Sprintf("%6.1fms", seg.ms))
+			} else {
+				timing = styleDim.Render("      —")
+			}
+
+			label := d.Render(padRight(seg.label, 5))
+			line := indent + label + " " + bar + empty + " " + timing
+			if seg.extra != "" {
+				line += "  " + d.Render(seg.extra)
+			}
+			lines = append(lines, line)
+		}
+
+		// Memory
+		if rs.MemoryDeltaMb != 0 {
+			mc := colorGreen
+			if rs.MemoryDeltaMb > 5 {
+				mc = colorOrange
+			}
+			if rs.MemoryDeltaMb > 20 {
+				mc = colorRed
+			}
+			lines = append(lines, indent+d.Render("mem  ")+
+				lipgloss.NewStyle().Foreground(mc).Render(fmt.Sprintf("%+.1fMB", rs.MemoryDeltaMb)))
+		}
+
+		// Slowest SQL
+		if rs.SQLSlowestName != "" {
+			lines = append(lines, indent+d.Render("slow ")+
+				lipgloss.NewStyle().Foreground(colorOrange).Render(
+					fmt.Sprintf("%.1fms %s", rs.SQLSlowestMs, truncate(rs.SQLSlowestName, maxW-25))))
+		}
+
+	} else if detail == nil && m.logExpanded {
+		lines = append(lines, indent+styleDim.Render("loading request details..."))
+	}
+
 	// Metadata
-	for k, val := range e.Metadata {
-		s := fmt.Sprintf("%v", val)
-		lines = append(lines, indent+d.Render(k+" ")+v.Render(truncate(s, maxW-len(k)-10)))
+	if len(e.Metadata) > 0 {
+		for k, val := range e.Metadata {
+			s := fmt.Sprintf("%v", val)
+			lines = append(lines, indent+d.Render(k+" ")+v.Render(truncate(s, maxW-len(k)-10)))
+		}
 	}
 
 	lines = append(lines, sep)
 	return lines
-}
-
-func msgW(maxW int) int {
-	w := maxW - 32
-	if w < 10 {
-		return 10
-	}
-	return w
 }
 
 func (m Model) hotkeys() string {
@@ -962,6 +1080,16 @@ func (m Model) fetchWatches() tea.Msg {
 	}
 	return watchesMsg(r)
 }
+func (m Model) fetchLogDetail(id int64) tea.Cmd {
+	return func() tea.Msg {
+		r, e := m.config.Client.GetLog(id)
+		if e != nil {
+			return errMsg(e)
+		}
+		return logDetailMsg(r)
+	}
+}
+
 func (m Model) fetchStats() tea.Msg {
 	r, e := m.config.Client.IngestionStats("1h", "1m", m.serviceFilter)
 	if e != nil {

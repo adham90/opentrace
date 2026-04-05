@@ -75,14 +75,45 @@ type LogTailResponse struct {
 
 // LogEntry is a single log line from the API.
 type LogEntry struct {
-	ID             int64          `json:"id"`
-	Timestamp      time.Time      `json:"timestamp"`
-	Level          string         `json:"level"`
-	Service        string         `json:"service,omitempty"`
-	Message        string         `json:"message"`
-	RequestID      string         `json:"request_id,omitempty"`
-	ExceptionClass string         `json:"exception_class,omitempty"`
-	Metadata       map[string]any `json:"metadata,omitempty"`
+	ID             int64           `json:"id"`
+	Timestamp      time.Time       `json:"timestamp"`
+	Level          string          `json:"level"`
+	Service        string          `json:"service,omitempty"`
+	Message        string          `json:"message"`
+	RequestID      string          `json:"request_id,omitempty"`
+	ExceptionClass string          `json:"exception_class,omitempty"`
+	Metadata       map[string]any  `json:"metadata,omitempty"`
+	RequestSummary *RequestSummary `json:"request_summary,omitempty"`
+}
+
+// RequestSummary holds structured performance metrics for an HTTP request.
+type RequestSummary struct {
+	Controller          string  `json:"controller,omitempty"`
+	Action              string  `json:"action,omitempty"`
+	Method              string  `json:"method,omitempty"`
+	Path                string  `json:"path,omitempty"`
+	Status              int     `json:"status,omitempty"`
+	DurationMs          float64 `json:"duration_ms,omitempty"`
+	DBTimeMs            float64 `json:"db_time_ms,omitempty"`
+	ViewTimeMs          float64 `json:"view_time_ms,omitempty"`
+	SQLCount            int     `json:"sql_count,omitempty"`
+	SQLTotalMs          float64 `json:"sql_total_ms,omitempty"`
+	SQLSlowestMs        float64 `json:"sql_slowest_ms,omitempty"`
+	SQLSlowestName      string  `json:"sql_slowest_name,omitempty"`
+	NPlusOne            bool    `json:"n_plus_one,omitempty"`
+	ViewCount           int     `json:"view_count,omitempty"`
+	ViewTotalMs         float64 `json:"view_total_ms,omitempty"`
+	ViewSlowestMs       float64 `json:"view_slowest_ms,omitempty"`
+	ViewSlowestTemplate string  `json:"view_slowest_template,omitempty"`
+	CacheReads          int     `json:"cache_reads,omitempty"`
+	CacheHits           int     `json:"cache_hits,omitempty"`
+	CacheWrites         int     `json:"cache_writes,omitempty"`
+	CacheHitRatio       float64 `json:"cache_hit_ratio,omitempty"`
+	HTTPExternalCount   int     `json:"http_external_count,omitempty"`
+	HTTPExternalTotalMs float64 `json:"http_external_total_ms,omitempty"`
+	DuplicateQueries    int     `json:"duplicate_queries,omitempty"`
+	MemoryDeltaMb       float64 `json:"memory_delta_mb,omitempty"`
+	Timeline            string  `json:"timeline,omitempty"`
 }
 
 // ErrorGroupsResponse is the JSON response from GET /api/cli/errors/top.

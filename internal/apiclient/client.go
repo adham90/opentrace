@@ -38,6 +38,15 @@ func (c *Client) Status() (*StatusResponse, error) {
 	return &resp, nil
 }
 
+// GetLog fetches GET /api/cli/logs/{id} — single log with request summary.
+func (c *Client) GetLog(id int64) (*LogEntry, error) {
+	var resp LogEntry
+	if err := c.getJSON(fmt.Sprintf("/api/cli/logs/%d", id), nil, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // LogTail fetches GET /api/cli/logs/tail with the given filters.
 func (c *Client) LogTail(after int64, limit int, level, service, search string) (*LogTailResponse, error) {
 	params := url.Values{}

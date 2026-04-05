@@ -8,9 +8,35 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
 )
+
+func (h *handler) handleLogDetail(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if h.deps.LogStore == nil {
+		server.WriteError(w, http.StatusServiceUnavailable, "log store not available")
+		return
+	}
+
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		server.WriteError(w, http.StatusBadRequest, "invalid log id")
+		return
+	}
+
+	entry, err := h.deps.LogStore.GetByID(ctx, id)
+	if err != nil {
+		server.WriteError(w, http.StatusNotFound, "log not found")
+		return
+	}
+
+	server.WriteJSON(w, http.StatusOK, entry)
+}
 
 // logTailResponse is the JSON response for GET /api/cli/logs/tail.
 type logTailResponse struct {
