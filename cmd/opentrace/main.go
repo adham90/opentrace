@@ -281,7 +281,7 @@ func run() error {
 
 	httpServer := &http.Server{
 		Addr:         deps.Cfg.ListenAddr,
-		Handler:      srv.Router,
+		Handler:      srv.Handler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 60 * time.Second, // higher for SSE endpoints
 		IdleTimeout:  120 * time.Second,

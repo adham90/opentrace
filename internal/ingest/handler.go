@@ -61,24 +61,52 @@ func IsValidBatchID(id string) bool {
 }
 
 type ingestLogEntry struct {
-	Timestamp        time.Time              `json:"timestamp" msgpack:"timestamp"`
+	Ts               string                 `json:"ts" msgpack:"ts"`
 	Level            string                 `json:"level" msgpack:"level"`
 	Service          string                 `json:"service" msgpack:"service"`
-	Environment      string                 `json:"environment" msgpack:"environment"`
-	CommitHash       string                 `json:"commit_hash" msgpack:"commit_hash"`
+	Env              string                 `json:"env" msgpack:"env"`
+	Version          string                 `json:"version" msgpack:"version"`
+	Message          string                 `json:"message" msgpack:"message"`
+	EventType        string                 `json:"event_type" msgpack:"event_type"`
 	TraceID          string                 `json:"trace_id" msgpack:"trace_id"`
 	SpanID           string                 `json:"span_id" msgpack:"span_id"`
 	ParentSpanID     string                 `json:"parent_span_id" msgpack:"parent_span_id"`
 	RequestID        string                 `json:"request_id" msgpack:"request_id"`
-	Message          string                 `json:"message" msgpack:"message"`
-	EventType        string                 `json:"event_type" msgpack:"event_type"`
-	ExceptionClass   string                 `json:"error_class" msgpack:"error_class"`
-	ErrorFingerprint string                 `json:"error_fingerprint" msgpack:"error_fingerprint"`
+	UserID           string                 `json:"user_id" msgpack:"user_id"`
+	TenantID         string                 `json:"tenant_id" msgpack:"tenant_id"`
+	SessionID        string                 `json:"session_id" msgpack:"session_id"`
+	Method           string                 `json:"method" msgpack:"method"`
+	Path             string                 `json:"path" msgpack:"path"`
+	Controller       string                 `json:"controller" msgpack:"controller"`
+	Status           int                    `json:"status" msgpack:"status"`
+	DurationMs       int                    `json:"duration_ms" msgpack:"duration_ms"`
+	DbMs             int                    `json:"db_ms" msgpack:"db_ms"`
+	DbCount          int                    `json:"db_count" msgpack:"db_count"`
+	NPlusOne         *bool                  `json:"n_plus_one" msgpack:"n_plus_one"`
+	SlowQueries      int                    `json:"slow_queries" msgpack:"slow_queries"`
+	DupQueries       int                    `json:"dup_queries" msgpack:"dup_queries"`
+	ErrorClass       string                 `json:"error_class" msgpack:"error_class"`
+	ErrorMessage     string                 `json:"error_message" msgpack:"error_message"`
 	SourceFile       string                 `json:"source_file" msgpack:"source_file"`
 	SourceLine       int                    `json:"source_line" msgpack:"source_line"`
-	Metadata         map[string]any         `json:"metadata" msgpack:"metadata"`
-	DeepCapture      json.RawMessage        `json:"deep_capture,omitempty" msgpack:"deep_capture,omitempty"`
-	RequestSummary   *ingestRequestSummary  `json:"request_summary,omitempty" msgpack:"request_summary,omitempty"`
+	Body             json.RawMessage        `json:"body,omitempty" msgpack:"body,omitempty"`
+
+	// Resolved timestamp (not in JSON — computed from Ts)
+	timestamp time.Time
+}
+
+// resolveTimestamp parses the "ts" field into a time.Time.
+func (e *ingestLogEntry) resolveTimestamp() error {
+	if e.Ts != "" {
+		t, err := time.Parse(time.RFC3339Nano, e.Ts)
+		if err != nil {
+			return fmt.Errorf("invalid ts format (use RFC3339): %v", err)
+		}
+		e.timestamp = t
+		return nil
+	}
+	e.timestamp = time.Now().UTC()
+	return nil
 }
 
 type ingestRequestSummary struct {
@@ -174,16 +202,18 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Validate required fields and normalize levels to lowercase
+	// Validate required fields, resolve timestamps, normalize levels
 	validLevels := map[string]bool{
 		"debug": true, "info": true, "warn": true, "warning": true,
 		"error": true, "fatal": true,
 	}
-	for i, e := range entries {
-		var missing []string
-		if e.Timestamp.IsZero() {
-			missing = append(missing, "timestamp")
+	for i := range entries {
+		e := &entries[i]
+		if err := e.resolveTimestamp(); err != nil {
+			server.WriteError(w, http.StatusBadRequest, fmt.Sprintf("entry %d: %v", i, err))
+			return
 		}
+		var missing []string
 		if e.Level == "" {
 			missing = append(missing, "level")
 		}
@@ -194,8 +224,8 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 			server.WriteError(w, http.StatusBadRequest, fmt.Sprintf("entry %d: missing required field(s): %s", i, strings.Join(missing, ", ")))
 			return
 		}
-		entries[i].Level = strings.ToLower(e.Level)
-		if !validLevels[entries[i].Level] {
+		e.Level = strings.ToLower(e.Level)
+		if !validLevels[e.Level] {
 			server.WriteError(w, http.StatusBadRequest, fmt.Sprintf("entry %d: 'level' must be one of: debug, info, warn, error, fatal (got %q)", i, e.Level))
 			return
 		}
@@ -220,79 +250,58 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 
 	logEntries := make([]store.LogEntry, len(entries))
 	for i, e := range entries {
-		// Pre-marshal metadata once to avoid double marshal in the store layer
+		// Build metadata from Body JSON blob if present
+		var metadata map[string]any
 		var metadataJSON string
-		if e.Metadata != nil {
-			if raw, err := json.Marshal(e.Metadata); err == nil {
-				metadataJSON = string(raw)
-			}
+		if len(e.Body) > 0 {
+			metadata = make(map[string]any)
+			_ = json.Unmarshal(e.Body, &metadata)
+			metadataJSON = string(e.Body)
 		}
 
 		entry := store.LogEntry{
-			Timestamp:      e.Timestamp,
+			Timestamp:      e.timestamp,
 			Level:          e.Level,
 			Service:        e.Service,
-			Environment:    e.Environment,
-			CommitHash:     e.CommitHash,
+			Environment:    e.Env,
+			CommitHash:     e.Version,
 			TraceID:        e.TraceID,
 			SpanID:         e.SpanID,
 			ParentSpanID:   e.ParentSpanID,
 			RequestID:      e.RequestID,
 			Message:        e.Message,
 			EventType:      e.EventType,
-			ExceptionClass: e.ExceptionClass,
+			ExceptionClass: e.ErrorClass,
 			SourceFile:     e.SourceFile,
 			SourceLine:     e.SourceLine,
-			Metadata:       e.Metadata,
+			Metadata:       metadata,
 			MetadataJSON:   metadataJSON,
-			DeepCapture:    e.DeepCapture,
 		}
 
-		// Server-side fingerprinting: always compute on the server,
-		// ignoring any SDK-provided value for consistency across languages.
+		// Server-side fingerprinting
 		if fp := GenerateErrorFingerprint(&entry); fp != "" {
 			entry.ErrorFingerprint = fp
 		}
 
-		logEntries[i] = entry
-		if e.RequestSummary != nil {
-			rs := e.RequestSummary
-			logEntries[i].RequestSummary = &store.RequestSummary{
-				Controller:          rs.Controller,
-				Action:              rs.Action,
-				Method:              rs.Method,
-				Path:                rs.Path,
-				Status:              rs.Status,
-				DurationMs:          rs.DurationMs,
-				DBTimeMs:            rs.DBTimeMs,
-				ViewTimeMs:          rs.ViewTimeMs,
-				SQLCount:            rs.SQLCount,
-				SQLTotalMs:          rs.SQLTotalMs,
-				SQLSlowestMs:        rs.SQLSlowestMs,
-				SQLSlowestName:      rs.SQLSlowestName,
-				NPlusOne:            rs.NPlusOne,
-				ViewCount:           rs.ViewCount,
-				ViewTotalMs:         rs.ViewTotalMs,
-				ViewSlowestMs:       rs.ViewSlowestMs,
-				ViewSlowestTemplate: rs.ViewSlowestTemplate,
-				CacheReads:          rs.CacheReads,
-				CacheHits:           rs.CacheHits,
-				CacheWrites:         rs.CacheWrites,
-				CacheHitRatio:       rs.CacheHitRatio,
-				HTTPExternalCount:   rs.HTTPExternalCount,
-				HTTPExternalTotalMs: rs.HTTPExternalTotalMs,
-				HTTPSlowestMs:       rs.HTTPSlowestMs,
-				HTTPSlowestHost:     rs.HTTPSlowestHost,
-				MemoryBeforeMb:      rs.MemoryBeforeMb,
-				MemoryAfterMb:       rs.MemoryAfterMb,
-				MemoryDeltaMb:       rs.MemoryDeltaMb,
-				Timeline:            string(rs.Timeline),
-				TimeBreakdown:       string(rs.TimeBreakdown),
-				DuplicateQueries:    rs.DuplicateQueries,
-				WorstDuplicateCount: rs.WorstDuplicateCount,
-				TopDuplicates:       string(rs.TopDuplicates),
+		// Build RequestSummary from flat fields if this is an http.request event
+		if e.Method != "" || e.Path != "" || e.Status > 0 || e.DurationMs > 0 {
+			nplusone := false
+			if e.NPlusOne != nil {
+				nplusone = *e.NPlusOne
+			}
+			entry.RequestSummary = &store.RequestSummary{
+				Controller: e.Controller,
+				Method:     e.Method,
+				Path:       e.Path,
+				Status:     e.Status,
+				DurationMs: float64(e.DurationMs),
+				DBTimeMs:   float64(e.DbMs),
+				SQLCount:   e.DbCount,
+				NPlusOne:   nplusone,
 			}
 		}
+
+		logEntries[i] = entry
 	}
 
 	// Apply sampling rules

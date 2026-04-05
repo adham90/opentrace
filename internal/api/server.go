@@ -64,9 +64,12 @@ type Server struct {
 	codeEntityStore          store.CodeEntityStore
 	reliabilityProvider      ReliabilityProvider
 	sseServer         *mcp.SSEHandler
+	sseAPILimiter     *RateLimiter
 	streamableServer  *mcp.StreamableHTTPHandler
 	loginLimiter   *RateLimiter
 	apiLimiter     *RateLimiter
+	// Handler is the top-level http.Handler (wraps Router with SSE mux)
+	Handler        http.Handler
 	metricsConnMu  sync.Mutex
 
 	// Domain modules (isolated packages mounted on the API router)
@@ -195,7 +198,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Use(middleware.Recoverer)
 	router.Use(middleware.RequestID)
 	router.Use(PrometheusMiddleware)
-	router.Use(wrapCompressSkipMCP(middleware.Compress(5))) // gzip compression, bypassed for /mcp/ SSE
+	router.Use(wrapCompressSkipMCP(middleware.Compress(5))) // gzip compression, bypassed for /mcp/
 	router.Use(MaxBodySize(maxRequestBodyBytes)) // 10 MB global body limit
 	router.Use(srv.ProxyAuth)          // trusted proxy headers (cloud managed mode)
 
@@ -203,7 +206,6 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Get("/readyz", srv.handleReadiness)
 
 	// MCP transport — authenticated via Bearer token (MCP token).
-	// Supports both Streamable HTTP (recommended, /mcp) and legacy SSE (/mcp/sse).
 	if srv.userStore != nil && srv.registry != nil {
 		// Streamable HTTP transport (MCP spec 2025-06-18+)
 		streamableServer := srv.setupMCPStreamableHTTP()
@@ -211,18 +213,14 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		router.Route("/mcp", func(r chi.Router) {
 			r.Use(apiLimiter.Middleware)
 			r.Use(srv.MCPTokenAuth)
-			// Streamable HTTP handles POST/GET/DELETE on the endpoint path.
 			r.Handle("/*", streamableServer)
 		})
 
-		// Legacy SSE transport (deprecated, kept for backward compatibility)
-		sseServer := srv.setupMCPSSE()
-		srv.sseServer = sseServer
-		router.Route("/mcp-sse", func(r chi.Router) {
-			r.Use(apiLimiter.Middleware)
-			r.Use(srv.MCPTokenAuth)
-			r.Handle("/*", sseServer)
-		})
+		// SSE transport — stored on srv, mounted via top-level mux
+		// (not on the chi router) to avoid Logger/Compress middleware
+		// wrapping http.ResponseWriter which breaks http.Flusher.
+		srv.sseServer = srv.setupMCPSSE()
+		srv.sseAPILimiter = apiLimiter
 	}
 
 	// Expose the root router and login limiter so auth/onboarding modules
@@ -279,6 +277,24 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	})
 
 	srv.Router = router
+
+	// Build top-level handler: if SSE is configured, use an http.ServeMux
+	// that routes /mcp-sse to a clean handler (no Logger/Compress wrapping)
+	// and everything else to the chi router.
+	if srv.sseServer != nil {
+		mux := http.NewServeMux()
+		sseHandler := srv.MCPTokenAuth(srv.sseServer)
+		if srv.sseAPILimiter != nil {
+			sseHandler = srv.sseAPILimiter.Middleware(sseHandler)
+		}
+		mux.Handle("/mcp-sse/", http.StripPrefix("/mcp-sse", sseHandler))
+		mux.Handle("/mcp-sse", sseHandler) // exact match (no trailing slash)
+		mux.Handle("/", router)
+		srv.Handler = mux
+	} else {
+		srv.Handler = router
+	}
+
 	return srv
 }
 

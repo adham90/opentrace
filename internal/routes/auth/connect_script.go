@@ -40,7 +40,7 @@ echo ""
 # Check if .mcp.json already exists
 if [ -f .mcp.json ]; then
   echo "  .mcp.json already exists in this directory."
-  read -r -p "  Overwrite? [y/N] " CONFIRM
+  read -r -p "  Overwrite? [y/N] " CONFIRM < /dev/tty
   if [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ]; then
     echo "  Aborted."
     exit 0
@@ -66,21 +66,17 @@ if [ -n "$NEEDS_SETUP" ]; then
 fi
 
 # Prompt for credentials
-read -r -p "  Email: " EMAIL
+read -r -p "  Email: " EMAIL < /dev/tty
 if [ -z "$EMAIL" ]; then
   echo "  Email is required."
   exit 1
 fi
 
 # Read password without echo
-if [ -t 0 ]; then
-  stty -echo 2>/dev/null || true
-  read -r -p "  Password: " PASS
-  stty echo 2>/dev/null || true
-  echo ""
-else
-  read -r -p "  Password: " PASS
-fi
+stty -echo < /dev/tty 2>/dev/null || true
+read -r -p "  Password: " PASS < /dev/tty
+stty echo < /dev/tty 2>/dev/null || true
+echo ""
 
 if [ -z "$PASS" ]; then
   echo "  Password is required."
@@ -89,9 +85,9 @@ fi
 
 # Confirm password for new admin
 if [ -n "$NEEDS_SETUP" ]; then
-  stty -echo 2>/dev/null || true
-  read -r -p "  Confirm:  " PASS2
-  stty echo 2>/dev/null || true
+  stty -echo < /dev/tty 2>/dev/null || true
+  read -r -p "  Confirm:  " PASS2 < /dev/tty
+  stty echo < /dev/tty 2>/dev/null || true
   echo ""
   if [ "$PASS" != "$PASS2" ]; then
     echo "  Passwords do not match."
@@ -128,16 +124,13 @@ else
   echo "ok"
 fi
 
-# Determine MCP endpoint path
-MCP_URL="${SERVER}/mcp/sse"
-
 # Write .mcp.json
 cat > .mcp.json << MCPEOF
 {
   "mcpServers": {
     "opentrace": {
       "type": "sse",
-      "url": "${MCP_URL}",
+      "url": "${SERVER}/mcp-sse",
       "headers": {
         "Authorization": "Bearer ${TOKEN}"
       }

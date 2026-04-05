@@ -20,7 +20,7 @@ func wrapCompressSkipMCP(compressMw func(http.Handler) http.Handler) func(http.H
 	return func(next http.Handler) http.Handler {
 		compressed := compressMw(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasPrefix(r.URL.Path, "/mcp/") {
+			if strings.HasPrefix(r.URL.Path, "/mcp/") || strings.HasPrefix(r.URL.Path, "/mcp-sse") {
 				next.ServeHTTP(w, r)
 				return
 			}
