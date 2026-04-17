@@ -140,9 +140,7 @@ func (s *WatchStreamEvaluator) evaluateOne(ctx context.Context, w *store.Watch) 
 			RunID:          run.ID,
 			Urgency:        w.Urgency,
 			Summary:        result.Summary,
-			TriggerMetric:  store.ConditionsSummary(w.ConditionsJSON),
-			TriggerValue:   result.Value,
-			ThresholdValue: store.ConditionsThreshold(w.ConditionsJSON),
+			ConditionsSnapshot: store.BuildConditionsSnapshot(store.ConditionsSummary(w.ConditionsJSON), result.Value, store.ConditionsThreshold(w.ConditionsJSON)),
 			Evidence:       evidence,
 		})
 		if err != nil {

@@ -318,9 +318,7 @@ func TestWatchStore_AlertCRUD(t *testing.T) {
 		WatchID:        w.ID,
 		Urgency:        store.WatchUrgencyHigh,
 		Summary:        "error rate spike",
-		TriggerMetric:  "error_rate",
-		TriggerValue:   0.12,
-		ThresholdValue: 0.05,
+		ConditionsSnapshot: store.BuildConditionsSnapshot("error_rate", 0.12, 0.05),
 		Evidence: &store.WatchEvidenceBundle{
 			RecentErrors: []store.WatchEvidenceError{
 				{ExceptionClass: "NoMethodError", Message: "undefined method", Count: 5, IsNew: true},

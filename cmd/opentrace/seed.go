@@ -407,10 +407,10 @@ func runSeed() error {
 
 	// Watch alerts.
 	alertDefs := []store.CreateWatchAlertParams{
-		{WatchID: watchIDs[2], Urgency: store.WatchUrgencyNormal, Summary: "p95 response time for order-service exceeded 1200ms for 3 checks. Current: 1500ms.", TriggerMetric: "p95_response", TriggerValue: 1500, ThresholdValue: 1200},
-		{WatchID: watchIDs[4], Urgency: store.WatchUrgencyCritical, Summary: "payment-api heartbeat missing. Zero events for 5+ minutes. Service may be down.", TriggerMetric: "heartbeat", TriggerValue: 0, ThresholdValue: 1},
-		{WatchID: watchIDs[0], Urgency: store.WatchUrgencyCritical, Summary: "Error rate for payment-api spiked to 8% (threshold 5%).", TriggerMetric: "error_rate", TriggerValue: 0.08, ThresholdValue: 0.05},
-		{WatchID: watchIDs[5], Urgency: store.WatchUrgencyHigh, Summary: "Checkout endpoint response time 920ms (threshold 800ms).", TriggerMetric: "response_time", TriggerValue: 920, ThresholdValue: 800},
+		{WatchID: watchIDs[2], Urgency: store.WatchUrgencyNormal, Summary: "p95 response time for order-service exceeded 1200ms for 3 checks. Current: 1500ms.", ConditionsSnapshot: store.BuildConditionsSnapshot("p95_response", 1500, 1200)},
+		{WatchID: watchIDs[4], Urgency: store.WatchUrgencyCritical, Summary: "payment-api heartbeat missing. Zero events for 5+ minutes. Service may be down.", ConditionsSnapshot: store.BuildConditionsSnapshot("heartbeat", 0, 1)},
+		{WatchID: watchIDs[0], Urgency: store.WatchUrgencyCritical, Summary: "Error rate for payment-api spiked to 8% (threshold 5%).", ConditionsSnapshot: store.BuildConditionsSnapshot("error_rate", 0.08, 0.05)},
+		{WatchID: watchIDs[5], Urgency: store.WatchUrgencyHigh, Summary: "Checkout endpoint response time 920ms (threshold 800ms).", ConditionsSnapshot: store.BuildConditionsSnapshot("response_time", 920, 800)},
 	}
 	for _, p := range alertDefs {
 		watchStore.CreateAlert(ctx, p)

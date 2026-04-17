@@ -127,11 +127,11 @@ func TestWatchScheduler_CreatesAlertOnBreach(t *testing.T) {
 	}
 
 	alert := alerts[0]
-	if alert.TriggerMetric != "error_rate" {
-		t.Errorf("trigger_metric = %q, want error_rate", alert.TriggerMetric)
+	if alert.TriggerMetric() != "error_rate" {
+		t.Errorf("trigger_metric = %q, want error_rate", alert.TriggerMetric())
 	}
-	if alert.TriggerValue <= 0.1 {
-		t.Errorf("trigger_value = %v, expected > 0.1", alert.TriggerValue)
+	if alert.TriggerValue() <= 0.1 {
+		t.Errorf("trigger_value = %v, expected > 0.1", alert.TriggerValue())
 	}
 }
 

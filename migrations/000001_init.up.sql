@@ -171,7 +171,7 @@ CREATE INDEX IF NOT EXISTS idx_error_group_events_fp ON error_group_events(finge
 
 CREATE TABLE IF NOT EXISTS error_impacts (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    error_fingerprint TEXT NOT NULL,
+    error_fingerprint TEXT NOT NULL REFERENCES error_groups(fingerprint) ON DELETE CASCADE,
     user_id           TEXT NOT NULL,
     service           TEXT NOT NULL DEFAULT '',
     first_seen_at     TEXT NOT NULL,
@@ -272,9 +272,7 @@ CREATE TABLE IF NOT EXISTS watch_alerts (
     run_id          TEXT REFERENCES watch_runs(id) ON DELETE SET NULL,
     urgency         TEXT NOT NULL DEFAULT 'normal',
     summary         TEXT NOT NULL,
-    trigger_metric  TEXT NOT NULL,
-    trigger_value   REAL NOT NULL,
-    threshold_value REAL NOT NULL,
+    conditions_snapshot TEXT NOT NULL DEFAULT '{}',
     evidence_json   TEXT,
     status          TEXT NOT NULL DEFAULT 'pending',
     dismiss_reason  TEXT,

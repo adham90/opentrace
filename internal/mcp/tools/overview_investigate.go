@@ -110,9 +110,9 @@ func HandleOverviewInvestigate(ctx context.Context, d OverviewDeps, args map[str
 					"id":              a.ID,
 					"summary":         a.Summary,
 					"urgency":         string(a.Urgency),
-					"trigger_metric":  a.TriggerMetric,
-					"trigger_value":   a.TriggerValue,
-					"threshold_value": a.ThresholdValue,
+					"trigger_metric":  a.TriggerMetric(),
+					"trigger_value":   a.TriggerValue(),
+					"threshold_value": a.ThresholdValue(),
 					"created_at":      a.CreatedAt.Format(time.RFC3339),
 				})
 			}

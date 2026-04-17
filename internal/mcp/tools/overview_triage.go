@@ -61,7 +61,7 @@ func HandleTriage(ctx context.Context, d OverviewDeps) (*CallToolResult, error) 
 					Type:     "watch_alert",
 					Severity: "warning",
 					Title:    a.Summary,
-					Detail:   fmt.Sprintf("%s: %.2f (threshold: %.2f)", a.TriggerMetric, a.TriggerValue, a.ThresholdValue),
+					Detail:   fmt.Sprintf("%s: %.2f (threshold: %.2f)", a.TriggerMetric(), a.TriggerValue(), a.ThresholdValue()),
 					Time:     a.CreatedAt.Format(time.RFC3339),
 					ID:       a.ID,
 				})

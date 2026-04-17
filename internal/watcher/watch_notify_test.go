@@ -23,9 +23,7 @@ func testAlert() *store.WatchAlert {
 		RunID:          "run-1",
 		Urgency:        store.WatchUrgencyHigh,
 		Summary:        "error_rate = 0.35 exceeds threshold 0.10",
-		TriggerMetric:  "error_rate",
-		TriggerValue:   0.35,
-		ThresholdValue: 0.10,
+		ConditionsSnapshot: store.BuildConditionsSnapshot("error_rate", 0.35, 0.10),
 		Status:         "pending",
 		CreatedAt:      time.Date(2026, 2, 26, 12, 0, 0, 0, time.UTC),
 	}

@@ -422,11 +422,10 @@ func (s *watchStore) CreateAlert(ctx context.Context, params store.CreateWatchAl
 
 	_, err := s.db.NewRaw(`
 		INSERT INTO watch_alerts (id, watch_id, run_id, urgency, summary,
-			trigger_metric, trigger_value, threshold_value, evidence_json, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			conditions_snapshot, evidence_json, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, params.WatchID, nullString(params.RunID), string(params.Urgency),
-		params.Summary, params.TriggerMetric, params.TriggerValue,
-		params.ThresholdValue, evidenceStr, now,
+		params.Summary, params.ConditionsSnapshot, evidenceStr, now,
 	).Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("inserting watch alert: %w", err)
@@ -437,8 +436,8 @@ func (s *watchStore) CreateAlert(ctx context.Context, params store.CreateWatchAl
 
 func (s *watchStore) GetAlert(ctx context.Context, id string) (*store.WatchAlert, error) {
 	a, err := s.scanSingleAlert(ctx, `
-		SELECT id, watch_id, run_id, urgency, summary, trigger_metric, trigger_value,
-			threshold_value, evidence_json, status, dismiss_reason, created_at
+		SELECT id, watch_id, run_id, urgency, summary, conditions_snapshot,
+			evidence_json, status, dismiss_reason, created_at
 		FROM watch_alerts WHERE id = ?`, id)
 	if err == sql.ErrNoRows {
 		return nil, store.ErrNotFound
@@ -466,8 +465,8 @@ func (s *watchStore) ListAlerts(ctx context.Context, watchID string, status stri
 		args = append(args, status)
 	}
 
-	query := `SELECT id, watch_id, run_id, urgency, summary, trigger_metric, trigger_value,
-		threshold_value, evidence_json, status, dismiss_reason, created_at
+	query := `SELECT id, watch_id, run_id, urgency, summary, conditions_snapshot,
+		evidence_json, status, dismiss_reason, created_at
 		FROM watch_alerts`
 
 	if len(conditions) > 0 {
@@ -591,7 +590,7 @@ func scanWatchAlert(sc interface{ Scan(...any) error }) (*store.WatchAlert, erro
 	var createdAt string
 
 	err := sc.Scan(&a.ID, &a.WatchID, &runID, &a.Urgency, &a.Summary,
-		&a.TriggerMetric, &a.TriggerValue, &a.ThresholdValue,
+		&a.ConditionsSnapshot,
 		&evidenceStr, &a.Status, &dismissReason, &createdAt,
 	)
 	if err != nil {
