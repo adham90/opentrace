@@ -54,10 +54,10 @@ func (h *handler) handleLogsTail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := store.LogSearchParams{
-		Limit:   50,
-		SortAsc: true,
+		Limit: 50,
 	}
 
+	hasCursor := false
 	if v := r.URL.Query().Get("after"); v != "" {
 		id, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
@@ -65,6 +65,8 @@ func (h *handler) handleLogsTail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.SinceID = id
+		params.SortAsc = true // polling: ascending from cursor
+		hasCursor = true
 	}
 
 	if v := r.URL.Query().Get("limit"); v != "" {
@@ -92,6 +94,14 @@ func (h *handler) handleLogsTail(w http.ResponseWriter, r *http.Request) {
 		slog.Error("cli logs tail: search failed", "error", err)
 		server.WriteError(w, http.StatusInternalServerError, "log search failed")
 		return
+	}
+
+	// Initial fetch (no cursor): results are newest-first from DB.
+	// Reverse to ascending order so cursor tracking works consistently.
+	if !hasCursor && len(entries) > 1 {
+		for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
+			entries[i], entries[j] = entries[j], entries[i]
+		}
 	}
 
 	resp := logTailResponse{
