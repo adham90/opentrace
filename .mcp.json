@@ -5,7 +5,7 @@
       "command": "/Users/adhameldeeb/dev/opentrace_project/opentrace/opentrace",
       "args": ["mcp"],
       "env": {
-        "OPENTRACE_MCP_TOKEN": "mcp_3ccea985d652322e9e1eb866df9368f6c8d4bb4dc2ae93b0cac572ae571158be"
+        "OPENTRACE_MCP_TOKEN": "mcp_55ca15dd38d5deb78b35dd71c444d318b36458c3fa474d127e994cb2eed4027e"
       }
     }
   }

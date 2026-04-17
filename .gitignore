@@ -18,6 +18,7 @@ vendor/
 *.swp
 *.swo
 *~
+.opentrace.yml
 
 # Docker
 .docker/
