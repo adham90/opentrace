@@ -200,10 +200,10 @@ func decodeResponse(t *testing.T, rec *httptest.ResponseRecorder) map[string]any
 // validLogEntry returns a minimal valid ingestLogEntry-shaped map.
 func validLogEntry() map[string]any {
 	return map[string]any{
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
-		"level":     "info",
-		"message":   "test log message",
-		"service":   "test-svc",
+		"ts":      time.Now().UTC().Format(time.RFC3339Nano),
+		"level":   "info",
+		"message": "test log message",
+		"service": "test-svc",
 	}
 }
 
@@ -367,33 +367,25 @@ func TestHandleIngestLogs_MissingRequiredFields(t *testing.T) {
 		wantFields []string // substrings expected in the error
 	}{
 		{
-			name: "missing timestamp",
-			entry: map[string]any{
-				"level":   "info",
-				"message": "hello",
-			},
-			wantFields: []string{"timestamp"},
-		},
-		{
 			name: "missing level",
 			entry: map[string]any{
-				"timestamp": time.Now().UTC().Format(time.RFC3339),
-				"message":   "hello",
+				"ts":      time.Now().UTC().Format(time.RFC3339),
+				"message": "hello",
 			},
 			wantFields: []string{"level"},
 		},
 		{
 			name: "missing message",
 			entry: map[string]any{
-				"timestamp": time.Now().UTC().Format(time.RFC3339),
-				"level":     "info",
+				"ts":    time.Now().UTC().Format(time.RFC3339),
+				"level": "info",
 			},
 			wantFields: []string{"message"},
 		},
 		{
 			name:       "missing all required fields",
 			entry:      map[string]any{},
-			wantFields: []string{"timestamp", "level", "message"},
+			wantFields: []string{"level", "message"},
 		},
 	}
 
@@ -635,14 +627,16 @@ func TestHandleIngestLogs_AllValidLevels(t *testing.T) {
 	}
 }
 
-func TestHandleIngestLogs_WithMetadata(t *testing.T) {
+func TestHandleIngestLogs_WithBody(t *testing.T) {
 	logStore := &mockLogStore{}
 	h := newTestHandler(logStore)
 
 	entry := validLogEntry()
-	entry["metadata"] = map[string]any{
-		"user_id":    "u-123",
-		"request_ms": 42.5,
+	entry["body"] = map[string]any{
+		"context": map[string]any{
+			"user_id":    "u-123",
+			"request_ms": 42.5,
+		},
 	}
 	req := makeRequest(t, entry, nil)
 	rec := httptest.NewRecorder()
@@ -657,10 +651,10 @@ func TestHandleIngestLogs_WithMetadata(t *testing.T) {
 	}
 	inserted := logStore.insertedEntries[0]
 	if inserted.MetadataJSON == "" {
-		t.Error("expected MetadataJSON to be pre-marshaled")
+		t.Error("expected MetadataJSON to be set from body")
 	}
 	if inserted.Metadata == nil {
-		t.Error("expected Metadata map to be present")
+		t.Error("expected Metadata map to be parsed from body")
 	}
 }
 
@@ -770,7 +764,7 @@ func TestHandleIngestLogs_MsgpackSingleEntry(t *testing.T) {
 	h := newTestHandler(logStore)
 
 	entry := ingestLogEntry{
-		Timestamp: time.Now().UTC().Truncate(time.Second),
+		Ts: time.Now().UTC().Truncate(time.Second).Format(time.RFC3339Nano),
 		Level:     "info",
 		Message:   "msgpack single entry",
 		Service:   "test-svc",
@@ -802,13 +796,13 @@ func TestHandleIngestLogs_MsgpackBatch(t *testing.T) {
 
 	batch := []ingestLogEntry{
 		{
-			Timestamp: time.Now().UTC().Truncate(time.Second),
+			Ts: time.Now().UTC().Truncate(time.Second).Format(time.RFC3339Nano),
 			Level:     "info",
 			Message:   "first msgpack",
 			Service:   "test-svc",
 		},
 		{
-			Timestamp: time.Now().UTC().Truncate(time.Second),
+			Ts: time.Now().UTC().Truncate(time.Second).Format(time.RFC3339Nano),
 			Level:     "warn",
 			Message:   "second msgpack",
 			Service:   "test-svc",

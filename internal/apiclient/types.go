@@ -80,6 +80,7 @@ type LogEntry struct {
 	Level          string          `json:"level"`
 	Service        string          `json:"service,omitempty"`
 	Message        string          `json:"message"`
+	EventType      string          `json:"event_type,omitempty"`
 	RequestID      string          `json:"request_id,omitempty"`
 	ExceptionClass string          `json:"exception_class,omitempty"`
 	Metadata       map[string]any  `json:"metadata,omitempty"`
