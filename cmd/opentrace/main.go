@@ -55,8 +55,6 @@ func main() {
 			err = runStatus()
 		case "logs":
 			err = runLogs()
-		case "top":
-			err = runTop()
 		case "version":
 			fmt.Println("opentrace " + version.Full())
 			return
@@ -75,7 +73,6 @@ func main() {
 			fmt.Println("CLI commands (connect to a running server):")
 			fmt.Println("  status    Show server health and summary stats")
 			fmt.Println("  logs      Stream live log tail")
-			fmt.Println("  top       Interactive TUI dashboard")
 			fmt.Println()
 			fmt.Println("  version   Print version information")
 			fmt.Println()

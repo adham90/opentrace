@@ -1,5 +1,5 @@
 // Package cli provides HTTP API endpoints for the OpenTrace CLI tools
-// (opentrace status, opentrace logs, opentrace top).
+// (opentrace status, opentrace logs).
 //
 // All endpoints are mounted under /api/cli/ with API key authentication.
 package cli
