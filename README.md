@@ -177,7 +177,7 @@ The agent detects your framework, installs the SDK, configures it with the corre
 
 | SDK | Platform | Install |
 |---|---|---|
-| [opentrace](https://github.com/adham90/opentrace_ruby) | Ruby / Rails | `gem 'opentrace'` |
+| [opentrace](https://github.com/adham90/opentrace-ruby) | Ruby / Rails | `gem 'opentrace'` |
 | [@opentrace-sdk/node](https://github.com/adham90/opentrace_node) | Node.js | `npm install @opentrace-sdk/node` |
 
 The SDK captures structured logs, request lifecycle data (SQL queries, external API calls, cache metrics, view rendering, email delivery), error traces with stack traces, and runtime metrics — all sent as flat JSON with async I/O. Your app never blocks.
