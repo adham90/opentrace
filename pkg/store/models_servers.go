@@ -29,6 +29,7 @@ type Server struct {
 	Labels        map[string]string `bun:"labels" json:"labels,omitempty"`
 	Status        ServerStatus      `bun:"status" json:"status"`
 	LastSeenAt    *time.Time        `bun:"last_seen_at" json:"last_seen_at,omitempty"`
+	Environment   string            `bun:"environment" json:"environment,omitempty"`
 	CreatedAt     time.Time         `bun:"created_at" json:"created_at"`
 	UpdatedAt     time.Time         `bun:"updated_at" json:"updated_at"`
 }
@@ -46,6 +47,7 @@ type RegisterServerParams struct {
 	Arch         string            `json:"arch,omitempty"`
 	AgentVersion string            `json:"agent_version,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
+	Environment  string            `json:"environment,omitempty"`
 }
 
 // MetricPoint represents a single metric data point returned by queries.
@@ -79,6 +81,7 @@ type MetricQuery struct {
 
 // ListServerParams controls pagination for server listing.
 type ListServerParams struct {
-	Limit  int `json:"limit,omitempty"`
-	Offset int `json:"offset,omitempty"`
+	Limit       int    `json:"limit,omitempty"`
+	Offset      int    `json:"offset,omitempty"`
+	Environment string `json:"environment,omitempty"`
 }

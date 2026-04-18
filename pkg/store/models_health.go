@@ -28,6 +28,7 @@ type HealthCheck struct {
 	ExpectedBody   string    `bun:"expected_body" json:"expected_body,omitempty"`
 	Retries        int       `bun:"retries" json:"retries,omitempty"`
 	Enabled        bool      `bun:"enabled" json:"enabled"`
+	Environment    string    `bun:"environment" json:"environment,omitempty"`
 	CreatedAt      time.Time `bun:"created_at" json:"created_at"`
 }
 
@@ -53,6 +54,7 @@ type CreateHealthCheckParams struct {
 	ExpectedStatus int    `json:"expected_status,omitempty"`
 	ExpectedBody   string `json:"expected_body,omitempty"`
 	Retries        int    `json:"retries,omitempty"`
+	Environment    string `json:"environment,omitempty"`
 }
 
 // UptimeSummary aggregates uptime stats for a single health check.
@@ -70,6 +72,7 @@ type UptimeSummary struct {
 
 // ListHealthCheckParams controls pagination for health check listing.
 type ListHealthCheckParams struct {
-	Limit  int `json:"limit,omitempty"`
-	Offset int `json:"offset,omitempty"`
+	Limit       int    `json:"limit,omitempty"`
+	Offset      int    `json:"offset,omitempty"`
+	Environment string `json:"environment,omitempty"`
 }

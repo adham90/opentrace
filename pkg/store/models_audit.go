@@ -17,16 +17,18 @@ type AuditEntry struct {
 	TargetID      string    `bun:"target_id" json:"target_id,omitempty"`
 	Details       string    `bun:"details" json:"details,omitempty"`
 	IPAddress     string    `bun:"ip_address" json:"ip_address,omitempty"`
+	Environment   string    `bun:"environment" json:"environment,omitempty"`
 	CreatedAt     time.Time `bun:"created_at" json:"created_at"`
 }
 
 // LogAuditParams are the parameters for creating an audit log entry.
 type LogAuditParams struct {
-	UserID     string
-	UserEmail  string
-	Action     string // e.g. "user.create", "connector.delete", "settings.update"
-	TargetType string // e.g. "user", "connector", "watcher"
-	TargetID   string
-	Details    string // JSON or free-text details
-	IPAddress  string
+	UserID      string
+	UserEmail   string
+	Action      string // e.g. "user.create", "connector.delete", "settings.update"
+	TargetType  string // e.g. "user", "connector", "watcher"
+	TargetID    string
+	Details     string // JSON or free-text details
+	IPAddress   string
+	Environment string // env the write targeted; empty for admin / global actions
 }

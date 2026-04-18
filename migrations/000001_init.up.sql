@@ -51,12 +51,14 @@ CREATE TABLE IF NOT EXISTS audit_log (
     target_id   TEXT,
     details     TEXT,
     ip_address  TEXT,
+    environment TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
+CREATE INDEX IF NOT EXISTS idx_audit_log_env ON audit_log(environment, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS jobs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,11 +112,13 @@ CREATE TABLE IF NOT EXISTS servers (
     last_seen_at  TEXT,
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL,
-    display_name  TEXT DEFAULT ''
+    display_name  TEXT DEFAULT '',
+    environment   TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_servers_status ON servers(status);
 CREATE INDEX IF NOT EXISTS idx_servers_hostname ON servers(hostname);
+CREATE INDEX IF NOT EXISTS idx_servers_env ON servers(environment);
 
 CREATE TABLE IF NOT EXISTS metrics (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -203,8 +207,11 @@ CREATE TABLE IF NOT EXISTS healthchecks (
     enabled         INTEGER NOT NULL DEFAULT 1,
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     expected_body   TEXT NOT NULL DEFAULT '',
-    retries         INTEGER NOT NULL DEFAULT 0
+    retries         INTEGER NOT NULL DEFAULT 0,
+    environment     TEXT NOT NULL DEFAULT ''
 );
+
+CREATE INDEX IF NOT EXISTS idx_healthchecks_env ON healthchecks(environment);
 
 CREATE TABLE IF NOT EXISTS healthcheck_results (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -254,34 +261,38 @@ CREATE INDEX IF NOT EXISTS idx_watches_expires_at ON watches(expires_at);
 CREATE INDEX IF NOT EXISTS idx_watches_session_id ON watches(session_id);
 
 CREATE TABLE IF NOT EXISTS watch_runs (
-    id           TEXT PRIMARY KEY,
-    watch_id     TEXT NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
-    status       TEXT NOT NULL DEFAULT 'running',
-    metric_value REAL,
-    breached     INTEGER NOT NULL DEFAULT 0,
-    summary      TEXT,
+    id            TEXT PRIMARY KEY,
+    watch_id      TEXT NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
+    status        TEXT NOT NULL DEFAULT 'running',
+    metric_value  REAL,
+    breached      INTEGER NOT NULL DEFAULT 0,
+    summary       TEXT,
     error_message TEXT,
-    started_at   TEXT NOT NULL,
-    finished_at  TEXT
+    environment   TEXT NOT NULL DEFAULT '',
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_watch_runs_watch_id ON watch_runs(watch_id);
+CREATE INDEX IF NOT EXISTS idx_watch_runs_env ON watch_runs(environment, started_at DESC);
 
 CREATE TABLE IF NOT EXISTS watch_alerts (
-    id              TEXT PRIMARY KEY,
-    watch_id        TEXT NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
-    run_id          TEXT REFERENCES watch_runs(id) ON DELETE SET NULL,
-    urgency         TEXT NOT NULL DEFAULT 'normal',
-    summary         TEXT NOT NULL,
+    id                  TEXT PRIMARY KEY,
+    watch_id            TEXT NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
+    run_id              TEXT REFERENCES watch_runs(id) ON DELETE SET NULL,
+    urgency             TEXT NOT NULL DEFAULT 'normal',
+    summary             TEXT NOT NULL,
     conditions_snapshot TEXT NOT NULL DEFAULT '{}',
-    evidence_json   TEXT,
-    status          TEXT NOT NULL DEFAULT 'pending',
-    dismiss_reason  TEXT,
-    created_at      TEXT NOT NULL
+    evidence_json       TEXT,
+    status              TEXT NOT NULL DEFAULT 'pending',
+    dismiss_reason      TEXT,
+    environment         TEXT NOT NULL DEFAULT '',
+    created_at          TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_watch_alerts_watch_id ON watch_alerts(watch_id);
 CREATE INDEX IF NOT EXISTS idx_watch_alerts_status ON watch_alerts(status);
+CREATE INDEX IF NOT EXISTS idx_watch_alerts_env ON watch_alerts(environment, created_at DESC);
 
 -- ============================================================================
 -- Agent Notes
@@ -421,12 +432,14 @@ CREATE TABLE IF NOT EXISTS mcp_activity (
     step_index               INTEGER NOT NULL DEFAULT 0,
     was_suggested            INTEGER NOT NULL DEFAULT 0,
     suggestion_rank          INTEGER NOT NULL DEFAULT 0,
-    followed_by              TEXT NOT NULL DEFAULT ''
+    followed_by              TEXT NOT NULL DEFAULT '',
+    environment              TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_mcp_activity_created ON mcp_activity(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mcp_activity_session ON mcp_activity(session_id);
 CREATE INDEX IF NOT EXISTS idx_mcp_activity_inv_session ON mcp_activity(investigation_session_id, step_index);
+CREATE INDEX IF NOT EXISTS idx_mcp_activity_env ON mcp_activity(environment, created_at DESC);
 
 -- ============================================================================
 -- Intelligence

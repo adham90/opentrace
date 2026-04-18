@@ -302,3 +302,62 @@ func TestServerStore_List_Pagination(t *testing.T) {
 		t.Errorf("page4 len = %d, want 0", len(page4))
 	}
 }
+
+func TestServerStore_EnvRoundTrip(t *testing.T) {
+	db := setupTestDB(t)
+	ss := NewServerStore(db)
+	ctx := context.Background()
+
+	s1, err := ss.Register(ctx, store.RegisterServerParams{
+		Hostname:    "host-staging-1",
+		Environment: "staging",
+	})
+	if err != nil {
+		t.Fatalf("Register staging: %v", err)
+	}
+	if s1.Environment != "staging" {
+		t.Errorf("Register staging: Environment = %q", s1.Environment)
+	}
+
+	s2, err := ss.Register(ctx, store.RegisterServerParams{
+		Hostname:    "host-prod-1",
+		Environment: "production",
+	})
+	if err != nil {
+		t.Fatalf("Register prod: %v", err)
+	}
+
+	// GetByID round-trips the env.
+	got, err := ss.GetByID(ctx, s2.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Environment != "production" {
+		t.Errorf("GetByID: Environment = %q", got.Environment)
+	}
+
+	// List with env filter.
+	staging, err := ss.List(ctx, store.ListServerParams{Environment: "staging"})
+	if err != nil {
+		t.Fatalf("List staging: %v", err)
+	}
+	if len(staging) != 1 || staging[0].Environment != "staging" {
+		t.Errorf("List staging = %+v", staging)
+	}
+
+	// Re-register with no env: existing env is preserved (sticky).
+	_, err = ss.Register(ctx, store.RegisterServerParams{
+		Hostname: "host-staging-1",
+		// Environment intentionally omitted.
+	})
+	if err != nil {
+		t.Fatalf("Re-register: %v", err)
+	}
+	still, err := ss.GetByID(ctx, s1.ID)
+	if err != nil {
+		t.Fatalf("GetByID after re-register: %v", err)
+	}
+	if still.Environment != "staging" {
+		t.Errorf("re-register overwrote env to %q; expected sticky staging", still.Environment)
+	}
+}

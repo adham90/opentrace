@@ -18,6 +18,7 @@ type MCPActivityEvent struct {
 	IsError       bool      `bun:"is_error" json:"is_error"`
 	DurationMs    *int64    `bun:"duration_ms" json:"duration_ms,omitempty"`
 	EventType     string    `bun:"event_type" json:"event_type"`
+	Environment   string    `bun:"environment" json:"environment,omitempty"`
 	CreatedAt     time.Time `bun:"created_at" json:"created_at"`
 }
 
@@ -31,6 +32,7 @@ type LogMCPActivityParams struct {
 	IsError                bool
 	DurationMs             *int64
 	EventType              string // "tool_call", "connect", "disconnect"
+	Environment            string // env the call targeted; empty for scope-less or global tools
 	InvestigationSessionID string // links to investigation_sessions.id
 	StepIndex              int    // step number within the investigation session
 	WasSuggested           bool   // whether this tool was in the previous suggested_tools

@@ -43,14 +43,14 @@ func (s *mcpActivityStore) Log(ctx context.Context, params store.LogMCPActivityP
 	_, err := s.db.NewRaw(`
 		INSERT INTO mcp_activity (
 		    session_id, user_id, tool_name, arguments, result_preview,
-		    is_error, duration_ms, event_type,
+		    is_error, duration_ms, event_type, environment,
 		    investigation_session_id, step_index,
 		    was_suggested, suggestion_rank, followed_by
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		params.SessionID, params.UserID, params.ToolName,
 		params.Arguments, params.ResultPreview,
-		isError, durationMs, eventType,
+		isError, durationMs, eventType, params.Environment,
 		params.InvestigationSessionID, params.StepIndex,
 		wasSuggested, params.SuggestionRank, "",
 	).Exec(ctx)
@@ -138,7 +138,7 @@ func (s *mcpActivityStore) Recent(ctx context.Context, limit int) ([]store.MCPAc
 		SELECT id, session_id, COALESCE(user_id, '') AS user_id, tool_name,
 		       COALESCE(arguments, '') AS arguments,
 		       COALESCE(result_preview, '') AS result_preview,
-		       is_error, duration_ms, event_type, created_at
+		       is_error, duration_ms, event_type, environment, created_at
 		FROM mcp_activity
 		ORDER BY created_at DESC
 		LIMIT ?`, limit,
@@ -155,7 +155,7 @@ func (s *mcpActivityStore) ListByInvestigationSession(ctx context.Context, sessi
 		SELECT id, session_id, COALESCE(user_id, '') AS user_id, tool_name,
 		       COALESCE(arguments, '') AS arguments,
 		       COALESCE(result_preview, '') AS result_preview,
-		       is_error, duration_ms, event_type, created_at
+		       is_error, duration_ms, event_type, environment, created_at
 		FROM mcp_activity
 		WHERE investigation_session_id = ?
 		ORDER BY step_index ASC, created_at ASC`, sessionID,

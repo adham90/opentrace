@@ -48,23 +48,39 @@ func (s *serverStore) Register(ctx context.Context, params store.RegisterServerP
 
 		if err == nil {
 			serverID, _ = uuid.Parse(existingID)
-			_, err := tx.ExecContext(ctx,
-				`UPDATE servers SET ip_address = ?, os = ?, arch = ?, agent_version = ?,
-				 labels = ?, status = 'online', last_seen_at = ?, updated_at = ?
-				 WHERE id = ?`,
-				params.IPAddress, params.OS, params.Arch, params.AgentVersion,
-				labelsJSON, nowStr, nowStr, existingID,
-			)
-			if err != nil {
-				return fmt.Errorf("updating server: %w", err)
+			// Update env only if the caller provided one. This preserves the
+			// env set via an earlier register when the agent reconnects
+			// without supplying one.
+			if params.Environment != "" {
+				_, err := tx.ExecContext(ctx,
+					`UPDATE servers SET ip_address = ?, os = ?, arch = ?, agent_version = ?,
+					 labels = ?, status = 'online', last_seen_at = ?, updated_at = ?, environment = ?
+					 WHERE id = ?`,
+					params.IPAddress, params.OS, params.Arch, params.AgentVersion,
+					labelsJSON, nowStr, nowStr, params.Environment, existingID,
+				)
+				if err != nil {
+					return fmt.Errorf("updating server: %w", err)
+				}
+			} else {
+				_, err := tx.ExecContext(ctx,
+					`UPDATE servers SET ip_address = ?, os = ?, arch = ?, agent_version = ?,
+					 labels = ?, status = 'online', last_seen_at = ?, updated_at = ?
+					 WHERE id = ?`,
+					params.IPAddress, params.OS, params.Arch, params.AgentVersion,
+					labelsJSON, nowStr, nowStr, existingID,
+				)
+				if err != nil {
+					return fmt.Errorf("updating server: %w", err)
+				}
 			}
 		} else if errors.Is(err, sql.ErrNoRows) {
 			serverID = uuid.New()
 			_, err = tx.ExecContext(ctx,
-				`INSERT INTO servers (id, hostname, display_name, ip_address, os, arch, agent_version, labels, status, last_seen_at, created_at, updated_at)
-				 VALUES (?, ?, '', ?, ?, ?, ?, ?, 'online', ?, ?, ?)`,
+				`INSERT INTO servers (id, hostname, display_name, ip_address, os, arch, agent_version, labels, status, last_seen_at, environment, created_at, updated_at)
+				 VALUES (?, ?, '', ?, ?, ?, ?, ?, 'online', ?, ?, ?, ?)`,
 				serverID.String(), params.Hostname, params.IPAddress, params.OS, params.Arch,
-				params.AgentVersion, labelsJSON, nowStr, nowStr, nowStr,
+				params.AgentVersion, labelsJSON, nowStr, params.Environment, nowStr, nowStr,
 			)
 			if err != nil {
 				return fmt.Errorf("inserting server: %w", err)
@@ -87,6 +103,7 @@ func (s *serverStore) Register(ctx context.Context, params store.RegisterServerP
 		Labels:       params.Labels,
 		Status:       store.ServerOnline,
 		LastSeenAt:   &now,
+		Environment:  params.Environment,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}, nil
@@ -110,12 +127,16 @@ func (s *serverStore) List(ctx context.Context, params store.ListServerParams) (
 		limit = 100
 	}
 
-	var servers []store.Server
-	err := s.db.NewSelect().Model(&servers).
+	q := s.db.NewSelect().Model(&[]store.Server{}).
 		OrderExpr("hostname ASC").
 		Offset(params.Offset).
-		Limit(limit).
-		Scan(ctx)
+		Limit(limit)
+	if params.Environment != "" {
+		q = q.Where("environment = ?", params.Environment)
+	}
+
+	var servers []store.Server
+	err := q.Model(&servers).Scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("querying servers: %w", err)
 	}

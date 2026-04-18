@@ -485,3 +485,108 @@ func TestWatchStore_MissingConditions(t *testing.T) {
 		t.Fatal("expected error when conditions_json is missing")
 	}
 }
+
+func TestWatchStore_AlertAndRunInheritEnv(t *testing.T) {
+	db := setupTestDB(t)
+	ws := NewWatchStore(db)
+	ctx := context.Background()
+
+	// Create a staging-scoped watch.
+	condJSON := []byte(`{"type":"threshold","metric":"error_rate","op":"gt","value":0.05}`)
+	w, err := ws.Create(ctx, store.CreateWatchParams{
+		ConditionsJSON: condJSON,
+		Service:        "api",
+		Environment:    "staging",
+		Duration:       "1h",
+		Urgency:        store.WatchUrgencyHigh,
+		CheckInterval:  "30s",
+		BaselineWindow: "1h",
+		MinConsecutive: 1,
+	})
+	if err != nil {
+		t.Fatalf("Create watch: %v", err)
+	}
+
+	// CreateRun should denormalize env from the watch.
+	run, err := ws.CreateRun(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if run.Environment != "staging" {
+		t.Errorf("WatchRun.Environment = %q, want staging", run.Environment)
+	}
+
+	// Verify via ListRuns round-trip.
+	runs, err := ws.ListRuns(ctx, w.ID, 5)
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 1 || runs[0].Environment != "staging" {
+		t.Errorf("ListRuns = %+v, expected one staging run", runs)
+	}
+
+	// CreateAlert without explicit env should inherit from the watch too.
+	alert, err := ws.CreateAlert(ctx, store.CreateWatchAlertParams{
+		WatchID:            w.ID,
+		RunID:              run.ID,
+		Urgency:            store.WatchUrgencyHigh,
+		Summary:            "test",
+		ConditionsSnapshot: `{"metric":"error_rate"}`,
+	})
+	if err != nil {
+		t.Fatalf("CreateAlert: %v", err)
+	}
+	if alert.Environment != "staging" {
+		t.Errorf("WatchAlert.Environment = %q, want staging", alert.Environment)
+	}
+
+	// GetAlert round-trips env.
+	got, err := ws.GetAlert(ctx, alert.ID)
+	if err != nil {
+		t.Fatalf("GetAlert: %v", err)
+	}
+	if got.Environment != "staging" {
+		t.Errorf("GetAlert Environment = %q", got.Environment)
+	}
+}
+
+func TestWatchStore_ListByEnvironment(t *testing.T) {
+	db := setupTestDB(t)
+	ws := NewWatchStore(db)
+	ctx := context.Background()
+
+	mkWatch := func(env string) *store.Watch {
+		w, err := ws.Create(ctx, store.CreateWatchParams{
+			ConditionsJSON: []byte(`{"type":"threshold","metric":"error_rate","op":"gt","value":0.05}`),
+			Service:        "api",
+			Environment:    env,
+			Duration:       "1h",
+			Urgency:        store.WatchUrgencyHigh,
+			CheckInterval:  "30s",
+			BaselineWindow: "1h",
+			MinConsecutive: 1,
+		})
+		if err != nil {
+			t.Fatalf("Create watch: %v", err)
+		}
+		return w
+	}
+	mkWatch("staging")
+	mkWatch("staging")
+	mkWatch("production")
+
+	staging, err := ws.List(ctx, store.ListWatchParams{Environment: "staging"})
+	if err != nil {
+		t.Fatalf("List staging: %v", err)
+	}
+	if len(staging) != 2 {
+		t.Errorf("List staging = %d, want 2", len(staging))
+	}
+	prod, err := ws.List(ctx, store.ListWatchParams{Environment: "production"})
+	if err != nil {
+		t.Fatalf("List prod: %v", err)
+	}
+	if len(prod) != 1 {
+		t.Errorf("List prod = %d, want 1", len(prod))
+	}
+}

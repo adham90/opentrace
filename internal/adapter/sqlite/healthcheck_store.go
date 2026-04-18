@@ -47,10 +47,10 @@ func (s *healthCheckStore) Create(ctx context.Context, params store.CreateHealth
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.NewRaw(`
 		INSERT INTO healthchecks (id, name, url, method, interval_secs, timeout_secs,
-			expected_status, expected_body, retries, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			expected_status, expected_body, retries, environment, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, params.Name, params.URL, method, interval, timeout,
-		expected, params.ExpectedBody, retries, now,
+		expected, params.ExpectedBody, retries, params.Environment, now,
 	).Exec(ctx)
 	if err != nil {
 		return nil, err
@@ -71,12 +71,13 @@ func (s *healthCheckStore) Get(ctx context.Context, id string) (*store.HealthChe
 		ExpectedBody   string `bun:"expected_body"`
 		Retries        int    `bun:"retries"`
 		Enabled        int    `bun:"enabled"`
+		Environment    string `bun:"environment"`
 		CreatedAt      string `bun:"created_at"`
 	}
 
 	err := s.db.NewRaw(`
 		SELECT id, name, url, method, interval_secs, timeout_secs,
-			expected_status, expected_body, retries, enabled, created_at
+			expected_status, expected_body, retries, enabled, environment, created_at
 		FROM healthchecks WHERE id = ?`, id,
 	).Scan(ctx, &hc)
 	if err != nil {
@@ -97,6 +98,7 @@ func (s *healthCheckStore) Get(ctx context.Context, id string) (*store.HealthChe
 		ExpectedBody:   hc.ExpectedBody,
 		Retries:        hc.Retries,
 		Enabled:        hc.Enabled == 1,
+		Environment:    hc.Environment,
 		CreatedAt:      parseTime(hc.CreatedAt),
 	}, nil
 }
@@ -122,17 +124,23 @@ func (s *healthCheckStore) List(ctx context.Context, params store.ListHealthChec
 		ExpectedBody   string `bun:"expected_body"`
 		Retries        int    `bun:"retries"`
 		Enabled        int    `bun:"enabled"`
+		Environment    string `bun:"environment"`
 		CreatedAt      string `bun:"created_at"`
 	}
 
+	sqlStr := `SELECT id, name, url, method, interval_secs, timeout_secs,
+			expected_status, expected_body, retries, enabled, environment, created_at
+		FROM healthchecks`
+	args := []any{}
+	if params.Environment != "" {
+		sqlStr += ` WHERE environment = ?`
+		args = append(args, params.Environment)
+	}
+	sqlStr += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+
 	var rows []row
-	err := s.db.NewRaw(`
-		SELECT id, name, url, method, interval_secs, timeout_secs,
-			expected_status, expected_body, retries, enabled, created_at
-		FROM healthchecks
-		ORDER BY created_at DESC
-		LIMIT ? OFFSET ?`, limit, offset,
-	).Scan(ctx, &rows)
+	err := s.db.NewRaw(sqlStr, args...).Scan(ctx, &rows)
 	if err != nil {
 		return nil, err
 	}
@@ -150,6 +158,7 @@ func (s *healthCheckStore) List(ctx context.Context, params store.ListHealthChec
 			ExpectedBody:   r.ExpectedBody,
 			Retries:        r.Retries,
 			Enabled:        r.Enabled == 1,
+			Environment:    r.Environment,
 			CreatedAt:      parseTime(r.CreatedAt),
 		}
 	}

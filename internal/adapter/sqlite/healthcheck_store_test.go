@@ -360,3 +360,57 @@ func TestHealthCheckStore_DeleteCascadesResults(t *testing.T) {
 		t.Errorf("results after cascade delete = %d, want 0", len(results))
 	}
 }
+
+func TestHealthCheckStore_EnvRoundTrip(t *testing.T) {
+	db := setupTestDB(t)
+	hs := NewHealthCheckStore(db)
+	ctx := context.Background()
+
+	hc, err := hs.Create(ctx, store.CreateHealthCheckParams{
+		Name:        "api-staging",
+		URL:         "https://staging.example.com/health",
+		Environment: "staging",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if hc.Environment != "staging" {
+		t.Errorf("Create: Environment = %q, want staging", hc.Environment)
+	}
+
+	got, err := hs.Get(ctx, hc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Environment != "staging" {
+		t.Errorf("Get: Environment = %q, want staging", got.Environment)
+	}
+
+	// Seed a second check in production.
+	_, err = hs.Create(ctx, store.CreateHealthCheckParams{
+		Name:        "api-prod",
+		URL:         "https://prod.example.com/health",
+		Environment: "production",
+	})
+	if err != nil {
+		t.Fatalf("Create prod: %v", err)
+	}
+
+	// List with env filter.
+	stagingOnly, err := hs.List(ctx, store.ListHealthCheckParams{Environment: "staging"})
+	if err != nil {
+		t.Fatalf("List staging: %v", err)
+	}
+	if len(stagingOnly) != 1 || stagingOnly[0].Environment != "staging" {
+		t.Errorf("List staging = %+v, expected one staging check", stagingOnly)
+	}
+
+	// List without filter returns both.
+	all, err := hs.List(ctx, store.ListHealthCheckParams{})
+	if err != nil {
+		t.Fatalf("List all: %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("List all = %d, want 2", len(all))
+	}
+}

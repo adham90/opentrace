@@ -123,6 +123,10 @@ func (s *watchStore) List(ctx context.Context, params store.ListWatchParams) ([]
 		conditions = append(conditions, "service = ?")
 		args = append(args, params.Service)
 	}
+	if params.Environment != "" {
+		conditions = append(conditions, "environment = ?")
+		args = append(args, params.Environment)
+	}
 	if params.SessionID != "" {
 		conditions = append(conditions, "session_id = ?")
 		args = append(args, params.SessionID)
@@ -287,19 +291,28 @@ func (s *watchStore) CreateRun(ctx context.Context, watchID string) (*store.Watc
 	id := uuid.New().String()
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// Denormalize the parent watch's environment into the run so listing or
+	// filtering runs by env avoids a join. The subselect stays in the same
+	// statement so any rare race between watch update and run insert still
+	// captures the current env.
 	_, err := s.db.NewRaw(`
-		INSERT INTO watch_runs (id, watch_id, started_at)
-		VALUES (?, ?, ?)`, id, watchID, now,
+		INSERT INTO watch_runs (id, watch_id, environment, started_at)
+		VALUES (?, ?, (SELECT COALESCE(environment, '') FROM watches WHERE id = ?), ?)`,
+		id, watchID, watchID, now,
 	).Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("inserting watch run: %w", err)
 	}
 
+	var env string
+	_ = s.db.NewRaw(`SELECT environment FROM watch_runs WHERE id = ?`, id).Scan(ctx, &env)
+
 	return &store.WatchRun{
-		ID:        id,
-		WatchID:   watchID,
-		Status:    "running",
-		StartedAt: func() time.Time { t, _ := time.Parse(time.RFC3339, now); return t }(),
+		ID:          id,
+		WatchID:     watchID,
+		Status:      "running",
+		Environment: env,
+		StartedAt:   func() time.Time { t, _ := time.Parse(time.RFC3339, now); return t }(),
 	}, nil
 }
 
@@ -362,6 +375,7 @@ func (s *watchStore) ListRuns(ctx context.Context, watchID string, limit int) ([
 		Breached     int64           `bun:"breached"`
 		Summary      sql.NullString  `bun:"summary"`
 		ErrorMessage sql.NullString  `bun:"error_message"`
+		Environment  string          `bun:"environment"`
 		StartedAt    string          `bun:"started_at"`
 		FinishedAt   sql.NullString  `bun:"finished_at"`
 	}
@@ -369,7 +383,7 @@ func (s *watchStore) ListRuns(ctx context.Context, watchID string, limit int) ([
 	var rows []row
 	err := s.db.NewRaw(`
 		SELECT id, watch_id, status, metric_value, breached, summary,
-			error_message, started_at, finished_at
+			error_message, environment, started_at, finished_at
 		FROM watch_runs
 		WHERE watch_id = ?
 		ORDER BY started_at DESC
@@ -382,11 +396,12 @@ func (s *watchStore) ListRuns(ctx context.Context, watchID string, limit int) ([
 	result := make([]store.WatchRun, len(rows))
 	for i, r := range rows {
 		result[i] = store.WatchRun{
-			ID:        r.ID,
-			WatchID:   r.WatchID,
-			Status:    r.Status,
-			Breached:  r.Breached == 1,
-			StartedAt: parseTime(r.StartedAt),
+			ID:          r.ID,
+			WatchID:     r.WatchID,
+			Status:      r.Status,
+			Breached:    r.Breached == 1,
+			Environment: r.Environment,
+			StartedAt:   parseTime(r.StartedAt),
 		}
 		if r.MetricValue.Valid {
 			result[i].MetricValue = &r.MetricValue.Float64
@@ -420,12 +435,20 @@ func (s *watchStore) CreateAlert(ctx context.Context, params store.CreateWatchAl
 		evidenceStr = sql.NullString{String: string(b), Valid: true}
 	}
 
+	// Denormalize env from the parent watch if the caller didn't supply one;
+	// notifiers read Environment off the alert directly.
+	env := params.Environment
+	if env == "" {
+		_ = s.db.NewRaw(`SELECT COALESCE(environment, '') FROM watches WHERE id = ?`,
+			params.WatchID).Scan(ctx, &env)
+	}
+
 	_, err := s.db.NewRaw(`
 		INSERT INTO watch_alerts (id, watch_id, run_id, urgency, summary,
-			conditions_snapshot, evidence_json, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			conditions_snapshot, evidence_json, environment, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, params.WatchID, nullString(params.RunID), string(params.Urgency),
-		params.Summary, params.ConditionsSnapshot, evidenceStr, now,
+		params.Summary, params.ConditionsSnapshot, evidenceStr, env, now,
 	).Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("inserting watch alert: %w", err)
@@ -437,7 +460,7 @@ func (s *watchStore) CreateAlert(ctx context.Context, params store.CreateWatchAl
 func (s *watchStore) GetAlert(ctx context.Context, id string) (*store.WatchAlert, error) {
 	a, err := s.scanSingleAlert(ctx, `
 		SELECT id, watch_id, run_id, urgency, summary, conditions_snapshot,
-			evidence_json, status, dismiss_reason, created_at
+			evidence_json, status, dismiss_reason, environment, created_at
 		FROM watch_alerts WHERE id = ?`, id)
 	if err == sql.ErrNoRows {
 		return nil, store.ErrNotFound
@@ -466,7 +489,7 @@ func (s *watchStore) ListAlerts(ctx context.Context, watchID string, status stri
 	}
 
 	query := `SELECT id, watch_id, run_id, urgency, summary, conditions_snapshot,
-		evidence_json, status, dismiss_reason, created_at
+		evidence_json, status, dismiss_reason, environment, created_at
 		FROM watch_alerts`
 
 	if len(conditions) > 0 {
@@ -591,7 +614,7 @@ func scanWatchAlert(sc interface{ Scan(...any) error }) (*store.WatchAlert, erro
 
 	err := sc.Scan(&a.ID, &a.WatchID, &runID, &a.Urgency, &a.Summary,
 		&a.ConditionsSnapshot,
-		&evidenceStr, &a.Status, &dismissReason, &createdAt,
+		&evidenceStr, &a.Status, &dismissReason, &a.Environment, &createdAt,
 	)
 	if err != nil {
 		return nil, err

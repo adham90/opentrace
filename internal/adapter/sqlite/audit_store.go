@@ -21,14 +21,15 @@ func NewAuditStore(db *bun.DB) store.AuditStore {
 
 func (s *auditStore) Log(ctx context.Context, params store.LogAuditParams) error {
 	entry := &store.AuditEntry{
-		UserID:     params.UserID,
-		UserEmail:  params.UserEmail,
-		Action:     params.Action,
-		TargetType: params.TargetType,
-		TargetID:   params.TargetID,
-		Details:    params.Details,
-		IPAddress:  params.IPAddress,
-		CreatedAt:  time.Now().UTC(),
+		UserID:      params.UserID,
+		UserEmail:   params.UserEmail,
+		Action:      params.Action,
+		TargetType:  params.TargetType,
+		TargetID:    params.TargetID,
+		Details:     params.Details,
+		IPAddress:   params.IPAddress,
+		Environment: params.Environment,
+		CreatedAt:   time.Now().UTC(),
 	}
 	_, err := s.db.NewInsert().Model(entry).
 		ExcludeColumn("id").
