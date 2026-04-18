@@ -99,10 +99,11 @@ type LogSearchParams struct {
 
 // LogCountParams defines filters for log aggregation queries.
 type LogCountParams struct {
-	Since   time.Time
-	Until   time.Time
-	Service string // optional filter
-	Level   string // optional filter
+	Since       time.Time
+	Until       time.Time
+	Service     string // optional filter
+	Level       string // optional filter
+	Environment string // optional filter — empty matches every env
 }
 
 // ServiceLogCount holds per-service log counts.
@@ -114,11 +115,12 @@ type ServiceLogCount struct {
 
 // LogHistogramParams defines parameters for log volume histogram queries.
 type LogHistogramParams struct {
-	Since    time.Time
-	Until    time.Time
-	Interval time.Duration
-	Service  string
-	Level    string
+	Since       time.Time
+	Until       time.Time
+	Interval    time.Duration
+	Service     string
+	Level       string
+	Environment string
 }
 
 // LogHistogramBucket holds aggregated log counts for a single time bucket.
@@ -135,7 +137,8 @@ type RequestSummarySearchParams struct {
 	Controller    string
 	Action        string
 	Path          string
-	NPlusOneOnly bool
+	Environment   string
+	NPlusOneOnly  bool
 	MinDurationMs float64
 	MinSQLCount   int
 	SortBy        string // "duration_ms", "sql_count", "db_time_ms", "duplicate_queries"
@@ -153,10 +156,11 @@ type RequestSummaryResult struct {
 
 // RequestSummaryAggregateParams defines filters for SQL-level aggregation.
 type RequestSummaryAggregateParams struct {
-	Start    *time.Time
-	End      *time.Time
-	Service  string
-	Endpoint string
+	Start       *time.Time
+	End         *time.Time
+	Service     string
+	Endpoint    string
+	Environment string
 }
 
 // RequestSummaryAggregates holds pre-computed aggregate metrics.

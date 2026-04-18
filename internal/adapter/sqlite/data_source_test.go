@@ -283,3 +283,70 @@ func TestDelete_NotFound(t *testing.T) {
 		t.Fatalf("expected ErrNotFound, got: %v", err)
 	}
 }
+
+func TestDataSourceStore_EnvFilter(t *testing.T) {
+	db := setupTestDB(t)
+	ds := NewDataSourceStore(db)
+	ctx := context.Background()
+
+	_, err := ds.Create(ctx, store.CreateDataSourceParams{
+		Type:        store.ConnectorDatabase,
+		Name:        "prod-postgres",
+		Config:      map[string]any{"host": "prod.db"},
+		Environment: "production",
+	})
+	if err != nil {
+		t.Fatalf("Create prod: %v", err)
+	}
+	_, err = ds.Create(ctx, store.CreateDataSourceParams{
+		Type:        store.ConnectorDatabase,
+		Name:        "staging-postgres",
+		Config:      map[string]any{"host": "staging.db"},
+		Environment: "staging",
+	})
+	if err != nil {
+		t.Fatalf("Create staging: %v", err)
+	}
+	// Shared infra — queryable from any env.
+	_, err = ds.Create(ctx, store.CreateDataSourceParams{
+		Type:        store.ConnectorDatabase,
+		Name:        "warehouse",
+		Config:      map[string]any{"host": "warehouse.db"},
+		Environment: "*",
+	})
+	if err != nil {
+		t.Fatalf("Create warehouse: %v", err)
+	}
+
+	// Filter by "production" — should return prod and warehouse, not staging.
+	prod, err := ds.List(ctx, store.ListDataSourceParams{Environment: "production"})
+	if err != nil {
+		t.Fatalf("List prod: %v", err)
+	}
+	if len(prod) != 2 {
+		t.Fatalf("List production = %d rows, want 2 (prod + wildcard warehouse), got %+v", len(prod), prod)
+	}
+	for _, d := range prod {
+		if d.Environment != "production" && d.Environment != "*" {
+			t.Errorf("unexpected env %q in production filter", d.Environment)
+		}
+	}
+
+	// "*" scope returns everything regardless of env column value.
+	all, err := ds.List(ctx, store.ListDataSourceParams{Environment: "*"})
+	if err != nil {
+		t.Fatalf("List all: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("List * = %d rows, want 3", len(all))
+	}
+
+	// No filter returns everything.
+	unfiltered, err := ds.List(ctx, store.ListDataSourceParams{})
+	if err != nil {
+		t.Fatalf("List unfiltered: %v", err)
+	}
+	if len(unfiltered) != 3 {
+		t.Errorf("List unfiltered = %d rows, want 3", len(unfiltered))
+	}
+}

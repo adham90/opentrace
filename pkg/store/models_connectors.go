@@ -36,14 +36,20 @@ type DataSource struct {
 	Status        ConnectorStatus `bun:"status" json:"status"`
 	StatusMessage *string         `bun:"status_message" json:"status_message,omitempty"`
 	LastTestedAt  *time.Time      `bun:"last_tested_at" json:"last_tested_at,omitempty"`
-	CreatedAt     time.Time       `bun:"created_at" json:"created_at"`
-	UpdatedAt     time.Time       `bun:"updated_at" json:"updated_at"`
+	// Environment pins this connector to a single env ("staging", "production",
+	// etc.) or the wildcard "*" for shared infrastructure (e.g. an analytics
+	// warehouse queried from every env). See decision #7 in
+	// docs/multi-env-support.md for the bidirectional enforcement rules.
+	Environment string    `bun:"environment" json:"environment,omitempty"`
+	CreatedAt   time.Time `bun:"created_at" json:"created_at"`
+	UpdatedAt   time.Time `bun:"updated_at" json:"updated_at"`
 }
 
 type CreateDataSourceParams struct {
-	Type   ConnectorType  `json:"type"`
-	Name   string         `json:"name"`
-	Config map[string]any `json:"config"`
+	Type        ConnectorType  `json:"type"`
+	Name        string         `json:"name"`
+	Config      map[string]any `json:"config"`
+	Environment string         `json:"environment,omitempty"`
 }
 
 type UpdateDataSourceParams struct {
@@ -52,9 +58,11 @@ type UpdateDataSourceParams struct {
 	Status        *ConnectorStatus `json:"status,omitempty"`
 	StatusMessage *string          `json:"status_message,omitempty"`
 	LastTestedAt  *time.Time       `json:"last_tested_at,omitempty"`
+	Environment   *string          `json:"environment,omitempty"`
 }
 
 // ListDataSourceParams defines filters for listing data sources.
 type ListDataSourceParams struct {
-	Type ConnectorType `json:"type,omitempty"`
+	Type        ConnectorType `json:"type,omitempty"`
+	Environment string        `json:"environment,omitempty"`
 }

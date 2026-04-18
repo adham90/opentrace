@@ -35,23 +35,24 @@ func (s *dataSourceStore) Create(ctx context.Context, params store.CreateDataSou
 	nowStr := now.Format(time.RFC3339)
 
 	_, err = s.db.NewRaw(
-		`INSERT INTO data_sources (id, type, name, config, status, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO data_sources (id, type, name, config, status, environment, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		id.String(), string(params.Type), params.Name, string(configJSON),
-		string(store.StatusDisconnected), nowStr, nowStr,
+		string(store.StatusDisconnected), params.Environment, nowStr, nowStr,
 	).Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("inserting data source: %w", err)
 	}
 
 	return &store.DataSource{
-		ID:        id,
-		Type:      params.Type,
-		Name:      params.Name,
-		Config:    params.Config,
-		Status:    store.StatusDisconnected,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:          id,
+		Type:        params.Type,
+		Name:        params.Name,
+		Config:      params.Config,
+		Status:      store.StatusDisconnected,
+		Environment: params.Environment,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}, nil
 }
 
@@ -73,6 +74,15 @@ func (s *dataSourceStore) List(ctx context.Context, params store.ListDataSourceP
 	if params.Type != "" {
 		q = q.Where("type = ?", string(params.Type))
 	}
+	if params.Environment != "" {
+		// A "*" scope matches every env; otherwise, exact match plus any
+		// connector explicitly marked as shared ("*") is included.
+		if params.Environment == "*" {
+			// no-op — caller wants everything
+		} else {
+			q = q.Where("environment = ? OR environment = '*'", params.Environment)
+		}
+	}
 	q = q.OrderExpr("name ASC")
 	err := q.Scan(ctx)
 	if err != nil {
@@ -85,7 +95,7 @@ func (s *dataSourceStore) List(ctx context.Context, params store.ListDataSourceP
 func (s *dataSourceStore) Update(ctx context.Context, id uuid.UUID, params store.UpdateDataSourceParams) (*store.DataSource, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	var nameStr, statusStr, statusMsg, testedAt, configStr *string
+	var nameStr, statusStr, statusMsg, testedAt, configStr, envStr *string
 	if params.Name != nil {
 		nameStr = params.Name
 	}
@@ -108,6 +118,9 @@ func (s *dataSourceStore) Update(ctx context.Context, id uuid.UUID, params store
 		ts := params.LastTestedAt.UTC().Format(time.RFC3339)
 		testedAt = &ts
 	}
+	if params.Environment != nil {
+		envStr = params.Environment
+	}
 
 	// When config changes, reset status to disconnected so the user knows to re-test.
 	if params.Config != nil && params.Status == nil {
@@ -122,9 +135,10 @@ func (s *dataSourceStore) Update(ctx context.Context, id uuid.UUID, params store
 		     status = COALESCE(?, status),
 		     status_message = COALESCE(?, status_message),
 		     last_tested_at = COALESCE(?, last_tested_at),
+		     environment = COALESCE(?, environment),
 		     updated_at = ?
 		 WHERE id = ?`,
-		nameStr, configStr, statusStr, statusMsg, testedAt, now, id.String(),
+		nameStr, configStr, statusStr, statusMsg, testedAt, envStr, now, id.String(),
 	).Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("updating data source: %w", err)
