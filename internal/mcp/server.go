@@ -159,10 +159,16 @@ func NewConfiguredServer(deps Deps, isAdmin bool, serverOpts *mcp.ServerOptions)
 // (the server stays alive but is useless). Members get read-only tools; admins
 // get all tools. When no UserStore is provided (backward compat), all tools
 // are registered.
+//
+// The authenticated user's EnvScope is attached to the run context so tool
+// handlers can honour multi-env authorization via ScopeFromContext. Stdio
+// serves a single user for the life of the process, so the scope is fixed
+// at startup — unlike the SSE path, there is no per-request middleware.
 func Serve(deps Deps) error {
 	// Determine access level.
 	isAdmin := true // default: full access (backward compat)
 	hasAccess := true
+	var user *store.User
 
 	if deps.UserStore != nil && deps.MCPToken != "" {
 		parentCtx := deps.Ctx
@@ -170,13 +176,14 @@ func Serve(deps Deps) error {
 			parentCtx = context.Background()
 		}
 		ctx, cancel := context.WithTimeout(parentCtx, 10*time.Second)
-		user, err := deps.UserStore.GetByMCPToken(ctx, deps.MCPToken)
+		u, err := deps.UserStore.GetByMCPToken(ctx, deps.MCPToken)
 		cancel()
-		if err != nil || user == nil {
+		if err != nil || u == nil {
 			// Invalid token — serve with zero tools.
 			hasAccess = false
 		} else {
-			isAdmin = user.Role == store.RoleAdmin
+			user = u
+			isAdmin = u.Role == store.RoleAdmin
 		}
 	}
 
@@ -199,7 +206,16 @@ func Serve(deps Deps) error {
 
 	s := NewConfiguredServer(deps, isAdmin, nil)
 
-	err := s.Run(context.Background(), &mcp.StdioTransport{})
+	// Build the run context with the user's env scope attached so tool
+	// handlers can resolve authorization via ScopeFromContext. When no
+	// user was loaded (e.g. missing UserStore — backward compat path),
+	// the scope is empty and handlers fall back to their own defaults.
+	runCtx := context.Background()
+	if user != nil {
+		runCtx = WithScope(runCtx, ScopeFromUser(user))
+	}
+
+	err := s.Run(runCtx, &mcp.StdioTransport{})
 
 	// Clean up on exit.
 	if deps.ActivityLogger != nil {

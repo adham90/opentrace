@@ -62,8 +62,11 @@ func (s *Server) MCPTokenAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// Store user in context for downstream use.
+		// Store user and derived env scope in context for downstream use.
+		// Tools pull scope via mcpserver.ScopeFromContext; the server-side
+		// User object is kept around for role checks via mcpUserFromContext.
 		rctx := srvpkg.WithUser(r.Context(), user)
+		rctx = mcpserver.WithScope(rctx, mcpserver.ScopeFromUser(user))
 		next.ServeHTTP(w, r.WithContext(rctx))
 	})
 }

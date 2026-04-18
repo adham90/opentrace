@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/adham90/opentrace/internal/config"
+	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
 	_ "modernc.org/sqlite"
@@ -1196,6 +1197,69 @@ func TestMCPTokenAuth_ValidTokenActiveUser(t *testing.T) {
 	}
 	if gotUser.ID != "mcp-user-1" {
 		t.Fatalf("expected user ID 'mcp-user-1', got %q", gotUser.ID)
+	}
+}
+
+func TestMCPTokenAuth_AttachesEnvScope(t *testing.T) {
+	cases := []struct {
+		name        string
+		allowedEnvs []string
+		wantMode    string
+	}{
+		{"single_env", []string{"staging"}, "single"},
+		{"multi_env", []string{"staging", "production"}, "multi"},
+		{"legacy_wildcard", []string{"*"}, "legacy_wildcard"},
+		{"empty_scope", []string{}, "denied"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockUsers := newMockUserStore()
+			token := "scope-test-token-" + tc.name
+			user := &store.User{
+				ID:                  "scope-user-" + tc.name,
+				Email:                tc.name + "@test.com",
+				IsActive:             true,
+				MCPEnabled:           true,
+				MCPToken:             &token,
+				AllowedEnvironments:  tc.allowedEnvs,
+			}
+			mockUsers.mu.Lock()
+			mockUsers.users[user.ID] = user
+			mockUsers.mu.Unlock()
+
+			s := &Server{
+				userStore: mockUsers,
+				auditCh:   make(chan auditEntry, 1),
+			}
+
+			var gotScope mcpserver.EnvScope
+			var gotScopeAttached bool
+			inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotScope, gotScopeAttached = mcpserver.ScopeFromContextOK(r.Context())
+				w.WriteHeader(http.StatusOK)
+			})
+
+			handler := s.MCPTokenAuth(inner)
+
+			req := httptest.NewRequest(http.MethodPost, "/mcp/", nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d", rec.Code)
+			}
+			if !gotScopeAttached {
+				t.Fatal("expected scope to be attached to ctx")
+			}
+			if gotScope.Mode() != tc.wantMode {
+				t.Errorf("Mode = %q, want %q (allowed=%v)", gotScope.Mode(), tc.wantMode, tc.allowedEnvs)
+			}
+			if len(gotScope.Allowed) != len(tc.allowedEnvs) {
+				t.Errorf("Allowed len = %d, want %d", len(gotScope.Allowed), len(tc.allowedEnvs))
+			}
+		})
 	}
 }
 
