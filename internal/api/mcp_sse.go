@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +13,31 @@ import (
 	"github.com/adham90/opentrace/pkg/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// prepareSSE gets the response ready for a long-lived SSE stream:
+//   - Signals reverse proxies (nginx via X-Accel-Buffering, Cloudflare,
+//     any proxy honoring no-transform) not to buffer. Caddy ignores these
+//     and needs `flush_interval -1` in its reverse_proxy config.
+//   - Clears the http.Server WriteTimeout on this connection. Without this,
+//     the global WriteTimeout (set in main.go) would kill the SSE stream
+//     mid-session, making every tool call after that point hang.
+func prepareSSE(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Accel-Buffering", "no")
+		h.Set("Cache-Control", "no-cache, no-transform")
+
+		// SSE is a long-lived stream — the global WriteTimeout on http.Server
+		// would otherwise tear it down. Zero time = no deadline.
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {
+			// Not fatal — if the underlying writer doesn't support deadlines,
+			// the handler will still run, just bounded by WriteTimeout.
+			slog.Warn("sse: clearing write deadline failed", "error", err)
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
 
 // wrapCompressSkipMCP wraps chi's Compress middleware so that /mcp/ paths
 // bypass it entirely. Simply stripping Accept-Encoding is not enough because
