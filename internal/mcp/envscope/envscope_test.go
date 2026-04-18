@@ -1,4 +1,4 @@
-package mcp
+package envscope
 
 import (
 	"context"
@@ -127,8 +127,8 @@ func TestEnvScope_Mode(t *testing.T) {
 func TestEnvScope_Context(t *testing.T) {
 	t.Run("round_trip", func(t *testing.T) {
 		scope := EnvScope{Allowed: []string{"staging"}}
-		ctx := WithScope(context.Background(), scope)
-		got, ok := ScopeFromContextOK(ctx)
+		ctx := With(context.Background(), scope)
+		got, ok := FromOK(ctx)
 		if !ok {
 			t.Fatal("expected scope to be present in ctx")
 		}
@@ -138,7 +138,7 @@ func TestEnvScope_Context(t *testing.T) {
 	})
 
 	t.Run("no_scope_attached", func(t *testing.T) {
-		got, ok := ScopeFromContextOK(context.Background())
+		got, ok := FromOK(context.Background())
 		if ok {
 			t.Errorf("expected ok=false, got scope=%v", got)
 		}
@@ -148,10 +148,9 @@ func TestEnvScope_Context(t *testing.T) {
 	})
 
 	t.Run("nil_ctx", func(t *testing.T) {
-		// ScopeFromContextOK defends against nil so a mis-wired call site
-		// can't panic — verify that behaviour directly.
+		// FromOK defends against nil so a mis-wired call site can't panic.
 		var ctx context.Context
-		got, ok := ScopeFromContextOK(ctx)
+		got, ok := FromOK(ctx)
 		if ok {
 			t.Errorf("expected ok=false for nil ctx, got scope=%v", got)
 		}
@@ -161,35 +160,33 @@ func TestEnvScope_Context(t *testing.T) {
 	})
 
 	t.Run("shortcut_returns_empty_when_absent", func(t *testing.T) {
-		got := ScopeFromContext(context.Background())
+		got := From(context.Background())
 		if len(got.Allowed) != 0 {
 			t.Errorf("expected empty scope, got %v", got)
 		}
 	})
 }
 
-func TestScopeFromUser(t *testing.T) {
+func TestFromUser(t *testing.T) {
 	t.Run("nil_user", func(t *testing.T) {
-		s := ScopeFromUser(nil)
+		s := FromUser(nil)
 		if len(s.Allowed) != 0 {
-			t.Errorf("ScopeFromUser(nil) should be empty, got %v", s.Allowed)
+			t.Errorf("FromUser(nil) should be empty, got %v", s.Allowed)
 		}
 	})
 
 	t.Run("user_with_scope", func(t *testing.T) {
 		u := &store.User{AllowedEnvironments: []string{"staging", "production"}}
-		s := ScopeFromUser(u)
+		s := FromUser(u)
 		if len(s.Allowed) != 2 || s.Allowed[0] != "staging" || s.Allowed[1] != "production" {
 			t.Errorf("got %v, want [staging production]", s.Allowed)
 		}
 	})
 
 	t.Run("independent_from_source_slice", func(t *testing.T) {
-		// Mutating the user's slice after building scope must not affect
-		// the scope copy — otherwise a request could see a mutated view.
 		src := []string{"staging"}
 		u := &store.User{AllowedEnvironments: src}
-		s := ScopeFromUser(u)
+		s := FromUser(u)
 		src[0] = "production"
 		if s.Allowed[0] != "staging" {
 			t.Errorf("scope aliased user slice: got %q, want %q", s.Allowed[0], "staging")
@@ -198,7 +195,7 @@ func TestScopeFromUser(t *testing.T) {
 
 	t.Run("empty_user", func(t *testing.T) {
 		u := &store.User{}
-		s := ScopeFromUser(u)
+		s := FromUser(u)
 		if len(s.Allowed) != 0 {
 			t.Errorf("empty user should produce empty scope, got %v", s.Allowed)
 		}

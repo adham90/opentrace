@@ -7,6 +7,7 @@ import (
 	"time"
 
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
+	"github.com/adham90/opentrace/internal/mcp/envscope"
 	srvpkg "github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -63,10 +64,10 @@ func (s *Server) MCPTokenAuth(next http.Handler) http.Handler {
 		}
 
 		// Store user and derived env scope in context for downstream use.
-		// Tools pull scope via mcpserver.ScopeFromContext; the server-side
-		// User object is kept around for role checks via mcpUserFromContext.
+		// Tools pull scope via envscope.From; the server-side User object
+		// is kept around for role checks via mcpUserFromContext.
 		rctx := srvpkg.WithUser(r.Context(), user)
-		rctx = mcpserver.WithScope(rctx, mcpserver.ScopeFromUser(user))
+		rctx = envscope.With(rctx, envscope.FromUser(user))
 		next.ServeHTTP(w, r.WithContext(rctx))
 	})
 }

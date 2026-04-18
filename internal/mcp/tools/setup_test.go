@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/adham90/opentrace/internal/mcp/envscope"
 	"github.com/adham90/opentrace/internal/testutil/mocks"
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -69,6 +70,101 @@ func TestHandleSetupStatus(t *testing.T) {
 	}
 	if status["users"] != float64(1) {
 		t.Errorf("users = %v, want 1", status["users"])
+	}
+}
+
+func TestHandleSetupStatus_EnvScope(t *testing.T) {
+	cases := []struct {
+		name        string
+		allowed     []string
+		wantMode    string
+		wantWarnSub string // substring the warning must contain; "" means no warning
+	}{
+		{"single_env_no_warning", []string{"production"}, "single", ""},
+		{"multi_env_requires_explicit", []string{"staging", "production"}, "multi", "must specify environment"},
+		{"legacy_wildcard_deprecated", []string{"*"}, "legacy_wildcard", "deprecated wildcard"},
+		{"denied_has_warning", []string{}, "denied", "no environment scope"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := SetupDeps{}
+			ctx := envscope.With(context.Background(), envscope.EnvScope{Allowed: tc.allowed})
+
+			result, err := HandleSetupStatus(ctx, d)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result == nil || result.IsError {
+				t.Fatalf("unexpected error result: %+v", result)
+			}
+
+			text := extractText(t, result)
+			var status map[string]any
+			if err := json.Unmarshal([]byte(text), &status); err != nil {
+				t.Fatalf("failed to parse result JSON: %v", err)
+			}
+
+			// env_scope round-trips as []any through JSON.
+			scopeAny, ok := status["env_scope"].([]any)
+			if !ok {
+				t.Fatalf("env_scope missing or wrong type: %T", status["env_scope"])
+			}
+			if len(scopeAny) != len(tc.allowed) {
+				t.Errorf("env_scope len = %d, want %d", len(scopeAny), len(tc.allowed))
+			}
+			for i, v := range scopeAny {
+				if s, _ := v.(string); s != tc.allowed[i] {
+					t.Errorf("env_scope[%d] = %v, want %q", i, v, tc.allowed[i])
+				}
+			}
+
+			if status["scope_mode"] != tc.wantMode {
+				t.Errorf("scope_mode = %v, want %q", status["scope_mode"], tc.wantMode)
+			}
+
+			warn, hasWarn := status["scope_warning"].(string)
+			if tc.wantWarnSub == "" {
+				if hasWarn {
+					t.Errorf("expected no scope_warning, got %q", warn)
+				}
+			} else {
+				if !hasWarn {
+					t.Fatalf("expected scope_warning containing %q, got none", tc.wantWarnSub)
+				}
+				if !strings.Contains(warn, tc.wantWarnSub) {
+					t.Errorf("scope_warning %q missing substring %q", warn, tc.wantWarnSub)
+				}
+			}
+		})
+	}
+}
+
+func TestHandleSetupStatus_NoScopeInContext(t *testing.T) {
+	// When scope is missing entirely (e.g. a test or a non-MCP caller),
+	// setup status still reports scope fields — just with the "denied"
+	// default — so downstream consumers see a consistent shape.
+	d := SetupDeps{}
+	result, err := HandleSetupStatus(context.Background(), d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := extractText(t, result)
+	var status map[string]any
+	if err := json.Unmarshal([]byte(text), &status); err != nil {
+		t.Fatalf("failed to parse result JSON: %v", err)
+	}
+
+	if status["scope_mode"] != "denied" {
+		t.Errorf("scope_mode = %v, want denied", status["scope_mode"])
+	}
+	scopeAny, ok := status["env_scope"].([]any)
+	if !ok {
+		t.Fatalf("env_scope missing or wrong type: %T", status["env_scope"])
+	}
+	if len(scopeAny) != 0 {
+		t.Errorf("env_scope = %v, want empty", scopeAny)
 	}
 }
 

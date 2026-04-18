@@ -1,4 +1,11 @@
-package mcp
+// Package envscope holds the multi-env authorization scope that flows from
+// the authenticated MCP user through the request ctx into tool handlers.
+//
+// It lives in its own subpackage so both the MCP server (which attaches the
+// scope at auth time) and the MCP tool handlers (which read it to resolve
+// the target env per call) can import it without a cycle through the
+// parent mcp package.
+package envscope
 
 import (
 	"context"
@@ -8,7 +15,7 @@ import (
 )
 
 // envScopeKey is the ctx key for EnvScope. Unexported so callers go through
-// WithScope / ScopeFromContext rather than poking at the raw value.
+// With / From rather than poking at the raw value.
 type envScopeKey struct{}
 
 // WildcardEnv is the legacy scope value that allows any environment. Assigned
@@ -29,9 +36,9 @@ type EnvScope struct {
 	Allowed []string
 }
 
-// ScopeFromUser builds an EnvScope from a user's AllowedEnvironments. A nil
+// FromUser builds an EnvScope from a user's AllowedEnvironments. A nil
 // user yields an empty scope (denied).
-func ScopeFromUser(u *store.User) EnvScope {
+func FromUser(u *store.User) EnvScope {
 	if u == nil {
 		return EnvScope{}
 	}
@@ -98,23 +105,23 @@ func (s EnvScope) Mode() string {
 	}
 }
 
-// WithScope returns ctx with the given scope attached.
-func WithScope(ctx context.Context, s EnvScope) context.Context {
+// With returns ctx with the given scope attached.
+func With(ctx context.Context, s EnvScope) context.Context {
 	return context.WithValue(ctx, envScopeKey{}, s)
 }
 
-// ScopeFromContext returns the scope attached via WithScope, or an empty
-// scope if none was attached. Callers that need to distinguish "no scope
-// attached" from "scope explicitly empty" should use ScopeFromContextOK.
-func ScopeFromContext(ctx context.Context) EnvScope {
-	s, _ := ScopeFromContextOK(ctx)
+// From returns the scope attached via With, or an empty scope if none was
+// attached. Callers that need to distinguish "no scope attached" from
+// "scope explicitly empty" should use FromOK.
+func From(ctx context.Context) EnvScope {
+	s, _ := FromOK(ctx)
 	return s
 }
 
-// ScopeFromContextOK returns the scope and a bool indicating whether one
-// was actually attached. Useful in tests and in middleware that wants to
-// reject requests reaching a handler without scope plumbing.
-func ScopeFromContextOK(ctx context.Context) (EnvScope, bool) {
+// FromOK returns the scope and a bool indicating whether one was actually
+// attached. Useful in tests and in middleware that wants to reject requests
+// reaching a handler without scope plumbing.
+func FromOK(ctx context.Context) (EnvScope, bool) {
 	if ctx == nil {
 		return EnvScope{}, false
 	}

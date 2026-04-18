@@ -9,6 +9,7 @@ import (
 
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/mcp/envscope"
 	"github.com/adham90/opentrace/pkg/store"
 	"github.com/adham90/opentrace/internal/watcher"
 )
@@ -212,7 +213,7 @@ func Serve(deps Deps) error {
 	// the scope is empty and handlers fall back to their own defaults.
 	runCtx := context.Background()
 	if user != nil {
-		runCtx = WithScope(runCtx, ScopeFromUser(user))
+		runCtx = envscope.With(runCtx, envscope.FromUser(user))
 	}
 
 	err := s.Run(runCtx, &mcp.StdioTransport{})

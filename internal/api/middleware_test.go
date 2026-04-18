@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/adham90/opentrace/internal/config"
-	mcpserver "github.com/adham90/opentrace/internal/mcp"
+	"github.com/adham90/opentrace/internal/mcp/envscope"
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
 	_ "modernc.org/sqlite"
@@ -1233,10 +1233,10 @@ func TestMCPTokenAuth_AttachesEnvScope(t *testing.T) {
 				auditCh:   make(chan auditEntry, 1),
 			}
 
-			var gotScope mcpserver.EnvScope
+			var gotScope envscope.EnvScope
 			var gotScopeAttached bool
 			inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gotScope, gotScopeAttached = mcpserver.ScopeFromContextOK(r.Context())
+				gotScope, gotScopeAttached = envscope.FromOK(r.Context())
 				w.WriteHeader(http.StatusOK)
 			})
 

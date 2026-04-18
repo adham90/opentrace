@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/adham90/opentrace/internal/mcp/envscope"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -39,9 +40,38 @@ func SetupHandler(d SetupDeps) ToolHandlerFunc {
 	}
 }
 
+// scopeWarning returns a short human-readable note for scope shapes that
+// change how the agent must call tools. An empty string means the common
+// single-env path where no warning is needed.
+func scopeWarning(s envscope.EnvScope) string {
+	switch s.Mode() {
+	case "denied":
+		return "this token has no environment scope — data-access tools will reject calls"
+	case "multi":
+		return "token covers multiple environments; every tool call must specify environment=..."
+	case "legacy_wildcard":
+		return "this token uses the deprecated wildcard scope; missing env args fall back to the server default on writes"
+	default:
+		return ""
+	}
+}
+
 func HandleSetupStatus(ctx context.Context, d SetupDeps) (*CallToolResult, error) {
 	status := map[string]any{
 		"server": "ok",
+	}
+
+	// Env scope surfaces the caller's multi-env authorization so the agent
+	// knows whether to auto-fill, require, or refuse environment args on
+	// subsequent calls. See docs/multi-env-support.md decisions #3-#4.
+	scope := envscope.From(ctx)
+	status["env_scope"] = scope.Allowed
+	if scope.Allowed == nil {
+		status["env_scope"] = []string{}
+	}
+	status["scope_mode"] = scope.Mode()
+	if warn := scopeWarning(scope); warn != "" {
+		status["scope_warning"] = warn
 	}
 
 	// User count
