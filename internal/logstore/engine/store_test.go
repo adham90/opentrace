@@ -218,7 +218,7 @@ func TestStoreCountByLevel(t *testing.T) {
 
 	start := now.Add(-time.Minute)
 	end := now.Add(time.Minute)
-	counts, err := s.CountByLevel(start, end, "")
+	counts, err := s.CountByLevel(start, end, "", "")
 	if err != nil {
 		t.Fatalf("CountByLevel: %v", err)
 	}
@@ -460,4 +460,80 @@ func extractMessages(es []chunk.Entry) []string {
 		out[i] = e.Message
 	}
 	return out
+}
+
+func TestStoreCountByLevel_EnvFilter(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().UTC()
+	entries := []chunk.Entry{
+		{Ts: now.UnixMilli(), Level: "info", Service: "api", Env: "production", Message: "prod1"},
+		{Ts: now.UnixMilli(), Level: "error", Service: "api", Env: "production", Message: "prod2"},
+		{Ts: now.UnixMilli(), Level: "info", Service: "api", Env: "staging", Message: "staging1"},
+		{Ts: now.UnixMilli(), Level: "info", Service: "api", Env: "", Message: "legacy1"}, // legacy wildcard
+	}
+	if _, err := s.Ingest(entries); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	start := now.Add(-time.Minute)
+	end := now.Add(time.Minute)
+
+	// No env filter: all four entries counted.
+	counts, err := s.CountByLevel(start, end, "", "")
+	if err != nil {
+		t.Fatalf("CountByLevel: %v", err)
+	}
+	if counts["info"] != 3 || counts["error"] != 1 {
+		t.Errorf("unfiltered counts = %+v, want info=3 error=1", counts)
+	}
+
+	// Production filter: 2 prod + 1 legacy (wildcard) = 3 total.
+	// Breakdown: info from prod + info from legacy = 2 info; error from prod = 1 error.
+	counts, err = s.CountByLevel(start, end, "", "production")
+	if err != nil {
+		t.Fatalf("CountByLevel env=production: %v", err)
+	}
+	if counts["info"] != 2 || counts["error"] != 1 {
+		t.Errorf("env=production counts = %+v, want info=2 error=1", counts)
+	}
+
+	// Staging filter: 1 staging + 1 legacy = 2 total.
+	counts, err = s.CountByLevel(start, end, "", "staging")
+	if err != nil {
+		t.Fatalf("CountByLevel env=staging: %v", err)
+	}
+	if counts["info"] != 2 {
+		t.Errorf("env=staging counts = %+v, want info=2", counts)
+	}
+}
+
+func TestStoreCountByService_EnvFilter(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().UTC()
+	entries := []chunk.Entry{
+		{Ts: now.UnixMilli(), Level: "info", Service: "api", Env: "production", Message: "p1"},
+		{Ts: now.UnixMilli(), Level: "info", Service: "api", Env: "production", Message: "p2"},
+		{Ts: now.UnixMilli(), Level: "info", Service: "api", Env: "staging", Message: "s1"},
+		{Ts: now.UnixMilli(), Level: "info", Service: "worker", Env: "staging", Message: "ws1"},
+	}
+	if _, err := s.Ingest(entries); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	start := now.Add(-time.Minute)
+	end := now.Add(time.Minute)
+
+	// Production filter: api=2, worker=0.
+	counts, err := s.CountByService(start, end, "production")
+	if err != nil {
+		t.Fatalf("CountByService: %v", err)
+	}
+	if counts["api"] != 2 {
+		t.Errorf("env=production counts api = %d, want 2", counts["api"])
+	}
+	if counts["worker"] != 0 {
+		t.Errorf("env=production worker unexpectedly counted: %d", counts["worker"])
+	}
 }

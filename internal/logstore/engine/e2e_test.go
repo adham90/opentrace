@@ -279,7 +279,7 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	// ====================================================================
 
 	// CountByLevel
-	counts, err := store.CountByLevel(start, end, "")
+	counts, err := store.CountByLevel(start, end, "", "")
 	if err != nil {
 		t.Fatalf("CountByLevel: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	}
 
 	// CountByService
-	svcCounts, err := store.CountByService(start, end)
+	svcCounts, err := store.CountByService(start, end, "")
 	if err != nil {
 		t.Fatalf("CountByService: %v", err)
 	}

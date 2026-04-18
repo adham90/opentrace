@@ -168,7 +168,7 @@ func TestFlatE2E_SDKToQueryRoundTrip(t *testing.T) {
 	}
 
 	// CountByLevel
-	counts, err := e.CountByLevel(start, end, "")
+	counts, err := e.CountByLevel(start, end, "", "")
 	if err != nil {
 		t.Fatalf("CountByLevel: %v", err)
 	}

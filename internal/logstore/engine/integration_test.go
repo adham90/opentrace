@@ -178,7 +178,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	}
 
 	// --- CountByLevel ---
-	counts, err := s.CountByLevel(start, end, "")
+	counts, err := s.CountByLevel(start, end, "", "")
 	if err != nil {
 		t.Fatalf("CountByLevel: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	}
 
 	// --- CountByService ---
-	svcCounts, err := s.CountByService(start, end)
+	svcCounts, err := s.CountByService(start, end, "")
 	if err != nil {
 		t.Fatalf("CountByService: %v", err)
 	}

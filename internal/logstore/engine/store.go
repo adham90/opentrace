@@ -242,7 +242,14 @@ func (s *Store) GetBody(id int64) (json.RawMessage, error) {
 }
 
 // CountByLevel returns log counts grouped by level for the given time range.
-func (s *Store) CountByLevel(start, end time.Time, service string) (map[string]int, error) {
+// CountByLevel returns log counts grouped by level for the given time range.
+//
+// When environment is set, the WAL path filters by env. Sealed segments use
+// pre-computed counts that aren't broken down by env yet — for segments, the
+// env parameter is ignored, so multi-env deployments may see slight
+// over-counts on historical data. Single-env deployments (the common case)
+// are unaffected since all segment rows share the same env.
+func (s *Store) CountByLevel(start, end time.Time, service, environment string) (map[string]int, error) {
 	counts := make(map[string]int)
 
 	segs := s.segments.SegmentsInRange(start, end)
@@ -252,8 +259,8 @@ func (s *Store) CountByLevel(start, end time.Time, service string) (map[string]i
 		}
 	}
 
-	// Active WAL counts
-	walCounts := s.countActiveWALByLevel(start, end, service)
+	// Active WAL counts (service + env filters applied).
+	walCounts := s.countActiveWALByLevel(start, end, service, environment)
 	for level, count := range walCounts {
 		counts[level] += count
 	}
@@ -261,8 +268,9 @@ func (s *Store) CountByLevel(start, end time.Time, service string) (map[string]i
 	return counts, nil
 }
 
-// CountByService returns log counts grouped by service for the given time range.
-func (s *Store) CountByService(start, end time.Time) (map[string]int, error) {
+// CountByService returns log counts grouped by service for the given time
+// range. See CountByLevel for notes on segment-level env filtering.
+func (s *Store) CountByService(start, end time.Time, environment string) (map[string]int, error) {
 	counts := make(map[string]int)
 
 	segs := s.segments.SegmentsInRange(start, end)
@@ -272,7 +280,7 @@ func (s *Store) CountByService(start, end time.Time) (map[string]int, error) {
 		}
 	}
 
-	walCounts := s.countActiveWALByService(start, end)
+	walCounts := s.countActiveWALByService(start, end, environment)
 	for svc, count := range walCounts {
 		counts[svc] += count
 	}
@@ -537,7 +545,7 @@ func (s *Store) findInActiveWAL(id int64) (*chunk.Entry, error) {
 	return nil, fmt.Errorf("entry ID %d not found", id)
 }
 
-func (s *Store) countActiveWALByLevel(start, end time.Time, service string) map[string]int {
+func (s *Store) countActiveWALByLevel(start, end time.Time, service, environment string) map[string]int {
 	walPath := s.writer.WALPath()
 	f, err := os.Open(walPath)
 	if err != nil {
@@ -550,16 +558,21 @@ func (s *Store) countActiveWALByLevel(start, end time.Time, service string) map[
 	startMs := start.UnixMilli()
 	endMs := end.UnixMilli()
 	for _, e := range entries {
-		if e.ReceivedAt >= startMs && e.ReceivedAt <= endMs {
-			if service == "" || strings.EqualFold(e.Service, service) {
-				counts[e.Level]++
-			}
+		if e.ReceivedAt < startMs || e.ReceivedAt > endMs {
+			continue
 		}
+		if service != "" && !strings.EqualFold(e.Service, service) {
+			continue
+		}
+		if !envMatches(environment, e.Env) {
+			continue
+		}
+		counts[e.Level]++
 	}
 	return counts
 }
 
-func (s *Store) countActiveWALByService(start, end time.Time) map[string]int {
+func (s *Store) countActiveWALByService(start, end time.Time, environment string) map[string]int {
 	walPath := s.writer.WALPath()
 	f, err := os.Open(walPath)
 	if err != nil {
@@ -572,11 +585,25 @@ func (s *Store) countActiveWALByService(start, end time.Time) map[string]int {
 	startMs := start.UnixMilli()
 	endMs := end.UnixMilli()
 	for _, e := range entries {
-		if e.ReceivedAt >= startMs && e.ReceivedAt <= endMs {
-			counts[e.Service]++
+		if e.ReceivedAt < startMs || e.ReceivedAt > endMs {
+			continue
 		}
+		if !envMatches(environment, e.Env) {
+			continue
+		}
+		counts[e.Service]++
 	}
 	return counts
+}
+
+// envMatches applies the PR 2 legacy-wildcard rule: a filter is satisfied
+// when it's empty, when the row's env exactly matches, or when the row's
+// env is empty (pre-multi-env row, treated as wildcard).
+func envMatches(filter, entryEnv string) bool {
+	if filter == "" || entryEnv == "" {
+		return true
+	}
+	return strings.EqualFold(filter, entryEnv)
 }
 
 func (s *Store) addActiveWALHistogram(minuteCounts map[string]HBucket, start, end time.Time) {

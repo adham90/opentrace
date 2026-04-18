@@ -96,7 +96,7 @@ func (a *LogStore) Prune(ctx context.Context, olderThan time.Duration) (int64, e
 }
 
 func (a *LogStore) CountByLevel(ctx context.Context, params store.LogCountParams) (map[string]int, error) {
-	counts, err := a.engine.CountByLevel(params.Since, params.Until, params.Service)
+	counts, err := a.engine.CountByLevel(params.Since, params.Until, params.Service, params.Environment)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +114,7 @@ func (a *LogStore) CountByLevel(ctx context.Context, params store.LogCountParams
 }
 
 func (a *LogStore) CountByService(ctx context.Context, params store.LogCountParams) ([]store.ServiceLogCount, error) {
-	counts, err := a.engine.CountByService(params.Since, params.Until)
+	counts, err := a.engine.CountByService(params.Since, params.Until, params.Environment)
 	if err != nil {
 		return nil, err
 	}
