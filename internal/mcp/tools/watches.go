@@ -45,7 +45,12 @@ func WatchesHandler(d WatchesDeps) ToolHandlerFunc {
 }
 
 func HandleWatchStatus(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
-	params := store.ListWatchParams{}
+	env, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
+	params := store.ListWatchParams{Environment: env}
 	if v := ArgString(args, "status"); v != "" {
 		params.Status = store.WatchStatus(v)
 	}
@@ -55,24 +60,25 @@ func HandleWatchStatus(ctx context.Context, d WatchesDeps, args map[string]any) 
 	var watches []store.Watch
 	if params.Status == "" {
 		active, err := d.WatchStore.List(ctx, store.ListWatchParams{
-			Status:    store.WatchStatusActive,
-			Service:   params.Service,
-			SessionID: params.SessionID,
+			Status:      store.WatchStatusActive,
+			Service:     params.Service,
+			Environment: env,
+			SessionID:   params.SessionID,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("listing active watches: %w", err)
 		}
 		triggered, err := d.WatchStore.List(ctx, store.ListWatchParams{
-			Status:    store.WatchStatusTriggered,
-			Service:   params.Service,
-			SessionID: params.SessionID,
+			Status:      store.WatchStatusTriggered,
+			Service:     params.Service,
+			Environment: env,
+			SessionID:   params.SessionID,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("listing triggered watches: %w", err)
 		}
 		watches = append(active, triggered...)
 	} else {
-		var err error
 		watches, err = d.WatchStore.List(ctx, params)
 		if err != nil {
 			return nil, fmt.Errorf("listing watches: %w", err)

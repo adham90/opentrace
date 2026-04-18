@@ -48,7 +48,7 @@ func TestHandleHealthcheckList(t *testing.T) {
 	d := HealthchecksDeps{HealthCheckStore: hcStore}
 
 	t.Run("empty list", func(t *testing.T) {
-		result, err := HandleHealthcheckList(context.Background(), d)
+		result, err := HandleHealthcheckList(context.Background(), d, map[string]any{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

@@ -26,7 +26,7 @@ func HealthchecksHandler(d HealthchecksDeps) ToolHandlerFunc {
 
 		switch action {
 		case "list":
-			return HandleHealthcheckList(ctx, d)
+			return HandleHealthcheckList(ctx, d, args)
 		case "uptime":
 			return HandleHealthcheckUptime(ctx, d, args)
 		case "create":
@@ -39,8 +39,12 @@ func HealthchecksHandler(d HealthchecksDeps) ToolHandlerFunc {
 	}
 }
 
-func HandleHealthcheckList(ctx context.Context, d HealthchecksDeps) (*CallToolResult, error) {
-	checks, err := d.HealthCheckStore.List(ctx, store.ListHealthCheckParams{})
+func HandleHealthcheckList(ctx context.Context, d HealthchecksDeps, args map[string]any) (*CallToolResult, error) {
+	env, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+	checks, err := d.HealthCheckStore.List(ctx, store.ListHealthCheckParams{Environment: env})
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to list health checks: %v", err)), nil
 	}

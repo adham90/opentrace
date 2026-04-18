@@ -23,12 +23,18 @@ func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallT
 	eventType := ArgString(args, "event_type")
 	commitHash := ArgString(args, "commit_hash")
 	requestID := ArgString(args, "request_id")
-	environment := ArgString(args, "environment")
 	exceptionClass := ArgString(args, "exception_class")
 	errorFingerprint := ArgString(args, "error_fingerprint")
 	sourceFile := ArgString(args, "source_file")
 	limit := ArgInt(args, "limit", 50, 200)
 	offset := ArgInt(args, "offset", 0, 100000)
+
+	// Resolve env from scope + optional environment arg; rejects out-of-scope
+	// values and auto-fills when the token covers a single env.
+	environment, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
 
 	// Sort order (default: desc = newest first).
 	sortAsc := ArgString(args, "sort") == "asc"

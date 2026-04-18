@@ -42,6 +42,11 @@ func ErrorsList(ctx context.Context, deps ErrorsDeps, args map[string]any) (*Cal
 		return NewToolResultError("ErrorGroupStore not configured"), nil
 	}
 
+	env, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
 	params := store.ListErrorGroupParams{
 		Limit: 20,
 	}
@@ -49,7 +54,7 @@ func ErrorsList(ctx context.Context, deps ErrorsDeps, args map[string]any) (*Cal
 		params.Status = store.ErrorGroupStatus(v)
 	}
 	params.Service = ArgString(args, "service")
-	params.Environment = ArgString(args, "environment")
+	params.Environment = env
 	if v := ArgString(args, "sort_by"); v != "" {
 		params.SortBy = v
 	}
