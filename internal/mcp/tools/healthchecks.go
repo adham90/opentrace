@@ -157,9 +157,15 @@ func HandleHealthcheckCreate(ctx context.Context, d HealthchecksDeps, args map[s
 		return NewToolResultError("url is required"), nil
 	}
 
+	env, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
 	params := store.CreateHealthCheckParams{
-		Name: name,
-		URL:  url,
+		Name:        name,
+		URL:         url,
+		Environment: env,
 	}
 	if v := ArgString(args, "method"); v != "" {
 		params.Method = v

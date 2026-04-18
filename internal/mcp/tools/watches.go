@@ -171,9 +171,18 @@ func HandleWatchCreate(ctx context.Context, d WatchesDeps, args map[string]any) 
 		return NewToolResultError("conditions is required (pass a condition tree or metric/operator/threshold)"), nil
 	}
 
+	// Watches require a concrete env — no legacy-wildcard fallback, no "*"
+	// acceptance (decision #6 in docs/multi-env-support.md). Users of legacy
+	// ["*"] tokens must specify environment=... explicitly when creating
+	// a watch.
+	envArg, err := ResolveEnvStrict(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+	params.Environment = envArg
+
 	params.Service = ArgString(args, "service")
 	params.Endpoint = ArgString(args, "endpoint")
-	params.Environment = ArgString(args, "environment")
 	params.CommitHash = ArgString(args, "commit_hash")
 	params.Duration = ArgString(args, "duration")
 	if v := ArgString(args, "urgency"); v != "" {

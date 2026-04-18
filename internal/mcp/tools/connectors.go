@@ -10,6 +10,7 @@ import (
 
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/mcp/envscope"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -184,10 +185,23 @@ func HandleConnectorCreate(ctx context.Context, d ConnectorsDeps, args map[strin
 		}
 	}
 
+	// Connectors support both env-scoped and wildcard ("*") creation, so we
+	// take the arg as-is (subject to scope) rather than forcing auto-fill.
+	// An explicit environment="*" marks the connector as shared across envs.
+	envArg := ArgString(args, "environment")
+	if envArg != envscope.WildcardEnv {
+		resolved, err := ResolveEnv(ctx, args)
+		if err != nil {
+			return NewToolResultError(err.Error()), nil
+		}
+		envArg = resolved
+	}
+
 	ds, err := d.DSStore.Create(ctx, store.CreateDataSourceParams{
-		Type:   store.ConnectorType(dsType),
-		Name:   name,
-		Config: cfg,
+		Type:        store.ConnectorType(dsType),
+		Name:        name,
+		Config:      cfg,
+		Environment: envArg,
 	})
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to create connector: %v", err)), nil
