@@ -122,6 +122,16 @@ func NewConfiguredServer(deps Deps, isAdmin bool, serverOpts *mcp.ServerOptions)
 		Tools:     &mcp.ToolCapabilities{ListChanged: false},
 		Resources: &mcp.ResourceCapabilities{ListChanged: false, Subscribe: true},
 	}
+	// Send periodic JSON-RPC pings on every session. Two reasons:
+	//   1. Keeps the underlying TCP/SSE stream warm so intermediaries
+	//      (Caddy, NAT, Cloudflare, claude-code's own idle timers) don't
+	//      treat a quiet session as dead and cut it.
+	//   2. Detects and closes truly dead sessions (the SDK tears down when
+	//      the peer misses pings), letting the client reconnect cleanly.
+	// 25s sits comfortably under the common 60s idle-timeout bar.
+	if serverOpts.KeepAlive == 0 {
+		serverOpts.KeepAlive = 25 * time.Second
+	}
 
 	s := mcp.NewServer(
 		&mcp.Implementation{Name: name, Version: "0.1.0"},
