@@ -112,7 +112,7 @@ Pick one:
 
 ```bash
 ssh root@your-server
-curl -fsSL https://get.opentrace.dev | bash
+curl -fsSL https://raw.githubusercontent.com/adham90/opentrace/main/scripts/install.sh | bash
 ```
 
 The installer:

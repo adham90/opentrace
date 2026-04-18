@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # OpenTrace Server Installer
-# Usage: curl -fsSL https://get.opentrace.dev | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/adham90/opentrace/main/scripts/install.sh | bash
 
 REPO="adham90/opentrace"
 BINARY_NAME="opentrace"
