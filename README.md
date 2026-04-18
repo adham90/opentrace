@@ -216,7 +216,7 @@ Connect your Postgres databases (read-only). The agent runs `EXPLAIN ANALYZE` on
 Create HTTP health checks that run on a schedule. The agent sees uptime percentages, response times, and gets notified when endpoints go down.
 
 ### Set Up Alerts
-Create threshold watches on error rate, response time, request volume, SQL count, or cache hit rate. The agent can create watches for code it just deployed — self-monitoring its own changes.
+Create threshold watches on error rate, response time (mean or p95), log volume, error count, SQL count, cache hit rate, or service heartbeat. The agent can create watches for code it just deployed — self-monitoring its own changes.
 
 ### Assess Code Risk
 Every file and endpoint gets a risk score based on error frequency, investigation history, and change velocity. Before modifying a file, the agent checks its production behavior.
@@ -228,21 +228,23 @@ The SDK sends the git commit hash with every log. OpenTrace detects deploys auto
 
 ## MCP Tools
 
-OpenTrace exposes 12 tools with 80+ actions via MCP. Each tool returns `suggested_tools` with pre-filled arguments so the agent knows what to call next.
+OpenTrace exposes 13 tools with 90+ actions via MCP. Each tool returns `suggested_tools` with pre-filled arguments so the agent knows what to call next.
 
 | Tool | Actions | What it does |
 |---|---|---|
-| **logs** | search, context, stats, summary, performance, trace, compare | Full-text log search, distributed trace assembly, N+1 detection |
-| **errors** | list, detail, investigate, impact, ranking, resolve, ignore | Error grouping by fingerprint, user impact scoring, stack traces |
-| **database** | queries, explain, tables, activity, locks, indexes, schema, runbook | Postgres introspection, EXPLAIN plans, composite investigation runbooks |
-| **watches** | status, create, delete, alerts, dismiss, investigate | Threshold alerts on error rate, latency, request volume |
-| **overview** | status, triage, diagnose, timeline, investigate, changes, settings, notes | System health, alerts, incident timeline, settings, agent memory |
+| **logs** | search, context, attributes, stats, summary, performance, trace, compare | Full-text log search, distributed trace assembly, N+1 detection |
+| **errors** | list, detail, investigate, impact, user_errors, ranking, resolve, ignore, reopen, new | Error grouping by fingerprint, user impact scoring, stack traces |
+| **database** | queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions | Postgres introspection, EXPLAIN plans, lock and connection analysis |
+| **watches** | status, create, delete, alerts, dismiss, acknowledge, investigate | Threshold alerts on error rate, latency, request volume |
+| **overview** | status, triage, diagnose, timeline, investigate, changes, settings, notes, delete_note | System health, alerts, incident timeline, settings, agent memory |
 | **analytics** | traffic, endpoints, heatmap, trends, movers | Traffic patterns, endpoint performance, time-series analysis |
-| **code** | risk, fragile, test_gaps, annotate_file, gen_context, deps_risk | Code risk scores, test generation, blast radius, production annotations |
+| **code** | risk, fragile, annotate_file, annotate_function, hotspots, gen_context, gen_suggest, deps_service, deps_blast, deps_risk | Code risk scores, test generation, blast radius, production annotations |
+| **deep_capture** | request_capture, sql_captures, http_captures, email_captures, audit_trail, search_audit, search_sql, file_captures, get_pii_config, update_pii_config, get_retention, update_retention | Per-request deep capture: SQL, HTTP, emails, audit trail, file ops, PII config |
 | **healthchecks** | list, uptime, create, delete | HTTP endpoint monitoring with uptime tracking |
 | **servers** | list, query, health | Server and process metrics (CPU, memory, GC) |
-| **admin** | update_retention, users, audit | User management, retention, audit log (admin only) |
+| **connectors** | list, get, create, test, update, delete | Manage database connectors (Postgres, MySQL, etc.) |
 | **setup** | status, detect, guide, verify | SDK setup assistant — detects framework, provides config with API key |
+| **admin** | update_retention, users, update_role, toggle_active, delete_user, audit | User management, retention, audit log (admin only) |
 
 ---
 
