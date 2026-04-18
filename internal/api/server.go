@@ -283,7 +283,10 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	// and everything else to the chi router.
 	if srv.sseServer != nil {
 		mux := http.NewServeMux()
-		sseHandler := srv.MCPTokenAuth(prepareSSE(srv.sseServer))
+		gate := newSSEInitGate()
+		// Chain: rate-limit -> token auth -> init-order gate -> SSE setup -> SDK handler
+		sseHandler := gate.wrap(prepareSSE(srv.sseServer))
+		sseHandler = srv.MCPTokenAuth(sseHandler)
 		if srv.sseAPILimiter != nil {
 			sseHandler = srv.sseAPILimiter.Middleware(sseHandler)
 		}
