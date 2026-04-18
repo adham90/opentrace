@@ -47,7 +47,7 @@ func (m *WatchSessionManager) CheckAutoResolve(ctx context.Context, w *store.Wat
 		if err != nil {
 			return err
 		}
-		result, err := EvaluateCondition(ctx, cond, m.metrics, w.BaselineJSON, window)
+		result, err := EvaluateCondition(ctx, cond, m.metrics, w.BaselineJSON, w.Environment, window)
 		if err != nil {
 			return err
 		}
@@ -59,7 +59,7 @@ func (m *WatchSessionManager) CheckAutoResolve(ctx context.Context, w *store.Wat
 		return nil
 	}
 
-	value, err := m.metrics.Measure(ctx, metric, w.Service, w.Endpoint, window)
+	value, err := m.metrics.Measure(ctx, metric, w.Service, w.Endpoint, w.Environment, window)
 	if err != nil {
 		return err
 	}

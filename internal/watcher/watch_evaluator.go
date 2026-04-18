@@ -49,7 +49,7 @@ func (e *WatchEvaluator) Evaluate(ctx context.Context, w *store.Watch) (*WatchEv
 	if err != nil {
 		return nil, fmt.Errorf("parsing conditions: %w", err)
 	}
-	condResult, err := EvaluateCondition(ctx, cond, e.metrics, w.BaselineJSON, window)
+	condResult, err := EvaluateCondition(ctx, cond, e.metrics, w.BaselineJSON, w.Environment, window)
 	if err != nil {
 		return nil, fmt.Errorf("evaluating conditions: %w", err)
 	}

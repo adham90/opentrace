@@ -20,36 +20,39 @@ func NewWatchMetrics(logStore store.LogStore) *WatchMetrics {
 	return &WatchMetrics{logStore: logStore}
 }
 
-// Measure computes the given metric for the specified service/endpoint over the time window.
-func (m *WatchMetrics) Measure(ctx context.Context, metric store.WatchMetric, service, endpoint string, window time.Duration) (float64, error) {
+// Measure computes the given metric for the specified service/endpoint/env
+// over the time window. environment scopes log-store queries to a single env
+// — pass "" to match every env (used only in tests and legacy paths).
+func (m *WatchMetrics) Measure(ctx context.Context, metric store.WatchMetric, service, endpoint, environment string, window time.Duration) (float64, error) {
 	switch metric {
 	case store.WatchMetricErrorRate:
-		return m.measureErrorRate(ctx, service, window)
+		return m.measureErrorRate(ctx, service, environment, window)
 	case store.WatchMetricResponseTime:
-		return m.measureResponseTime(ctx, service, endpoint, window)
+		return m.measureResponseTime(ctx, service, endpoint, environment, window)
 	case store.WatchMetricP95Response:
-		return m.measureP95Response(ctx, service, endpoint, window)
+		return m.measureP95Response(ctx, service, endpoint, environment, window)
 	case store.WatchMetricLogCount:
-		return m.measureLogCount(ctx, service, window)
+		return m.measureLogCount(ctx, service, environment, window)
 	case store.WatchMetricErrorCount:
-		return m.measureErrorCount(ctx, service, window)
+		return m.measureErrorCount(ctx, service, environment, window)
 	case store.WatchMetricHeartbeat:
-		return m.measureHeartbeat(ctx, service, window)
+		return m.measureHeartbeat(ctx, service, environment, window)
 	case store.WatchMetricSQLCount:
-		return m.measureSQLCount(ctx, service, endpoint, window)
+		return m.measureSQLCount(ctx, service, endpoint, environment, window)
 	case store.WatchMetricCacheHitRate:
-		return m.measureCacheHitRate(ctx, service, endpoint, window)
+		return m.measureCacheHitRate(ctx, service, endpoint, environment, window)
 	default:
 		return 0, fmt.Errorf("unknown metric: %s", metric)
 	}
 }
 
-func (m *WatchMetrics) measureErrorRate(ctx context.Context, service string, window time.Duration) (float64, error) {
+func (m *WatchMetrics) measureErrorRate(ctx context.Context, service, environment string, window time.Duration) (float64, error) {
 	now := time.Now().UTC()
 	counts, err := m.logStore.CountByLevel(ctx, store.LogCountParams{
-		Since:   now.Add(-window),
-		Until:   now,
-		Service: service,
+		Since:       now.Add(-window),
+		Until:       now,
+		Service:     service,
+		Environment: environment,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("counting by level: %w", err)
@@ -70,8 +73,8 @@ func (m *WatchMetrics) measureErrorRate(ctx context.Context, service string, win
 }
 
 // measureResponseTime uses SQL aggregation — no row loading.
-func (m *WatchMetrics) measureResponseTime(ctx context.Context, service, endpoint string, window time.Duration) (float64, error) {
-	agg, err := m.aggregate(ctx, service, endpoint, window)
+func (m *WatchMetrics) measureResponseTime(ctx context.Context, service, endpoint, environment string, window time.Duration) (float64, error) {
+	agg, err := m.aggregate(ctx, service, endpoint, environment, window)
 	if err != nil {
 		return 0, err
 	}
@@ -83,15 +86,16 @@ func (m *WatchMetrics) measureResponseTime(ctx context.Context, service, endpoin
 
 // measureP95Response loads a limited set of durations for percentile calculation.
 // SQLite has no native percentile function, so we sort in Go.
-func (m *WatchMetrics) measureP95Response(ctx context.Context, service, endpoint string, window time.Duration) (float64, error) {
+func (m *WatchMetrics) measureP95Response(ctx context.Context, service, endpoint, environment string, window time.Duration) (float64, error) {
 	now := time.Now().UTC()
 	start := now.Add(-window)
 
 	params := store.RequestSummarySearchParams{
-		Start:  &start,
-		End:    &now,
-		SortBy: "duration_ms",
-		Limit:  200,
+		Start:       &start,
+		End:         &now,
+		Environment: environment,
+		SortBy:      "duration_ms",
+		Limit:       200,
 	}
 	if endpoint != "" {
 		params.Path = endpoint
@@ -124,12 +128,13 @@ func (m *WatchMetrics) measureP95Response(ctx context.Context, service, endpoint
 	return durations[idx], nil
 }
 
-func (m *WatchMetrics) measureLogCount(ctx context.Context, service string, window time.Duration) (float64, error) {
+func (m *WatchMetrics) measureLogCount(ctx context.Context, service, environment string, window time.Duration) (float64, error) {
 	now := time.Now().UTC()
 	counts, err := m.logStore.CountByLevel(ctx, store.LogCountParams{
-		Since:   now.Add(-window),
-		Until:   now,
-		Service: service,
+		Since:       now.Add(-window),
+		Until:       now,
+		Service:     service,
+		Environment: environment,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("counting by level: %w", err)
@@ -142,13 +147,14 @@ func (m *WatchMetrics) measureLogCount(ctx context.Context, service string, wind
 	return float64(total), nil
 }
 
-func (m *WatchMetrics) measureErrorCount(ctx context.Context, service string, window time.Duration) (float64, error) {
+func (m *WatchMetrics) measureErrorCount(ctx context.Context, service, environment string, window time.Duration) (float64, error) {
 	now := time.Now().UTC()
 	counts, err := m.logStore.CountByLevel(ctx, store.LogCountParams{
-		Since:   now.Add(-window),
-		Until:   now,
-		Service: service,
-		Level:   "error",
+		Since:       now.Add(-window),
+		Until:       now,
+		Service:     service,
+		Level:       "error",
+		Environment: environment,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("counting errors: %w", err)
@@ -161,14 +167,15 @@ func (m *WatchMetrics) measureErrorCount(ctx context.Context, service string, wi
 	return float64(total), nil
 }
 
-func (m *WatchMetrics) measureHeartbeat(ctx context.Context, service string, window time.Duration) (float64, error) {
+func (m *WatchMetrics) measureHeartbeat(ctx context.Context, service, environment string, window time.Duration) (float64, error) {
 	now := time.Now().UTC()
 	start := now.Add(-window)
 	entries, err := m.logStore.Search(ctx, store.LogSearchParams{
-		Service: service,
-		Start:   &start,
-		End:     &now,
-		Limit:   1,
+		Service:     service,
+		Environment: environment,
+		Start:       &start,
+		End:         &now,
+		Limit:       1,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("searching for heartbeat: %w", err)
@@ -180,8 +187,8 @@ func (m *WatchMetrics) measureHeartbeat(ctx context.Context, service string, win
 }
 
 // measureSQLCount uses SQL aggregation — no row loading.
-func (m *WatchMetrics) measureSQLCount(ctx context.Context, service, endpoint string, window time.Duration) (float64, error) {
-	agg, err := m.aggregate(ctx, service, endpoint, window)
+func (m *WatchMetrics) measureSQLCount(ctx context.Context, service, endpoint, environment string, window time.Duration) (float64, error) {
+	agg, err := m.aggregate(ctx, service, endpoint, environment, window)
 	if err != nil {
 		return 0, err
 	}
@@ -192,8 +199,8 @@ func (m *WatchMetrics) measureSQLCount(ctx context.Context, service, endpoint st
 }
 
 // measureCacheHitRate uses SQL aggregation — no row loading.
-func (m *WatchMetrics) measureCacheHitRate(ctx context.Context, service, endpoint string, window time.Duration) (float64, error) {
-	agg, err := m.aggregate(ctx, service, endpoint, window)
+func (m *WatchMetrics) measureCacheHitRate(ctx context.Context, service, endpoint, environment string, window time.Duration) (float64, error) {
+	agg, err := m.aggregate(ctx, service, endpoint, environment, window)
 	if err != nil {
 		return 0, err
 	}
@@ -204,15 +211,16 @@ func (m *WatchMetrics) measureCacheHitRate(ctx context.Context, service, endpoin
 }
 
 // aggregate runs a single SQL aggregation query for response time, SQL count, and cache metrics.
-func (m *WatchMetrics) aggregate(ctx context.Context, service, endpoint string, window time.Duration) (*store.RequestSummaryAggregates, error) {
+func (m *WatchMetrics) aggregate(ctx context.Context, service, endpoint, environment string, window time.Duration) (*store.RequestSummaryAggregates, error) {
 	now := time.Now().UTC()
 	start := now.Add(-window)
 
 	agg, err := m.logStore.AggregateRequestSummaries(ctx, store.RequestSummaryAggregateParams{
-		Start:    &start,
-		End:      &now,
-		Service:  service,
-		Endpoint: endpoint,
+		Start:       &start,
+		End:         &now,
+		Service:     service,
+		Endpoint:    endpoint,
+		Environment: environment,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("aggregating summaries: %w", err)

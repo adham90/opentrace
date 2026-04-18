@@ -38,6 +38,7 @@ type WatchWebhookPayload struct {
 	TriggerValue   float64 `json:"trigger_value"`
 	ThresholdValue float64 `json:"threshold_value"`
 	Service        string  `json:"service,omitempty"`
+	Environment    string  `json:"environment,omitempty"`
 	Timestamp      string  `json:"timestamp"`
 }
 
@@ -50,6 +51,14 @@ func NewWatchWebhookNotifier(url string) *WatchWebhookNotifier {
 }
 
 func (n *WatchWebhookNotifier) NotifyWatchAlert(ctx context.Context, alert *store.WatchAlert, watch *store.Watch) error {
+	// Prefer the alert's denormalized env (PR 2 copied it from the watch at
+	// CreateAlert time) and fall back to the watch itself if the alert row
+	// somehow predates that denormalization.
+	env := alert.Environment
+	if env == "" {
+		env = watch.Environment
+	}
+
 	payload := WatchWebhookPayload{
 		AlertID:        alert.ID,
 		WatchID:        alert.WatchID,
@@ -59,6 +68,7 @@ func (n *WatchWebhookNotifier) NotifyWatchAlert(ctx context.Context, alert *stor
 		TriggerValue:   alert.TriggerValue(),
 		ThresholdValue: alert.ThresholdValue(),
 		Service:        string(watch.Service),
+		Environment:    env,
 		Timestamp:      alert.CreatedAt.Format(time.RFC3339),
 	}
 
@@ -101,6 +111,10 @@ func (n *WatchWebhookNotifier) NotifyWatchAlert(ctx context.Context, alert *stor
 type WatchLogNotifier struct{}
 
 func (n *WatchLogNotifier) NotifyWatchAlert(_ context.Context, alert *store.WatchAlert, watch *store.Watch) error {
+	env := alert.Environment
+	if env == "" {
+		env = watch.Environment
+	}
 	slog.Info("watch alert fired",
 		"alert_id", alert.ID,
 		"watch_id", alert.WatchID,
@@ -109,6 +123,7 @@ func (n *WatchLogNotifier) NotifyWatchAlert(_ context.Context, alert *store.Watc
 		"threshold", alert.ThresholdValue(),
 		"urgency", alert.Urgency,
 		"service", watch.Service,
+		"environment", env,
 		"summary", alert.Summary,
 	)
 	return nil

@@ -163,7 +163,7 @@ func TestEvaluateCondition_SimpleThreshold(t *testing.T) {
 		Service: "api",
 	}
 
-	result, err := EvaluateCondition(context.Background(), c, metrics, nil, 30*1e9)
+	result, err := EvaluateCondition(context.Background(), c, metrics, nil, "", 30*1e9)
 	if err != nil {
 		t.Fatalf("eval: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestEvaluateCondition_AllRequiresBothTrue(t *testing.T) {
 		},
 	}
 
-	result, err := EvaluateCondition(context.Background(), c, metrics, nil, 30*1e9)
+	result, err := EvaluateCondition(context.Background(), c, metrics, nil, "", 30*1e9)
 	if err != nil {
 		t.Fatalf("eval: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestEvaluateCondition_AnyNeedsOneTrue(t *testing.T) {
 		},
 	}
 
-	result, err := EvaluateCondition(context.Background(), c, metrics, nil, 30*1e9)
+	result, err := EvaluateCondition(context.Background(), c, metrics, nil, "", 30*1e9)
 	if err != nil {
 		t.Fatalf("eval: %v", err)
 	}

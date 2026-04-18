@@ -298,6 +298,11 @@ func HandleWatchInvestigate(ctx context.Context, d WatchesDeps, args map[string]
 		return nil, fmt.Errorf("either alert_id or service is required")
 	}
 
+	invEnv, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
 	windowStr := ArgStringDefault(args, "window", "1h")
 	window, err := time.ParseDuration(windowStr)
 	if err != nil {
@@ -324,19 +329,20 @@ func HandleWatchInvestigate(ctx context.Context, d WatchesDeps, args map[string]
 
 	// Metrics
 	if d.WatchMetrics != nil {
-		inv.ErrorRate, _ = d.WatchMetrics.Measure(ctx, store.WatchMetricErrorRate, service, "", window)
-		inv.LogCount, _ = d.WatchMetrics.Measure(ctx, store.WatchMetricLogCount, service, "", window)
-		inv.ErrorCount, _ = d.WatchMetrics.Measure(ctx, store.WatchMetricErrorCount, service, "", window)
+		inv.ErrorRate, _ = d.WatchMetrics.Measure(ctx, store.WatchMetricErrorRate, service, "", invEnv, window)
+		inv.LogCount, _ = d.WatchMetrics.Measure(ctx, store.WatchMetricLogCount, service, "", invEnv, window)
+		inv.ErrorCount, _ = d.WatchMetrics.Measure(ctx, store.WatchMetricErrorCount, service, "", invEnv, window)
 	}
 
 	// Recent errors
 	if d.LogStore != nil {
 		errorLogs, err := d.LogStore.Search(ctx, store.LogSearchParams{
-			Service: service,
-			Level:   "error",
-			Start:   &start,
-			End:     &now,
-			Limit:   20,
+			Service:     service,
+			Environment: invEnv,
+			Level:       "error",
+			Start:       &start,
+			End:         &now,
+			Limit:       20,
 		})
 		if err == nil {
 			errorCounts := make(map[string]*store.WatchEvidenceError)

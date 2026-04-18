@@ -56,7 +56,7 @@ func TestMeasure_ErrorRate(t *testing.T) {
 		m := NewWatchMetrics(logStore)
 		ctx := context.Background()
 
-		val, err := m.Measure(ctx, store.WatchMetricErrorRate, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricErrorRate, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -72,7 +72,7 @@ func TestMeasure_ErrorRate(t *testing.T) {
 
 		insertTestLogs(t, logStore, "web", 10, "info")
 
-		val, err := m.Measure(ctx, store.WatchMetricErrorRate, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricErrorRate, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -89,7 +89,7 @@ func TestMeasure_ErrorRate(t *testing.T) {
 		insertTestLogs(t, logStore, "web", 8, "info")
 		insertTestLogs(t, logStore, "web", 2, "error")
 
-		val, err := m.Measure(ctx, store.WatchMetricErrorRate, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricErrorRate, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -105,7 +105,7 @@ func TestMeasure_ErrorRate(t *testing.T) {
 
 		insertTestLogs(t, logStore, "web", 5, "error")
 
-		val, err := m.Measure(ctx, store.WatchMetricErrorRate, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricErrorRate, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -125,7 +125,7 @@ func TestMeasure_LogCount(t *testing.T) {
 		m := NewWatchMetrics(logStore)
 		ctx := context.Background()
 
-		val, err := m.Measure(ctx, store.WatchMetricLogCount, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricLogCount, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -141,7 +141,7 @@ func TestMeasure_LogCount(t *testing.T) {
 
 		insertTestLogs(t, logStore, "web", 10, "info")
 
-		val, err := m.Measure(ctx, store.WatchMetricLogCount, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricLogCount, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -163,7 +163,7 @@ func TestMeasure_ErrorCount(t *testing.T) {
 
 		insertTestLogs(t, logStore, "web", 10, "info")
 
-		val, err := m.Measure(ctx, store.WatchMetricErrorCount, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricErrorCount, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -179,7 +179,7 @@ func TestMeasure_ErrorCount(t *testing.T) {
 
 		insertTestLogs(t, logStore, "web", 5, "error")
 
-		val, err := m.Measure(ctx, store.WatchMetricErrorCount, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricErrorCount, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -199,7 +199,7 @@ func TestMeasure_ResponseTime(t *testing.T) {
 		m := NewWatchMetrics(logStore)
 		ctx := context.Background()
 
-		val, err := m.Measure(ctx, store.WatchMetricResponseTime, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricResponseTime, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -220,7 +220,7 @@ func TestMeasure_ResponseTime(t *testing.T) {
 			{Path: "/api/c", DurationMs: 300.0},
 		})
 
-		val, err := m.Measure(ctx, store.WatchMetricResponseTime, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricResponseTime, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -240,7 +240,7 @@ func TestMeasure_P95Response(t *testing.T) {
 		m := NewWatchMetrics(logStore)
 		ctx := context.Background()
 
-		val, err := m.Measure(ctx, store.WatchMetricP95Response, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricP95Response, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -264,7 +264,7 @@ func TestMeasure_P95Response(t *testing.T) {
 		}
 		insertTestRequestSummaries(t, logStore, "web", summaries)
 
-		val, err := m.Measure(ctx, store.WatchMetricP95Response, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricP95Response, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -287,7 +287,7 @@ func TestMeasure_Heartbeat(t *testing.T) {
 		ctx := context.Background()
 
 		window := time.Hour
-		val, err := m.Measure(ctx, store.WatchMetricHeartbeat, "web", "", window)
+		val, err := m.Measure(ctx, store.WatchMetricHeartbeat, "web", "", "", window)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -304,7 +304,7 @@ func TestMeasure_Heartbeat(t *testing.T) {
 		// Insert a log just now
 		insertTestLogs(t, logStore, "web", 1, "info")
 
-		val, err := m.Measure(ctx, store.WatchMetricHeartbeat, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricHeartbeat, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -326,7 +326,7 @@ func TestMeasure_SQLCount(t *testing.T) {
 		m := NewWatchMetrics(logStore)
 		ctx := context.Background()
 
-		val, err := m.Measure(ctx, store.WatchMetricSQLCount, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricSQLCount, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -347,7 +347,7 @@ func TestMeasure_SQLCount(t *testing.T) {
 			{Path: "/api/c", DurationMs: 100.0, SQLCount: 12},
 		})
 
-		val, err := m.Measure(ctx, store.WatchMetricSQLCount, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricSQLCount, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -367,7 +367,7 @@ func TestMeasure_CacheHitRate(t *testing.T) {
 		m := NewWatchMetrics(logStore)
 		ctx := context.Background()
 
-		val, err := m.Measure(ctx, store.WatchMetricCacheHitRate, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricCacheHitRate, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -389,7 +389,7 @@ func TestMeasure_CacheHitRate(t *testing.T) {
 			{Path: "/api/b", DurationMs: 100.0, CacheReads: 10, CacheHits: 6},
 		})
 
-		val, err := m.Measure(ctx, store.WatchMetricCacheHitRate, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricCacheHitRate, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -409,7 +409,7 @@ func TestMeasure_CacheHitRate(t *testing.T) {
 			{Path: "/api/b", DurationMs: 100.0, CacheReads: 0, CacheHits: 0},
 		})
 
-		val, err := m.Measure(ctx, store.WatchMetricCacheHitRate, "web", "", time.Hour)
+		val, err := m.Measure(ctx, store.WatchMetricCacheHitRate, "web", "", "", time.Hour)
 		if err != nil {
 			t.Fatalf("Measure: %v", err)
 		}
@@ -428,7 +428,7 @@ func TestMeasure_UnknownMetric(t *testing.T) {
 	m := NewWatchMetrics(logStore)
 	ctx := context.Background()
 
-	_, err := m.Measure(ctx, store.WatchMetric("nonexistent_metric"), "web", "", time.Hour)
+	_, err := m.Measure(ctx, store.WatchMetric("nonexistent_metric"), "web", "", "", time.Hour)
 	if err == nil {
 		t.Fatal("expected error for unknown metric, got nil")
 	}
@@ -578,7 +578,7 @@ func TestMeasure_ErrorRate_FatalCountsAsError(t *testing.T) {
 	insertTestLogs(t, logStore, "web", 5, "info")
 	insertTestLogs(t, logStore, "web", 5, "fatal")
 
-	val, err := m.Measure(ctx, store.WatchMetricErrorRate, "web", "", time.Hour)
+	val, err := m.Measure(ctx, store.WatchMetricErrorRate, "web", "", "", time.Hour)
 	if err != nil {
 		t.Fatalf("Measure: %v", err)
 	}
@@ -597,7 +597,7 @@ func TestMeasure_ServiceFilter(t *testing.T) {
 	insertTestLogs(t, logStore, "api", 5, "error")
 
 	// Count for "web" should be 10 (only info logs)
-	val, err := m.Measure(ctx, store.WatchMetricLogCount, "web", "", time.Hour)
+	val, err := m.Measure(ctx, store.WatchMetricLogCount, "web", "", "", time.Hour)
 	if err != nil {
 		t.Fatalf("Measure web: %v", err)
 	}
@@ -606,7 +606,7 @@ func TestMeasure_ServiceFilter(t *testing.T) {
 	}
 
 	// Error count for "web" should be 0
-	val, err = m.Measure(ctx, store.WatchMetricErrorCount, "web", "", time.Hour)
+	val, err = m.Measure(ctx, store.WatchMetricErrorCount, "web", "", "", time.Hour)
 	if err != nil {
 		t.Fatalf("Measure web errors: %v", err)
 	}
@@ -615,7 +615,7 @@ func TestMeasure_ServiceFilter(t *testing.T) {
 	}
 
 	// Error count for "api" should be 5
-	val, err = m.Measure(ctx, store.WatchMetricErrorCount, "api", "", time.Hour)
+	val, err = m.Measure(ctx, store.WatchMetricErrorCount, "api", "", "", time.Hour)
 	if err != nil {
 		t.Fatalf("Measure api errors: %v", err)
 	}
@@ -638,7 +638,7 @@ func TestMeasure_ResponseTime_ServiceFilter(t *testing.T) {
 	})
 
 	// Avg response for "web" should be 100
-	val, err := m.Measure(ctx, store.WatchMetricResponseTime, "web", "", time.Hour)
+	val, err := m.Measure(ctx, store.WatchMetricResponseTime, "web", "", "", time.Hour)
 	if err != nil {
 		t.Fatalf("Measure web: %v", err)
 	}
@@ -647,7 +647,7 @@ func TestMeasure_ResponseTime_ServiceFilter(t *testing.T) {
 	}
 
 	// Avg response for "api" should be 500
-	val, err = m.Measure(ctx, store.WatchMetricResponseTime, "api", "", time.Hour)
+	val, err = m.Measure(ctx, store.WatchMetricResponseTime, "api", "", "", time.Hour)
 	if err != nil {
 		t.Fatalf("Measure api: %v", err)
 	}

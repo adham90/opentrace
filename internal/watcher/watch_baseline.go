@@ -91,7 +91,7 @@ func CaptureBaseline(ctx context.Context, logStore store.LogStore, metrics *Watc
 			}
 
 			// P95
-			val, err := metrics.Measure(ctx, store.WatchMetricP95Response, w.Service, w.Endpoint, window)
+			val, err := metrics.Measure(ctx, store.WatchMetricP95Response, w.Service, w.Endpoint, w.Environment, window)
 			if err == nil {
 				baseline.P95ResponseMs = val
 			}

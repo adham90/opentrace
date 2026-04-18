@@ -90,16 +90,19 @@ func ParseCondition(raw json.RawMessage) (*Condition, error) {
 }
 
 // EvaluateCondition recursively evaluates a condition tree.
-func EvaluateCondition(ctx context.Context, c *Condition, metrics *WatchMetrics, baseline *store.WatchBaseline, checkWindow time.Duration) (*ConditionResult, error) {
+// environment scopes every underlying metric query; callers should pass the
+// owning watch's Environment so metrics are computed against that env's
+// traffic only.
+func EvaluateCondition(ctx context.Context, c *Condition, metrics *WatchMetrics, baseline *store.WatchBaseline, environment string, checkWindow time.Duration) (*ConditionResult, error) {
 	// Combinators
 	if len(c.All) > 0 {
-		return evalAll(ctx, c.All, metrics, baseline, checkWindow)
+		return evalAll(ctx, c.All, metrics, baseline, environment, checkWindow)
 	}
 	if len(c.Any) > 0 {
-		return evalAny(ctx, c.Any, metrics, baseline, checkWindow)
+		return evalAny(ctx, c.Any, metrics, baseline, environment, checkWindow)
 	}
 	if c.Not != nil {
-		r, err := EvaluateCondition(ctx, c.Not, metrics, baseline, checkWindow)
+		r, err := EvaluateCondition(ctx, c.Not, metrics, baseline, environment, checkWindow)
 		if err != nil {
 			return nil, err
 		}
@@ -113,23 +116,23 @@ func EvaluateCondition(ctx context.Context, c *Condition, metrics *WatchMetrics,
 	// Leaf conditions
 	switch c.Type {
 	case "threshold":
-		return evalThreshold(ctx, c, metrics, checkWindow)
+		return evalThreshold(ctx, c, metrics, environment, checkWindow)
 	case "relative":
-		return evalRelative(ctx, c, metrics, baseline, checkWindow)
+		return evalRelative(ctx, c, metrics, baseline, environment, checkWindow)
 	case "delta":
-		return evalDelta(ctx, c, metrics, checkWindow)
+		return evalDelta(ctx, c, metrics, environment, checkWindow)
 	case "count":
-		return evalCount(ctx, c, metrics)
+		return evalCount(ctx, c, metrics, environment)
 	default:
 		return nil, fmt.Errorf("unknown condition type: %q", c.Type)
 	}
 }
 
-func evalAll(ctx context.Context, conditions []*Condition, metrics *WatchMetrics, baseline *store.WatchBaseline, checkWindow time.Duration) (*ConditionResult, error) {
+func evalAll(ctx context.Context, conditions []*Condition, metrics *WatchMetrics, baseline *store.WatchBaseline, environment string, checkWindow time.Duration) (*ConditionResult, error) {
 	var summaries []string
 	allBreached := true
 	for _, c := range conditions {
-		r, err := EvaluateCondition(ctx, c, metrics, baseline, checkWindow)
+		r, err := EvaluateCondition(ctx, c, metrics, baseline, environment, checkWindow)
 		if err != nil {
 			return nil, err
 		}
@@ -144,11 +147,11 @@ func evalAll(ctx context.Context, conditions []*Condition, metrics *WatchMetrics
 	}, nil
 }
 
-func evalAny(ctx context.Context, conditions []*Condition, metrics *WatchMetrics, baseline *store.WatchBaseline, checkWindow time.Duration) (*ConditionResult, error) {
+func evalAny(ctx context.Context, conditions []*Condition, metrics *WatchMetrics, baseline *store.WatchBaseline, environment string, checkWindow time.Duration) (*ConditionResult, error) {
 	var summaries []string
 	anyBreached := false
 	for _, c := range conditions {
-		r, err := EvaluateCondition(ctx, c, metrics, baseline, checkWindow)
+		r, err := EvaluateCondition(ctx, c, metrics, baseline, environment, checkWindow)
 		if err != nil {
 			return nil, err
 		}
@@ -165,8 +168,8 @@ func evalAny(ctx context.Context, conditions []*Condition, metrics *WatchMetrics
 
 // --- Leaf evaluators ---
 
-func evalThreshold(ctx context.Context, c *Condition, metrics *WatchMetrics, checkWindow time.Duration) (*ConditionResult, error) {
-	value, err := metrics.Measure(ctx, c.Metric, c.Service, c.Endpoint, checkWindow)
+func evalThreshold(ctx context.Context, c *Condition, metrics *WatchMetrics, environment string, checkWindow time.Duration) (*ConditionResult, error) {
+	value, err := metrics.Measure(ctx, c.Metric, c.Service, c.Endpoint, environment, checkWindow)
 	if err != nil {
 		return nil, fmt.Errorf("measuring %s: %w", c.Metric, err)
 	}
@@ -178,12 +181,12 @@ func evalThreshold(ctx context.Context, c *Condition, metrics *WatchMetrics, che
 	}, nil
 }
 
-func evalRelative(ctx context.Context, c *Condition, metrics *WatchMetrics, baseline *store.WatchBaseline, checkWindow time.Duration) (*ConditionResult, error) {
+func evalRelative(ctx context.Context, c *Condition, metrics *WatchMetrics, baseline *store.WatchBaseline, environment string, checkWindow time.Duration) (*ConditionResult, error) {
 	if baseline == nil {
 		return &ConditionResult{Summary: "no baseline available for relative comparison"}, nil
 	}
 
-	value, err := metrics.Measure(ctx, c.Metric, c.Service, c.Endpoint, checkWindow)
+	value, err := metrics.Measure(ctx, c.Metric, c.Service, c.Endpoint, environment, checkWindow)
 	if err != nil {
 		return nil, fmt.Errorf("measuring %s: %w", c.Metric, err)
 	}
@@ -205,7 +208,7 @@ func evalRelative(ctx context.Context, c *Condition, metrics *WatchMetrics, base
 	}, nil
 }
 
-func evalDelta(ctx context.Context, c *Condition, metrics *WatchMetrics, checkWindow time.Duration) (*ConditionResult, error) {
+func evalDelta(ctx context.Context, c *Condition, metrics *WatchMetrics, environment string, checkWindow time.Duration) (*ConditionResult, error) {
 	compareWindow := checkWindow
 	if c.CompareWindow != "" {
 		if d, err := time.ParseDuration(c.CompareWindow); err == nil {
@@ -213,7 +216,7 @@ func evalDelta(ctx context.Context, c *Condition, metrics *WatchMetrics, checkWi
 		}
 	}
 
-	currentValue, err := metrics.Measure(ctx, c.Metric, c.Service, c.Endpoint, checkWindow)
+	currentValue, err := metrics.Measure(ctx, c.Metric, c.Service, c.Endpoint, environment, checkWindow)
 	if err != nil {
 		return nil, fmt.Errorf("measuring current %s: %w", c.Metric, err)
 	}
@@ -222,7 +225,7 @@ func evalDelta(ctx context.Context, c *Condition, metrics *WatchMetrics, checkWi
 	// We can't directly shift time in WatchMetrics, so we use 2x the window
 	// and approximate: previousValue ≈ metric over (2*window) minus current.
 	// This is a pragmatic approximation for SQLite.
-	wideValue, err := metrics.Measure(ctx, c.Metric, c.Service, c.Endpoint, checkWindow+compareWindow)
+	wideValue, err := metrics.Measure(ctx, c.Metric, c.Service, c.Endpoint, environment, checkWindow+compareWindow)
 	if err != nil {
 		return nil, fmt.Errorf("measuring wide %s: %w", c.Metric, err)
 	}
@@ -250,7 +253,7 @@ func evalDelta(ctx context.Context, c *Condition, metrics *WatchMetrics, checkWi
 	}, nil
 }
 
-func evalCount(ctx context.Context, c *Condition, metrics *WatchMetrics) (*ConditionResult, error) {
+func evalCount(ctx context.Context, c *Condition, metrics *WatchMetrics, environment string) (*ConditionResult, error) {
 	if metrics.logStore == nil {
 		return nil, fmt.Errorf("LogStore not available for count condition")
 	}
@@ -269,9 +272,10 @@ func evalCount(ctx context.Context, c *Condition, metrics *WatchMetrics) (*Condi
 		// COUNT DISTINCT via DistinctValues
 		field := c.Field
 		values, err := metrics.logStore.DistinctValues(ctx, field, store.LogCountParams{
-			Since:   start,
-			Until:   now,
-			Service: c.Service,
+			Since:       start,
+			Until:       now,
+			Service:     c.Service,
+			Environment: environment,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("counting distinct %s: %w", field, err)
@@ -287,9 +291,10 @@ func evalCount(ctx context.Context, c *Condition, metrics *WatchMetrics) (*Condi
 
 	// Plain count: use log count
 	counts, err := metrics.logStore.CountByLevel(ctx, store.LogCountParams{
-		Since:   start,
-		Until:   now,
-		Service: c.Service,
+		Since:       start,
+		Until:       now,
+		Service:     c.Service,
+		Environment: environment,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("counting logs: %w", err)
