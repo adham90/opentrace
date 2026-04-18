@@ -52,6 +52,12 @@ Add to your .env file:
 
 OPENTRACE_URL=<server_url>
 OPENTRACE_KEY=%s
+OPENTRACE_ENV=production
+
+Set OPENTRACE_ENV to the environment this deploy represents — typically
+production, staging, or the name of a branch preview. OpenTrace tags
+every log, error, and alert with that env so queries can be scoped to
+a single environment later.
 
 Then restart your app and call setup(action: "verify") to confirm logs are flowing.`, keyDisplay)
 
@@ -71,6 +77,12 @@ Add to your .env file:
 
 OPENTRACE_URL=<server_url>
 OPENTRACE_KEY=%s
+OPENTRACE_ENV=production
+
+Set OPENTRACE_ENV to the environment this deploy represents — typically
+production, staging, or the name of a branch preview. OpenTrace tags
+every log, error, and alert with that env so queries can be scoped to
+a single environment later.
 
 Then restart your app and call setup(action: "verify") to confirm logs are flowing.`, keyDisplay)
 
@@ -91,6 +103,12 @@ Add to your .env file:
 
 OPENTRACE_URL=<server_url>
 OPENTRACE_KEY=%s
+OPENTRACE_ENV=production
+
+Set OPENTRACE_ENV to the environment this deploy represents — typically
+production, staging, or the name of a branch preview. OpenTrace tags
+every log, error, and alert with that env so queries can be scoped to
+a single environment later.
 
 Then restart your app and call setup(action: "verify") to confirm logs are flowing.`, keyDisplay)
 
@@ -115,6 +133,12 @@ Set environment variables:
 
 OPENTRACE_URL=<server_url>
 OPENTRACE_KEY=%s
+OPENTRACE_ENV=production
+
+Set OPENTRACE_ENV to the environment this deploy represents — typically
+production, staging, or the name of a branch preview. OpenTrace tags
+every log, error, and alert with that env so queries can be scoped to
+a single environment later.
 
 Then restart your app and call setup(action: "verify") to confirm logs are flowing.`, keyDisplay)
 

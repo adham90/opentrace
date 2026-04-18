@@ -23,6 +23,7 @@ func runLogs() error {
 
 	level := flagValue("--level")
 	service := flagValue("--service")
+	env := flagValue("--env")
 	since := flagValue("--since")
 	jsonOutput := hasFlag("--json")
 	noColor := hasFlag("--no-color")
@@ -37,16 +38,16 @@ func runLogs() error {
 	client := apiclient.New(cfg.Endpoint, cfg.APIKey)
 
 	if follow {
-		return streamLogs(client, level, service, "", jsonOutput, noColor)
+		return streamLogs(client, level, service, "", env, jsonOutput, noColor)
 	}
 
 	// One-shot: dump logs and exit
-	return dumpLogs(client, level, service, since, jsonOutput, noColor)
+	return dumpLogs(client, level, service, since, env, jsonOutput, noColor)
 }
 
 // dumpLogs fetches a page of recent logs and prints them.
-func dumpLogs(client *apiclient.Client, level, service, since string, jsonOutput, noColor bool) error {
-	resp, err := client.LogTail(0, 100, level, service, "")
+func dumpLogs(client *apiclient.Client, level, service, since, env string, jsonOutput, noColor bool) error {
+	resp, err := client.LogTail(0, 100, level, service, "", env)
 	if err != nil {
 		return fmt.Errorf("fetching logs: %w", err)
 	}
@@ -76,8 +77,8 @@ func dumpLogs(client *apiclient.Client, level, service, since string, jsonOutput
 }
 
 // streamLogs connects to the SSE endpoint and streams logs in real time.
-func streamLogs(client *apiclient.Client, level, service, search string, jsonOutput, noColor bool) error {
-	url := client.LogStreamURL(level, service, search)
+func streamLogs(client *apiclient.Client, level, service, search, env string, jsonOutput, noColor bool) error {
+	url := client.LogStreamURL(level, service, search, env)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return fmt.Errorf("creating SSE request: %w", err)

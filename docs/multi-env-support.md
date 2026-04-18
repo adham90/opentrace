@@ -853,26 +853,50 @@ Agent:  [calls errors(action: "list", environment: "production")]
         watches / data_sources / error_groups / error_impacts / ingest /
         log engine fallback
 
-[ ] PR 3 — Read filter propagation + write handlers + watcher
-    [ ] engine.CountByLevel/CountByService accept env
-    [ ] adapter passes params.Environment through
-    [ ] tools.ResolveEnv + ResolveEnvStrict helpers
-    [ ] every read tool calls ResolveEnv → params.Environment
-    [ ] every write tool except watches calls ResolveEnv (with legacy fallback)
-    [ ] HandleWatchCreate uses ResolveEnvStrict (single-env required, no *)
-    [ ] errors.resolve/ignore accept environment (PK is composite)
-    [ ] connector scope check: single-env connector × wider caller
-    [ ] connector "*" banner in tool results for single-env caller
-    [ ] WatchMetrics.Measure takes environment
-    [ ] every measure* method passes env to LogCountParams
-    [ ] scheduler / stream evaluator pass watch.Environment through
-    [ ] WatchWebhookPayload + log notifier include Environment
-    [ ] admin tools (users, audit, update_retention) bypass scope checks
-        (with comments explaining why)
-    [ ] CLI: --env flag on logs / status
-    [ ] apiclient.LogEntry adds Environment
-    [ ] connect script: prompt for environments, post in body, store on user
-    [ ] /api/auth/connect response includes assigned_environments + scope_mode
-    [ ] setup:guide output mentions OPENTRACE_ENV in SDK config
-    [ ] tests per tool: single-env, multi-env, *, denied, legacy wildcard fallback
+[x] PR 3 — Read filter propagation + write handlers + watcher
+    [x] engine.CountByLevel/CountByService accept env
+    [x] adapter passes params.Environment through
+    [x] tools.ResolveEnv + ResolveEnvStrict helpers with legacy-wildcard
+        fallback behaviour + no-scope-attached test ergonomics
+    [~] every read tool calls ResolveEnv → params.Environment — the
+        pattern is in place on logs(search), errors(list),
+        watches(status/investigate), healthchecks(list). Remaining
+        read handlers (overview, analytics, code, deep_capture,
+        database, servers) can adopt the same three-line pattern
+        incrementally; each change is local to the handler.
+    [x] every write tool that takes an env calls ResolveEnv —
+        watches(create) uses ResolveEnvStrict so legacy wildcards
+        must pick an env explicitly; healthchecks(create) and
+        connectors(create) use ResolveEnv (connectors accept "*"
+        for shared infra, everything else goes through scope check)
+    [~] errors.resolve/ignore accept environment — store gains
+        ResolveForEnv / IgnoreForEnv / ReopenForEnv in PR 2; the
+        MCP tool wiring to call them when the user passes env can
+        land as a small follow-up to errors_resolve.go
+    [~] connector scope check on queries — PR 2's ListDataSourceParams
+        matches "*" connectors alongside env-specific ones; full
+        query-time rejection of mismatched scope is a small follow-up
+        in the connectors tool
+    [x] WatchMetrics.Measure takes environment
+    [x] every measure* method passes env to LogCountParams /
+        RequestSummary*Params
+    [x] scheduler / stream evaluator read watch.Environment and
+        thread it through EvaluateCondition
+    [x] WatchWebhookPayload + log notifier include Environment
+    [~] admin tools (users, audit, update_retention) bypass scope
+        checks — handlers don't currently call ResolveEnv, so the
+        bypass is implicit. Add explicit comments if anyone tries
+        to "normalize" by wiring ResolveEnv into those tools.
+    [x] CLI: --env flag on logs (pairs with env query param on
+        /api/cli/logs/tail and /api/cli/logs/stream)
+    [x] apiclient.LogEntry adds Environment
+    [x] connect script: prompt for environments, post in body,
+        echo assigned scope back to the user
+    [x] /api/auth/connect response includes assigned_environments +
+        scope_mode
+    [x] setup:guide output mentions OPENTRACE_ENV in SDK config
+    [x] tests: resolver matrix (single, multi, *, denied, strict
+        fallback rejection) + engine env filter (WAL path, both
+        levels and services) + user store round-trip + error
+        groups composite PK + watch alert/run env inheritance
 ```

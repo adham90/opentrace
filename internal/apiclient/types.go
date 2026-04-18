@@ -79,6 +79,7 @@ type LogEntry struct {
 	Timestamp      time.Time       `json:"timestamp"`
 	Level          string          `json:"level"`
 	Service        string          `json:"service,omitempty"`
+	Environment    string          `json:"environment,omitempty"`
 	Message        string          `json:"message"`
 	EventType      string          `json:"event_type,omitempty"`
 	RequestID      string          `json:"request_id,omitempty"`

@@ -97,13 +97,29 @@ if [ -n "$NEEDS_SETUP" ]; then
     echo "  Password must be at least 12 characters."
     exit 1
   fi
+
+  # Environment scope (admin creation only; existing tokens keep their scope).
+  # Accepts a comma-separated list. Hit enter for the safe default.
+  read -r -p "  Environments for this token (comma-separated, or * for all) [production]: " ENV_INPUT < /dev/tty
+  if [ -z "$ENV_INPUT" ]; then
+    ENV_INPUT="production"
+  fi
+  # Convert "staging,production" -> ["staging","production"]
+  ENV_JSON=$(printf %%s "$ENV_INPUT" | awk -v RS=',' '
+    { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); if ($0 != "") arr[NR]=$0 }
+    END { printf("["); for (i=1; i<=NR; i++) { printf("%%s\"%%s\"", (i==1 ? "" : ","), arr[i]) } printf("]") }')
 fi
 
 # Authenticate
 echo -n "  Authenticating... "
+BODY="{\"email\":\"${EMAIL}\",\"password\":\"${PASS}\""
+if [ -n "${ENV_JSON:-}" ]; then
+  BODY="${BODY},\"environments\":${ENV_JSON}"
+fi
+BODY="${BODY}}"
 RESPONSE=$(curl -sf -X POST "${SERVER}/api/auth/connect" \
   -H "Content-Type: application/json" \
-  -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASS}\"}" 2>/dev/null) || {
+  -d "${BODY}" 2>/dev/null) || {
   echo "FAILED"
   echo "  Invalid credentials."
   exit 1
@@ -122,6 +138,12 @@ if echo "$RESPONSE" | grep -q '"created_admin":true'; then
   echo "admin account created"
 else
   echo "ok"
+fi
+
+# Echo the assigned env scope so the user sees which envs they can access.
+ASSIGNED=$(echo "$RESPONSE" | grep -o '"assigned_environments":\[[^]]*\]' | head -1 | sed 's/"assigned_environments"://')
+if [ -n "$ASSIGNED" ]; then
+  echo "  Token scoped to: ${ASSIGNED}"
 fi
 
 # Write .mcp.json

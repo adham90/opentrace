@@ -85,6 +85,9 @@ func (h *handler) handleLogsTail(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("service"); v != "" {
 		params.Service = v
 	}
+	if v := r.URL.Query().Get("env"); v != "" {
+		params.Environment = v
+	}
 	if v := r.URL.Query().Get("search"); v != "" {
 		params.Query = v
 	}
@@ -134,6 +137,7 @@ func (h *handler) handleLogsStream(w http.ResponseWriter, r *http.Request) {
 
 	level := r.URL.Query().Get("level")
 	service := r.URL.Query().Get("service")
+	env := r.URL.Query().Get("env")
 	search := r.URL.Query().Get("search")
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -146,10 +150,11 @@ func (h *handler) handleLogsStream(w http.ResponseWriter, r *http.Request) {
 	// Start from the latest log entry
 	var cursor int64
 	latest, err := h.deps.LogStore.Search(ctx, store.LogSearchParams{
-		Limit:   1,
-		Level:   level,
-		Service: service,
-		Query:   search,
+		Limit:       1,
+		Level:       level,
+		Service:     service,
+		Environment: env,
+		Query:       search,
 	})
 	if err == nil && len(latest) > 0 {
 		cursor = latest[0].ID
@@ -164,12 +169,13 @@ func (h *handler) handleLogsStream(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-ticker.C:
 			entries, err := h.deps.LogStore.Search(ctx, store.LogSearchParams{
-				SinceID: cursor,
-				Limit:   100,
-				SortAsc: true,
-				Level:   level,
-				Service: service,
-				Query:   search,
+				SinceID:     cursor,
+				Limit:       100,
+				SortAsc:     true,
+				Level:       level,
+				Service:     service,
+				Environment: env,
+				Query:       search,
 			})
 			if err != nil {
 				slog.Error("cli logs stream: poll failed", "error", err)

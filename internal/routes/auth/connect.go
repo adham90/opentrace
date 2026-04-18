@@ -16,6 +16,11 @@ import (
 type connectRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	// Environments is the comma-separated or JSON-array list of envs the
+	// caller wants their token scoped to. On admin creation (first connect)
+	// this sets the initial scope. On login, an existing token's scope is
+	// preserved — the field is ignored.
+	Environments []string `json:"environments,omitempty"`
 }
 
 // connectResponse is returned on successful authentication.
@@ -24,6 +29,12 @@ type connectResponse struct {
 	User         connectUser   `json:"user"`
 	ServerInfo   connectServer `json:"server"`
 	CreatedAdmin bool          `json:"created_admin,omitempty"`
+	// AssignedEnvironments echoes back the scope actually set on the token.
+	// For admin creation that's whatever the caller requested (defaulting to
+	// ["production"]); for login it's the user's existing scope. The connect
+	// script uses this to confirm to the user which env(s) they're paired to.
+	AssignedEnvironments []string `json:"assigned_environments"`
+	ScopeMode            string   `json:"scope_mode"`
 }
 
 type connectUser struct {
@@ -104,12 +115,18 @@ func (h *handler) handleConnectCreateAdmin(w http.ResponseWriter, r *http.Reques
 
 	displayName := strings.Split(req.Email, "@")[0]
 
+	envs := req.Environments
+	if len(envs) == 0 {
+		envs = []string{"production"}
+	}
+
 	user, err := h.userStore.Create(ctx, store.CreateUserParams{
-		Email:        req.Email,
-		PasswordHash: string(hash),
-		DisplayName:  displayName,
-		Role:         store.RoleAdmin,
-		MCPToken:     &mcpToken,
+		Email:               req.Email,
+		PasswordHash:        string(hash),
+		DisplayName:         displayName,
+		Role:                store.RoleAdmin,
+		MCPToken:            &mcpToken,
+		AllowedEnvironments: envs,
 	})
 	if err != nil {
 		server.WriteError(w, http.StatusInternalServerError, "failed to create admin account")
@@ -117,8 +134,10 @@ func (h *handler) handleConnectCreateAdmin(w http.ResponseWriter, r *http.Reques
 	}
 
 	server.WriteJSON(w, http.StatusCreated, connectResponse{
-		Token:        mcpToken,
-		CreatedAdmin: true,
+		Token:                mcpToken,
+		CreatedAdmin:         true,
+		AssignedEnvironments: envs,
+		ScopeMode:            scopeMode(envs),
 		User: connectUser{
 			ID:    user.ID,
 			Email: user.Email,
@@ -128,6 +147,22 @@ func (h *handler) handleConnectCreateAdmin(w http.ResponseWriter, r *http.Reques
 			Name: "opentrace",
 		},
 	})
+}
+
+// scopeMode mirrors envscope.EnvScope.Mode but stays in the auth package so
+// it can shape the connect response without introducing a dependency on
+// internal/mcp from the auth routes.
+func scopeMode(envs []string) string {
+	switch {
+	case len(envs) == 0:
+		return "denied"
+	case len(envs) == 1 && envs[0] == "*":
+		return "legacy_wildcard"
+	case len(envs) == 1:
+		return "single"
+	default:
+		return "multi"
+	}
 }
 
 // handleConnectLogin authenticates an existing user.
@@ -193,7 +228,9 @@ func (h *handler) handleConnectLogin(w http.ResponseWriter, r *http.Request, req
 	}
 
 	server.WriteJSON(w, http.StatusOK, connectResponse{
-		Token: mcpToken,
+		Token:                mcpToken,
+		AssignedEnvironments: user.AllowedEnvironments,
+		ScopeMode:            scopeMode(user.AllowedEnvironments),
 		User: connectUser{
 			ID:    user.ID,
 			Email: user.Email,

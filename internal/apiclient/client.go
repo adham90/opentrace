@@ -48,7 +48,8 @@ func (c *Client) GetLog(id int64) (*LogEntry, error) {
 }
 
 // LogTail fetches GET /api/cli/logs/tail with the given filters.
-func (c *Client) LogTail(after int64, limit int, level, service, search string) (*LogTailResponse, error) {
+// env scopes to a single environment; pass "" to query every env.
+func (c *Client) LogTail(after int64, limit int, level, service, search, env string) (*LogTailResponse, error) {
 	params := url.Values{}
 	if after > 0 {
 		params.Set("after", strconv.FormatInt(after, 10))
@@ -64,6 +65,9 @@ func (c *Client) LogTail(after int64, limit int, level, service, search string) 
 	}
 	if search != "" {
 		params.Set("search", search)
+	}
+	if env != "" {
+		params.Set("env", env)
 	}
 	var resp LogTailResponse
 	if err := c.getJSON("/api/cli/logs/tail", params, &resp); err != nil {
@@ -120,7 +124,8 @@ func (c *Client) IngestionStats(since, bucket, service string) (*IngestionStatsR
 }
 
 // LogStreamURL returns the full URL for the SSE log stream endpoint.
-func (c *Client) LogStreamURL(level, service, search string) string {
+// env scopes to a single environment; pass "" to stream every env.
+func (c *Client) LogStreamURL(level, service, search, env string) string {
 	u, _ := url.Parse(c.baseURL + "/api/cli/logs/stream")
 	params := url.Values{}
 	if level != "" {
@@ -131,6 +136,9 @@ func (c *Client) LogStreamURL(level, service, search string) string {
 	}
 	if search != "" {
 		params.Set("search", search)
+	}
+	if env != "" {
+		params.Set("env", env)
 	}
 	if len(params) > 0 {
 		u.RawQuery = params.Encode()
