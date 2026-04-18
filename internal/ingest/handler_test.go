@@ -844,3 +844,60 @@ func TestHandleIngestLogs_MsgpackInvalidPayload(t *testing.T) {
 		t.Errorf("expected error to mention 'invalid msgpack', got: %s", errMsg)
 	}
 }
+
+func TestHandleIngestLogs_EnvDefaultFallback(t *testing.T) {
+	// Entries missing "env" should be stamped with Cfg.DefaultEnv so downstream
+	// env filters treat them as first-class members of that env.
+	logStore := &mockLogStore{}
+	h := &Handler{
+		LogStore:      logStore,
+		SettingsStore: &mockSettingsStore{},
+		DSStore:       &mockDSStore{},
+		Registry:      connector.NewRegistry(),
+		Cfg:           &config.Config{DefaultEnv: "staging"},
+	}
+
+	entry := validLogEntry()
+	delete(entry, "env") // ensure env is omitted
+
+	req := makeRequest(t, entry, nil)
+	rec := httptest.NewRecorder()
+	h.HandleIngestLogs(rec, req)
+
+	if rec.Code >= 300 {
+		t.Fatalf("status = %d, want 2xx (body=%q)", rec.Code, rec.Body.String())
+	}
+	if len(logStore.insertedEntries) != 1 {
+		t.Fatalf("inserted %d entries, want 1", len(logStore.insertedEntries))
+	}
+	if got := logStore.insertedEntries[0].Environment; got != "staging" {
+		t.Errorf("Environment = %q, want staging (from Cfg.DefaultEnv)", got)
+	}
+}
+
+func TestHandleIngestLogs_EnvExplicitWins(t *testing.T) {
+	// Explicit env on the payload is preserved verbatim, even when a server
+	// default is configured.
+	logStore := &mockLogStore{}
+	h := &Handler{
+		LogStore:      logStore,
+		SettingsStore: &mockSettingsStore{},
+		DSStore:       &mockDSStore{},
+		Registry:      connector.NewRegistry(),
+		Cfg:           &config.Config{DefaultEnv: "production"},
+	}
+
+	entry := validLogEntry()
+	entry["env"] = "staging"
+
+	req := makeRequest(t, entry, nil)
+	rec := httptest.NewRecorder()
+	h.HandleIngestLogs(rec, req)
+
+	if rec.Code >= 300 {
+		t.Fatalf("status = %d, want 2xx", rec.Code)
+	}
+	if got := logStore.insertedEntries[0].Environment; got != "staging" {
+		t.Errorf("Environment = %q, want staging (explicit beats server default)", got)
+	}
+}

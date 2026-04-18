@@ -626,9 +626,21 @@ func filterByColumn(r *chunkpkg.Reader, colName, value string, rows []int) ([]in
 		return nil, fmt.Errorf("read column %s: %w", colName, err)
 	}
 
+	// For the env column, rows stored with an empty value predate multi-env
+	// enforcement and should match any env filter (see matchesParams comment).
+	// No other dict-encoded column has this semantics today.
+	legacyWildcard := colName == "env"
+
 	filtered := make([]int, 0, len(rows))
 	for _, row := range rows {
-		if row < len(values) && strings.EqualFold(values[row], value) {
+		if row >= len(values) {
+			continue
+		}
+		if legacyWildcard && values[row] == "" {
+			filtered = append(filtered, row)
+			continue
+		}
+		if strings.EqualFold(values[row], value) {
 			filtered = append(filtered, row)
 		}
 	}
@@ -786,7 +798,12 @@ func matchesParams(e *chunk.Entry, p SearchParams) bool {
 	if p.Level != "" && !strings.EqualFold(e.Level, p.Level) {
 		return false
 	}
-	if p.Env != "" && !strings.EqualFold(e.Env, p.Env) {
+	// Legacy fallback: treat entries with env="" as matching any env filter.
+	// Rows ingested before multi-env enforcement don't carry a scope; the
+	// SQL backfill rewrites them in bulk, but chunks on disk aren't
+	// rewritten until the admin runs the rebuild-logs tool, so we leak
+	// them through for now to preserve visibility.
+	if p.Env != "" && e.Env != "" && !strings.EqualFold(e.Env, p.Env) {
 		return false
 	}
 	if p.TraceID != "" && e.TraceID != p.TraceID {

@@ -494,3 +494,23 @@ INSERT OR IGNORE INTO app_config (key, value) VALUES ('retention_policy', '{"log
 UPDATE users SET allowed_environments = '["*"]'
   WHERE allowed_environments = '[]'
     AND mcp_token IS NOT NULL;
+
+-- ============================================================================
+-- Multi-env row backfill: any row with environment='' predates env scoping.
+-- Rename it to 'production' so PR 3 env filters still surface the data.
+-- Admins who want a non-default backfill should set OPENTRACE_DEFAULT_ENV
+-- and rerun these UPDATEs manually before shipping PR 3 — fresh installs
+-- see zero affected rows, so this is a no-op there.
+-- ============================================================================
+
+UPDATE data_sources       SET environment = 'production' WHERE environment = '';
+UPDATE error_groups       SET environment = 'production' WHERE environment = '';
+UPDATE error_group_events SET environment = 'production' WHERE environment = '';
+UPDATE error_impacts      SET environment = 'production' WHERE environment = '';
+UPDATE watches            SET environment = 'production' WHERE environment = '';
+UPDATE watch_runs         SET environment = 'production' WHERE environment = '';
+UPDATE watch_alerts       SET environment = 'production' WHERE environment = '';
+UPDATE healthchecks       SET environment = 'production' WHERE environment = '';
+UPDATE servers            SET environment = 'production' WHERE environment = '';
+UPDATE audit_log          SET environment = 'production' WHERE environment = '';
+UPDATE mcp_activity       SET environment = 'production' WHERE environment = '';

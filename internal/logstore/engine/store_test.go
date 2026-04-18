@@ -405,3 +405,59 @@ func TestStoreIngestWithPipeline(t *testing.T) {
 		t.Error("fingerprint should be set")
 	}
 }
+
+func TestStoreSearch_EnvFilterLegacyWildcard(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().UTC()
+	entries := []chunk.Entry{
+		{Ts: now.UnixMilli(), Level: "info", Service: "api", Env: "production", Message: "prod hit"},
+		{Ts: now.UnixMilli(), Level: "info", Service: "api", Env: "staging", Message: "staging hit"},
+		{Ts: now.UnixMilli(), Level: "info", Service: "api", Env: "", Message: "legacy hit"}, // pre-multi-env row
+	}
+
+	if _, err := s.Ingest(entries); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	start := now.Add(-time.Minute)
+	end := now.Add(time.Minute)
+
+	// A production filter should find the prod row AND the legacy row,
+	// but not the staging row.
+	res, err := s.Search(SearchParams{Env: "production", Start: &start, End: &end, Limit: 50})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if res.Total != 2 {
+		t.Fatalf("env=production matched %d rows, want 2 (production + legacy), got messages: %v",
+			res.Total, extractMessages(res.Entries))
+	}
+
+	// A staging filter finds staging row + legacy row (same wildcard rule).
+	res, err = s.Search(SearchParams{Env: "staging", Start: &start, End: &end, Limit: 50})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if res.Total != 2 {
+		t.Fatalf("env=staging matched %d rows, want 2 (staging + legacy), got messages: %v",
+			res.Total, extractMessages(res.Entries))
+	}
+
+	// No env filter returns all three.
+	res, err = s.Search(SearchParams{Start: &start, End: &end, Limit: 50})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if res.Total != 3 {
+		t.Errorf("no env filter matched %d rows, want 3", res.Total)
+	}
+}
+
+func extractMessages(es []chunk.Entry) []string {
+	out := make([]string, len(es))
+	for i, e := range es {
+		out[i] = e.Message
+	}
+	return out
+}

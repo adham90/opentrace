@@ -37,6 +37,12 @@ type Config struct {
 	// binary protocol, bypassing HTTP overhead for local apps.
 	// Empty string (default) disables the listener.
 	SocketPath string
+
+	// DefaultEnv is the environment used for legacy-compatibility fallbacks:
+	// ingest stamps it onto payloads that don't carry an "env" field, and
+	// migrations backfill historical rows with environment='' to this value.
+	// Set via OPENTRACE_DEFAULT_ENV. Defaults to "production".
+	DefaultEnv string
 }
 
 // LoadEnvFile reads a .env file and sets any variables not already in the environment.
@@ -109,6 +115,7 @@ func Load() (*Config, error) {
 		CORSAllowedOrigins: parseCommaSeparated(os.Getenv("OPENTRACE_CORS_ORIGINS")),
 		DevMode:            os.Getenv("OPENTRACE_DEV") == "true",
 		SocketPath:         os.Getenv("OPENTRACE_SOCKET_PATH"),
+		DefaultEnv:         envOrDefault("OPENTRACE_DEFAULT_ENV", "production"),
 	}, nil
 }
 

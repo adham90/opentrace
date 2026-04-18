@@ -259,11 +259,19 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 			metadataJSON = string(e.Body)
 		}
 
+		// Stamp missing env with the server-configured default so downstream
+		// env filters match. Empty env used to mean "legacy/unscoped"; the
+		// ingest layer is the one place we canonicalise it.
+		env := e.Env
+		if env == "" && h.Cfg != nil {
+			env = h.Cfg.DefaultEnv
+		}
+
 		entry := store.LogEntry{
 			Timestamp:      e.timestamp,
 			Level:          e.Level,
 			Service:        e.Service,
-			Environment:    e.Env,
+			Environment:    env,
 			CommitHash:     e.Version,
 			TraceID:        e.TraceID,
 			SpanID:         e.SpanID,

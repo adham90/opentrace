@@ -811,22 +811,47 @@ Agent:  [calls errors(action: "list", environment: "production")]
     [x] surface env_scope in setup status (Initialize meta deferred to PR 3)
     [x] tests
 
-[ ] PR 2 — Schema completion + backfill
-    [ ] add env column + index to: healthchecks, servers, watch_alerts, watch_runs,
-        sql_captures, http_captures, email_captures, audit_trail, file_captures,
+[x] PR 2 — Schema completion + backfill
+    [x] add env column + index to: healthchecks, servers, watch_alerts, watch_runs,
         audit_log, mcp_activity
-    [ ] error_groups PK change to (fingerprint, environment) + seen_in_envs
-    [ ] FK rebuild dance for error_impacts and error_group_events
-    [ ] missing env-aware indexes on error_groups, watches
-    [ ] one-time SQL backfill: '' → OPENTRACE_DEFAULT_ENV across env-bearing tables
-    [ ] add Environment field to: DataSource, Healthcheck, Server, WatchAlert,
-        WatchRun, ErrorImpact, ErrorGroupEvent, MCPActivity, AuditEntry,
+    [~] deep_capture children (sql_captures, http_captures, email_captures,
+        audit_trail, file_captures) — **deferred**: these tables don't exist in
+        production migrations yet, only in deep_capture_test.go. Whenever the
+        feature ships its schema, env should be added from the start.
+    [x] error_groups PK change to (fingerprint, environment) + seen_in_envs
+    [x] FK rebuild for error_impacts (composite FK + unique constraint) and
+        error_group_events (composite FK)
+    [x] missing env-aware indexes on error_groups, watches, watch_alerts,
+        watch_runs, healthchecks, servers, audit_log, mcp_activity
+    [x] one-time SQL backfill: '' → 'production' across env-bearing tables
+        (hardcoded literal; admins with a non-default OPENTRACE_DEFAULT_ENV
+        should rerun the UPDATEs after install)
+    [x] add Environment field to: DataSource, Healthcheck, Server, WatchAlert,
+        WatchRun, MCPActivity, AuditEntry, ErrorImpact, ErrorGroupEvent,
         seen_in_envs to ErrorGroup
-    [ ] add Environment to all *Params lacking it
-    [ ] update SQLite stores to read/write the new column (no filtering)
-    [ ] ingest path denormalizes env into deep-capture child rows
-    [ ] cmd/opentrace/migrate_logs.go — rebuild-logs tool for chunk backfill
-    [ ] migration test + backfill test + FK rebuild test
+    [x] add Environment to every *Params that reads/writes env-bearing rows
+        (ListHealthCheckParams, ListServerParams, ListWatchParams,
+        CreateWatchAlertParams, LogAuditParams, LogMCPActivityParams,
+        LogCountParams, LogHistogramParams, RequestSummarySearchParams,
+        RequestSummaryAggregateParams, CreateDataSourceParams,
+        UpdateDataSourceParams, ListDataSourceParams, ImpactQueryParams)
+    [x] update SQLite stores to read/write the new column (filtering still
+        deferred to PR 3 for most; error_groups ops already apply)
+    [~] ingest path denormalizes env into deep-capture child rows — deferred
+        with the tables themselves
+    [x] ingest handler stamps missing env with Cfg.DefaultEnv
+        (OPENTRACE_DEFAULT_ENV)
+    [x] config.DefaultEnv + OPENTRACE_DEFAULT_ENV env var
+    [x] log engine legacy-wildcard fallback: env="" rows match any env filter
+        (transitional until the rebuild-logs tool lands)
+    [~] cmd/opentrace/migrate_logs.go — rebuild-logs tool for chunk backfill —
+        **deferred**: the legacy-wildcard read-side fallback covers the
+        visibility gap for now; chunk rewriting needs segment-level codec
+        work and can ship as a standalone PR when there's real data to
+        migrate
+    [x] migration test + env round-trip tests for healthchecks / servers /
+        watches / data_sources / error_groups / error_impacts / ingest /
+        log engine fallback
 
 [ ] PR 3 — Read filter propagation + write handlers + watcher
     [ ] engine.CountByLevel/CountByService accept env
