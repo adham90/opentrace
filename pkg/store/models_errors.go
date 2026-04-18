@@ -15,12 +15,15 @@ const (
 	ErrorGroupIgnored    ErrorGroupStatus = "ignored"
 )
 
-// ErrorGroup aggregates errors by fingerprint.
+// ErrorGroup aggregates errors by (fingerprint, environment). The same crash
+// appearing in staging and production produces two distinct rows; SeenInEnvs
+// carries the full set of envs a given fingerprint has been observed in so
+// the agent can cross-reference without scanning every row.
 type ErrorGroup struct {
 	bun.BaseModel   `bun:"table:error_groups" json:"-"`
 	Fingerprint     string            `bun:"fingerprint,pk" json:"fingerprint"`
+	Environment     string            `bun:"environment,pk" json:"environment"`
 	Service         string            `bun:"service" json:"service"`
-	Environment     string            `bun:"environment" json:"environment"`
 	ExceptionClass  string            `bun:"exception_class" json:"exception_class"`
 	Message         string            `bun:"message" json:"message"`
 	SourceFile      string            `bun:"source_file" json:"source_file"`
@@ -33,7 +36,10 @@ type ErrorGroup struct {
 	ReopenedCount   int               `bun:"reopened_count" json:"reopened_count"`
 	ResolvedAt      *time.Time        `bun:"resolved_at" json:"resolved_at,omitempty"`
 	IgnoredAt       *time.Time        `bun:"ignored_at" json:"ignored_at,omitempty"`
-	Events          []ErrorGroupEvent `bun:"rel:has-many,join:fingerprint=fingerprint" json:"events,omitempty"`
+	// SeenInEnvs is stored as a JSON array of env names in the seen_in_envs
+	// TEXT column; the sqlite store encodes/decodes on read/write.
+	SeenInEnvs []string          `bun:"-" json:"seen_in_envs,omitempty"`
+	Events     []ErrorGroupEvent `bun:"rel:has-many,join:fingerprint=fingerprint" json:"events,omitempty"`
 
 	// Phase 3: Impact tracking
 	UniqueUsers   int            `bun:"unique_users" json:"unique_users"`
@@ -41,11 +47,13 @@ type ErrorGroup struct {
 	CommonContext map[string]any `bun:"common_context" json:"common_context,omitempty"`
 }
 
-// ErrorGroupEvent records a lifecycle action on an error group.
+// ErrorGroupEvent records a lifecycle action on an error group. Environment
+// matches the parent error_groups row; both are required to disambiguate.
 type ErrorGroupEvent struct {
 	bun.BaseModel `bun:"table:error_group_events" json:"-"`
 	ID            int64     `bun:"id,pk,autoincrement" json:"id"`
 	Fingerprint   string    `bun:"fingerprint" json:"fingerprint"`
+	Environment   string    `bun:"environment" json:"environment,omitempty"`
 	Action        string    `bun:"action" json:"action"` // "resolved", "ignored", "reopened"
 	Reason        string    `bun:"reason" json:"reason,omitempty"`
 	CreatedAt     time.Time `bun:"created_at" json:"created_at"`
@@ -62,10 +70,12 @@ type ListErrorGroupParams struct {
 	Offset      int              `json:"offset,omitempty"`
 }
 
-// ErrorImpact summarizes the user impact of an error group.
+// ErrorImpact summarizes the user impact of an error group. Environment
+// matches the parent error_groups row (composite FK + unique constraint).
 type ErrorImpact struct {
 	bun.BaseModel    `bun:"table:error_impacts" json:"-"`
 	Fingerprint      string         `bun:"error_fingerprint,pk" json:"fingerprint"`
+	Environment      string         `bun:"environment" json:"environment,omitempty"`
 	UniqueUsers      int            `bun:"-" json:"unique_users"`
 	TotalOccurrences int            `bun:"-" json:"total_occurrences"`
 	ImpactScore      float64        `bun:"-" json:"impact_score"`
@@ -94,11 +104,12 @@ type ErrorSummary struct {
 
 // ImpactQueryParams defines filters for querying errors by impact.
 type ImpactQueryParams struct {
-	Status  ErrorGroupStatus `json:"status,omitempty"`
-	Service string           `json:"service,omitempty"`
-	Since   time.Time        `json:"since"`
-	SortBy  string           `json:"sort_by,omitempty"` // impact_score, unique_users, occurrence_count, last_seen
-	Limit   int              `json:"limit,omitempty"`
+	Status      ErrorGroupStatus `json:"status,omitempty"`
+	Service     string           `json:"service,omitempty"`
+	Environment string           `json:"environment,omitempty"`
+	Since       time.Time        `json:"since"`
+	SortBy      string           `json:"sort_by,omitempty"` // impact_score, unique_users, occurrence_count, last_seen
+	Limit       int              `json:"limit,omitempty"`
 }
 
 // ErrorGroupWithImpact extends ErrorGroup with impact details.

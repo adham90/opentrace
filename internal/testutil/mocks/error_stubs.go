@@ -64,7 +64,7 @@ type ErrorImpactStore struct{}
 // NewErrorImpactStore returns an initialised ErrorImpactStore stub.
 func NewErrorImpactStore() *ErrorImpactStore { return &ErrorImpactStore{} }
 
-func (m *ErrorImpactStore) TrackImpact(_ context.Context, _ string, _ string, _ map[string]any, _ int64, _ string) error {
+func (m *ErrorImpactStore) TrackImpact(_ context.Context, _ string, _ string, _ string, _ map[string]any, _ int64, _ string) error {
 	return nil
 }
 func (m *ErrorImpactStore) GetImpact(_ context.Context, _ string) (*store.ErrorImpact, error) {

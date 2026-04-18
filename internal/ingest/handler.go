@@ -430,7 +430,7 @@ func (h *Handler) processAfterInsert(entries []store.LogEntry) {
 			}
 			_ = h.ErrorGroupStore.Upsert(ctx, e)
 			if h.ErrorImpactStore != nil && e.UserID != "" {
-				_ = h.ErrorImpactStore.TrackImpact(ctx, e.ErrorFingerprint, e.UserID, e.Metadata, e.ID, e.Service)
+				_ = h.ErrorImpactStore.TrackImpact(ctx, e.ErrorFingerprint, e.Environment, e.UserID, e.Metadata, e.ID, e.Service)
 			}
 		}
 	}

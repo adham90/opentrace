@@ -16,19 +16,19 @@ func TestErrorImpactStore_TrackImpact(t *testing.T) {
 	ctx := context.Background()
 
 	// Track first occurrence
-	err := eis.TrackImpact(ctx, "fp-001", "user-1", map[string]any{"browser": "Chrome"}, 100, "api")
+	err := eis.TrackImpact(ctx, "fp-001", "production", "user-1", map[string]any{"browser": "Chrome"}, 100, "api")
 	if err != nil {
 		t.Fatalf("TrackImpact: %v", err)
 	}
 
 	// Track second occurrence for same user → should increment
-	err = eis.TrackImpact(ctx, "fp-001", "user-1", map[string]any{"browser": "Chrome"}, 101, "api")
+	err = eis.TrackImpact(ctx, "fp-001", "production", "user-1", map[string]any{"browser": "Chrome"}, 101, "api")
 	if err != nil {
 		t.Fatalf("TrackImpact second: %v", err)
 	}
 
 	// Track different user
-	err = eis.TrackImpact(ctx, "fp-001", "user-2", map[string]any{"browser": "Safari"}, 102, "api")
+	err = eis.TrackImpact(ctx, "fp-001", "production", "user-2", map[string]any{"browser": "Safari"}, 102, "api")
 	if err != nil {
 		t.Fatalf("TrackImpact user-2: %v", err)
 	}
@@ -52,12 +52,12 @@ func TestErrorImpactStore_GetAffectedUsers(t *testing.T) {
 	ctx := context.Background()
 
 	// User-1: 3 occurrences
-	eis.TrackImpact(ctx, "fp-002", "user-1", map[string]any{"browser": "Chrome"}, 1, "api")
-	eis.TrackImpact(ctx, "fp-002", "user-1", map[string]any{"browser": "Chrome"}, 2, "api")
-	eis.TrackImpact(ctx, "fp-002", "user-1", map[string]any{"browser": "Chrome"}, 3, "api")
+	eis.TrackImpact(ctx, "fp-002", "production", "user-1", map[string]any{"browser": "Chrome"}, 1, "api")
+	eis.TrackImpact(ctx, "fp-002", "production", "user-1", map[string]any{"browser": "Chrome"}, 2, "api")
+	eis.TrackImpact(ctx, "fp-002", "production", "user-1", map[string]any{"browser": "Chrome"}, 3, "api")
 
 	// User-2: 1 occurrence
-	eis.TrackImpact(ctx, "fp-002", "user-2", map[string]any{"browser": "Safari"}, 4, "api")
+	eis.TrackImpact(ctx, "fp-002", "production", "user-2", map[string]any{"browser": "Safari"}, 4, "api")
 
 	users, err := eis.GetAffectedUsers(ctx, "fp-002", 10)
 	if err != nil {
@@ -99,7 +99,7 @@ func TestErrorImpactStore_GetUserErrors(t *testing.T) {
 	egs.Upsert(ctx, entry)
 
 	// Track impact
-	eis.TrackImpact(ctx, "fp-uf-1", "user-10", nil, 1, "api")
+	eis.TrackImpact(ctx, "fp-uf-1", "production", "user-10", nil, 1, "api")
 
 	errors, err := eis.GetUserErrors(ctx, "user-10", now.Add(-time.Hour))
 	if err != nil {
@@ -138,7 +138,7 @@ func TestErrorImpactStore_ComputeImpactScores(t *testing.T) {
 	// Track 5 users with multiple occurrences each
 	for i := 1; i <= 5; i++ {
 		for j := 0; j < i; j++ {
-			eis.TrackImpact(ctx, "fp-score-1", fmt.Sprintf("user-%d", i),
+			eis.TrackImpact(ctx, "fp-score-1", "production", fmt.Sprintf("user-%d", i),
 				map[string]any{"browser": "Chrome"}, int64(i*10+j), "api")
 		}
 	}
@@ -181,9 +181,9 @@ func TestErrorImpactStore_TopByImpact(t *testing.T) {
 	}
 	ls.BatchInsert(ctx, []store.LogEntry{entryA})
 	egs.Upsert(ctx, entryA)
-	eis.TrackImpact(ctx, "fp-top-a", "u1", nil, 1, "api")
-	eis.TrackImpact(ctx, "fp-top-a", "u2", nil, 2, "api")
-	eis.TrackImpact(ctx, "fp-top-a", "u3", nil, 3, "api")
+	eis.TrackImpact(ctx, "fp-top-a", "production", "u1", nil, 1, "api")
+	eis.TrackImpact(ctx, "fp-top-a", "production", "u2", nil, 2, "api")
+	eis.TrackImpact(ctx, "fp-top-a", "production", "u3", nil, 3, "api")
 
 	// Error B: low impact (1 user)
 	entryB := store.LogEntry{
@@ -196,7 +196,7 @@ func TestErrorImpactStore_TopByImpact(t *testing.T) {
 	}
 	ls.BatchInsert(ctx, []store.LogEntry{entryB})
 	egs.Upsert(ctx, entryB)
-	eis.TrackImpact(ctx, "fp-top-b", "u1", nil, 4, "api")
+	eis.TrackImpact(ctx, "fp-top-b", "production", "u1", nil, 4, "api")
 
 	// Compute scores
 	eis.ComputeImpactScores(ctx)
@@ -229,10 +229,10 @@ func TestErrorImpactStore_FindCommonTraits(t *testing.T) {
 	ctx := context.Background()
 
 	// 4 users: 3 on Safari, 1 on Chrome
-	eis.TrackImpact(ctx, "fp-traits", "u1", map[string]any{"browser": "Safari", "os": "iOS"}, 1, "api")
-	eis.TrackImpact(ctx, "fp-traits", "u2", map[string]any{"browser": "Safari", "os": "iOS"}, 2, "api")
-	eis.TrackImpact(ctx, "fp-traits", "u3", map[string]any{"browser": "Safari", "os": "macOS"}, 3, "api")
-	eis.TrackImpact(ctx, "fp-traits", "u4", map[string]any{"browser": "Chrome", "os": "Windows"}, 4, "api")
+	eis.TrackImpact(ctx, "fp-traits", "production", "u1", map[string]any{"browser": "Safari", "os": "iOS"}, 1, "api")
+	eis.TrackImpact(ctx, "fp-traits", "production", "u2", map[string]any{"browser": "Safari", "os": "iOS"}, 2, "api")
+	eis.TrackImpact(ctx, "fp-traits", "production", "u3", map[string]any{"browser": "Safari", "os": "macOS"}, 3, "api")
+	eis.TrackImpact(ctx, "fp-traits", "production", "u4", map[string]any{"browser": "Chrome", "os": "Windows"}, 4, "api")
 
 	traits, err := eis.FindCommonTraits(ctx, "fp-traits")
 	if err != nil {

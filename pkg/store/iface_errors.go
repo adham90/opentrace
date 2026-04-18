@@ -20,10 +20,13 @@ type ErrorGroupStore interface {
 
 // ErrorImpactStore tracks which users are affected by each error and computes impact scores.
 type ErrorImpactStore interface {
-	// Called on each error occurrence (upsert)
-	TrackImpact(ctx context.Context, fingerprint string, userID string, contextData map[string]any, logID int64, service string) error
+	// Called on each error occurrence (upsert). environment must match the
+	// env of the error_groups row the impact belongs to.
+	TrackImpact(ctx context.Context, fingerprint, environment, userID string, contextData map[string]any, logID int64, service string) error
 
-	// Query
+	// Query. GetImpact aggregates across every env the fingerprint has been
+	// observed in; callers that want env-specific numbers should filter
+	// GetAffectedUsers results.
 	GetImpact(ctx context.Context, fingerprint string) (*ErrorImpact, error)
 	GetAffectedUsers(ctx context.Context, fingerprint string, limit int) ([]AffectedUser, error)
 	GetUserErrors(ctx context.Context, userID string, since time.Time) ([]ErrorSummary, error)

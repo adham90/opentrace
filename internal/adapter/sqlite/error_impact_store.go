@@ -24,8 +24,10 @@ func NewErrorImpactStore(db *bun.DB) store.ErrorImpactStore {
 	return &errorImpactStore{db: db}
 }
 
-// TrackImpact records or updates the impact of an error on a specific user.
-func (s *errorImpactStore) TrackImpact(ctx context.Context, fingerprint string, userID string, contextData map[string]any, logID int64, service string) error {
+// TrackImpact records or updates the impact of an error on a specific user,
+// scoped to (fingerprint, environment). A user who hits the same fingerprint
+// in both staging and production will have two distinct rows.
+func (s *errorImpactStore) TrackImpact(ctx context.Context, fingerprint, environment, userID string, contextData map[string]any, logID int64, service string) error {
 	if fingerprint == "" || userID == "" {
 		return nil // silently skip if no fingerprint or user
 	}
@@ -34,15 +36,15 @@ func (s *errorImpactStore) TrackImpact(ctx context.Context, fingerprint string, 
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err := s.db.NewRaw(`
-		INSERT INTO error_impacts (error_fingerprint, user_id, service, first_seen_at, last_seen_at,
+		INSERT INTO error_impacts (error_fingerprint, environment, user_id, service, first_seen_at, last_seen_at,
 			last_context, last_log_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(error_fingerprint, user_id) DO UPDATE SET
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(error_fingerprint, environment, user_id) DO UPDATE SET
 			occurrence_count = occurrence_count + 1,
 			last_seen_at = excluded.last_seen_at,
 			last_context = excluded.last_context,
 			last_log_id = excluded.last_log_id`,
-		fingerprint, userID, service, now, now, string(ctxJSON), logID,
+		fingerprint, environment, userID, service, now, now, string(ctxJSON), logID,
 	).Exec(ctx)
 	return err
 }
@@ -68,9 +70,14 @@ func (s *errorImpactStore) GetImpact(ctx context.Context, fingerprint string) (*
 		ei.TotalOccurrences = int(totalOccurrences.Float64)
 	}
 
-	// Get the impact score from error_groups
+	// Get the impact score from error_groups. With the composite PK,
+	// a fingerprint can have multiple rows (one per env). Take the max
+	// score — the aggregate GetImpact view mirrors the highest-impact env.
 	var score float64
-	err = s.db.NewRaw(`SELECT impact_score FROM error_groups WHERE fingerprint = ?`, fingerprint).Scan(ctx, &score)
+	err = s.db.NewRaw(
+		`SELECT COALESCE(MAX(impact_score), 0) FROM error_groups WHERE fingerprint = ?`,
+		fingerprint,
+	).Scan(ctx, &score)
 	if err == nil {
 		ei.ImpactScore = score
 	}
@@ -149,7 +156,9 @@ func (s *errorImpactStore) GetUserErrors(ctx context.Context, userID string, sin
 			ei.last_seen_at,
 			COALESCE(eg.status, 'unresolved') AS status
 		FROM error_impacts ei
-		LEFT JOIN error_groups eg ON eg.fingerprint = ei.error_fingerprint
+		LEFT JOIN error_groups eg
+			ON eg.fingerprint = ei.error_fingerprint
+			AND eg.environment = ei.environment
 		WHERE ei.user_id = ? AND ei.last_seen_at >= ?
 		ORDER BY ei.last_seen_at DESC`, userID, sinceStr,
 	).Scan(ctx, &rows)

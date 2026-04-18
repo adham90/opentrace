@@ -43,30 +43,49 @@ func (s *errorGroupStore) Upsert(ctx context.Context, entry store.LogEntry) erro
 		lastLogID = sql.NullInt64{Int64: entry.ID, Valid: true}
 	}
 
-	// Fast path: single statement, no transaction needed.
-	// Inserts new groups with occurrence_count=1, or increments existing ones.
+	// Fast path: single statement per (fingerprint, environment) row.
+	// Inserts a new group or increments an existing one scoped to this env.
 	_, err := s.db.NewRaw(`
 		INSERT INTO error_groups (fingerprint, service, environment, exception_class, message,
-			source_file, source_line, first_seen_at, last_seen_at, last_log_id, occurrence_count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-		ON CONFLICT(fingerprint) DO UPDATE SET
+			source_file, source_line, first_seen_at, last_seen_at, last_log_id, occurrence_count,
+			seen_in_envs)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+		ON CONFLICT(fingerprint, environment) DO UPDATE SET
 			occurrence_count = occurrence_count + 1,
 			last_seen_at = excluded.last_seen_at,
 			last_log_id = excluded.last_log_id`,
 		entry.ErrorFingerprint, entry.Service, entry.Environment,
 		entry.ExceptionClass, truncate(entry.Message, 500),
 		entry.SourceFile, entry.SourceLine, ts, ts, lastLogID,
+		`["`+entry.Environment+`"]`,
 	).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("upsert error group: %w", err)
 	}
 
-	// Slow path: reopen resolved errors. Only fires when status='resolved',
-	// which is rare — most errors are unresolved or ignored.
+	// Maintain seen_in_envs consistency: any row for this fingerprint should
+	// list the full set of envs the fingerprint has ever appeared in. Cheap
+	// aggregation since rows are keyed by (fingerprint, env) and the count
+	// per fingerprint is typically small (one row per env).
+	_, err = s.db.NewRaw(`
+		UPDATE error_groups SET seen_in_envs = (
+			SELECT COALESCE(json_group_array(env), '[]') FROM (
+				SELECT DISTINCT environment AS env FROM error_groups WHERE fingerprint = ?
+			)
+		)
+		WHERE fingerprint = ?`,
+		entry.ErrorFingerprint, entry.ErrorFingerprint,
+	).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("updating seen_in_envs: %w", err)
+	}
+
+	// Slow path: reopen resolved errors scoped to this (fp, env). Only fires
+	// when the specific env's row is currently resolved — rare.
 	res, err := s.db.NewRaw(`
 		UPDATE error_groups SET status = 'unresolved', reopened_count = reopened_count + 1
-		WHERE fingerprint = ? AND status = 'resolved'`,
-		entry.ErrorFingerprint,
+		WHERE fingerprint = ? AND environment = ? AND status = 'resolved'`,
+		entry.ErrorFingerprint, entry.Environment,
 	).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("reopen check: %w", err)
@@ -75,9 +94,10 @@ func (s *errorGroupStore) Upsert(ctx context.Context, entry store.LogEntry) erro
 	if reopened > 0 {
 		now := time.Now().UTC().Format(time.RFC3339)
 		_, err = s.db.NewRaw(`
-			INSERT INTO error_group_events (fingerprint, action, reason, created_at)
-			VALUES (?, ?, ?, ?)`,
-			entry.ErrorFingerprint, "reopened", "New occurrence after resolution", now,
+			INSERT INTO error_group_events (fingerprint, environment, action, reason, created_at)
+			VALUES (?, ?, ?, ?, ?)`,
+			entry.ErrorFingerprint, entry.Environment,
+			"reopened", "New occurrence after resolution", now,
 		).Exec(ctx)
 		if err != nil {
 			return fmt.Errorf("insert reopen event: %w", err)
@@ -87,19 +107,57 @@ func (s *errorGroupStore) Upsert(ctx context.Context, entry store.LogEntry) erro
 	return nil
 }
 
+// Get returns the most recently seen row for a fingerprint. With the composite
+// (fingerprint, environment) PK, the same fingerprint can exist in multiple
+// envs; Get picks the row with the latest last_seen_at so the caller gets
+// current status without needing to know the env. Callers that need a specific
+// env should use GetForEnv instead.
 func (s *errorGroupStore) Get(ctx context.Context, fingerprint string) (*store.ErrorGroup, error) {
 	var eg errorGroupRow
 	err := s.db.NewRaw(`
 		SELECT fingerprint, service, environment, exception_class, message,
 			source_file, source_line, status, first_seen_at, last_seen_at,
 			occurrence_count, last_log_id, reopened_count, resolved_at, ignored_at,
-			unique_users, impact_score, COALESCE(common_context, '{}')
-		FROM error_groups WHERE fingerprint = ?`, fingerprint,
+			unique_users, impact_score, COALESCE(common_context, '{}'),
+			COALESCE(seen_in_envs, '[]')
+		FROM error_groups
+		WHERE fingerprint = ?
+		ORDER BY last_seen_at DESC LIMIT 1`, fingerprint,
 	).Scan(ctx,
 		&eg.Fingerprint, &eg.Service, &eg.Environment, &eg.ExceptionClass, &eg.Message,
 		&eg.SourceFile, &eg.SourceLine, &eg.Status, &eg.FirstSeenAt, &eg.LastSeenAt,
 		&eg.OccurrenceCount, &eg.LastLogID, &eg.ReopenedCount, &eg.ResolvedAt, &eg.IgnoredAt,
 		&eg.UniqueUsers, &eg.ImpactScore, &eg.CommonContext,
+		&eg.SeenInEnvs,
+	)
+	if err == sql.ErrNoRows {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return eg.toStore(), nil
+}
+
+// GetForEnv returns the row for an exact (fingerprint, environment) pair.
+// Used by PR 3 write handlers that resolve the caller's env before acting on
+// an error group.
+func (s *errorGroupStore) GetForEnv(ctx context.Context, fingerprint, environment string) (*store.ErrorGroup, error) {
+	var eg errorGroupRow
+	err := s.db.NewRaw(`
+		SELECT fingerprint, service, environment, exception_class, message,
+			source_file, source_line, status, first_seen_at, last_seen_at,
+			occurrence_count, last_log_id, reopened_count, resolved_at, ignored_at,
+			unique_users, impact_score, COALESCE(common_context, '{}'),
+			COALESCE(seen_in_envs, '[]')
+		FROM error_groups
+		WHERE fingerprint = ? AND environment = ?`, fingerprint, environment,
+	).Scan(ctx,
+		&eg.Fingerprint, &eg.Service, &eg.Environment, &eg.ExceptionClass, &eg.Message,
+		&eg.SourceFile, &eg.SourceLine, &eg.Status, &eg.FirstSeenAt, &eg.LastSeenAt,
+		&eg.OccurrenceCount, &eg.LastLogID, &eg.ReopenedCount, &eg.ResolvedAt, &eg.IgnoredAt,
+		&eg.UniqueUsers, &eg.ImpactScore, &eg.CommonContext,
+		&eg.SeenInEnvs,
 	)
 	if err == sql.ErrNoRows {
 		return nil, store.ErrNotFound
@@ -142,7 +200,8 @@ func (s *errorGroupStore) List(ctx context.Context, params store.ListErrorGroupP
 	baseQuery := `SELECT fingerprint, service, environment, exception_class, message,
 		source_file, source_line, status, first_seen_at, last_seen_at,
 		occurrence_count, last_log_id, reopened_count, resolved_at, ignored_at,
-		unique_users, impact_score, COALESCE(common_context, '{}')
+		unique_users, impact_score, COALESCE(common_context, '{}'),
+		COALESCE(seen_in_envs, '[]')
 		FROM error_groups`
 
 	query, args := qb.build(baseQuery)
@@ -164,6 +223,7 @@ func (s *errorGroupStore) List(ctx context.Context, params store.ListErrorGroupP
 			&eg.SourceFile, &eg.SourceLine, &eg.Status, &eg.FirstSeenAt, &eg.LastSeenAt,
 			&eg.OccurrenceCount, &eg.LastLogID, &eg.ReopenedCount, &eg.ResolvedAt, &eg.IgnoredAt,
 			&eg.UniqueUsers, &eg.ImpactScore, &eg.CommonContext,
+			&eg.SeenInEnvs,
 		); err != nil {
 			return nil, err
 		}
@@ -182,90 +242,97 @@ func (s *errorGroupStore) Count(ctx context.Context, status store.ErrorGroupStat
 	return n, err
 }
 
+// Resolve / Ignore / Reopen operate across every env-scoped row for the
+// fingerprint. PR 3 will add env-scoped variants so tools can resolve just
+// one env's occurrence of a fingerprint. For now the old "blanket" semantics
+// are preserved — a resolve here closes the group in staging AND production.
 func (s *errorGroupStore) Resolve(ctx context.Context, fingerprint string, reason string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		res, err := tx.NewRaw(`
-			UPDATE error_groups SET status = 'resolved', resolved_at = ?
-			WHERE fingerprint = ? AND status != 'resolved'`,
-			now, fingerprint,
-		).Exec(ctx)
-		if err != nil {
-			return fmt.Errorf("resolve: %w", err)
-		}
-		n, _ := res.RowsAffected()
-		if n == 0 {
-			return store.ErrNotFound
-		}
-
-		_, err = tx.NewRaw(`
-			INSERT INTO error_group_events (fingerprint, action, reason, created_at)
-			VALUES (?, ?, ?, ?)`,
-			fingerprint, "resolved", reason, now,
-		).Exec(ctx)
-		if err != nil {
-			return fmt.Errorf("insert resolve event: %w", err)
-		}
-
-		return nil
-	})
+	return s.changeStatus(ctx, fingerprint, "", "resolved", reason)
 }
 
 func (s *errorGroupStore) Ignore(ctx context.Context, fingerprint string, reason string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		res, err := tx.NewRaw(`
-			UPDATE error_groups SET status = 'ignored', ignored_at = ?
-			WHERE fingerprint = ? AND status != 'ignored'`,
-			now, fingerprint,
-		).Exec(ctx)
-		if err != nil {
-			return fmt.Errorf("ignore: %w", err)
-		}
-		n, _ := res.RowsAffected()
-		if n == 0 {
-			return store.ErrNotFound
-		}
-
-		_, err = tx.NewRaw(`
-			INSERT INTO error_group_events (fingerprint, action, reason, created_at)
-			VALUES (?, ?, ?, ?)`,
-			fingerprint, "ignored", reason, now,
-		).Exec(ctx)
-		if err != nil {
-			return fmt.Errorf("insert ignore event: %w", err)
-		}
-
-		return nil
-	})
+	return s.changeStatus(ctx, fingerprint, "", "ignored", reason)
 }
 
 func (s *errorGroupStore) Reopen(ctx context.Context, fingerprint string, reason string) error {
+	return s.changeStatus(ctx, fingerprint, "", "reopened", reason)
+}
+
+// ResolveForEnv / IgnoreForEnv / ReopenForEnv apply the lifecycle transition
+// to a single (fingerprint, environment) row. Used by PR 3 write handlers.
+func (s *errorGroupStore) ResolveForEnv(ctx context.Context, fingerprint, environment, reason string) error {
+	return s.changeStatus(ctx, fingerprint, environment, "resolved", reason)
+}
+
+func (s *errorGroupStore) IgnoreForEnv(ctx context.Context, fingerprint, environment, reason string) error {
+	return s.changeStatus(ctx, fingerprint, environment, "ignored", reason)
+}
+
+func (s *errorGroupStore) ReopenForEnv(ctx context.Context, fingerprint, environment, reason string) error {
+	return s.changeStatus(ctx, fingerprint, environment, "reopened", reason)
+}
+
+// changeStatus is the shared implementation. env == "" means "apply to every
+// env-scoped row for this fingerprint"; otherwise only the matching row.
+func (s *errorGroupStore) changeStatus(ctx context.Context, fingerprint, environment, action, reason string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	var updateSQL, eventEnvExpr string
+	switch action {
+	case "resolved":
+		updateSQL = "UPDATE error_groups SET status = 'resolved', resolved_at = ? WHERE fingerprint = ? AND status != 'resolved'"
+	case "ignored":
+		updateSQL = "UPDATE error_groups SET status = 'ignored', ignored_at = ? WHERE fingerprint = ? AND status != 'ignored'"
+	case "reopened":
+		updateSQL = "UPDATE error_groups SET status = 'unresolved' WHERE fingerprint = ? AND status IN ('resolved', 'ignored')"
+	default:
+		return fmt.Errorf("unknown action %q", action)
+	}
+
 	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		res, err := tx.NewRaw(`
-			UPDATE error_groups SET status = 'unresolved'
-			WHERE fingerprint = ? AND status IN ('resolved', 'ignored')`,
-			fingerprint,
-		).Exec(ctx)
+		var args []any
+		sql := updateSQL
+		if action == "reopened" {
+			args = []any{fingerprint}
+		} else {
+			args = []any{now, fingerprint}
+		}
+		if environment != "" {
+			sql += " AND environment = ?"
+			args = append(args, environment)
+			eventEnvExpr = environment
+		} else {
+			eventEnvExpr = ""
+		}
+
+		res, err := tx.NewRaw(sql, args...).Exec(ctx)
 		if err != nil {
-			return fmt.Errorf("reopen: %w", err)
+			return fmt.Errorf("%s: %w", action, err)
 		}
 		n, _ := res.RowsAffected()
 		if n == 0 {
 			return store.ErrNotFound
 		}
 
-		_, err = tx.NewRaw(`
-			INSERT INTO error_group_events (fingerprint, action, reason, created_at)
-			VALUES (?, ?, ?, ?)`,
-			fingerprint, "reopened", reason, now,
-		).Exec(ctx)
+		// Insert one audit event per affected row so the env is accurate.
+		// For env-scoped calls that's a single insert; for blanket calls we
+		// emit one event per env row that exists for this fingerprint.
+		if environment != "" {
+			_, err = tx.NewRaw(`
+				INSERT INTO error_group_events (fingerprint, environment, action, reason, created_at)
+				VALUES (?, ?, ?, ?, ?)`,
+				fingerprint, eventEnvExpr, action, reason, now,
+			).Exec(ctx)
+		} else {
+			_, err = tx.NewRaw(`
+				INSERT INTO error_group_events (fingerprint, environment, action, reason, created_at)
+				SELECT ?, environment, ?, ?, ?
+				FROM error_groups WHERE fingerprint = ?`,
+				fingerprint, action, reason, now, fingerprint,
+			).Exec(ctx)
+		}
 		if err != nil {
-			return fmt.Errorf("insert reopen event: %w", err)
+			return fmt.Errorf("insert %s event: %w", action, err)
 		}
 
 		return nil
@@ -279,6 +346,7 @@ func (s *errorGroupStore) ListEvents(ctx context.Context, fingerprint string, li
 
 	type row struct {
 		Fingerprint string `bun:"fingerprint"`
+		Environment string `bun:"environment"`
 		Action      string `bun:"action"`
 		Reason      string `bun:"reason"`
 		CreatedAt   string `bun:"created_at"`
@@ -286,7 +354,7 @@ func (s *errorGroupStore) ListEvents(ctx context.Context, fingerprint string, li
 
 	var rows []row
 	err := s.db.NewRaw(`
-		SELECT fingerprint, action, reason, created_at
+		SELECT fingerprint, environment, action, reason, created_at
 		FROM error_group_events
 		WHERE fingerprint = ?
 		ORDER BY created_at DESC
@@ -300,6 +368,7 @@ func (s *errorGroupStore) ListEvents(ctx context.Context, fingerprint string, li
 	for i, r := range rows {
 		events[i] = store.ErrorGroupEvent{
 			Fingerprint: r.Fingerprint,
+			Environment: r.Environment,
 			Action:      r.Action,
 			Reason:      r.Reason,
 			CreatedAt:   parseTime(r.CreatedAt),
@@ -316,9 +385,16 @@ func (s *errorGroupStore) Prune(ctx context.Context, olderThan time.Duration) (i
 	}
 	n, _ := res.RowsAffected()
 
-	// Clean up orphaned error_impacts rows whose fingerprint no longer exists.
+	// Clean up orphaned error_impacts rows whose (fingerprint, environment)
+	// no longer exists in error_groups. FK cascade should handle most of
+	// this, but the explicit cleanup guards against rows that predate the
+	// cascade or were inserted with FK checks disabled during a migration.
 	if n > 0 {
-		s.db.NewRaw(`DELETE FROM error_impacts WHERE error_fingerprint NOT IN (SELECT fingerprint FROM error_groups)`).Exec(ctx)
+		s.db.NewRaw(`
+			DELETE FROM error_impacts
+			WHERE (error_fingerprint, environment) NOT IN (
+				SELECT fingerprint, environment FROM error_groups
+			)`).Exec(ctx)
 	}
 
 	return n, nil
@@ -344,6 +420,7 @@ type errorGroupRow struct {
 	UniqueUsers     int
 	ImpactScore     float64
 	CommonContext   string
+	SeenInEnvs      string
 }
 
 func (r *errorGroupRow) toStore() *store.ErrorGroup {
@@ -376,6 +453,12 @@ func (r *errorGroupRow) toStore() *store.ErrorGroup {
 	}
 	if r.CommonContext != "" && r.CommonContext != "{}" {
 		json.Unmarshal([]byte(r.CommonContext), &eg.CommonContext)
+	}
+	if r.SeenInEnvs != "" && r.SeenInEnvs != "[]" {
+		var envs []string
+		if err := json.Unmarshal([]byte(r.SeenInEnvs), &envs); err == nil {
+			eg.SeenInEnvs = envs
+		}
 	}
 	return eg
 }

@@ -317,3 +317,183 @@ func TestErrorGroupStore_Prune(t *testing.T) {
 		t.Errorf("remaining = %d, want 1", remaining)
 	}
 }
+
+func TestErrorGroupStore_CompositePKAndSeenInEnvs(t *testing.T) {
+	db := setupTestDB(t)
+	egs := NewErrorGroupStore(db)
+	ctx := context.Background()
+
+	// Upsert in staging.
+	err := egs.Upsert(ctx, store.LogEntry{
+		ID:               1,
+		Level:            "error",
+		Timestamp:        time.Now().UTC(),
+		ErrorFingerprint: "fp-crash-1",
+		Service:          "api",
+		Environment:      "staging",
+		ExceptionClass:   "NullPointerException",
+		Message:          "boom",
+		SourceFile:       "foo.rb",
+		SourceLine:       42,
+	})
+	if err != nil {
+		t.Fatalf("Upsert staging: %v", err)
+	}
+
+	// Upsert the same fingerprint in production — should create a second row.
+	err = egs.Upsert(ctx, store.LogEntry{
+		ID:               2,
+		Level:            "error",
+		Timestamp:        time.Now().UTC(),
+		ErrorFingerprint: "fp-crash-1",
+		Service:          "api",
+		Environment:      "production",
+		ExceptionClass:   "NullPointerException",
+		Message:          "boom",
+		SourceFile:       "foo.rb",
+		SourceLine:       42,
+	})
+	if err != nil {
+		t.Fatalf("Upsert production: %v", err)
+	}
+
+	// List should return both rows.
+	groups, err := egs.List(ctx, store.ListErrorGroupParams{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(groups) != 2 {
+		t.Fatalf("List = %d rows, want 2 (one per env)", len(groups))
+	}
+
+	// Each row should carry seen_in_envs = both envs.
+	for _, g := range groups {
+		if len(g.SeenInEnvs) != 2 {
+			t.Errorf("group env=%q SeenInEnvs = %v, want both envs", g.Environment, g.SeenInEnvs)
+		}
+		hasStaging := false
+		hasProd := false
+		for _, e := range g.SeenInEnvs {
+			switch e {
+			case "staging":
+				hasStaging = true
+			case "production":
+				hasProd = true
+			}
+		}
+		if !hasStaging || !hasProd {
+			t.Errorf("group env=%q SeenInEnvs = %v, want both staging and production", g.Environment, g.SeenInEnvs)
+		}
+	}
+
+	// Filter by env returns only the matching row.
+	stagingOnly, err := egs.List(ctx, store.ListErrorGroupParams{Environment: "staging"})
+	if err != nil {
+		t.Fatalf("List staging: %v", err)
+	}
+	if len(stagingOnly) != 1 || stagingOnly[0].Environment != "staging" {
+		t.Errorf("List staging = %+v", stagingOnly)
+	}
+}
+
+func TestErrorGroupStore_ResolveForEnv(t *testing.T) {
+	db := setupTestDB(t)
+	egs := NewErrorGroupStore(db)
+	ctx := context.Background()
+
+	// Seed the same fingerprint in two envs.
+	for _, env := range []string{"staging", "production"} {
+		if err := egs.Upsert(ctx, store.LogEntry{
+			ID:               int64(len(env)),
+			Level:            "error",
+			Timestamp:        time.Now().UTC(),
+			ErrorFingerprint: "fp-2env",
+			Service:          "api",
+			Environment:      env,
+			ExceptionClass:   "ArgError",
+		}); err != nil {
+			t.Fatalf("Upsert %s: %v", env, err)
+		}
+	}
+
+	// Resolve only staging.
+	storeImpl, ok := egs.(interface {
+		ResolveForEnv(context.Context, string, string, string) error
+	})
+	if !ok {
+		t.Fatal("expected ResolveForEnv on sqlite impl")
+	}
+	if err := storeImpl.ResolveForEnv(ctx, "fp-2env", "staging", "fixed in staging first"); err != nil {
+		t.Fatalf("ResolveForEnv: %v", err)
+	}
+
+	// Staging row is resolved; production stays unresolved.
+	groups, err := egs.List(ctx, store.ListErrorGroupParams{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for _, g := range groups {
+		switch g.Environment {
+		case "staging":
+			if g.Status != store.ErrorGroupResolved {
+				t.Errorf("staging row status = %q, want resolved", g.Status)
+			}
+		case "production":
+			if g.Status != store.ErrorGroupUnresolved {
+				t.Errorf("production row status = %q, want unresolved", g.Status)
+			}
+		}
+	}
+
+	// Blanket Resolve closes both.
+	if err := egs.Resolve(ctx, "fp-2env", "fixed everywhere"); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	groups, _ = egs.List(ctx, store.ListErrorGroupParams{})
+	for _, g := range groups {
+		if g.Status != store.ErrorGroupResolved {
+			t.Errorf("after blanket resolve, env=%q status = %q, want resolved", g.Environment, g.Status)
+		}
+	}
+}
+
+func TestErrorImpactStore_EnvIsolation(t *testing.T) {
+	db := setupTestDB(t)
+	egs := NewErrorGroupStore(db)
+	eis := NewErrorImpactStore(db)
+	ctx := context.Background()
+
+	// Seed parent groups in both envs.
+	for _, env := range []string{"staging", "production"} {
+		if err := egs.Upsert(ctx, store.LogEntry{
+			ID:               1,
+			Level:            "error",
+			Timestamp:        time.Now().UTC(),
+			ErrorFingerprint: "fp-impact",
+			Service:          "api",
+			Environment:      env,
+			ExceptionClass:   "X",
+		}); err != nil {
+			t.Fatalf("Upsert %s: %v", env, err)
+		}
+	}
+
+	// Same user hits the error in both envs — should create two impact rows.
+	if err := eis.TrackImpact(ctx, "fp-impact", "staging", "user-1", nil, 1, "api"); err != nil {
+		t.Fatalf("TrackImpact staging: %v", err)
+	}
+	if err := eis.TrackImpact(ctx, "fp-impact", "production", "user-1", nil, 2, "api"); err != nil {
+		t.Fatalf("TrackImpact production: %v", err)
+	}
+
+	// GetImpact aggregates across both envs: 2 unique "user rows", even though
+	// it's the same user in two envs, because the unique constraint is
+	// (fingerprint, environment, user_id).
+	impact, err := eis.GetImpact(ctx, "fp-impact")
+	if err != nil {
+		t.Fatalf("GetImpact: %v", err)
+	}
+	if impact.UniqueUsers != 2 {
+		t.Errorf("GetImpact.UniqueUsers = %d, want 2 (one row per env)", impact.UniqueUsers)
+	}
+}

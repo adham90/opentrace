@@ -138,10 +138,14 @@ CREATE INDEX IF NOT EXISTS idx_metrics_ts ON metrics(timestamp);
 -- Error Tracking
 -- ============================================================================
 
+-- error_groups is keyed by (fingerprint, environment): the same crash in
+-- staging and production produces two distinct rows. seen_in_envs is a JSON
+-- array of env names where this fingerprint has ever been observed — handy
+-- for cross-env cross-reference without scanning every row.
 CREATE TABLE IF NOT EXISTS error_groups (
-    fingerprint      TEXT PRIMARY KEY,
-    service          TEXT NOT NULL,
+    fingerprint      TEXT NOT NULL,
     environment      TEXT NOT NULL DEFAULT '',
+    service          TEXT NOT NULL,
     exception_class  TEXT NOT NULL DEFAULT '',
     message          TEXT NOT NULL DEFAULT '',
     source_file      TEXT NOT NULL DEFAULT '',
@@ -157,26 +161,33 @@ CREATE TABLE IF NOT EXISTS error_groups (
     ignored_at       TEXT,
     unique_users     INTEGER NOT NULL DEFAULT 0,
     impact_score     REAL NOT NULL DEFAULT 0,
-    common_context   TEXT NOT NULL DEFAULT '{}'
+    common_context   TEXT NOT NULL DEFAULT '{}',
+    seen_in_envs     TEXT NOT NULL DEFAULT '[]',
+    PRIMARY KEY (fingerprint, environment)
 );
 
 CREATE INDEX IF NOT EXISTS idx_error_groups_service ON error_groups(service, status);
 CREATE INDEX IF NOT EXISTS idx_error_groups_last_seen ON error_groups(last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_error_groups_count ON error_groups(occurrence_count DESC);
+CREATE INDEX IF NOT EXISTS idx_error_groups_env ON error_groups(environment, status);
 
 CREATE TABLE IF NOT EXISTS error_group_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    fingerprint TEXT NOT NULL REFERENCES error_groups(fingerprint) ON DELETE CASCADE,
+    fingerprint TEXT NOT NULL,
+    environment TEXT NOT NULL DEFAULT '',
     action      TEXT NOT NULL,
     reason      TEXT NOT NULL DEFAULT '',
-    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    FOREIGN KEY (fingerprint, environment)
+        REFERENCES error_groups(fingerprint, environment) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_error_group_events_fp ON error_group_events(fingerprint, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_error_group_events_fp ON error_group_events(fingerprint, environment, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS error_impacts (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    error_fingerprint TEXT NOT NULL REFERENCES error_groups(fingerprint) ON DELETE CASCADE,
+    error_fingerprint TEXT NOT NULL,
+    environment       TEXT NOT NULL DEFAULT '',
     user_id           TEXT NOT NULL,
     service           TEXT NOT NULL DEFAULT '',
     first_seen_at     TEXT NOT NULL,
@@ -185,10 +196,12 @@ CREATE TABLE IF NOT EXISTS error_impacts (
     last_context      TEXT NOT NULL DEFAULT '{}',
     last_log_id       INTEGER NOT NULL DEFAULT 0,
 
-    UNIQUE(error_fingerprint, user_id)
+    UNIQUE(error_fingerprint, environment, user_id),
+    FOREIGN KEY (error_fingerprint, environment)
+        REFERENCES error_groups(fingerprint, environment) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_error_impacts_fingerprint ON error_impacts(error_fingerprint);
+CREATE INDEX IF NOT EXISTS idx_error_impacts_fingerprint ON error_impacts(error_fingerprint, environment);
 CREATE INDEX IF NOT EXISTS idx_error_impacts_user ON error_impacts(user_id);
 CREATE INDEX IF NOT EXISTS idx_error_impacts_last_seen ON error_impacts(last_seen_at DESC);
 
