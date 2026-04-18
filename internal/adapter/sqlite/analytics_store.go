@@ -21,175 +21,19 @@ func NewAnalyticsStore(db *bun.DB) store.AnalyticsStore {
 	return &analyticsStore{db: db}
 }
 
-// AggregateEndpointStats reads request_summaries and populates endpoint_stats.
-func (s *analyticsStore) AggregateEndpointStats(ctx context.Context, period string, since time.Time) error {
-	periodDur, err := parseBucketDuration(period)
-	if err != nil {
-		return fmt.Errorf("invalid period %q: %w", period, err)
-	}
-
-	now := time.Now().UTC()
-	since = since.Truncate(periodDur)
-
-	for t := since; t.Before(now); t = t.Add(periodDur) {
-		periodEnd := t.Add(periodDur)
-		if periodEnd.After(now) {
-			periodEnd = now
-		}
-
-		start := t.Format(time.RFC3339)
-		end := periodEnd.Format(time.RFC3339)
-		periodStart := t.Format(time.RFC3339)
-
-		rows, err := s.db.QueryContext(ctx, `
-			SELECT COALESCE(l.service, '') as service,
-			       COALESCE(rs.method, '') as method,
-			       COALESCE(rs.controller, '') as controller,
-			       COALESCE(rs.action, '') as action,
-			       COALESCE(rs.path, '') as path_pattern,
-			       COUNT(*) as request_count,
-			       SUM(CASE WHEN rs.status >= 500 THEN 1 ELSE 0 END) as error_count,
-			       SUM(CASE WHEN rs.status >= 400 AND rs.status < 500 THEN 1 ELSE 0 END) as client_error_count,
-			       COALESCE(AVG(rs.duration_ms), 0) as avg_duration,
-			       MAX(rs.duration_ms) as max_duration,
-			       COALESCE(AVG(rs.sql_count), 0) as avg_sql,
-			       SUM(CASE WHEN rs.status >= 200 AND rs.status < 300 THEN 1 ELSE 0 END) as s2xx,
-			       SUM(CASE WHEN rs.status >= 300 AND rs.status < 400 THEN 1 ELSE 0 END) as s3xx,
-			       SUM(CASE WHEN rs.status >= 400 AND rs.status < 500 THEN 1 ELSE 0 END) as s4xx,
-			       SUM(CASE WHEN rs.status >= 500 THEN 1 ELSE 0 END) as s5xx
-			FROM request_summaries rs
-			JOIN logs l ON rs.log_id = l.id
-			WHERE l.timestamp >= ? AND l.timestamp < ?
-			GROUP BY service, method, controller, action, path_pattern
-		`, start, end)
-		if err != nil {
-			return fmt.Errorf("querying endpoint stats: %w", err)
-		}
-
-		type aggRow struct {
-			service, method, controller, action, path string
-			requestCount, errorCount, clientErrorCount int
-			avgDur, maxDur, avgSQL                     float64
-			s2xx, s3xx, s4xx, s5xx                     int
-		}
-		var aggRows []aggRow
-		for rows.Next() {
-			var r aggRow
-			if err := rows.Scan(&r.service, &r.method, &r.controller, &r.action, &r.path,
-				&r.requestCount, &r.errorCount, &r.clientErrorCount,
-				&r.avgDur, &r.maxDur, &r.avgSQL,
-				&r.s2xx, &r.s3xx, &r.s4xx, &r.s5xx); err != nil {
-				rows.Close()
-				return fmt.Errorf("scanning endpoint stat: %w", err)
-			}
-			aggRows = append(aggRows, r)
-		}
-		rows.Close()
-
-		for _, r := range aggRows {
-			var p95 float64
-			p95Row := s.db.QueryRowContext(ctx, `
-				SELECT rs.duration_ms
-				FROM request_summaries rs
-				JOIN logs l ON rs.log_id = l.id
-				WHERE l.timestamp >= ? AND l.timestamp < ?
-				  AND COALESCE(l.service, '') = ?
-				  AND COALESCE(rs.controller, '') = ?
-				  AND COALESCE(rs.action, '') = ?
-				ORDER BY rs.duration_ms ASC
-				LIMIT 1 OFFSET CAST(? * 0.95 AS INTEGER)
-			`, start, end, r.service, r.controller, r.action, r.requestCount)
-			if err := p95Row.Scan(&p95); err != nil {
-				p95 = r.avgDur
-			}
-
-			_, err := s.db.NewRaw(`
-				INSERT INTO endpoint_stats (
-					period, period_start, service, method, controller, action, path_pattern,
-					request_count, error_count, client_error_count,
-					avg_duration_ms, p95_duration_ms, max_duration_ms, avg_sql_count,
-					status_2xx, status_3xx, status_4xx, status_5xx
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-				ON CONFLICT(period, period_start, service, method, controller, action) DO UPDATE SET
-					request_count = excluded.request_count,
-					error_count = excluded.error_count,
-					client_error_count = excluded.client_error_count,
-					avg_duration_ms = excluded.avg_duration_ms,
-					p95_duration_ms = excluded.p95_duration_ms,
-					max_duration_ms = excluded.max_duration_ms,
-					avg_sql_count = excluded.avg_sql_count,
-					status_2xx = excluded.status_2xx,
-					status_3xx = excluded.status_3xx,
-					status_4xx = excluded.status_4xx,
-					status_5xx = excluded.status_5xx
-			`, period, periodStart, r.service, r.method, r.controller, r.action, r.path,
-				r.requestCount, r.errorCount, r.clientErrorCount,
-				r.avgDur, p95, r.maxDur, r.avgSQL,
-				r.s2xx, r.s3xx, r.s4xx, r.s5xx,
-			).Exec(ctx)
-			if err != nil {
-				return fmt.Errorf("upserting endpoint stat: %w", err)
-			}
-		}
-	}
-
+// AggregateEndpointStats is a no-op. It previously read the `request_summaries`
+// and `logs` SQLite tables; those source tables were removed when log storage
+// moved to the segmented log store. Re-enabling requires porting to LogStore.
+func (s *analyticsStore) AggregateEndpointStats(_ context.Context, _ string, _ time.Time) error {
+	noteAggregationDisabled()
 	return nil
 }
 
-// UpdateTrafficHeatmap recalculates the 24x7 heatmap from request_summaries.
-func (s *analyticsStore) UpdateTrafficHeatmap(ctx context.Context, since time.Time) error {
-	sinceStr := since.Format(time.RFC3339)
-
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT COALESCE(l.service, '') as service,
-		       CAST(strftime('%w', l.timestamp) AS INTEGER) as dow,
-		       CAST(strftime('%H', l.timestamp) AS INTEGER) as hod,
-		       COUNT(*) as cnt,
-		       SUM(CASE WHEN rs.status >= 500 THEN 1 ELSE 0 END) as errs,
-		       COALESCE(AVG(rs.duration_ms), 0) as avg_dur
-		FROM request_summaries rs
-		JOIN logs l ON rs.log_id = l.id
-		WHERE l.timestamp >= ?
-		GROUP BY service, dow, hod
-	`, sinceStr)
-	if err != nil {
-		return fmt.Errorf("querying heatmap data: %w", err)
-	}
-
-	type heatmapRow struct {
-		service string
-		dow     int
-		hod     int
-		cnt     int
-		errs    int
-		avgDur  float64
-	}
-	var heatmapRows []heatmapRow
-	for rows.Next() {
-		var h heatmapRow
-		if err := rows.Scan(&h.service, &h.dow, &h.hod, &h.cnt, &h.errs, &h.avgDur); err != nil {
-			rows.Close()
-			return fmt.Errorf("scanning heatmap: %w", err)
-		}
-		heatmapRows = append(heatmapRows, h)
-	}
-	rows.Close()
-
-	for _, h := range heatmapRows {
-		_, err := s.db.NewRaw(`
-			INSERT INTO traffic_heatmap (service, day_of_week, hour_of_day, request_count, error_count, avg_duration_ms, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(service, day_of_week, hour_of_day) DO UPDATE SET
-				request_count = excluded.request_count,
-				error_count = excluded.error_count,
-				avg_duration_ms = excluded.avg_duration_ms,
-				updated_at = excluded.updated_at
-		`, h.service, h.dow, h.hod, h.cnt, h.errs, h.avgDur, time.Now().UTC().Format(time.RFC3339),
-		).Exec(ctx)
-		if err != nil {
-			return fmt.Errorf("upserting heatmap cell: %w", err)
-		}
-	}
+// UpdateTrafficHeatmap is a no-op. It previously read `logs` + `request_summaries`
+// from SQLite; those tables moved to the segmented log store. Re-enabling requires
+// porting to LogStore.
+func (s *analyticsStore) UpdateTrafficHeatmap(_ context.Context, _ time.Time) error {
+	noteAggregationDisabled()
 	return nil
 }
 
