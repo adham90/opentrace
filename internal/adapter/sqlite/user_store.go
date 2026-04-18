@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +13,33 @@ import (
 
 	"github.com/adham90/opentrace/pkg/store"
 )
+
+// encodeAllowedEnvs marshals the env list to the canonical JSON text stored
+// in users.allowed_environments. nil becomes "[]" so the column invariant
+// (NOT NULL, valid JSON array) is preserved.
+func encodeAllowedEnvs(envs []string) string {
+	if envs == nil {
+		envs = []string{}
+	}
+	b, _ := json.Marshal(envs)
+	return string(b)
+}
+
+// decodeAllowedEnvs parses the column value. An empty or invalid value is
+// treated as no scope (empty slice), matching the schema default.
+func decodeAllowedEnvs(raw string) []string {
+	if raw == "" {
+		return []string{}
+	}
+	var envs []string
+	if err := json.Unmarshal([]byte(raw), &envs); err != nil {
+		return []string{}
+	}
+	if envs == nil {
+		envs = []string{}
+	}
+	return envs
+}
 
 type userStore struct {
 	db *bun.DB
@@ -36,11 +64,17 @@ func (s *userStore) Create(ctx context.Context, params store.CreateUserParams) (
 		mcpToken = sql.NullString{String: *params.MCPToken, Valid: true}
 	}
 
+	allowedEnvs := params.AllowedEnvironments
+	if allowedEnvs == nil {
+		allowedEnvs = []string{}
+	}
+	allowedEnvsJSON := encodeAllowedEnvs(allowedEnvs)
+
 	_, err := s.db.NewRaw(`
-		INSERT INTO users (id, email, password_hash, display_name, role, mcp_token, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO users (id, email, password_hash, display_name, role, mcp_token, allowed_environments, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, params.Email, params.PasswordHash, params.DisplayName,
-		string(role), mcpToken, nowStr, nowStr,
+		string(role), mcpToken, allowedEnvsJSON, nowStr, nowStr,
 	).Exec(ctx)
 	if err != nil {
 		if isUniqueConstraintError(err, "users.email") {
@@ -50,15 +84,16 @@ func (s *userStore) Create(ctx context.Context, params store.CreateUserParams) (
 	}
 
 	return &store.User{
-		ID:           id,
-		Email:        params.Email,
-		PasswordHash: params.PasswordHash,
-		DisplayName:  params.DisplayName,
-		Role:         role,
-		MCPToken:     params.MCPToken,
-		IsActive:     true,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:                  id,
+		Email:               params.Email,
+		PasswordHash:        params.PasswordHash,
+		DisplayName:         params.DisplayName,
+		Role:                role,
+		MCPToken:            params.MCPToken,
+		IsActive:            true,
+		AllowedEnvironments: allowedEnvs,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}, nil
 }
 
@@ -78,11 +113,11 @@ func (s *userStore) getUser(ctx context.Context, whereClause string, arg any) (*
 	var u userRow
 	err := s.db.NewRaw(`
 		SELECT id, email, password_hash, display_name, role, mcp_token, mcp_enabled,
-			is_active, created_at, updated_at
+			is_active, allowed_environments, created_at, updated_at
 		FROM users WHERE `+whereClause, arg,
 	).Scan(ctx,
 		&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.Role,
-		&u.MCPToken, &u.MCPEnabled, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
+		&u.MCPToken, &u.MCPEnabled, &u.IsActive, &u.AllowedEnvs, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, store.ErrNotFound
@@ -103,6 +138,7 @@ func (s *userStore) List(ctx context.Context) ([]store.User, error) {
 		MCPToken     sql.NullString `bun:"mcp_token"`
 		MCPEnabled   int64          `bun:"mcp_enabled"`
 		IsActive     int64          `bun:"is_active"`
+		AllowedEnvs  string         `bun:"allowed_environments"`
 		CreatedAt    string         `bun:"created_at"`
 		UpdatedAt    string         `bun:"updated_at"`
 	}
@@ -110,7 +146,7 @@ func (s *userStore) List(ctx context.Context) ([]store.User, error) {
 	var rows []row
 	err := s.db.NewRaw(`
 		SELECT id, email, password_hash, display_name, role, mcp_token, mcp_enabled,
-			is_active, created_at, updated_at
+			is_active, allowed_environments, created_at, updated_at
 		FROM users ORDER BY created_at ASC`,
 	).Scan(ctx, &rows)
 	if err != nil {
@@ -120,15 +156,16 @@ func (s *userStore) List(ctx context.Context) ([]store.User, error) {
 	result := make([]store.User, len(rows))
 	for i, r := range rows {
 		result[i] = store.User{
-			ID:           r.ID,
-			Email:        r.Email,
-			PasswordHash: r.PasswordHash,
-			DisplayName:  r.DisplayName,
-			Role:         store.UserRole(r.Role),
-			MCPEnabled:   r.MCPEnabled == 1,
-			IsActive:     r.IsActive == 1,
-			CreatedAt:    parseTime(r.CreatedAt),
-			UpdatedAt:    parseTime(r.UpdatedAt),
+			ID:                  r.ID,
+			Email:               r.Email,
+			PasswordHash:        r.PasswordHash,
+			DisplayName:         r.DisplayName,
+			Role:                store.UserRole(r.Role),
+			MCPEnabled:          r.MCPEnabled == 1,
+			IsActive:            r.IsActive == 1,
+			AllowedEnvironments: decodeAllowedEnvs(r.AllowedEnvs),
+			CreatedAt:           parseTime(r.CreatedAt),
+			UpdatedAt:           parseTime(r.UpdatedAt),
 		}
 		if r.MCPToken.Valid {
 			result[i].MCPToken = &r.MCPToken.String
@@ -175,6 +212,10 @@ func (s *userStore) Update(ctx context.Context, id string, params store.UpdateUs
 	if params.IsActive != nil {
 		sets = append(sets, "is_active = ?")
 		args = append(args, boolToInt64(*params.IsActive))
+	}
+	if params.AllowedEnvironments != nil {
+		sets = append(sets, "allowed_environments = ?")
+		args = append(args, encodeAllowedEnvs(*params.AllowedEnvironments))
 	}
 
 	args = append(args, id)
@@ -281,21 +322,23 @@ type userRow struct {
 	MCPToken     sql.NullString
 	MCPEnabled   int64
 	IsActive     int64
+	AllowedEnvs  string
 	CreatedAt    string
 	UpdatedAt    string
 }
 
 func (r *userRow) toStore() *store.User {
 	u := &store.User{
-		ID:           r.ID,
-		Email:        r.Email,
-		PasswordHash: r.PasswordHash,
-		DisplayName:  r.DisplayName,
-		Role:         store.UserRole(r.Role),
-		MCPEnabled:   r.MCPEnabled == 1,
-		IsActive:     r.IsActive == 1,
-		CreatedAt:    parseTime(r.CreatedAt),
-		UpdatedAt:    parseTime(r.UpdatedAt),
+		ID:                  r.ID,
+		Email:               r.Email,
+		PasswordHash:        r.PasswordHash,
+		DisplayName:         r.DisplayName,
+		Role:                store.UserRole(r.Role),
+		MCPEnabled:          r.MCPEnabled == 1,
+		IsActive:            r.IsActive == 1,
+		AllowedEnvironments: decodeAllowedEnvs(r.AllowedEnvs),
+		CreatedAt:           parseTime(r.CreatedAt),
+		UpdatedAt:           parseTime(r.UpdatedAt),
 	}
 	if r.MCPToken.Valid {
 		u.MCPToken = &r.MCPToken.String

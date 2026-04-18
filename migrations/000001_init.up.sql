@@ -10,16 +10,17 @@
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS users (
-    id           TEXT PRIMARY KEY,
-    email        TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    display_name TEXT NOT NULL DEFAULT '',
-    role         TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('admin', 'member')),
-    mcp_enabled  INTEGER NOT NULL DEFAULT 0,
-    mcp_token    TEXT UNIQUE,
-    is_active    INTEGER NOT NULL DEFAULT 1,
-    created_at   TEXT NOT NULL,
-    updated_at   TEXT NOT NULL
+    id                   TEXT PRIMARY KEY,
+    email                TEXT NOT NULL UNIQUE,
+    password_hash        TEXT NOT NULL,
+    display_name         TEXT NOT NULL DEFAULT '',
+    role                 TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('admin', 'member')),
+    mcp_enabled          INTEGER NOT NULL DEFAULT 0,
+    mcp_token            TEXT UNIQUE,
+    is_active            INTEGER NOT NULL DEFAULT 1,
+    allowed_environments TEXT NOT NULL DEFAULT '[]',
+    created_at           TEXT NOT NULL,
+    updated_at           TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -457,3 +458,13 @@ CREATE INDEX IF NOT EXISTS idx_code_entities_risk ON code_entities(service, risk
 INSERT OR IGNORE INTO app_config (key, value) VALUES ('pii_scrubbing', '{"enabled":true,"builtin":{"credit_cards":true,"emails":true,"phone_numbers":true,"ssn":true,"ip_addresses":false},"sensitive_fields":["password","token","secret","authorization","api_key"],"custom_patterns":[],"skip_domains":[],"skip_services":[]}');
 
 INSERT OR IGNORE INTO app_config (key, value) VALUES ('retention_policy', '{"logs":"30d","error_groups":"never","metric_buckets":"180d","deploy_markers":"never"}');
+
+-- ============================================================================
+-- Multi-env backward compatibility: any pre-multi-env user with an MCP token
+-- gets backfilled to ["*"] so reads keep working. New users go through the
+-- connect flow and pick their scope explicitly.
+-- ============================================================================
+
+UPDATE users SET allowed_environments = '["*"]'
+  WHERE allowed_environments = '[]'
+    AND mcp_token IS NOT NULL;

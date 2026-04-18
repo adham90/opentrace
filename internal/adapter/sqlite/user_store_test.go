@@ -506,3 +506,242 @@ func TestUserStore_LastAdminProtection(t *testing.T) {
 		t.Errorf("expected ErrNotFound after delete, got: %v", err)
 	}
 }
+
+func TestUserStore_AllowedEnvironments_Default(t *testing.T) {
+	db := setupTestDB(t)
+	us := NewUserStore(db)
+	ctx := context.Background()
+
+	// Create with no AllowedEnvironments specified: empty slice, not nil.
+	user, err := us.Create(ctx, store.CreateUserParams{
+		Email:        "empty@example.com",
+		PasswordHash: "h",
+		DisplayName:  "Empty",
+		Role:         store.RoleMember,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if user.AllowedEnvironments == nil {
+		t.Fatal("AllowedEnvironments should be non-nil even when unspecified")
+	}
+	if len(user.AllowedEnvironments) != 0 {
+		t.Errorf("AllowedEnvironments = %v, want empty slice", user.AllowedEnvironments)
+	}
+
+	// Round-trip via GetByID.
+	got, err := us.GetByID(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.AllowedEnvironments == nil || len(got.AllowedEnvironments) != 0 {
+		t.Errorf("GetByID AllowedEnvironments = %v, want empty slice", got.AllowedEnvironments)
+	}
+}
+
+func TestUserStore_AllowedEnvironments_RoundTrip(t *testing.T) {
+	db := setupTestDB(t)
+	us := NewUserStore(db)
+	ctx := context.Background()
+
+	cases := []struct {
+		name string
+		envs []string
+	}{
+		{"single", []string{"production"}},
+		{"multi", []string{"staging", "production"}},
+		{"wildcard", []string{"*"}},
+		{"custom_names", []string{"qa", "eu-prod", "pr-1234"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			u, err := us.Create(ctx, store.CreateUserParams{
+				Email:               tc.name + "@example.com",
+				PasswordHash:        "h",
+				DisplayName:         tc.name,
+				Role:                store.RoleMember,
+				AllowedEnvironments: tc.envs,
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			if !equalSlices(u.AllowedEnvironments, tc.envs) {
+				t.Errorf("Create returned AllowedEnvironments = %v, want %v", u.AllowedEnvironments, tc.envs)
+			}
+
+			got, err := us.GetByID(ctx, u.ID)
+			if err != nil {
+				t.Fatalf("GetByID: %v", err)
+			}
+			if !equalSlices(got.AllowedEnvironments, tc.envs) {
+				t.Errorf("GetByID AllowedEnvironments = %v, want %v", got.AllowedEnvironments, tc.envs)
+			}
+
+			// Via List as well.
+			list, err := us.List(ctx)
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			found := false
+			for _, row := range list {
+				if row.ID == u.ID {
+					if !equalSlices(row.AllowedEnvironments, tc.envs) {
+						t.Errorf("List AllowedEnvironments = %v, want %v", row.AllowedEnvironments, tc.envs)
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("user %q not returned from List", u.ID)
+			}
+		})
+	}
+}
+
+func TestUserStore_AllowedEnvironments_Update(t *testing.T) {
+	db := setupTestDB(t)
+	us := NewUserStore(db)
+	ctx := context.Background()
+
+	u, err := us.Create(ctx, store.CreateUserParams{
+		Email:               "update-envs@example.com",
+		PasswordHash:        "h",
+		DisplayName:         "U",
+		Role:                store.RoleMember,
+		AllowedEnvironments: []string{"staging"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Widen scope to staging + production.
+	newEnvs := []string{"staging", "production"}
+	_, err = us.Update(ctx, u.ID, store.UpdateUserParams{AllowedEnvironments: &newEnvs})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got, err := us.GetByID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if !equalSlices(got.AllowedEnvironments, newEnvs) {
+		t.Errorf("after widen: %v, want %v", got.AllowedEnvironments, newEnvs)
+	}
+
+	// Narrow scope back to empty (revoked).
+	empty := []string{}
+	_, err = us.Update(ctx, u.ID, store.UpdateUserParams{AllowedEnvironments: &empty})
+	if err != nil {
+		t.Fatalf("Update revoke: %v", err)
+	}
+	got, err = us.GetByID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("GetByID after revoke: %v", err)
+	}
+	if got.AllowedEnvironments == nil || len(got.AllowedEnvironments) != 0 {
+		t.Errorf("after revoke: %v, want empty slice", got.AllowedEnvironments)
+	}
+
+	// Update that doesn't set AllowedEnvironments leaves it unchanged.
+	displayName := "New Name"
+	_, err = us.Update(ctx, u.ID, store.UpdateUserParams{DisplayName: &displayName})
+	if err != nil {
+		t.Fatalf("Update display name: %v", err)
+	}
+	got, err = us.GetByID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("GetByID after unrelated update: %v", err)
+	}
+	if got.DisplayName != "New Name" {
+		t.Errorf("DisplayName = %q, want %q", got.DisplayName, "New Name")
+	}
+	if got.AllowedEnvironments == nil || len(got.AllowedEnvironments) != 0 {
+		t.Errorf("AllowedEnvironments should still be empty: %v", got.AllowedEnvironments)
+	}
+}
+
+func TestUserStore_AllowedEnvironments_BackfillMigration(t *testing.T) {
+	// Ensure that the one-shot backfill in 000001_init.up.sql sets
+	// allowed_environments=["*"] for pre-existing users with an MCP token.
+	// We simulate the pre-multi-env state by clearing the column for a
+	// token-bearing user, then re-running the backfill SQL.
+	db := setupTestDB(t)
+	us := NewUserStore(db)
+	ctx := context.Background()
+
+	// Seed a user with an MCP token but explicitly empty scope, as if they
+	// predate the multi-env feature.
+	u, err := us.Create(ctx, store.CreateUserParams{
+		Email:        "legacy@example.com",
+		PasswordHash: "h",
+		DisplayName:  "Legacy",
+		Role:         store.RoleAdmin,
+		MCPToken:     ptrString("legacy-token-xyz"),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Ensure legacy state: empty JSON array and mcp_token set. New users
+	// default to []; simulate pre-migration by leaving it as [].
+	if u.AllowedEnvironments == nil || len(u.AllowedEnvironments) != 0 {
+		t.Fatalf("seed: expected [], got %v", u.AllowedEnvironments)
+	}
+
+	// Re-run the backfill statement from the migration.
+	_, err = db.DB.ExecContext(ctx, `
+		UPDATE users SET allowed_environments = '["*"]'
+		  WHERE allowed_environments = '[]'
+		    AND mcp_token IS NOT NULL`)
+	if err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+
+	got, err := us.GetByID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if !equalSlices(got.AllowedEnvironments, []string{"*"}) {
+		t.Errorf("after backfill: %v, want [\"*\"]", got.AllowedEnvironments)
+	}
+
+	// A tokenless user stays with [] (no backfill).
+	u2, err := us.Create(ctx, store.CreateUserParams{
+		Email:        "tokenless@example.com",
+		PasswordHash: "h",
+		DisplayName:  "Tokenless",
+		Role:         store.RoleMember,
+	})
+	if err != nil {
+		t.Fatalf("Create tokenless: %v", err)
+	}
+	_, err = db.DB.ExecContext(ctx, `
+		UPDATE users SET allowed_environments = '["*"]'
+		  WHERE allowed_environments = '[]'
+		    AND mcp_token IS NOT NULL`)
+	if err != nil {
+		t.Fatalf("backfill 2: %v", err)
+	}
+	got2, err := us.GetByID(ctx, u2.ID)
+	if err != nil {
+		t.Fatalf("GetByID tokenless: %v", err)
+	}
+	if got2.AllowedEnvironments == nil || len(got2.AllowedEnvironments) != 0 {
+		t.Errorf("tokenless user should keep []: %v", got2.AllowedEnvironments)
+	}
+}
+
+func equalSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func ptrString(s string) *string { return &s }
