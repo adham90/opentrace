@@ -26,7 +26,11 @@ const (
 // OpenSQLite opens a SQLite database with recommended settings.
 // Returns a *bun.DB wrapping the underlying *sql.DB. Use db.DB to access the raw *sql.DB.
 func OpenSQLite(path string) (*bun.DB, error) {
-	dsn := fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=%d&_foreign_keys=on", path, sqliteBusyTimeoutMs)
+	// modernc.org/sqlite ignores mattn-style params (_journal_mode/_busy_timeout);
+	// it honors _pragma=NAME(VALUE), applied on every connection open. WAL + a real
+	// busy_timeout are required for the file-WAL durability model and for
+	// synchronous=NORMAL below to be crash-safe.
+	dsn := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(on)", path, sqliteBusyTimeoutMs)
 	sqldb, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite: %w", err)
@@ -48,11 +52,13 @@ func OpenSQLite(path string) (*bun.DB, error) {
 // These are safe to use with WAL journal mode.
 func applySQLitePragmas(db *sql.DB) error {
 	pragmas := []string{
-		"PRAGMA foreign_keys = ON",                               // enforce FK constraints (DSN param not supported by modernc driver)
-		fmt.Sprintf("PRAGMA cache_size = %d", sqliteCacheSizeKB), // 64MB page cache (default: 2MB)
-		"PRAGMA synchronous = NORMAL",                            // safe with WAL, skips fsync per write
-		fmt.Sprintf("PRAGMA mmap_size = %d", sqliteMmapSize),    // 30MB memory-mapped I/O
-		"PRAGMA temp_store = MEMORY",                             // temp tables in RAM
+		"PRAGMA journal_mode = WAL",                                  // required; DSN _pragma also sets this, kept here as the visible source of truth
+		fmt.Sprintf("PRAGMA busy_timeout = %d", sqliteBusyTimeoutMs), // wait on a locked DB instead of failing immediately
+		"PRAGMA foreign_keys = ON",                                   // enforce FK constraints (mattn DSN param not supported by modernc driver)
+		fmt.Sprintf("PRAGMA cache_size = %d", sqliteCacheSizeKB),     // 64MB page cache (default: 2MB)
+		"PRAGMA synchronous = NORMAL",                                // safe with WAL, skips fsync per write
+		fmt.Sprintf("PRAGMA mmap_size = %d", sqliteMmapSize),         // 30MB memory-mapped I/O
+		"PRAGMA temp_store = MEMORY",                                 // temp tables in RAM
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {

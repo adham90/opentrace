@@ -26,6 +26,12 @@ func LogsCompare(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 	baselinePeriod := ArgStringDefault(args, "baseline_period", "previous")
 	serviceFilter := ArgString(args, "service")
 
+	// Resolve env scope so comparisons never mix in unauthorized environments.
+	environment, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
 	now := time.Now().UTC()
 	currentStart, currentEnd, err := logsResolvePeriod(currentPeriod, now)
 	if err != nil {
@@ -39,17 +45,17 @@ func LogsCompare(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 
 	switch metric {
 	case "errors":
-		return LogsCompareErrors(ctx, deps.Logs, currentStart, currentEnd, baseStart, baseEnd, serviceFilter)
+		return LogsCompareErrors(ctx, deps.Logs, currentStart, currentEnd, baseStart, baseEnd, serviceFilter, environment)
 	case "log_volume":
-		return LogsCompareLogVolume(ctx, deps.Logs, currentStart, currentEnd, baseStart, baseEnd, serviceFilter)
+		return LogsCompareLogVolume(ctx, deps.Logs, currentStart, currentEnd, baseStart, baseEnd, serviceFilter, environment)
 	default:
 		return NewToolResultError(fmt.Sprintf("invalid metric: %q (use errors or log_volume)", metric)), nil
 	}
 }
 
-func LogsCompareErrors(ctx context.Context, svc *logs.Service, curStart, curEnd, baseStart, baseEnd time.Time, service string) (*CallToolResult, error) {
-	curParams := store.LogCountParams{Since: curStart, Until: curEnd, Service: service}
-	baseParams := store.LogCountParams{Since: baseStart, Until: baseEnd, Service: service}
+func LogsCompareErrors(ctx context.Context, svc *logs.Service, curStart, curEnd, baseStart, baseEnd time.Time, service, environment string) (*CallToolResult, error) {
+	curParams := store.LogCountParams{Since: curStart, Until: curEnd, Service: service, Environment: environment}
+	baseParams := store.LogCountParams{Since: baseStart, Until: baseEnd, Service: service, Environment: environment}
 
 	curSvc, err := svc.CountByService(ctx, curParams)
 	if err != nil {
@@ -143,9 +149,9 @@ func LogsCompareErrors(ctx context.Context, svc *logs.Service, curStart, curEnd,
 	return JSONResult(resp)
 }
 
-func LogsCompareLogVolume(ctx context.Context, svc *logs.Service, curStart, curEnd, baseStart, baseEnd time.Time, service string) (*CallToolResult, error) {
-	curParams := store.LogCountParams{Since: curStart, Until: curEnd, Service: service}
-	baseParams := store.LogCountParams{Since: baseStart, Until: baseEnd, Service: service}
+func LogsCompareLogVolume(ctx context.Context, svc *logs.Service, curStart, curEnd, baseStart, baseEnd time.Time, service, environment string) (*CallToolResult, error) {
+	curParams := store.LogCountParams{Since: curStart, Until: curEnd, Service: service, Environment: environment}
+	baseParams := store.LogCountParams{Since: baseStart, Until: baseEnd, Service: service, Environment: environment}
 
 	curLC, err := svc.CountByLevel(ctx, curParams)
 	if err != nil {

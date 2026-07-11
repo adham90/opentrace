@@ -13,7 +13,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func HandleSchema(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
-	qe, errResult := getQueryExecutor(deps.Registry)
+	qe, errResult := getQueryExecutor(ctx, deps.Registry)
 	if errResult != nil {
 		return errResult, nil
 	}

@@ -50,6 +50,22 @@ func OpenReader(path string) (*Reader, error) {
 		f.Close()
 		return nil, fmt.Errorf("stat chunk: %w", err)
 	}
+	// Validate header fields before using them for allocation/reads. A corrupt
+	// or truncated chunk (bad disk, partial write) could otherwise yield a
+	// negative or multi-GB length and panic the reader — which, running inside
+	// an unrecovered search goroutine, would crash the whole server.
+	if int64(dirOffset) < HeaderSize || int64(dirOffset) > fi.Size() {
+		f.Close()
+		return nil, fmt.Errorf("corrupt chunk: directory offset %d out of range (file size %d)", dirOffset, fi.Size())
+	}
+	if entryCount < 0 || entryCount > maxChunkEntries {
+		f.Close()
+		return nil, fmt.Errorf("corrupt chunk: entry count %d out of range", entryCount)
+	}
+	if colCount < 0 || colCount > maxChunkColumns {
+		f.Close()
+		return nil, fmt.Errorf("corrupt chunk: column count %d out of range", colCount)
+	}
 	dirSize := fi.Size() - int64(dirOffset)
 	dirBuf := make([]byte, dirSize)
 	if _, err := f.ReadAt(dirBuf, int64(dirOffset)); err != nil {
@@ -101,6 +117,10 @@ func (r *Reader) readColumnRaw(name string) ([]byte, ColumnType, error) {
 		return nil, 0, fmt.Errorf("column %q not found (schema evolution: treat as all-null)", name)
 	}
 
+	// Guard against a corrupt directory entry claiming an absurd size.
+	if fi, err := r.f.Stat(); err == nil && int64(entry.CompressedSize) > fi.Size() {
+		return nil, 0, fmt.Errorf("corrupt chunk: column %q size %d exceeds file size %d", name, entry.CompressedSize, fi.Size())
+	}
 	data := make([]byte, entry.CompressedSize)
 	if _, err := r.f.ReadAt(data, int64(entry.Offset)); err != nil {
 		return nil, 0, fmt.Errorf("read column %s at offset %d: %w", name, entry.Offset, err)

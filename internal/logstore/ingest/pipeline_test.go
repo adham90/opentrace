@@ -363,3 +363,47 @@ func TestFingerprintDeterministic(t *testing.T) {
 		t.Error("different line should produce different fingerprint")
 	}
 }
+
+// TestScrubsMessage guards that PII in the log message (the most common leak
+// location) is redacted, not just PII in the opaque body.
+func TestScrubsMessage(t *testing.T) {
+	p := NewPipeline(nil, PIIConfig{Enabled: true, ScrubEmails: true})
+	out := p.Process([]chunk.Entry{{
+		Level:   "info",
+		Service: "svc",
+		Message: "user login failed for alice@example.com",
+	}})
+	if len(out) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(out))
+	}
+	if strings.Contains(out[0].Message, "alice@example.com") {
+		t.Fatalf("email not scrubbed from message: %q", out[0].Message)
+	}
+	if !strings.Contains(out[0].Message, filteredValue) {
+		t.Fatalf("expected %q in scrubbed message, got %q", filteredValue, out[0].Message)
+	}
+}
+
+// TestExpansionCapped guards that a body with a huge logs array can't expand
+// into unbounded WAL entries.
+func TestExpansionCapped(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString(`{"logs":[`)
+	for i := 0; i < maxExpandedLogs+500; i++ {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		sb.WriteString(`{"level":"info","message":"x"}`)
+	}
+	sb.WriteString(`]}`)
+
+	p := NewPipeline(nil, PIIConfig{})
+	out := p.Process([]chunk.Entry{{Level: "info", Service: "svc", Message: "parent", Body: []byte(sb.String())}})
+	// 1 parent + at most maxExpandedLogs children.
+	if len(out) > maxExpandedLogs+1 {
+		t.Fatalf("expansion not capped: got %d entries (cap %d + parent)", len(out), maxExpandedLogs)
+	}
+	if len(out) != maxExpandedLogs+1 {
+		t.Fatalf("want %d entries (parent + cap), got %d", maxExpandedLogs+1, len(out))
+	}
+}

@@ -18,6 +18,7 @@ import (
 	"github.com/adham90/opentrace/internal/connector"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/metrics"
+	"github.com/adham90/opentrace/internal/safe"
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
 	"github.com/vmihailenco/msgpack/v5"
@@ -229,23 +230,13 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 			server.WriteError(w, http.StatusBadRequest, fmt.Sprintf("entry %d: 'level' must be one of: debug, info, warn, error, fatal (got %q)", i, e.Level))
 			return
 		}
+		e.Level = normalizeLevel(e.Level)
 	}
 
 	// Check for duplicate batch
-	batchID := r.Header.Get("X-Batch-ID")
-	if batchID != "" {
-		if !IsValidBatchID(batchID) {
-			server.WriteError(w, http.StatusBadRequest, "invalid X-Batch-ID format (expected UUID)")
-			return
-		}
-		existing, err := h.LogStore.GetBatch(r.Context(), batchID)
-		if err == nil && existing != nil {
-			server.WriteJSON(w, http.StatusOK, map[string]any{
-				"count":        existing.LogCount,
-				"deduplicated": true,
-			})
-			return
-		}
+	batchID, done := h.checkBatchDup(w, r)
+	if done {
+		return
 	}
 
 	logEntries := make([]store.LogEntry, len(entries))
@@ -312,7 +303,38 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 		logEntries[i] = entry
 	}
 
-	// Apply sampling rules
+	h.storeAndRespond(w, r, logEntries, batchID)
+}
+
+// checkBatchDup reads and validates the X-Batch-ID header. It returns the batch
+// ID and done=true if the response has already been written (invalid ID → 400,
+// or a previously-seen batch → 200 deduplicated). Shared by both ingest handlers
+// so SDK retries are idempotent regardless of payload format.
+func (h *Handler) checkBatchDup(w http.ResponseWriter, r *http.Request) (batchID string, done bool) {
+	batchID = r.Header.Get("X-Batch-ID")
+	if batchID == "" {
+		return "", false
+	}
+	if !IsValidBatchID(batchID) {
+		server.WriteError(w, http.StatusBadRequest, "invalid X-Batch-ID format (expected UUID)")
+		return "", true
+	}
+	if existing, err := h.LogStore.GetBatch(r.Context(), batchID); err == nil && existing != nil {
+		server.WriteJSON(w, http.StatusOK, map[string]any{
+			"count":        existing.LogCount,
+			"deduplicated": true,
+		})
+		return batchID, true
+	}
+	return batchID, false
+}
+
+// storeAndRespond applies sampling rules, inserts the entries (via the async
+// queue when configured), records the batch ID, fires post-insert side-effects
+// (error grouping, watch evaluation), and writes the ingest response. Shared by
+// the nested (/api/logs) and flat (/api/v2/logs) handlers so both SDKs get
+// identical treatment.
+func (h *Handler) storeAndRespond(w http.ResponseWriter, r *http.Request, logEntries []store.LogEntry, batchID string) {
 	originalCount := len(logEntries)
 	if h.SettingsStore != nil {
 		rules, _ := h.SettingsStore.GetSamplingRules(r.Context())
@@ -323,6 +345,7 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 
 	// Use async ingest queue if available; otherwise fall back to synchronous insert
 	var count int
+	var err error
 	if h.Queue != nil {
 		count, err = h.Queue.Enqueue(r.Context(), logEntries)
 	} else {
@@ -333,12 +356,10 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Record Prometheus metrics for ingested logs
 	if count > 0 {
 		metrics.RecordLogIngest(count)
 	}
 
-	// Record batch ID after successful insert
 	if batchID != "" {
 		_ = h.LogStore.RecordBatch(r.Context(), batchID, count)
 	}
@@ -348,7 +369,9 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 
 		// All post-insert side-effects run async to keep the HTTP response fast.
 		// They use context.Background() since r.Context() is canceled after response.
-		go h.processAfterInsert(logEntries)
+		// Panic-isolated: these parse attacker-controlled log bodies/stacks, and a
+		// panic here must not crash the server.
+		safe.Go("ingest.processAfterInsert", func() { h.processAfterInsert(logEntries) })
 	}
 
 	status := http.StatusCreated
@@ -367,6 +390,11 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 // AI agent can use the log_search tool. Uses a mutex instead of sync.Once
 // so it can retry after transient failures or re-register after deletion.
 func (h *Handler) ensureLogsConnector(ctx context.Context) {
+	// Requires the connector registry and data-source store; skip when either is
+	// absent (minimal/embedded configs and unit tests wire only the log store).
+	if h.Registry == nil || h.DSStore == nil {
+		return
+	}
 	// Fast path: already registered in memory (no lock needed)
 	if h.Registry.Get(connector.ConnectorLogs) != nil {
 		return

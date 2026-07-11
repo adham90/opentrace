@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/adham90/opentrace/internal/logstore/chunk"
@@ -15,14 +16,28 @@ import (
 	"github.com/adham90/opentrace/pkg/store"
 )
 
+// maxTrackedBatches bounds the in-memory idempotency cache.
+const maxTrackedBatches = 20000
+
 // LogStore wraps engine.Store and implements pkg/store.LogStore.
 type LogStore struct {
 	engine *engine.Store
+
+	// Batch idempotency cache. ponytail: in-memory recent-batch set, per-process
+	// FIFO-evicted at maxTrackedBatches — dedups SDK retries within the window
+	// (the realistic "retry after timeout" case); does not persist across
+	// restarts. A persistent table would be needed for cross-restart dedup.
+	batchMu    sync.Mutex
+	batchSeen  map[string]store.BatchRecord
+	batchOrder []string
 }
 
 // New creates a LogStore adapter around an engine.Store.
 func New(e *engine.Store) *LogStore {
-	return &LogStore{engine: e}
+	return &LogStore{
+		engine:    e,
+		batchSeen: make(map[string]store.BatchRecord),
+	}
 }
 
 // Engine returns the underlying engine (for direct access when needed).
@@ -277,18 +292,59 @@ func (a *LogStore) AggregateRequestSummaries(ctx context.Context, params store.R
 	return agg, nil
 }
 
-// --- Batch deduplication (no-ops — WAL is crash-safe) ---
+// --- Batch deduplication (in-memory, bounded) ---
 
 func (a *LogStore) RecordBatch(ctx context.Context, batchID string, logCount int) error {
-	return nil // WAL is crash-safe, no batch tracking needed
+	if batchID == "" {
+		return nil
+	}
+	a.batchMu.Lock()
+	defer a.batchMu.Unlock()
+	if _, exists := a.batchSeen[batchID]; exists {
+		return nil
+	}
+	a.batchSeen[batchID] = store.BatchRecord{BatchID: batchID, LogCount: logCount, ReceivedAt: time.Now()}
+	a.batchOrder = append(a.batchOrder, batchID)
+	// FIFO-evict oldest entries once over the cap.
+	for len(a.batchOrder) > maxTrackedBatches {
+		oldest := a.batchOrder[0]
+		a.batchOrder = a.batchOrder[1:]
+		delete(a.batchSeen, oldest)
+	}
+	return nil
 }
 
 func (a *LogStore) GetBatch(ctx context.Context, batchID string) (*store.BatchRecord, error) {
-	return nil, nil // always "not found" — no dedup tracking
+	if batchID == "" {
+		return nil, nil
+	}
+	a.batchMu.Lock()
+	defer a.batchMu.Unlock()
+	if rec, ok := a.batchSeen[batchID]; ok {
+		r := rec
+		return &r, nil
+	}
+	return nil, nil
 }
 
 func (a *LogStore) PruneBatches(ctx context.Context, olderThan time.Duration) (int64, error) {
-	return 0, nil // no-op
+	a.batchMu.Lock()
+	defer a.batchMu.Unlock()
+	cutoff := time.Now().Add(-olderThan)
+	var pruned int64
+	kept := a.batchOrder[:0:0]
+	for _, id := range a.batchOrder {
+		if rec, ok := a.batchSeen[id]; ok {
+			if rec.ReceivedAt.Before(cutoff) {
+				delete(a.batchSeen, id)
+				pruned++
+				continue
+			}
+			kept = append(kept, id)
+		}
+	}
+	a.batchOrder = kept
+	return pruned, nil
 }
 
 // --- Type conversion helpers ---

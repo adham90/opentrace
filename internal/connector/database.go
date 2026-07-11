@@ -21,11 +21,17 @@ type schemaCacheEntry struct {
 type DatabaseConnector struct {
 	pool        *pgxpool.Pool
 	maxRows     int
+	environment string // env this connector is pinned to ("" or "*" = shared)
 	cacheMu     sync.RWMutex
 	schemaCache map[string]schemaCacheEntry // key: "" for table list, "tablename" for columns
 	cacheTTL    time.Duration
 	cb          *CircuitBreaker
 }
+
+// Environment reports the environment this connector is pinned to (empty or
+// "*" means shared / any env). Implements EnvironmentScoped so the database
+// tools can reject cross-env queries at query time.
+func (c *DatabaseConnector) Environment() string { return c.environment }
 
 // NewDatabaseConnector creates a new DatabaseConnector with a connection to the target DB.
 func NewDatabaseConnector(ctx context.Context, connStr string, maxRows, stmtTimeoutMS int) (*DatabaseConnector, error) {
@@ -173,22 +179,92 @@ func (c *DatabaseConnector) ExecuteReadQuery(ctx context.Context, query string) 
 		colNames[i] = string(d.Name)
 	}
 
-	var resultRows [][]any
-	for rows.Next() {
-		values, err := rows.Values()
-		if err != nil {
-			if c.cb != nil {
-				c.cb.RecordFailure()
-			}
-			return nil, fmt.Errorf("reading row: %w", err)
-		}
-		resultRows = append(resultRows, values)
-	}
-	if err := rows.Err(); err != nil {
+	// Hard cap the rows we materialize, independent of LIMIT detection. A query
+	// like `... WHERE msg LIKE '% LIMIT %'` fools HasLimitGeneric into skipping
+	// the injected LIMIT, so without this cap the whole table would be loaded
+	// into memory.
+	resultRows, err := materializeRows(rows, c.maxRows)
+	if err != nil {
 		if c.cb != nil {
 			c.cb.RecordFailure()
 		}
-		return nil, fmt.Errorf("iterating rows: %w", err)
+		return nil, fmt.Errorf("reading rows: %w", err)
+	}
+
+	if c.cb != nil {
+		c.cb.RecordSuccess()
+	}
+
+	return &QueryResult{
+		Columns:  colNames,
+		Rows:     resultRows,
+		RowCount: len(resultRows),
+	}, nil
+}
+
+// rowScanner is the minimal subset of pgx.Rows that materializeRows needs.
+// Keeping it small lets the row-cap logic be unit-tested without a live DB.
+type rowScanner interface {
+	Next() bool
+	Values() ([]any, error)
+	Err() error
+}
+
+// materializeRows collects up to maxRows rows from the scanner. Once the cap is
+// reached it stops pulling rows so a runaway result set can't exhaust memory.
+// A maxRows <= 0 means "no cap".
+func materializeRows(rows rowScanner, maxRows int) ([][]any, error) {
+	var out [][]any
+	for rows.Next() {
+		if maxRows > 0 && len(out) >= maxRows {
+			break
+		}
+		values, err := rows.Values()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, values)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ExecuteControlQuery runs a privileged control statement (e.g.
+// pg_terminate_backend / pg_cancel_backend) WITHOUT the read-only
+// side-effecting-function guardrail that ExecuteReadQuery applies. It exists
+// only for audited admin actions (the kill_query database tool) — the caller
+// is responsible for authorization. The connection pool still enforces
+// default_transaction_read_only and the statement timeout.
+func (c *DatabaseConnector) ExecuteControlQuery(ctx context.Context, query string) (*QueryResult, error) {
+	if c.cb != nil {
+		if err := c.cb.Allow(); err != nil {
+			return nil, fmt.Errorf("connector: %w", err)
+		}
+	}
+
+	rows, err := c.pool.Query(ctx, query)
+	if err != nil {
+		if c.cb != nil {
+			c.cb.RecordFailure()
+		}
+		return nil, fmt.Errorf("executing control query: %w", err)
+	}
+	defer rows.Close()
+
+	descs := rows.FieldDescriptions()
+	colNames := make([]string, len(descs))
+	for i, d := range descs {
+		colNames[i] = string(d.Name)
+	}
+
+	resultRows, err := materializeRows(rows, c.maxRows)
+	if err != nil {
+		if c.cb != nil {
+			c.cb.RecordFailure()
+		}
+		return nil, fmt.Errorf("reading rows: %w", err)
 	}
 
 	if c.cb != nil {

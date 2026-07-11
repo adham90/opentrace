@@ -114,5 +114,10 @@ func (b *Builder) Write(path string, entryCount int) error {
 		return fmt.Errorf("write postings: %w", err)
 	}
 
+	// Flush before returning: the seal path deletes the source WAL on success,
+	// so the index must be durable, not merely in the page cache.
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("fsync index: %w", err)
+	}
 	return nil
 }

@@ -15,6 +15,21 @@ type QueryExecutor interface {
 	ExecuteReadQuery(ctx context.Context, query string) (*QueryResult, error)
 }
 
+// EnvironmentScoped is implemented by connectors pinned to a specific
+// environment. The database tools use it to reject cross-env queries at query
+// time. An empty or "*" environment means the connector is shared / any-env.
+type EnvironmentScoped interface {
+	Environment() string
+}
+
+// ControlExecutor is implemented by connectors that can run privileged control
+// statements (e.g. cancelling/terminating a backend) that intentionally bypass
+// the read-only side-effecting-function guardrail. Callers MUST enforce
+// authorization (admin) before using it.
+type ControlExecutor interface {
+	ExecuteControlQuery(ctx context.Context, query string) (*QueryResult, error)
+}
+
 // PingResult holds the outcome of a data source connectivity check.
 type PingResult struct {
 	Reachable bool

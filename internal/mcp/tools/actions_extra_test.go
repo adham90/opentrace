@@ -776,6 +776,7 @@ func TestHandleWatchInvestigate_InvalidWindowFallback(t *testing.T) {
 func TestHandleKillQuery_MissingPID(t *testing.T) {
 	deps := DatabaseDeps{
 		Registry: connector.NewRegistry(),
+		IsAdmin:  true,
 	}
 
 	args := map[string]any{}
@@ -795,6 +796,7 @@ func TestHandleKillQuery_MissingPID(t *testing.T) {
 func TestHandleKillQuery_InvalidPID(t *testing.T) {
 	deps := DatabaseDeps{
 		Registry: connector.NewRegistry(),
+		IsAdmin:  true,
 	}
 
 	t.Run("zero pid", func(t *testing.T) {
@@ -834,6 +836,7 @@ func TestHandleKillQuery_InvalidPID(t *testing.T) {
 func TestHandleKillQuery_NoConnector(t *testing.T) {
 	deps := DatabaseDeps{
 		Registry: connector.NewRegistry(),
+		IsAdmin:  true,
 	}
 
 	args := map[string]any{"pid": float64(12345)}
@@ -853,6 +856,7 @@ func TestHandleKillQuery_NoConnector(t *testing.T) {
 func TestHandleKillQuery_WithForceFlag(t *testing.T) {
 	deps := DatabaseDeps{
 		Registry: connector.NewRegistry(),
+		IsAdmin:  true,
 	}
 
 	// Even with force=true, should still fail with no connector.

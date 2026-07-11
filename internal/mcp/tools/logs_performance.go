@@ -20,12 +20,19 @@ func LogsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("invalid time_range: %v. Use formats like '1h', '24h', '7d'.", err)), nil
 	}
+	// Resolve env scope so performance data never spans unauthorized envs.
+	environment, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
 	now := time.Now().UTC()
 	start := now.Add(-duration)
 
 	params := store.RequestSummarySearchParams{
-		Start: &start,
-		End:   &now,
+		Start:       &start,
+		End:         &now,
+		Environment: environment,
 	}
 
 	params.Controller = ArgString(args, "controller")

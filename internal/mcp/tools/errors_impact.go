@@ -27,6 +27,12 @@ func ErrorsImpact(ctx context.Context, deps ErrorsDeps, args map[string]any) (*C
 		return NewToolResultError(fmt.Sprintf("failed to get impact: %v", err)), nil
 	}
 
+	// Env-scope gate: impact is fetched by fingerprint (no env filter), so a
+	// token scoped to one env must not read impact rows from another.
+	if !scopeAllowsEnv(ctx, impact.Environment) {
+		return NewToolResultError("error group not found"), nil
+	}
+
 	resp := map[string]any{
 		"fingerprint":       fingerprint,
 		"unique_users":      impact.UniqueUsers,

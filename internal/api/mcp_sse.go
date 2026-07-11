@@ -98,11 +98,9 @@ func (s *Server) MCPTokenAuth(next http.Handler) http.Handler {
 	})
 }
 
-// setupMCPStreamableHTTP creates the Streamable HTTP server backed by an
-// MCPServer with all tools registered. This replaces the deprecated SSE
-// transport per MCP spec 2025-06-18.
-func (s *Server) setupMCPStreamableHTTP() *mcp.StreamableHTTPHandler {
-	deps := mcpserver.Deps{
+// mcpDeps builds the shared MCP dependency set used by both HTTP transports.
+func (s *Server) mcpDeps() mcpserver.Deps {
+	return mcpserver.Deps{
 		Ctx:      s.auditCtx,
 		Registry: s.registry,
 		Config:   s.cfg,
@@ -126,55 +124,51 @@ func (s *Server) setupMCPStreamableHTTP() *mcp.StreamableHTTPHandler {
 		},
 		WatchMetrics: s.watchMetrics,
 	}
+}
 
-	mcpSrv := mcpserver.NewConfiguredServer(deps, true, nil)
+// mcpServerForRole selects the admin or member MCP server based on the
+// authenticated user attached by MCPTokenAuth. It fails closed: any request
+// without an admin user gets the read-only member server. This is the
+// authorization boundary for the HTTP/SSE transports — the previous code
+// handed every authenticated user the admin server, letting a member call
+// write/admin tools (e.g. self-promote to admin).
+func mcpServerForRole(admin, member *mcp.Server) func(*http.Request) *mcp.Server {
+	return func(r *http.Request) *mcp.Server {
+		if u := mcpUserFromContext(r.Context()); u != nil && u.Role == store.RoleAdmin {
+			return admin
+		}
+		return member
+	}
+}
 
-	handler := mcp.NewStreamableHTTPHandler(
-		func(r *http.Request) *mcp.Server { return mcpSrv },
+// setupMCPStreamableHTTP creates the Streamable HTTP server. It builds one
+// admin server and one member (read-only) server and dispatches per request
+// according to the caller's role. This replaces the deprecated SSE transport
+// per MCP spec 2025-06-18.
+func (s *Server) setupMCPStreamableHTTP() *mcp.StreamableHTTPHandler {
+	deps := s.mcpDeps()
+	adminSrv := mcpserver.NewConfiguredServer(deps, true, nil)
+	memberSrv := mcpserver.NewConfiguredServer(deps, false, nil)
+
+	return mcp.NewStreamableHTTPHandler(
+		mcpServerForRole(adminSrv, memberSrv),
 		&mcp.StreamableHTTPOptions{
 			SessionTimeout: 30 * time.Minute,
 		},
 	)
-
-	return handler
 }
 
 // setupMCPSSE creates the legacy SSE server for backward compatibility.
 // Deprecated: Use setupMCPStreamableHTTP instead.
 func (s *Server) setupMCPSSE() *mcp.SSEHandler {
-	deps := mcpserver.Deps{
-		Ctx:      s.auditCtx,
-		Registry: s.registry,
-		Config:   s.cfg,
-		DB:       s.db,
-		Stores: store.Stores{
-			DSStore:          s.dsStore,
-			LogStore:         s.logStore,
-			ServerStore:      s.serverStore,
-			MetricStore:      s.metricStore,
-			UserStore:        s.userStore,
-			SettingsStore:    s.settingsStore,
-			MCPActivityStore: s.mcpActivityStore,
-			AuditStore:       s.auditStore,
-			WatchStore:       s.watchStore,
-			ErrorGroupStore:  s.errorGroupStore,
-			HealthCheckStore: s.healthCheckStore,
-			AgentNoteStore:   s.agentNoteStore,
-			TrendStore:       s.trendStore,
-			AnalyticsStore:   s.analyticsStore,
-			ErrorImpactStore: s.errorImpactStore,
-		},
-		WatchMetrics: s.watchMetrics,
-	}
+	deps := s.mcpDeps()
+	adminSrv := mcpserver.NewConfiguredServer(deps, true, nil)
+	memberSrv := mcpserver.NewConfiguredServer(deps, false, nil)
 
-	mcpSrv := mcpserver.NewConfiguredServer(deps, true, nil)
-
-	handler := mcp.NewSSEHandler(
-		func(r *http.Request) *mcp.Server { return mcpSrv },
+	return mcp.NewSSEHandler(
+		mcpServerForRole(adminSrv, memberSrv),
 		nil,
 	)
-
-	return handler
 }
 
 // mcpUserFromContext returns the user set by MCPTokenAuth, for role checks.

@@ -16,6 +16,9 @@ import (
 type DatabaseDeps struct {
 	Registry *connector.Registry
 	LogStore store.LogStore
+	// IsAdmin reports whether the MCP server this tool is registered on serves
+	// an admin token. The destructive kill_query action requires it.
+	IsAdmin bool
 }
 
 // DatabaseHandler returns the handler for the consolidated database tool.

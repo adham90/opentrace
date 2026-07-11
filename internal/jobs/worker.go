@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/adham90/opentrace/internal/safe"
 )
 
 // HandlerFunc processes a job's payload. Return nil on success, an error to trigger retry/failure.
@@ -111,7 +113,8 @@ func (w *Worker) processNext(ctx context.Context) {
 
 	slog.Info("processing job", "job_id", job.ID, "job_type", job.JobType)
 
-	if handlerErr := handler(ctx, job.Payload); handlerErr != nil {
+	handlerErr := safe.Call("job:"+job.JobType, func() error { return handler(ctx, job.Payload) })
+	if handlerErr != nil {
 		slog.Warn("job failed", "job_id", job.ID, "job_type", job.JobType, "error", handlerErr)
 		if failErr := w.queue.Fail(ctx, job.ID, handlerErr); failErr != nil {
 			slog.Error("recording job failure", "job_id", job.ID, "error", failErr)

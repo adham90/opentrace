@@ -75,16 +75,25 @@ func (h *handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// Check how many users exist
-	userCount, err := h.userStore.Count(ctx)
-	if err != nil {
-		server.WriteError(w, http.StatusInternalServerError, "failed to check user count")
-		return
-	}
+	// Serialize the check-and-create so concurrent first connections can't both
+	// create an admin (TOCTOU on Count()==0). Login runs outside the lock.
+	handled := func() bool {
+		h.firstAdminMu.Lock()
+		defer h.firstAdminMu.Unlock()
 
-	if userCount == 0 {
-		// First connection — create admin
-		h.handleConnectCreateAdmin(w, r, req)
+		userCount, err := h.userStore.Count(ctx)
+		if err != nil {
+			server.WriteError(w, http.StatusInternalServerError, "failed to check user count")
+			return true
+		}
+		if userCount == 0 {
+			// First connection — create admin (still holding the lock).
+			h.handleConnectCreateAdmin(w, r, req)
+			return true
+		}
+		return false
+	}()
+	if handled {
 		return
 	}
 

@@ -288,30 +288,3 @@ func RequireAdmin(next http.Handler) http.Handler {
 	})
 }
 
-// RequireAdminAPI returns 403 JSON if the user is not an admin (for API endpoints).
-func RequireAdminAPI(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user := UserFromContext(r.Context())
-		if user == nil {
-			writeError(w, http.StatusUnauthorized, "authentication required")
-			return
-		}
-		if user.Role != store.RoleAdmin {
-			writeError(w, http.StatusForbidden, "admin access required")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// RequireAuthAPI returns 401 JSON if no user is in the context (for API endpoints).
-func RequireAuthAPI(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if UserFromContext(r.Context()) == nil {
-			writeError(w, http.StatusUnauthorized, "authentication required")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-

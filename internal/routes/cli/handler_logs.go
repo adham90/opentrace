@@ -135,6 +135,12 @@ func (h *handler) handleLogsStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Clear the global http.Server WriteTimeout for this long-lived SSE stream;
+	// otherwise `opentrace logs` disconnects after exactly WriteTimeout (60s).
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {
+		slog.Warn("cli logs stream: clearing write deadline failed", "error", err)
+	}
+
 	level := r.URL.Query().Get("level")
 	service := r.URL.Query().Get("service")
 	env := r.URL.Query().Get("env")

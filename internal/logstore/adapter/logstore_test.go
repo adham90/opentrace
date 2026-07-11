@@ -203,25 +203,26 @@ func TestAdapterBatchDedup(t *testing.T) {
 	ctx := context.Background()
 	a := newTestAdapter(t)
 
-	// These should be no-ops
+	// Unseen batch is not found.
+	if batch, err := a.GetBatch(ctx, "batch-1"); err != nil || batch != nil {
+		t.Errorf("GetBatch(unseen): want nil,nil got %+v,%v", batch, err)
+	}
+
+	// Recording makes it findable, so the handler can dedup a retry.
 	if err := a.RecordBatch(ctx, "batch-1", 10); err != nil {
 		t.Errorf("RecordBatch: %v", err)
 	}
-
 	batch, err := a.GetBatch(ctx, "batch-1")
 	if err != nil {
 		t.Errorf("GetBatch: %v", err)
 	}
-	if batch != nil {
-		t.Errorf("GetBatch should return nil (no dedup tracking)")
+	if batch == nil || batch.LogCount != 10 {
+		t.Errorf("GetBatch(recorded): want count 10, got %+v", batch)
 	}
 
-	n, err := a.PruneBatches(ctx, time.Hour)
-	if err != nil {
-		t.Errorf("PruneBatches: %v", err)
-	}
-	if n != 0 {
-		t.Errorf("PruneBatches: want 0, got %d", n)
+	// PruneBatches with a large window keeps the just-recorded batch.
+	if n, err := a.PruneBatches(ctx, time.Hour); err != nil || n != 0 {
+		t.Errorf("PruneBatches(1h): want 0,nil got %d,%v", n, err)
 	}
 }
 
