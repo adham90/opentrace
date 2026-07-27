@@ -42,6 +42,12 @@ func (m *mockSettingsStore) GetTelegramConfig(_ context.Context) (*store.Telegra
 func (m *mockSettingsStore) SetTelegramConfig(_ context.Context, _ store.TelegramConfig) error {
 	return nil
 }
+func (m *mockSettingsStore) GetSlackConfig(_ context.Context) (*store.SlackConfig, error) {
+	return &store.SlackConfig{}, nil
+}
+func (m *mockSettingsStore) SetSlackConfig(_ context.Context, _ store.SlackConfig) error {
+	return nil
+}
 func (m *mockSettingsStore) SetMaxQueryRows(_ context.Context, _ int) error    { return nil }
 func (m *mockSettingsStore) SetStatementTimeout(_ context.Context, _ int) error { return nil }
 

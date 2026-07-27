@@ -26,6 +26,8 @@ type SettingsStore interface {
 	SetSamplingRules(ctx context.Context, rules []SamplingRule) error
 	GetTelegramConfig(ctx context.Context) (*TelegramConfig, error)
 	SetTelegramConfig(ctx context.Context, cfg TelegramConfig) error
+	GetSlackConfig(ctx context.Context) (*SlackConfig, error)
+	SetSlackConfig(ctx context.Context, cfg SlackConfig) error
 }
 
 // TelegramConfig holds Telegram notification settings.
@@ -33,4 +35,10 @@ type TelegramConfig struct {
 	BotToken string `json:"bot_token"`
 	ChatID   string `json:"chat_id"`
 	Enabled  bool   `json:"enabled"`
+}
+
+// SlackConfig holds Slack incoming-webhook notification settings.
+type SlackConfig struct {
+	WebhookURL string `json:"webhook_url"`
+	Enabled    bool   `json:"enabled"`
 }

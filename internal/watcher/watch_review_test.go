@@ -103,7 +103,7 @@ func TestWatchStreamEvaluator_NotifiesOnAlert(t *testing.T) {
 	}
 }
 
-// stubSender is a test double for the message sender used by TelegramWatchNotifier.
+// stubSender is a test double for the message sender used by ChatWatchNotifier.
 type stubSender struct {
 	mu   sync.Mutex
 	msgs []string
@@ -126,12 +126,12 @@ func (s *stubSender) last() (string, int) {
 	return s.msgs[len(s.msgs)-1], len(s.msgs)
 }
 
-// TestTelegramWatchNotifier_SendsFormattedMessage proves the Telegram adapter
+// TestChatWatchNotifier_SendsFormattedMessage proves the Telegram adapter
 // (previously never instantiated in the wiring) renders a watch alert and hands
 // it to the sender. Uses a stub — no real Telegram API call.
-func TestTelegramWatchNotifier_SendsFormattedMessage(t *testing.T) {
+func TestChatWatchNotifier_SendsFormattedMessage(t *testing.T) {
 	stub := &stubSender{}
-	n := NewTelegramWatchNotifier(stub)
+	n := NewChatWatchNotifier(stub)
 
 	if err := n.NotifyWatchAlert(context.Background(), testAlert(), testWatch()); err != nil {
 		t.Fatalf("NotifyWatchAlert: %v", err)
@@ -149,9 +149,9 @@ func TestTelegramWatchNotifier_SendsFormattedMessage(t *testing.T) {
 	}
 }
 
-// TestNewTelegramWatchNotifier_NilSender guards the graceful "not configured" path.
-func TestNewTelegramWatchNotifier_NilSender(t *testing.T) {
-	n := NewTelegramWatchNotifier(nil)
+// TestNewChatWatchNotifier_NilSender guards the graceful "not configured" path.
+func TestNewChatWatchNotifier_NilSender(t *testing.T) {
+	n := NewChatWatchNotifier(nil)
 	// A nil-backed notifier must be a safe no-op, never a panic.
 	if err := n.NotifyWatchAlert(context.Background(), testAlert(), testWatch()); err != nil {
 		t.Errorf("expected nil-backed notifier to no-op, got %v", err)

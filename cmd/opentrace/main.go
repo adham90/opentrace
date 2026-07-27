@@ -316,8 +316,9 @@ func run() error {
 	// path degrades gracefully: the Telegram sender no-ops when unconfigured and
 	// webhook notifiers are only added when a URL is set.
 	telegramSender := buildTelegramSender(ctx, deps.SettingsStore)
-	watchNotifiers := buildWatchNotifiers(telegramSender)
-	healthNotifiers := buildHealthNotifiers(telegramSender)
+	slackSender := buildSlackSender(ctx, deps.SettingsStore)
+	watchNotifiers := buildWatchNotifiers(telegramSender, slackSender)
+	healthNotifiers := buildHealthNotifiers(telegramSender, slackSender)
 
 	// Agent-first watch evaluator + stream (reactive on log ingestion)
 	watchEvaluator := watcher.NewWatchEvaluator(watchMetrics, deps.WatchStore)
@@ -516,12 +517,33 @@ func buildTelegramSender(ctx context.Context, ss store.SettingsStore) *notify.Te
 	})
 }
 
+// buildSlackSender returns a Slack sender whose webhook URL is read lazily from
+// the settings store on every send, so enabling/disabling Slack at runtime takes
+// effect without a restart. Send() silently no-ops when unconfigured.
+func buildSlackSender(ctx context.Context, ss store.SettingsStore) *notify.SlackSender {
+	return notify.NewSlackSender(func() *notify.SlackConfig {
+		if ss == nil {
+			return nil
+		}
+		cfg, err := ss.GetSlackConfig(ctx)
+		if err != nil || cfg == nil {
+			return nil
+		}
+		return &notify.SlackConfig{
+			WebhookURL: cfg.WebhookURL,
+			Enabled:    cfg.Enabled,
+		}
+	})
+}
+
 // buildWatchNotifiers assembles the watch-alert notifier list: the always-on
-// slog fallback, Telegram (no-op until configured), and a webhook if one is set.
-func buildWatchNotifiers(sender *notify.TelegramSender) []watcher.WatchAlertNotifier {
+// slog fallback, the chat channels (no-op until configured), and a webhook if
+// one is set.
+func buildWatchNotifiers(telegram *notify.TelegramSender, slack *notify.SlackSender) []watcher.WatchAlertNotifier {
 	notifiers := []watcher.WatchAlertNotifier{
 		&watcher.WatchLogNotifier{},
-		watcher.NewTelegramWatchNotifier(sender),
+		watcher.NewChatWatchNotifier(telegram),
+		watcher.NewChatWatchNotifier(slack),
 	}
 	if url := os.Getenv(alertWebhookEnv); url != "" {
 		notifiers = append(notifiers, watcher.NewWatchWebhookNotifier(url))
@@ -530,10 +552,11 @@ func buildWatchNotifiers(sender *notify.TelegramSender) []watcher.WatchAlertNoti
 }
 
 // buildHealthNotifiers assembles the health-check alert notifier list.
-func buildHealthNotifiers(sender *notify.TelegramSender) []healthcheck.HealthCheckAlertNotifier {
+func buildHealthNotifiers(telegram *notify.TelegramSender, slack *notify.SlackSender) []healthcheck.HealthCheckAlertNotifier {
 	notifiers := []healthcheck.HealthCheckAlertNotifier{
 		&healthcheck.HealthCheckLogNotifier{},
-		&telegramHealthNotifier{sender: sender},
+		&chatHealthNotifier{sender: telegram},
+		&chatHealthNotifier{sender: slack},
 	}
 	if url := os.Getenv(alertWebhookEnv); url != "" {
 		notifiers = append(notifiers, healthcheck.NewHealthCheckWebhookNotifier(url))
@@ -541,14 +564,20 @@ func buildHealthNotifiers(sender *notify.TelegramSender) []healthcheck.HealthChe
 	return notifiers
 }
 
-// telegramHealthNotifier adapts the Telegram sender to the health-check alert
-// notifier interface. It lives here rather than in internal/healthcheck so all
-// channel wiring stays in one place; the sender no-ops when Telegram is off.
-type telegramHealthNotifier struct {
-	sender *notify.TelegramSender
+// messageSender delivers a plain notification message to a chat channel.
+// Both *notify.TelegramSender and *notify.SlackSender satisfy it.
+type messageSender interface {
+	Send(ctx context.Context, message string) error
 }
 
-func (n *telegramHealthNotifier) NotifyHealthCheckAlert(ctx context.Context, alert *healthcheck.HealthCheckAlert) error {
+// chatHealthNotifier adapts a chat sender to the health-check alert notifier
+// interface. It lives here rather than in internal/healthcheck so all channel
+// wiring stays in one place; senders no-op when their channel is off.
+type chatHealthNotifier struct {
+	sender messageSender
+}
+
+func (n *chatHealthNotifier) NotifyHealthCheckAlert(ctx context.Context, alert *healthcheck.HealthCheckAlert) error {
 	if n == nil || n.sender == nil {
 		return nil
 	}

@@ -21,6 +21,7 @@ type SettingsStore struct {
 	MCPName          string
 	SamplingRules    []store.SamplingRule
 	TelegramConfig   *store.TelegramConfig
+	SlackConfig      *store.SlackConfig
 }
 
 // NewSettingsStore returns an initialised SettingsStore mock.
@@ -135,5 +136,21 @@ func (m *SettingsStore) SetTelegramConfig(_ context.Context, cfg store.TelegramC
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.TelegramConfig = &cfg
+	return nil
+}
+
+func (m *SettingsStore) GetSlackConfig(_ context.Context) (*store.SlackConfig, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.SlackConfig == nil {
+		return &store.SlackConfig{}, nil
+	}
+	return m.SlackConfig, nil
+}
+
+func (m *SettingsStore) SetSlackConfig(_ context.Context, cfg store.SlackConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.SlackConfig = &cfg
 	return nil
 }

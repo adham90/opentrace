@@ -618,6 +618,14 @@ func (m *mockSettingsStore) SetTelegramConfig(_ context.Context, _ store.Telegra
 	return nil
 }
 
+func (m *mockSettingsStore) GetSlackConfig(_ context.Context) (*store.SlackConfig, error) {
+	return &store.SlackConfig{}, nil
+}
+
+func (m *mockSettingsStore) SetSlackConfig(_ context.Context, _ store.SlackConfig) error {
+	return nil
+}
+
 // mockMCPActivityStore implements store.MCPActivityStore for testing.
 type mockMCPActivityStore struct {
 	mu     sync.Mutex

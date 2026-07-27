@@ -218,6 +218,8 @@ Create HTTP health checks that run on a schedule. The agent sees uptime percenta
 ### Set Up Alerts
 Create threshold watches on error rate, response time (mean or p95), log volume, error count, SQL count, cache hit rate, or service heartbeat. The agent can create watches for code it just deployed — self-monitoring its own changes.
 
+Watch and health-check alerts can be delivered to **Slack** or **Telegram** — see [`docs/notifications.md`](docs/notifications.md) for setup.
+
 ### Assess Code Risk
 Every file and endpoint gets a risk score based on error frequency, investigation history, and change velocity. Before modifying a file, the agent checks its production behavior.
 
@@ -275,8 +277,11 @@ Server-side environment variables (`.env` file):
 | `OPENTRACE_MAX_QUERY_ROWS` | `500` | Max rows returned from SQL queries |
 | `OPENTRACE_STATEMENT_TIMEOUT_MS` | `5000` | SQL query timeout in milliseconds |
 | `OPENTRACE_TRUSTED_PROXIES` | _(empty)_ | Comma-separated proxy IPs for rate limiting |
+| `OPENTRACE_ALERT_WEBHOOK_URL` | _(empty)_ | Generic JSON webhook for watch + health-check alerts |
 
 See [`.env.example`](.env.example) for all options.
+
+Alert delivery to Slack and Telegram is configured at runtime, not via environment variables — see [`docs/notifications.md`](docs/notifications.md).
 
 ---
 

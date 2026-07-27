@@ -243,3 +243,31 @@ func (s *settingsStore) SetTelegramConfig(ctx context.Context, cfg store.Telegra
 	}
 	return nil
 }
+
+const slackConfigKey = "slack_config"
+
+func (s *settingsStore) GetSlackConfig(ctx context.Context) (*store.SlackConfig, error) {
+	raw, err := s.getSetting(ctx, slackConfigKey)
+	if errors.Is(err, sql.ErrNoRows) || raw == "" {
+		return &store.SlackConfig{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying slack_config: %w", err)
+	}
+	var cfg store.SlackConfig
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return nil, fmt.Errorf("unmarshaling slack_config: %w", err)
+	}
+	return &cfg, nil
+}
+
+func (s *settingsStore) SetSlackConfig(ctx context.Context, cfg store.SlackConfig) error {
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshaling slack_config: %w", err)
+	}
+	if err := s.upsertSetting(ctx, slackConfigKey, string(raw)); err != nil {
+		return fmt.Errorf("upserting slack_config: %w", err)
+	}
+	return nil
+}

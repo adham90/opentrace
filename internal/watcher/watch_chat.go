@@ -8,37 +8,38 @@ import (
 	"github.com/adham90/opentrace/pkg/store"
 )
 
-// messageSender delivers a plain notification message to a channel (e.g.
-// Telegram). *notify.TelegramSender satisfies this, so the watcher package can
-// bridge to it without importing internal/notify.
+// messageSender delivers a plain notification message to a chat channel.
+// *notify.TelegramSender and *notify.SlackSender both satisfy this, so the
+// watcher package can bridge to them without importing internal/notify.
 type messageSender interface {
 	Send(ctx context.Context, message string) error
 }
 
-// TelegramWatchNotifier adapts a messageSender to the WatchAlertNotifier
-// interface by rendering the alert as an HTML message. The underlying sender is
-// expected to silently skip delivery when its channel is not configured, so
-// including this notifier unconditionally is safe.
-type TelegramWatchNotifier struct {
+// ChatWatchNotifier adapts a messageSender to the WatchAlertNotifier interface
+// by rendering the alert as an HTML message (the Slack sender converts that to
+// mrkdwn on its way out). The underlying sender is expected to silently skip
+// delivery when its channel is not configured, so including this notifier
+// unconditionally is safe.
+type ChatWatchNotifier struct {
 	sender messageSender
 }
 
-// NewTelegramWatchNotifier wraps a message sender as a watch-alert notifier.
+// NewChatWatchNotifier wraps a message sender as a watch-alert notifier.
 // A nil sender yields a notifier that no-ops (never panics), so callers can
 // wire it in even when the channel is unconfigured.
-func NewTelegramWatchNotifier(sender messageSender) *TelegramWatchNotifier {
-	return &TelegramWatchNotifier{sender: sender}
+func NewChatWatchNotifier(sender messageSender) *ChatWatchNotifier {
+	return &ChatWatchNotifier{sender: sender}
 }
 
 // NotifyWatchAlert renders and delivers the alert. Safe for concurrent use.
-func (n *TelegramWatchNotifier) NotifyWatchAlert(ctx context.Context, alert *store.WatchAlert, watch *store.Watch) error {
+func (n *ChatWatchNotifier) NotifyWatchAlert(ctx context.Context, alert *store.WatchAlert, watch *store.Watch) error {
 	if n == nil || n.sender == nil {
 		return nil
 	}
 	return n.sender.Send(ctx, formatWatchAlertMessage(alert, watch))
 }
 
-// formatWatchAlertMessage renders a watch alert as a Telegram-friendly HTML message.
+// formatWatchAlertMessage renders a watch alert as a chat-friendly HTML message.
 func formatWatchAlertMessage(alert *store.WatchAlert, watch *store.Watch) string {
 	env := alert.Environment
 	service := ""

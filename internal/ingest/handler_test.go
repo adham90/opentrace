@@ -118,6 +118,12 @@ func (m *mockSettingsStore) GetTelegramConfig(context.Context) (*store.TelegramC
 func (m *mockSettingsStore) SetTelegramConfig(context.Context, store.TelegramConfig) error {
 	return nil
 }
+func (m *mockSettingsStore) GetSlackConfig(context.Context) (*store.SlackConfig, error) {
+	return &store.SlackConfig{}, nil
+}
+func (m *mockSettingsStore) SetSlackConfig(context.Context, store.SlackConfig) error {
+	return nil
+}
 
 // mockWatchStream satisfies WatchStreamEvaluator.
 type mockWatchStream struct {
