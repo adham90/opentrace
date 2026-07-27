@@ -1,27 +1,62 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
-
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/mcp/envscope"
 )
 
 // ---------------------------------------------------------------------------
 // Helper: get query executor from registry
 // ---------------------------------------------------------------------------
 
-func getQueryExecutor(registry *connector.Registry) (connector.QueryExecutor, *CallToolResult) {
+// getQueryExecutor returns the active database connector's query executor,
+// after enforcing that the caller's env scope permits the connector's
+// environment. The registry keys connectors by type (one per type), so a token
+// scoped to "staging" must not be allowed to run queries against a connector
+// registered for "production".
+func getQueryExecutor(ctx context.Context, registry *connector.Registry) (connector.QueryExecutor, *CallToolResult) {
 	ds := registry.Get(connector.ConnectorDatabase)
 	if ds == nil {
 		return nil, NewToolResultError("No database connector is active. Connect a PostgreSQL data source first.")
+	}
+	if errResult := enforceConnectorEnvScope(ctx, ds); errResult != nil {
+		return nil, errResult
 	}
 	qe, ok := ds.(connector.QueryExecutor)
 	if !ok {
 		return nil, NewToolResultError("The active database connector does not support direct queries.")
 	}
 	return qe, nil
+}
+
+// enforceConnectorEnvScope rejects the call when the caller's env scope does
+// not permit the connector's pinned environment. Connectors with an empty or
+// "*" environment are shared infrastructure and always allowed. Returns nil
+// (allowed) when no scope is attached — the unit-test / non-MCP path.
+func enforceConnectorEnvScope(ctx context.Context, ds connector.DataSource) *CallToolResult {
+	es, ok := ds.(connector.EnvironmentScoped)
+	if !ok {
+		return nil
+	}
+	env := es.Environment()
+	if env == "" || env == envscope.WildcardEnv {
+		return nil
+	}
+	scope, attached := envscope.FromOK(ctx)
+	if !attached {
+		return nil
+	}
+	if !scope.Allows(env) {
+		return NewToolResultError(fmt.Sprintf(
+			"not authorized for the database connector's environment %q (token allows: %v)",
+			env, scope.Allowed,
+		))
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

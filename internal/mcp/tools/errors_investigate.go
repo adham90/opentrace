@@ -50,6 +50,13 @@ func ErrorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 		return NewToolResultError("Either log_id (positive integer) or trace_id (string) is required for the investigate action"), nil
 	}
 
+	// Env-scope gate: the anchor is resolved by log_id/trace_id (no env
+	// filter), so deny if the caller's token can't read the anchor's env —
+	// otherwise a cross-env id would leak production data.
+	if !scopeAllowsEnv(ctx, anchor.Environment) {
+		return NewToolResultError("log entry not found"), nil
+	}
+
 	resp := make(map[string]any)
 
 	// 1. Core log entry.
@@ -142,9 +149,10 @@ func ErrorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 		go func() {
 			defer wg.Done()
 			traceEntries, _ := deps.LogStore.Search(ctx, store.LogSearchParams{
-				TraceID: anchor.TraceID,
-				Limit:   30,
-				SortAsc: true,
+				TraceID:     anchor.TraceID,
+				Environment: anchor.Environment,
+				Limit:       30,
+				SortAsc:     true,
 			})
 			for _, e := range traceEntries {
 				if e.ID == anchor.ID {
@@ -172,17 +180,19 @@ func ErrorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 	go func() {
 		defer wg.Done()
 		beforeEntries, _ := deps.LogStore.Search(ctx, store.LogSearchParams{
-			End:     &anchor.Timestamp,
-			Service: anchor.Service,
-			Limit:   5,
-			SortAsc: false,
+			End:         &anchor.Timestamp,
+			Service:     anchor.Service,
+			Environment: anchor.Environment,
+			Limit:       5,
+			SortAsc:     false,
 		})
 		afterStart := anchor.Timestamp.Add(time.Millisecond)
 		afterEntries, _ := deps.LogStore.Search(ctx, store.LogSearchParams{
-			Start:   &afterStart,
-			Service: anchor.Service,
-			Limit:   5,
-			SortAsc: true,
+			Start:       &afterStart,
+			Service:     anchor.Service,
+			Environment: anchor.Environment,
+			Limit:       5,
+			SortAsc:     true,
 		})
 
 		for i := len(beforeEntries) - 1; i >= 0; i-- {

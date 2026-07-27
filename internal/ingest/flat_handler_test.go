@@ -7,11 +7,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/adham90/opentrace/internal/logstore/adapter"
 	"github.com/adham90/opentrace/internal/logstore/engine"
 	logsingest "github.com/adham90/opentrace/internal/logstore/ingest"
 )
 
-func newTestFlatHandler(t *testing.T) *FlatHandler {
+// newTestFlatHandler builds a *Handler backed by a real engine (via the store
+// adapter) so flat ingest exercises the same pipeline as production.
+func newTestFlatHandler(t *testing.T) *Handler {
 	t.Helper()
 	dir := t.TempDir()
 	e, err := engine.NewStore(dir, nil, logsingest.PIIConfig{})
@@ -19,7 +22,7 @@ func newTestFlatHandler(t *testing.T) *FlatHandler {
 		t.Fatalf("NewStore: %v", err)
 	}
 	t.Cleanup(func() { e.Close() })
-	return &FlatHandler{Engine: e}
+	return &Handler{LogStore: adapter.New(e)}
 }
 
 func TestFlatIngest_SingleEntry(t *testing.T) {
@@ -40,8 +43,8 @@ func TestFlatIngest_SingleEntry(t *testing.T) {
 
 	h.HandleFlatIngest(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status: want 200, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status: want 201, got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	var resp map[string]any
@@ -64,19 +67,14 @@ func TestFlatIngest_BatchArray(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.HandleFlatIngest(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status: want 200, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status: want 201, got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	var resp map[string]any
 	json.Unmarshal(rec.Body.Bytes(), &resp)
 	if resp["count"].(float64) != 3 {
 		t.Errorf("count: want 3, got %v", resp["count"])
-	}
-
-	ids := resp["ids"].([]any)
-	if len(ids) != 3 {
-		t.Errorf("ids: want 3, got %d", len(ids))
 	}
 }
 
@@ -107,8 +105,8 @@ func TestFlatIngest_RichRequest(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.HandleFlatIngest(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status: want 200, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status: want 201, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -134,7 +132,35 @@ func TestFlatIngest_NoTimestamp(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.HandleFlatIngest(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status: want 200, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status: want 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestFlatIngest_FractionalDurations reproduces the Node SDK contract bug: the
+// SDK sends fractional duration_ms/db_ms (performance.now()), which previously
+// made json.Unmarshal into an int field fail and rejected the WHOLE batch.
+func TestFlatIngest_FractionalDurations(t *testing.T) {
+	h := newTestFlatHandler(t)
+
+	// Mixed batch: a request event with fractional timings plus a plain log.
+	body := `[
+		{"ts":"2026-04-04T12:41:00Z","level":"info","service":"api","message":"GET /x 200 12.35ms","event_type":"http.request","status":200,"duration_ms":12.35,"db_ms":3.14,"db_count":2,"render_ms":0.5},
+		{"ts":"2026-04-04T12:41:01Z","level":"info","service":"api","message":"plain log"}
+	]`
+
+	req := httptest.NewRequest("POST", "/api/v2/logs", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	h.HandleFlatIngest(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("fractional durations rejected: status %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp["count"].(float64) != 2 {
+		t.Errorf("count: want 2 (whole batch stored), got %v", resp["count"])
 	}
 }

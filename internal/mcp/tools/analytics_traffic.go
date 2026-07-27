@@ -76,7 +76,20 @@ func HandleTraffic(ctx context.Context, d AnalyticsDeps, args map[string]any) (*
 		Until:   now,
 	})
 	if err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to get traffic summary: %v", err)), nil
+		// Never leak raw driver/SQL errors (e.g. "no such table: request_summaries")
+		// to the MCP client. The analytics source tables may be absent; degrade
+		// to an empty, clearly-labelled result instead of erroring.
+		return JSONResult(map[string]any{
+			"time_range": TimeRange{
+				Start: since.Format(time.RFC3339),
+				End:   now.Format(time.RFC3339),
+			},
+			"summary":             TrafficSummary{},
+			"status_breakdown":    map[string]int{},
+			"method_breakdown":    map[string]int{},
+			"analytics_available": false,
+			"note":                "traffic analytics are not available (aggregation is disabled or the source data is empty)",
+		})
 	}
 
 	resp := &TrafficResponse{

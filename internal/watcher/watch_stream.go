@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/adham90/opentrace/internal/safe"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -66,7 +67,7 @@ func (s *WatchStreamEvaluator) OnLogsReceived(entries []store.LogEntry) {
 	case s.sem <- struct{}{}:
 		go func() {
 			defer func() { <-s.sem }()
-			s.evaluateMatching(services)
+			safe.Run("watcher.evaluateMatching", func() { s.evaluateMatching(services) })
 		}()
 	default:
 		// Semaphore full — skip to prevent goroutine explosion.

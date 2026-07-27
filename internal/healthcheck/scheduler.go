@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/adham90/opentrace/internal/metrics"
+	"github.com/adham90/opentrace/internal/safe"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -203,12 +204,17 @@ func (s *Scheduler) tick(ctx context.Context) {
 		s.lastRun[hc.ID] = now
 		s.mu.Unlock()
 
-		// Run check in a goroutine with bounded concurrency
+		// Run check in a goroutine with bounded concurrency. Tracked in the
+		// WaitGroup so Stop() waits for in-flight probes to finish before the DB
+		// closes (they call RecordResult). Adds happen on this run-loop goroutine
+		// before its own wg.Done, so there is no Add-after-Wait race.
 		select {
 		case s.sem <- struct{}{}:
+			s.wg.Add(1)
 			go func(hc store.HealthCheck) {
+				defer s.wg.Done()
 				defer func() { <-s.sem }()
-				s.runCheck(ctx, hc)
+				safe.Run("healthcheck.runCheck", func() { s.runCheck(ctx, hc) })
 			}(hc)
 		default:
 			slog.Debug("healthcheck: concurrency limit reached, skipping",

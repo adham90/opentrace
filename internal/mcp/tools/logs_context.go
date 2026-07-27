@@ -41,11 +41,19 @@ func LogsContext(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 		return NewToolResultError(fmt.Sprintf("log entry %d not found: %v", int64(logID), err)), nil
 	}
 
+	// Env-scope gate: the anchor is fetched by ID, bypassing env-filtered
+	// queries. Deny (as "not found") if the caller's token can't read the
+	// anchor's environment so a cross-env log_id can't be probed.
+	if !scopeAllowsEnv(ctx, anchor.Environment) {
+		return NewToolResultError(fmt.Sprintf("log entry %d not found", int64(logID))), nil
+	}
+
 	// Fetch entries before (older timestamps, i.e. timestamp < anchor, order DESC, take `before`).
 	beforeParams := store.LogSearchParams{
-		End:     &anchor.Timestamp,
-		Limit:   before,
-		SortAsc: false, // newest first so we get the closest entries
+		End:         &anchor.Timestamp,
+		Environment: anchor.Environment,
+		Limit:       before,
+		SortAsc:     false, // newest first so we get the closest entries
 	}
 	if sameService && anchor.Service != "" {
 		beforeParams.Service = anchor.Service
@@ -72,9 +80,10 @@ func LogsContext(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 
 	// Fetch entries after (newer timestamps, i.e. timestamp > anchor, order ASC, take `after`).
 	afterParams := store.LogSearchParams{
-		Start:   &anchor.Timestamp,
-		Limit:   after + 1, // +1 because anchor might be included
-		SortAsc: true,
+		Start:       &anchor.Timestamp,
+		Environment: anchor.Environment,
+		Limit:       after + 1, // +1 because anchor might be included
+		SortAsc:     true,
 	}
 	if sameService && anchor.Service != "" {
 		afterParams.Service = anchor.Service
@@ -173,10 +182,18 @@ func LogsAttributes(ctx context.Context, args map[string]any, deps LogsDeps) (*C
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("invalid time_range: %v", err)), nil
 	}
+	// Resolve env scope so attribute discovery only reveals values from
+	// environments the caller's token is authorized for.
+	environment, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
 	now := time.Now().UTC()
 	params := store.LogCountParams{
-		Since: now.Add(-duration),
-		Until: now,
+		Since:       now.Add(-duration),
+		Until:       now,
+		Environment: environment,
 	}
 	params.Service = ArgString(args, "service")
 

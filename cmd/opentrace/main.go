@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 	"github.com/adham90/opentrace/internal/backup"
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/cryptoutil"
 	"github.com/adham90/opentrace/internal/healthcheck"
 	"github.com/adham90/opentrace/internal/ingest"
 	"github.com/adham90/opentrace/internal/jobs"
@@ -29,6 +32,8 @@ import (
 	logadapter "github.com/adham90/opentrace/internal/logstore/adapter"
 	"github.com/adham90/opentrace/internal/logstore/engine"
 	logsingest "github.com/adham90/opentrace/internal/logstore/ingest"
+	"github.com/adham90/opentrace/internal/notify"
+	"github.com/adham90/opentrace/internal/safe"
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
 	"github.com/adham90/opentrace/internal/version"
@@ -197,6 +202,40 @@ func runMCP() error {
 
 
 
+// ensureAPIKey guarantees `serve` does not silently accept unauthenticated
+// ingest/CLI requests. A key from OPENTRACE_API_KEY or the settings DB (e.g.
+// provisioned by `opentrace init`) is left as-is. If none exists, one is
+// generated, persisted, and printed — unless the operator explicitly opts out
+// via OPENTRACE_DISABLE_AUTH=true, in which case we run open but warn loudly.
+func ensureAPIKey(ctx context.Context, deps *server.Deps) {
+	if deps.Cfg != nil && deps.Cfg.APIKey != "" {
+		return // supplied via OPENTRACE_API_KEY
+	}
+	if deps.SettingsStore != nil {
+		if key, err := deps.SettingsStore.GetAPIKey(ctx); err == nil && key != "" {
+			return // already provisioned
+		}
+	}
+	if os.Getenv("OPENTRACE_DISABLE_AUTH") == "true" {
+		slog.Warn("AUTH DISABLED: ingest and CLI-read endpoints accept unauthenticated requests (OPENTRACE_DISABLE_AUTH=true). Do not expose this instance to untrusted networks.")
+		return
+	}
+	if deps.SettingsStore == nil {
+		slog.Error("no API key configured and no settings store to provision one; set OPENTRACE_API_KEY or OPENTRACE_DISABLE_AUTH=true")
+		return
+	}
+	key, err := cryptoutil.GenerateAPIKey()
+	if err != nil {
+		slog.Error("failed to auto-generate API key", "error", err)
+		return
+	}
+	if err := deps.SettingsStore.SetAPIKey(ctx, key); err != nil {
+		slog.Error("failed to persist auto-generated API key", "error", err)
+		return
+	}
+	slog.Warn("no API key was configured — generated one automatically; configure your SDKs with it", "api_key", key)
+}
+
 // run starts the full OpenTrace server. The initialization sequence is:
 //
 //  1. initApp          — load .env + config, create data dir, open SQLite,
@@ -228,12 +267,19 @@ func run() error {
 		defer logEngine.Close()
 	}
 
-	// Start hourly log seal goroutine
-	go func() {
-		// Calculate time until the next hour boundary
+	// Never silently run with ingest/CLI endpoints wide open.
+	ensureAPIKey(ctx, deps)
+
+	// Start hourly log seal goroutine (panic-isolated; ctx-aware so shutdown is
+	// not blocked by the initial wait and it never seals a closing engine).
+	safe.Go("hourly-seal", func() {
 		now := time.Now().UTC()
 		nextHour := now.Truncate(time.Hour).Add(time.Hour)
-		time.Sleep(time.Until(nextHour))
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Until(nextHour)):
+		}
 
 		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()
@@ -247,7 +293,7 @@ func run() error {
 				}
 			}
 		}
-	}()
+	})
 
 	// Agent-first watch components
 	watchMetrics := watcher.NewWatchMetrics(deps.LogStore)
@@ -263,13 +309,23 @@ func run() error {
 	})
 	deps.ToolCatalog = toolCatalog
 
+	// Build alert notifiers from settings. Without this the watch/health
+	// evaluators only log to slog and never deliver anything. Telegram config is
+	// read lazily per-send from the settings store (so runtime changes take
+	// effect without restart); webhook URLs come from the environment. Every
+	// path degrades gracefully: the Telegram sender no-ops when unconfigured and
+	// webhook notifiers are only added when a URL is set.
+	telegramSender := buildTelegramSender(ctx, deps.SettingsStore)
+	watchNotifiers := buildWatchNotifiers(telegramSender)
+	healthNotifiers := buildHealthNotifiers(telegramSender)
+
 	// Agent-first watch evaluator + stream (reactive on log ingestion)
 	watchEvaluator := watcher.NewWatchEvaluator(watchMetrics, deps.WatchStore)
 	watchEvidenceBuilder := watcher.NewWatchEvidenceBuilder(deps.LogStore, watchMetrics)
-	watchStream := watcher.NewWatchStreamEvaluator(ctx, deps.WatchStore, watchEvaluator, watchEvidenceBuilder, nil)
+	watchStream := watcher.NewWatchStreamEvaluator(ctx, deps.WatchStore, watchEvaluator, watchEvidenceBuilder, watchNotifiers)
 
 	// Create health check scheduler early so we can inject its reliability data into the web server.
-	hcSched := healthcheck.NewScheduler(deps.HealthCheckStore, 0)
+	hcSched := healthcheck.NewScheduler(deps.HealthCheckStore, 0, healthNotifiers...)
 
 	// Create job queue early so it can be injected into deps
 	jobQueue := jobs.NewQueue(deps.DB)
@@ -309,6 +365,7 @@ func run() error {
 		Evaluator:       watchEvaluator,
 		EvidenceBuilder: watchEvidenceBuilder,
 		SessionManager:  watchSessionMgr,
+		Notifiers:       watchNotifiers,
 	})
 	watchSched.Start(ctx)
 
@@ -322,12 +379,33 @@ func run() error {
 	// Register job handlers
 	registerBackgroundJobs(jobWorker, deps)
 
+	// Job-queue retention: prune old completed/dead jobs and VACUUM to reclaim
+	// disk. Queue.Prune previously had no caller (jobs table grew unbounded) and
+	// the VACUUM path was dead code. VACUUM locks the DB, so this runs on a slow
+	// recurring schedule via the worker — never per-request.
+	jobWorker.Register("retention:jobs", func(ctx context.Context, _ json.RawMessage) error {
+		_, err := jobs.RunJobRetention(ctx, deps.DB, jobRetentionWindow)
+		return err
+	})
+
 	// Register recurring schedules
 	jobScheduler.Add(jobs.Schedule{Name: "session-cleanup", JobType: "cleanup:sessions", Interval: 15 * time.Minute})
 	jobScheduler.Add(jobs.Schedule{Name: "stale-servers", JobType: "cleanup:stale_servers", Interval: 60 * time.Second})
 	jobScheduler.Add(jobs.Schedule{Name: "stale-traces", JobType: "cleanup:stale_traces", Interval: 60 * time.Second})
 	jobScheduler.Add(jobs.Schedule{Name: "data-retention", JobType: "retention:prune", Interval: 1 * time.Hour})
+	jobScheduler.Add(jobs.Schedule{Name: "jobs-retention", JobType: "retention:jobs", Interval: 6 * time.Hour})
 	jobScheduler.Add(jobs.Schedule{Name: "aggregation", JobType: "aggregate:all", Interval: 5 * time.Minute})
+
+	// Reclaim jobs left 'running' by a previous crash before the worker starts.
+	// ClaimNext has no lease, so a crash mid-job wedges that row 'running'
+	// forever and the scheduler then skips the job type indefinitely. Running
+	// this before Start() is safe: no worker is live yet, so any 'running' row
+	// is necessarily orphaned.
+	if n, err := jobQueue.ReapOrphaned(ctx, 0); err != nil {
+		slog.Error("reaping orphaned jobs on startup failed", "error", err)
+	} else if n > 0 {
+		slog.Info("reclaimed orphaned running jobs on startup", "count", n)
+	}
 
 	jobWorker.Start(ctx)
 	jobScheduler.Start(ctx)
@@ -395,15 +473,102 @@ func run() error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.Error("SSE shutdown error", "error", err)
-	}
-
+	// Drain the HTTP server FIRST so all in-flight handlers finish before we
+	// tear down app-level channels. srv.Shutdown() closes the audit channel;
+	// doing that while a mutating request is still running would panic on a
+	// send-to-closed-channel (even with the select/default) and lose the audit.
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		slog.Error("HTTP shutdown error", "error", err)
 	}
 
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("SSE shutdown error", "error", err)
+	}
+
 	return nil
+}
+
+// jobRetentionWindow is how long completed/dead jobs are kept before the
+// recurring retention job prunes them.
+const jobRetentionWindow = 7 * 24 * time.Hour
+
+// alertWebhookEnv names the environment variable holding an optional webhook URL
+// that receives both watch-rule and health-check alerts. Unset = no webhook.
+const alertWebhookEnv = "OPENTRACE_ALERT_WEBHOOK_URL"
+
+// buildTelegramSender returns a Telegram sender whose config is read lazily from
+// the settings store on every send, so enabling/disabling Telegram at runtime
+// takes effect without a restart. Send() silently no-ops when unconfigured.
+func buildTelegramSender(ctx context.Context, ss store.SettingsStore) *notify.TelegramSender {
+	return notify.NewTelegramSender(func() *notify.TelegramConfig {
+		if ss == nil {
+			return nil
+		}
+		cfg, err := ss.GetTelegramConfig(ctx)
+		if err != nil || cfg == nil {
+			return nil
+		}
+		return &notify.TelegramConfig{
+			BotToken: cfg.BotToken,
+			ChatID:   cfg.ChatID,
+			Enabled:  cfg.Enabled,
+		}
+	})
+}
+
+// buildWatchNotifiers assembles the watch-alert notifier list: the always-on
+// slog fallback, Telegram (no-op until configured), and a webhook if one is set.
+func buildWatchNotifiers(sender *notify.TelegramSender) []watcher.WatchAlertNotifier {
+	notifiers := []watcher.WatchAlertNotifier{
+		&watcher.WatchLogNotifier{},
+		watcher.NewTelegramWatchNotifier(sender),
+	}
+	if url := os.Getenv(alertWebhookEnv); url != "" {
+		notifiers = append(notifiers, watcher.NewWatchWebhookNotifier(url))
+	}
+	return notifiers
+}
+
+// buildHealthNotifiers assembles the health-check alert notifier list.
+func buildHealthNotifiers(sender *notify.TelegramSender) []healthcheck.HealthCheckAlertNotifier {
+	notifiers := []healthcheck.HealthCheckAlertNotifier{
+		&healthcheck.HealthCheckLogNotifier{},
+		&telegramHealthNotifier{sender: sender},
+	}
+	if url := os.Getenv(alertWebhookEnv); url != "" {
+		notifiers = append(notifiers, healthcheck.NewHealthCheckWebhookNotifier(url))
+	}
+	return notifiers
+}
+
+// telegramHealthNotifier adapts the Telegram sender to the health-check alert
+// notifier interface. It lives here rather than in internal/healthcheck so all
+// channel wiring stays in one place; the sender no-ops when Telegram is off.
+type telegramHealthNotifier struct {
+	sender *notify.TelegramSender
+}
+
+func (n *telegramHealthNotifier) NotifyHealthCheckAlert(ctx context.Context, alert *healthcheck.HealthCheckAlert) error {
+	if n == nil || n.sender == nil {
+		return nil
+	}
+	return n.sender.Send(ctx, formatHealthCheckAlertMessage(alert))
+}
+
+// formatHealthCheckAlertMessage renders a health-check transition as HTML for Telegram.
+func formatHealthCheckAlertMessage(alert *healthcheck.HealthCheckAlert) string {
+	emoji := "⚠️"
+	if alert.CurrentStatus == store.HealthCheckUp {
+		emoji = "✅"
+	}
+	msg := fmt.Sprintf(
+		"%s <b>Health check %s</b>\n<b>Name:</b> %s\n<b>URL:</b> %s\n<b>Status:</b> %s → %s",
+		emoji, alert.CurrentStatus, alert.HealthCheckName, alert.URL, alert.PreviousStatus, alert.CurrentStatus,
+	)
+	if alert.ErrorMessage != "" {
+		msg += "\n<b>Error:</b> " + alert.ErrorMessage
+	}
+	return msg
 }
 
 // runBackup creates a safe backup of the SQLite database.
@@ -528,8 +693,19 @@ func startUnixSocketListener(socketPath string, handler *ingest.Handler) (net.Li
 		return nil, fmt.Errorf("listen unix %s: %w", socketPath, err)
 	}
 
-	// Set permissions so any local user can connect
-	if err := os.Chmod(socketPath, 0666); err != nil {
+	// Restrict to owner+group. The socket routes straight into log ingestion
+	// with no API-key check, so world-writable (0666) let any local user inject
+	// logs. ponytail: 0660 shares with a co-located app via a common group; set
+	// OPENTRACE_SOCKET_MODE (octal) to override if a different arrangement is needed.
+	mode := os.FileMode(0o660)
+	if v := os.Getenv("OPENTRACE_SOCKET_MODE"); v != "" {
+		if parsed, err := strconv.ParseUint(v, 8, 32); err == nil {
+			mode = os.FileMode(parsed)
+		} else {
+			slog.Warn("invalid OPENTRACE_SOCKET_MODE, using 0660", "value", v, "error", err)
+		}
+	}
+	if err := os.Chmod(socketPath, mode); err != nil {
 		slog.Warn("failed to chmod unix socket", "path", socketPath, "error", err)
 	}
 

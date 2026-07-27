@@ -14,7 +14,7 @@ import (
 func buildGateway(deps Deps, isAdmin bool, b *CatalogBuilder) *Gateway {
 	gw := NewGateway()
 
-	registerReadOnlyTools(gw, deps, b)
+	registerReadOnlyTools(gw, deps, isAdmin, b)
 	if isAdmin {
 		registerWriteTools(gw, deps, b)
 	}
@@ -22,8 +22,9 @@ func buildGateway(deps Deps, isAdmin bool, b *CatalogBuilder) *Gateway {
 	return gw
 }
 
-// registerReadOnlyTools adds read-only tools to the gateway.
-func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
+// registerReadOnlyTools adds read-only tools to the gateway. isAdmin gates the
+// destructive kill_query action of the (otherwise read) database tool.
+func registerReadOnlyTools(gw *Gateway, deps Deps, isAdmin bool, b *CatalogBuilder) {
 	// --- connectors ---
 	gw.Register("connectors",
 		wrapHandler(deps, "connectors", tools.ConnectorsHandler(tools.ConnectorsDeps{
@@ -49,6 +50,7 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 		wrapHandler(deps, "database", tools.DatabaseHandler(tools.DatabaseDeps{
 			Registry: deps.Registry,
 			LogStore: deps.LogStore,
+			IsAdmin:  isAdmin,
 		})),
 		GatewayEntry{
 			Description: "Database introspection and management",

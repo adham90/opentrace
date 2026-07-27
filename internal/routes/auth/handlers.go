@@ -20,6 +20,13 @@ type handler struct {
 	cfg        *config.Config
 
 	loginTracker *loginTracker
+
+	// firstAdminMu serializes the "no users yet → create first admin" path so
+	// two concurrent /connect requests can't both pass the Count()==0 check and
+	// each create an admin. ponytail: process-level lock — sufficient for the
+	// single-binary self-hosted deployment; a DB partial-unique index would be
+	// needed for a multi-process setup.
+	firstAdminMu sync.Mutex
 }
 
 // ── Login tracker (brute-force protection) ────────────────────

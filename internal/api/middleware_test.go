@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -545,106 +544,6 @@ func TestRequireAdmin_AdminUser_PassesThrough(t *testing.T) {
 	}
 }
 
-// ---------- RequireAdminAPI (JSON middleware) ----------
-
-func TestRequireAdminAPI_NoUser_Returns401(t *testing.T) {
-	handler := RequireAdminAPI(noReadHandler())
-
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/settings", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", rec.Code)
-	}
-	errMsg := decodeErrorJSON(t, rec.Body.Bytes())
-	if errMsg != "authentication required" {
-		t.Fatalf("expected error 'authentication required', got %q", errMsg)
-	}
-}
-
-func TestRequireAdminAPI_NonAdmin_Returns403(t *testing.T) {
-	handler := RequireAdminAPI(noReadHandler())
-
-	member := &store.User{ID: "user-2", Email: "viewer@test.com", Role: store.RoleMember, IsActive: true}
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/settings", nil)
-	req = req.WithContext(server.WithUser(req.Context(), member))
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d", rec.Code)
-	}
-	errMsg := decodeErrorJSON(t, rec.Body.Bytes())
-	if errMsg != "admin access required" {
-		t.Fatalf("expected error 'admin access required', got %q", errMsg)
-	}
-}
-
-func TestRequireAdminAPI_Admin_PassesThrough(t *testing.T) {
-	handler := RequireAdminAPI(noReadHandler())
-
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/settings", nil)
-	req = withAdmin(req)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-}
-
-// ---------- RequireAuthAPI ----------
-
-func TestRequireAuthAPI_NoUser_Returns401(t *testing.T) {
-	handler := RequireAuthAPI(noReadHandler())
-
-	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", rec.Code)
-	}
-	errMsg := decodeErrorJSON(t, rec.Body.Bytes())
-	if errMsg != "authentication required" {
-		t.Fatalf("expected error 'authentication required', got %q", errMsg)
-	}
-}
-
-func TestRequireAuthAPI_AnyUser_PassesThrough(t *testing.T) {
-	handler := RequireAuthAPI(noReadHandler())
-
-	member := &store.User{ID: "user-3", Email: "anyone@test.com", Role: store.RoleMember, IsActive: true}
-	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
-	req = req.WithContext(server.WithUser(req.Context(), member))
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-}
-
-func TestRequireAuthAPI_AdminUser_PassesThrough(t *testing.T) {
-	handler := RequireAuthAPI(noReadHandler())
-
-	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
-	req = withAdmin(req)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-}
-
 // decodeFullJSON decodes a JSON response body into a generic map.
 func decodeFullJSON(t *testing.T, body []byte) map[string]any {
 	t.Helper()
@@ -653,89 +552,6 @@ func decodeFullJSON(t *testing.T, body []byte) map[string]any {
 		t.Fatalf("decode JSON response: %v (body=%q)", err, body)
 	}
 	return resp
-}
-
-// ---------- formatJSONError ----------
-
-func TestFormatJSONError_SyntaxError(t *testing.T) {
-	err := &json.SyntaxError{Offset: 42}
-	msg := formatJSONError(err, "body")
-	expected := "invalid JSON body: syntax error at byte offset 42"
-	if msg != expected {
-		t.Fatalf("expected %q, got %q", expected, msg)
-	}
-}
-
-func TestFormatJSONError_UnmarshalTypeError(t *testing.T) {
-	err := &json.UnmarshalTypeError{
-		Field: "name",
-		Type:  reflect.TypeOf(""),
-		Value: "number",
-	}
-	msg := formatJSONError(err, "payload")
-	if !strings.Contains(msg, `field "name"`) {
-		t.Fatalf("expected field name in message, got %q", msg)
-	}
-	if !strings.Contains(msg, "string") {
-		t.Fatalf("expected type 'string' in message, got %q", msg)
-	}
-	if !strings.Contains(msg, "number") {
-		t.Fatalf("expected value 'number' in message, got %q", msg)
-	}
-}
-
-func TestFormatJSONError_GenericError(t *testing.T) {
-	err := fmt.Errorf("unexpected EOF")
-	msg := formatJSONError(err, "request")
-	expected := "invalid JSON request: unexpected EOF"
-	if msg != expected {
-		t.Fatalf("expected %q, got %q", expected, msg)
-	}
-}
-
-// ---------- writeDetailedError ----------
-
-func TestWriteDetailedError_WithDetails(t *testing.T) {
-	rec := httptest.NewRecorder()
-	details := map[string]any{"field": "email", "reason": "required"}
-	writeDetailedError(rec, http.StatusBadRequest, "validation failed", "VALIDATION_ERROR", details)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rec.Code)
-	}
-	resp := decodeFullJSON(t, rec.Body.Bytes())
-	if resp["error"] != "validation failed" {
-		t.Fatalf("expected error 'validation failed', got %v", resp["error"])
-	}
-	if resp["code"] != "VALIDATION_ERROR" {
-		t.Fatalf("expected code 'VALIDATION_ERROR', got %v", resp["code"])
-	}
-	detailsOut, ok := resp["details"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected details map, got %T", resp["details"])
-	}
-	if detailsOut["field"] != "email" {
-		t.Fatalf("expected details.field 'email', got %v", detailsOut["field"])
-	}
-}
-
-func TestWriteDetailedError_NilDetails(t *testing.T) {
-	rec := httptest.NewRecorder()
-	writeDetailedError(rec, http.StatusInternalServerError, "internal error", "INTERNAL", nil)
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d", rec.Code)
-	}
-	resp := decodeFullJSON(t, rec.Body.Bytes())
-	if resp["error"] != "internal error" {
-		t.Fatalf("expected error 'internal error', got %v", resp["error"])
-	}
-	if resp["code"] != "INTERNAL" {
-		t.Fatalf("expected code 'INTERNAL', got %v", resp["code"])
-	}
-	if _, exists := resp["details"]; exists {
-		t.Fatalf("expected no details key when details is nil, but got %v", resp["details"])
-	}
 }
 
 // ---------- parseCORSOriginsString ----------
@@ -1042,6 +858,7 @@ func TestProxyAuth_TrustEnabled_WithForwardedUser(t *testing.T) {
 	handler := s.ProxyAuth(inner)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:5000" // loopback = trusted proxy when no explicit list
 	req.Header.Set("X-Forwarded-User", "proxy-user@example.com")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -1054,6 +871,40 @@ func TestProxyAuth_TrustEnabled_WithForwardedUser(t *testing.T) {
 	}
 	if gotUser.Email != "proxy-user@example.com" {
 		t.Fatalf("expected email 'proxy-user@example.com', got %q", gotUser.Email)
+	}
+}
+
+func TestProxyAuth_TrustEnabled_UntrustedPeerIgnored(t *testing.T) {
+	os.Setenv("OPENTRACE_TRUST_PROXY_AUTH", "true")
+	defer os.Unsetenv("OPENTRACE_TRUST_PROXY_AUTH")
+
+	s := &Server{
+		userStore: newMockUserStore(),
+		auditCh:   make(chan auditEntry, 1),
+	}
+
+	var gotUser *store.User
+	innerCalled := false
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUser = UserFromContext(r.Context())
+		innerCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := s.ProxyAuth(inner)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "203.0.113.7:9999" // arbitrary remote client, NOT a trusted proxy
+	req.Header.Set("X-Forwarded-User", "attacker@example.com")
+	req.Header.Set("X-Forwarded-User-Role", "admin")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if !innerCalled {
+		t.Fatal("request from untrusted peer should still reach inner handler")
+	}
+	if gotUser != nil {
+		t.Fatalf("identity headers from untrusted peer must be ignored, got user %q", gotUser.Email)
 	}
 }
 
@@ -1108,6 +959,7 @@ func TestProxyAuth_TrustEnabled_CreateUserFails(t *testing.T) {
 	handler := s.ProxyAuth(inner)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:5000" // loopback = trusted proxy when no explicit list
 	req.Header.Set("X-Forwarded-User", "new-user@example.com")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)

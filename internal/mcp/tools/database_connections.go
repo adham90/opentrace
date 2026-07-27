@@ -11,7 +11,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func HandleDatabaseActivity(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
-	qe, errResult := getQueryExecutor(deps.Registry)
+	qe, errResult := getQueryExecutor(ctx, deps.Registry)
 	if errResult != nil {
 		return errResult, nil
 	}
@@ -176,7 +176,7 @@ LIMIT 20`
 // ---------------------------------------------------------------------------
 
 func HandleConnections(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
-	qe, errResult := getQueryExecutor(deps.Registry)
+	qe, errResult := getQueryExecutor(ctx, deps.Registry)
 	if errResult != nil {
 		return errResult, nil
 	}

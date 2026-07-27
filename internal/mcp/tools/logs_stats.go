@@ -32,14 +32,22 @@ func LogsStats(ctx context.Context, args map[string]any, deps LogsDeps) (*CallTo
 		return NewToolResultError(fmt.Sprintf("invalid bucket_interval: %v", err)), nil
 	}
 
+	// Resolve the env scope so these aggregates only span environments the
+	// caller's token is authorized for (an empty Environment matches ALL envs).
+	environment, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
 	now := time.Now().UTC()
 	since := now.Add(-duration)
 
 	params := store.LogCountParams{
-		Since:   since,
-		Until:   now,
-		Service: serviceFilter,
-		Level:   levelFilter,
+		Since:       since,
+		Until:       now,
+		Service:     serviceFilter,
+		Level:       levelFilter,
+		Environment: environment,
 	}
 
 	switch groupBy {
@@ -48,7 +56,7 @@ func LogsStats(ctx context.Context, args map[string]any, deps LogsDeps) (*CallTo
 	case "service":
 		return LogsStatsByService(ctx, deps.Logs, params, since, now)
 	case "pattern":
-		return LogsStatsByPattern(ctx, deps.Logs, since, now, serviceFilter)
+		return LogsStatsByPattern(ctx, deps.Logs, since, now, serviceFilter, environment)
 	default:
 		return NewToolResultError(fmt.Sprintf("invalid group_by: %q (use level, service, or pattern)", groupBy)), nil
 	}
@@ -68,10 +76,11 @@ func LogsStatsByLevel(ctx context.Context, svc *logs.Service, params store.LogCo
 			bucketEnd = until
 		}
 		bucketParams := store.LogCountParams{
-			Since:   t,
-			Until:   bucketEnd,
-			Service: params.Service,
-			Level:   params.Level,
+			Since:       t,
+			Until:       bucketEnd,
+			Service:     params.Service,
+			Level:       params.Level,
+			Environment: params.Environment,
 		}
 		bucketLC, err := svc.CountByLevel(ctx, bucketParams)
 		if err != nil {
@@ -167,14 +176,15 @@ func LogsStatsByService(ctx context.Context, svc *logs.Service, params store.Log
 	return JSONResult(resp)
 }
 
-func LogsStatsByPattern(ctx context.Context, svc *logs.Service, since, until time.Time, service string) (*CallToolResult, error) {
+func LogsStatsByPattern(ctx context.Context, svc *logs.Service, since, until time.Time, service, environment string) (*CallToolResult, error) {
 	// Fetch error/fatal logs for pattern clustering.
 	errorResult, err := svc.Search(ctx, store.LogSearchParams{
-		Level:   "error",
-		Service: service,
-		Start:   &since,
-		End:     &until,
-		Limit:   10000,
+		Level:       "error",
+		Service:     service,
+		Environment: environment,
+		Start:       &since,
+		End:         &until,
+		Limit:       10000,
 	})
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to search logs: %v", err)), nil
@@ -183,11 +193,12 @@ func LogsStatsByPattern(ctx context.Context, svc *logs.Service, since, until tim
 
 	// Also fetch fatal logs.
 	fatalResult, err := svc.Search(ctx, store.LogSearchParams{
-		Level:   "fatal",
-		Service: service,
-		Start:   &since,
-		End:     &until,
-		Limit:   10000,
+		Level:       "fatal",
+		Service:     service,
+		Environment: environment,
+		Start:       &since,
+		End:         &until,
+		Limit:       10000,
 	})
 	if err == nil {
 		errorLogs = append(errorLogs, fatalResult.Entries...)

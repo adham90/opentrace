@@ -172,23 +172,35 @@ func Seal(walPath string, segmentHour int64) (*SegmentMeta, error) {
 		}
 	}
 
-	// Write meta.json
+	// Write meta.json (durably). Chunks and index were already fsynced by their
+	// writers.
 	metaPath := filepath.Join(segDir, "meta.json")
 	metaJSON, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal meta: %w", err)
 	}
-	if err := os.WriteFile(metaPath, metaJSON, 0o644); err != nil {
+	if err := writeFileSync(metaPath, metaJSON); err != nil {
 		return nil, fmt.Errorf("write meta: %w", err)
 	}
 
-	// Write .seal_complete marker
-	markerPath := filepath.Join(segDir, ".seal_complete")
-	if err := os.WriteFile(markerPath, []byte("ok"), 0o644); err != nil {
-		return nil, fmt.Errorf("write seal marker: %w", err)
+	// fsync the directory so the chunk/index/meta directory entries are durable
+	// before the completion marker is written.
+	if err := syncDir(segDir); err != nil {
+		return nil, fmt.Errorf("fsync segment dir: %w", err)
 	}
 
-	// Delete the WAL
+	// Write .seal_complete marker (durably), then fsync the dir again so the
+	// marker's presence is durable. Only after this is the segment safe.
+	markerPath := filepath.Join(segDir, ".seal_complete")
+	if err := writeFileSync(markerPath, []byte("ok")); err != nil {
+		return nil, fmt.Errorf("write seal marker: %w", err)
+	}
+	if err := syncDir(segDir); err != nil {
+		return nil, fmt.Errorf("fsync segment dir (marker): %w", err)
+	}
+
+	// Only now delete the WAL — the segment is fully durable, so a crash can
+	// never lose both the WAL and the sealed segment.
 	os.Remove(walPath)
 
 	slog.Info("seal: complete",
@@ -198,6 +210,38 @@ func Seal(walPath string, segmentHour int64) (*SegmentMeta, error) {
 	)
 
 	return meta, nil
+}
+
+// writeFileSync writes data to path and fsyncs it before returning, so the
+// content is durable and not merely in the page cache.
+func writeFileSync(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// syncDir fsyncs a directory so newly created files' directory entries are
+// durable (required before treating the files as committed).
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		d.Close()
+		return err
+	}
+	return d.Close()
 }
 
 // splitChunks divides entries into chunks of at most maxSize.

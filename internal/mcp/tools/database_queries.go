@@ -13,7 +13,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func HandleQueries(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
-	qe, errResult := getQueryExecutor(deps.Registry)
+	qe, errResult := getQueryExecutor(ctx, deps.Registry)
 	if errResult != nil {
 		return errResult, nil
 	}
@@ -141,7 +141,7 @@ func HandleExplain(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 		return NewToolResultError(fmt.Sprintf("only SELECT queries can be explained: %v", err)), nil
 	}
 
-	qe, errResult := getQueryExecutor(deps.Registry)
+	qe, errResult := getQueryExecutor(ctx, deps.Registry)
 	if errResult != nil {
 		return errResult, nil
 	}

@@ -18,7 +18,6 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 	InitLogsDeps(&deps)
 	timeRange := ArgStringDefault(args, "time_range", "1h")
 	serviceFilter := ArgString(args, "service")
-	environmentFilter := ArgString(args, "environment")
 	commitFilter := ArgString(args, "commit_hash")
 
 	duration, err := ParseTimeRange(timeRange)
@@ -26,14 +25,22 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 		return NewToolResultError(fmt.Sprintf("invalid time_range: %v", err)), nil
 	}
 
+	// Resolve env scope (rejects out-of-scope environment args and auto-fills
+	// single-env tokens) so the summary never spans unauthorized envs.
+	environmentFilter, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
 	now := time.Now().UTC()
 	since := now.Add(-duration)
 
 	// 1. Total and error counts by level.
 	countParams := store.LogCountParams{
-		Since:   since,
-		Until:   now,
-		Service: serviceFilter,
+		Since:       since,
+		Until:       now,
+		Service:     serviceFilter,
+		Environment: environmentFilter,
 	}
 	lc, err := deps.Logs.CountByLevel(ctx, countParams)
 	if err != nil {
@@ -209,10 +216,11 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 
 	// 5. Slowest endpoints from request summaries.
 	summaryParams := store.RequestSummarySearchParams{
-		Start:  &since,
-		End:    &now,
-		SortBy: "duration_ms",
-		Limit:  5,
+		Start:       &since,
+		End:         &now,
+		Environment: environmentFilter,
+		SortBy:      "duration_ms",
+		Limit:       5,
 	}
 	summaries, _ := deps.LogStore.SearchRequestSummaries(ctx, summaryParams)
 

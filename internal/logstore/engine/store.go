@@ -154,48 +154,60 @@ func (s *Store) Search(params SearchParams) (*SearchResult, error) {
 
 	// Collect results from sealed segments + active WAL
 	var allMatches []chunk.Entry
+	total := 0
 
-	// Query sealed segments (parallel)
+	// The final page needs at most offset+limit rows, so each segment can
+	// contribute at most that many candidates to the global top-N. Capping per
+	// segment bounds the merge set instead of materializing every matching row.
+	perSegLimit := params.Offset + params.Limit
+
+	// Query sealed segments with bounded concurrency. A wide time range can match
+	// hundreds of hourly segments; spawning one decompressing goroutine each was
+	// an OOM/CPU vector. Each goroutine is panic-isolated so one corrupt segment
+	// can't crash the server.
 	segs := s.segments.SegmentsInRange(*params.Start, *params.End)
 	if len(segs) > 0 {
-		type segResult struct {
-			entries []chunk.Entry
-			err     error
-		}
-		results := make([]segResult, len(segs))
+		results := make([][]chunk.Entry, len(segs))
+		counts := make([]int, len(segs))
+		sem := make(chan struct{}, searchConcurrency)
 		var wg sync.WaitGroup
 		for i, seg := range segs {
 			wg.Add(1)
+			sem <- struct{}{}
 			go func(idx int, seg *LoadedSegment) {
 				defer wg.Done()
+				defer func() { <-sem }()
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("search: recovered from segment panic", "segment", seg.DirName, "panic", r)
+					}
+				}()
 				entries, err := s.searchSegment(seg, params)
-				results[idx] = segResult{entries, err}
+				if err != nil {
+					slog.Warn("search: segment error", "segment", seg.DirName, "error", err)
+					return
+				}
+				counts[idx] = len(entries)
+				results[idx] = capEntriesByTs(entries, params.SortAsc, perSegLimit)
 			}(i, seg)
 		}
 		wg.Wait()
 
-		for _, r := range results {
-			if r.err != nil {
-				slog.Warn("search: segment error", "error", r.err)
-				continue
-			}
-			allMatches = append(allMatches, r.entries...)
+		for i := range results {
+			total += counts[i]
+			allMatches = append(allMatches, results[i]...)
 		}
 	}
 
-	// Query active WAL (linear scan)
+	// Query active WAL (linear scan of at most the current hour).
 	activeMatches := s.searchActiveWAL(params)
+	total += len(activeMatches)
 	allMatches = append(allMatches, activeMatches...)
 
-	// Sort by timestamp
-	if params.SortAsc {
-		sort.Slice(allMatches, func(i, j int) bool { return allMatches[i].Ts < allMatches[j].Ts })
-	} else {
-		sort.Slice(allMatches, func(i, j int) bool { return allMatches[i].Ts > allMatches[j].Ts })
-	}
+	// Sort by timestamp with a stable ID tiebreak so pagination is deterministic.
+	sortEntriesByTs(allMatches, params.SortAsc)
 
-	// Apply offset and limit
-	total := len(allMatches)
+	// Apply offset and limit.
 	if params.Offset > 0 && params.Offset < len(allMatches) {
 		allMatches = allMatches[params.Offset:]
 	} else if params.Offset >= len(allMatches) {
@@ -206,6 +218,33 @@ func (s *Store) Search(params SearchParams) (*SearchResult, error) {
 	}
 
 	return &SearchResult{Entries: allMatches, Total: total}, nil
+}
+
+// searchConcurrency bounds how many sealed segments are scanned in parallel.
+const searchConcurrency = 8
+
+// sortEntriesByTs sorts by timestamp (asc/desc per asc), breaking ties by ID so
+// results are deterministic across pages (equal-timestamp rows don't reorder).
+func sortEntriesByTs(entries []chunk.Entry, asc bool) {
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Ts != entries[j].Ts {
+			if asc {
+				return entries[i].Ts < entries[j].Ts
+			}
+			return entries[i].Ts > entries[j].Ts
+		}
+		return entries[i].ID < entries[j].ID
+	})
+}
+
+// capEntriesByTs returns at most max entries — the most relevant by timestamp
+// order — so a single segment can't contribute an unbounded slice to the merge.
+func capEntriesByTs(entries []chunk.Entry, asc bool, max int) []chunk.Entry {
+	if max <= 0 || len(entries) <= max {
+		return entries
+	}
+	sortEntriesByTs(entries, asc)
+	return entries[:max]
 }
 
 // GetByID retrieves a single entry by composite ID.
@@ -241,21 +280,39 @@ func (s *Store) GetBody(id int64) (json.RawMessage, error) {
 	return entry.Body, nil
 }
 
-// CountByLevel returns log counts grouped by level for the given time range.
+// segmentFullyInRange reports whether an entire hourly segment lies within
+// [start, end], so its precomputed whole-segment totals are exact for the range.
+func segmentFullyInRange(hour int64, start, end time.Time) bool {
+	segStart := hour * 3600
+	segEnd := (hour + 1) * 3600
+	return start.Unix() <= segStart && segEnd <= end.Unix()
+}
+
 // CountByLevel returns log counts grouped by level for the given time range.
 //
-// When environment is set, the WAL path filters by env. Sealed segments use
-// pre-computed counts that aren't broken down by env yet — for segments, the
-// env parameter is ignored, so multi-env deployments may see slight
-// over-counts on historical data. Single-env deployments (the common case)
-// are unaffected since all segment rows share the same env.
+// For segments fully inside the range (and with no service/env filter) the
+// precomputed per-level totals are exact. Segments that only partially overlap
+// the range — or when a service/env filter is set — are scanned and counted
+// with per-row time filtering, so sub-hour and non-hour-aligned ranges are no
+// longer over-counted by including whole neighbouring hours.
 func (s *Store) CountByLevel(start, end time.Time, service, environment string) (map[string]int, error) {
 	counts := make(map[string]int)
 
 	segs := s.segments.SegmentsInRange(start, end)
 	for _, seg := range segs {
-		for level, count := range seg.Meta.Counts.ByLevel {
-			counts[level] += count
+		if service == "" && environment == "" && segmentFullyInRange(seg.Hour, start, end) {
+			for level, count := range seg.Meta.Counts.ByLevel {
+				counts[level] += count
+			}
+			continue
+		}
+		entries, err := s.searchSegment(seg, SearchParams{Start: &start, End: &end, Service: service, Env: environment})
+		if err != nil {
+			slog.Warn("count: segment scan error", "segment", seg.DirName, "error", err)
+			continue
+		}
+		for i := range entries {
+			counts[entries[i].Level]++
 		}
 	}
 
@@ -268,15 +325,26 @@ func (s *Store) CountByLevel(start, end time.Time, service, environment string) 
 	return counts, nil
 }
 
-// CountByService returns log counts grouped by service for the given time
-// range. See CountByLevel for notes on segment-level env filtering.
+// CountByService returns log counts grouped by service for the given time range.
+// See CountByLevel for the fully-in-range vs boundary-scan strategy.
 func (s *Store) CountByService(start, end time.Time, environment string) (map[string]int, error) {
 	counts := make(map[string]int)
 
 	segs := s.segments.SegmentsInRange(start, end)
 	for _, seg := range segs {
-		for svc, count := range seg.Meta.Counts.ByService {
-			counts[svc] += count
+		if environment == "" && segmentFullyInRange(seg.Hour, start, end) {
+			for svc, count := range seg.Meta.Counts.ByService {
+				counts[svc] += count
+			}
+			continue
+		}
+		entries, err := s.searchSegment(seg, SearchParams{Start: &start, End: &end, Env: environment})
+		if err != nil {
+			slog.Warn("count: segment scan error", "segment", seg.DirName, "error", err)
+			continue
+		}
+		for i := range entries {
+			counts[entries[i].Service]++
 		}
 	}
 
@@ -295,11 +363,36 @@ type HistogramBucket struct {
 	Errors    int
 }
 
-// Histogram returns per-interval counts for the given time range.
-func (s *Store) Histogram(start, end time.Time, interval time.Duration) ([]HistogramBucket, error) {
-	// Build minute-level counts from meta.json
-	minuteCounts := make(map[string]HBucket)
+// Histogram bucketing bounds. A caller-supplied interval down to 1ns over a
+// huge range previously produced ~10^17 buckets (CPU pin + OOM from one query).
+const (
+	maxHistogramBuckets = 10000
+	minHistogramInterval = time.Second
+)
 
+// Histogram returns per-interval counts for the given time range. Times are
+// normalized to UTC (stored minute keys are UTC), the interval is floored at
+// minHistogramInterval, and the bucket count is capped by widening the interval
+// so a hostile range/interval can't exhaust CPU or memory.
+func (s *Store) Histogram(start, end time.Time, interval time.Duration) ([]HistogramBucket, error) {
+	start = start.UTC()
+	end = end.UTC()
+	if !end.After(start) {
+		return nil, nil
+	}
+	if interval < minHistogramInterval {
+		interval = minHistogramInterval
+	}
+	span := end.Sub(start)
+	if span/interval > maxHistogramBuckets {
+		interval = span / maxHistogramBuckets
+		if interval < minHistogramInterval {
+			interval = minHistogramInterval
+		}
+	}
+
+	// Build minute-level counts from meta.json (UTC-keyed).
+	minuteCounts := make(map[string]HBucket)
 	segs := s.segments.SegmentsInRange(start, end)
 	for _, seg := range segs {
 		for key, bucket := range seg.Meta.Histogram {
@@ -309,32 +402,25 @@ func (s *Store) Histogram(start, end time.Time, interval time.Duration) ([]Histo
 			minuteCounts[key] = existing
 		}
 	}
-
-	// Add active WAL counts
 	s.addActiveWALHistogram(minuteCounts, start, end)
 
-	// Aggregate into requested interval buckets
-	var buckets []HistogramBucket
-	for t := start; t.Before(end); t = t.Add(interval) {
-		bucketEnd := t.Add(interval)
-		if bucketEnd.After(end) {
-			bucketEnd = end
+	// Pre-size the bucket slice, then assign each data point to its bucket by
+	// index — O(data points), never iterating empty minutes of the span.
+	nBuckets := int(span/interval) + 1
+	buckets := make([]HistogramBucket, nBuckets)
+	for i := range buckets {
+		buckets[i].Timestamp = start.Add(time.Duration(i) * interval)
+	}
+	for key, mb := range minuteCounts {
+		minute, err := time.ParseInLocation("2006-01-02T15:04", key, time.UTC)
+		if err != nil || minute.Before(start) || !minute.Before(end) {
+			continue
 		}
-
-		var total, errors int
-		for minute := t; minute.Before(bucketEnd); minute = minute.Add(time.Minute) {
-			key := minute.Format("2006-01-02T15:04")
-			if bucket, ok := minuteCounts[key]; ok {
-				total += bucket.Total
-				errors += bucket.Errors
-			}
+		idx := int(minute.Sub(start) / interval)
+		if idx >= 0 && idx < nBuckets {
+			buckets[idx].Total += mb.Total
+			buckets[idx].Errors += mb.Errors
 		}
-
-		buckets = append(buckets, HistogramBucket{
-			Timestamp: t,
-			Total:     total,
-			Errors:    errors,
-		})
 	}
 
 	return buckets, nil
@@ -367,8 +453,74 @@ func (s *Store) DistinctValues(column string, start, end time.Time) ([]string, e
 		return result, nil
 	}
 
-	// For other columns: scan the column data (expensive but rare)
-	return nil, fmt.Errorf("distinct values for column %q requires column scan (not yet implemented)", column)
+	// Non-dict columns (e.g. error_fingerprint, user_id — used by watch rules)
+	// require a scan. Bounded by the hourly segment size and a distinct cap so a
+	// watch evaluating a wide window can't exhaust memory.
+	if _, ok := scanColumnValue(&chunk.Entry{}, column); !ok {
+		return nil, fmt.Errorf("distinct values not supported for column %q", column)
+	}
+	seen := make(map[string]struct{})
+	params := SearchParams{Start: &start, End: &end}
+	collect := func(entries []chunk.Entry) bool {
+		for i := range entries {
+			if v, _ := scanColumnValue(&entries[i], column); v != "" {
+				seen[v] = struct{}{}
+				if len(seen) >= maxDistinctValues {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	for _, seg := range s.segments.SegmentsInRange(start, end) {
+		entries, err := s.searchSegment(seg, params)
+		if err != nil {
+			slog.Warn("distinct: segment scan error", "segment", seg.DirName, "error", err)
+			continue
+		}
+		if collect(entries) {
+			break
+		}
+	}
+	if len(seen) < maxDistinctValues {
+		collect(s.searchActiveWAL(params))
+	}
+	result := make([]string, 0, len(seen))
+	for v := range seen {
+		result = append(result, v)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+// maxDistinctValues bounds the distinct set collected during a column scan.
+const maxDistinctValues = 100000
+
+// scanColumnValue returns the string value of a scannable (non-dict) column for
+// an entry, and whether the column is supported for distinct scans.
+func scanColumnValue(e *chunk.Entry, column string) (string, bool) {
+	switch column {
+	case "error_fingerprint":
+		return e.ErrorFingerprint, true
+	case "error_class":
+		return e.ErrorClass, true
+	case "user_id":
+		return e.UserID, true
+	case "tenant_id":
+		return e.TenantID, true
+	case "trace_id":
+		return e.TraceID, true
+	case "request_id":
+		return e.RequestID, true
+	case "path":
+		return e.Path, true
+	case "handler":
+		return e.Handler, true
+	case "host":
+		return e.Host, true
+	default:
+		return "", false
+	}
 }
 
 // Tail subscribes to live log entries.
@@ -489,12 +641,19 @@ func (s *Store) searchChunk(chunkPath, idxPath string, entryCount int, params Se
 		return nil, nil
 	}
 
-	// Read full entries for matching rows
+	// Read full entries for matching rows, then apply the structured filters that
+	// aren't column-indexed (method/path/tenant_id/min_duration/n_plus_one). The
+	// FTS Query was already resolved via the inverted index above, so clear it.
+	filterParams := params
+	filterParams.Query = ""
 	entries := make([]chunk.Entry, 0, len(matchingRows))
 	for _, row := range matchingRows {
 		entry, err := readEntryFromChunk(r, row)
 		if err != nil {
 			continue // skip corrupt entries
+		}
+		if !matchesParams(entry, filterParams) {
+			continue
 		}
 		entries = append(entries, *entry)
 	}
@@ -510,9 +669,12 @@ func (s *Store) searchActiveWAL(params SearchParams) []chunk.Entry {
 	}
 	defer f.Close()
 
+	// A concurrent in-flight append can leave a torn trailing record; ReadEntries
+	// returns the fully-parsed entries plus an error. Use the good entries and
+	// log rather than discarding the whole hour (which returned zero live logs).
 	entries, err := wal.ReadEntries(f)
 	if err != nil {
-		return nil
+		slog.Warn("search: active WAL had a torn tail; using parsed entries", "error", err, "parsed", len(entries))
 	}
 
 	var matches []chunk.Entry
@@ -532,9 +694,11 @@ func (s *Store) findInActiveWAL(id int64) (*chunk.Entry, error) {
 	}
 	defer f.Close()
 
+	// Tolerate a torn trailing record (see searchActiveWAL): scan the parsed
+	// entries even if the tail was incomplete.
 	entries, err := wal.ReadEntries(f)
 	if err != nil {
-		return nil, fmt.Errorf("read active WAL: %w", err)
+		slog.Warn("lookup: active WAL had a torn tail; using parsed entries", "error", err, "parsed", len(entries))
 	}
 
 	for i := range entries {
@@ -849,6 +1013,21 @@ func matchesParams(e *chunk.Entry, p SearchParams) bool {
 		return false
 	}
 	if p.ErrorFingerprint != "" && e.ErrorFingerprint != p.ErrorFingerprint {
+		return false
+	}
+	if p.TenantID != "" && e.TenantID != p.TenantID {
+		return false
+	}
+	if p.Method != "" && !strings.EqualFold(e.Method, p.Method) {
+		return false
+	}
+	if p.Path != "" && !strings.Contains(strings.ToLower(e.Path), strings.ToLower(p.Path)) {
+		return false
+	}
+	if p.MinDurationMs > 0 && e.DurationMs < p.MinDurationMs {
+		return false
+	}
+	if p.NPlusOneOnly && (e.NPlusOne == nil || !*e.NPlusOne) {
 		return false
 	}
 	if p.Query != "" && !strings.Contains(strings.ToLower(e.Message), strings.ToLower(p.Query)) {

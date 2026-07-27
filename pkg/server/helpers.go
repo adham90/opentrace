@@ -146,22 +146,6 @@ func ParseDurationWithDays(s string) (time.Duration, error) {
 	return 0, err
 }
 
-// RequireAdminAPI is middleware that returns 403 JSON if the user is not an admin.
-func RequireAdminAPI(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user := UserFromContext(r.Context())
-		if user == nil {
-			WriteError(w, http.StatusUnauthorized, "authentication required")
-			return
-		}
-		if user.Role != store.RoleAdmin {
-			WriteError(w, http.StatusForbidden, "admin access required")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 // Audit logs an admin action to the audit store. Safe to call with a nil store.
 func Audit(r *http.Request, auditStore store.AuditStore, action, targetType, targetID, details string) {
 	if auditStore == nil {

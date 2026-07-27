@@ -51,6 +51,60 @@ func parseTTL(ttl string) time.Duration {
 func RunRetentionCleanup(ctx context.Context, db *sql.DB) error {
 	slog.Info("retention cleanup: starting")
 
+	totalDeleted, err := cleanupRetentionTables(ctx, db)
+	if err != nil {
+		return err
+	}
+
+	if totalDeleted > 0 {
+		slog.Info("retention cleanup: running VACUUM", "total_deleted", totalDeleted)
+		if _, err := db.ExecContext(ctx, "VACUUM"); err != nil {
+			slog.Warn("retention cleanup: VACUUM failed", "error", err)
+		}
+	}
+
+	slog.Info("retention cleanup: complete", "total_deleted", totalDeleted)
+	return nil
+}
+
+// RunJobRetention prunes completed/dead jobs older than jobTTL, cleans the
+// SQLite-resident retention tables, and runs a single VACUUM to reclaim disk
+// when anything was removed. Without this the jobs table grows unbounded
+// (Queue.Prune had no caller) and even when rows were deleted the pages were
+// never reclaimed (RunRetentionCleanup, the only VACUUM caller, was dead code).
+//
+// VACUUM takes an exclusive lock on the database, so this is meant to run on
+// the recurring retention schedule — never per-request. Returns the number of
+// jobs pruned.
+func RunJobRetention(ctx context.Context, db *sql.DB, jobTTL time.Duration) (int64, error) {
+	q := NewQueue(db)
+	prunedJobs, err := q.Prune(ctx, jobTTL)
+	if err != nil {
+		return 0, fmt.Errorf("job retention: prune jobs: %w", err)
+	}
+	if prunedJobs > 0 {
+		slog.Info("job retention: pruned old jobs", "count", prunedJobs)
+	}
+
+	tableDeleted, err := cleanupRetentionTables(ctx, db)
+	if err != nil {
+		slog.Warn("job retention: table cleanup failed", "error", err)
+	}
+
+	if prunedJobs > 0 || tableDeleted > 0 {
+		slog.Info("job retention: running VACUUM", "pruned_jobs", prunedJobs, "table_deleted", tableDeleted)
+		if _, err := db.ExecContext(ctx, "VACUUM"); err != nil {
+			slog.Warn("job retention: VACUUM failed", "error", err)
+		}
+	}
+
+	return prunedJobs, nil
+}
+
+// cleanupRetentionTables deletes expired rows from the SQLite-resident tables
+// covered by the retention policy and returns the total number of rows removed.
+// It performs the deletes only — the caller decides whether to VACUUM.
+func cleanupRetentionTables(ctx context.Context, db *sql.DB) (int, error) {
 	// Read config from app_config
 	cfg := DefaultRetentionConfig()
 	var configJSON string
@@ -87,15 +141,7 @@ func RunRetentionCleanup(ctx context.Context, db *sql.DB) error {
 		}
 	}
 
-	if totalDeleted > 0 {
-		slog.Info("retention cleanup: running VACUUM", "total_deleted", totalDeleted)
-		if _, err := db.ExecContext(ctx, "VACUUM"); err != nil {
-			slog.Warn("retention cleanup: VACUUM failed", "error", err)
-		}
-	}
-
-	slog.Info("retention cleanup: complete", "total_deleted", totalDeleted)
-	return nil
+	return totalDeleted, nil
 }
 
 // deleteInBatches deletes rows in batches to avoid locking SQLite for too long.

@@ -26,6 +26,10 @@ type WALWriter struct {
 	// Readers snapshot this value before reading.
 	validBytes int64
 
+	// now returns the current UTC time. Overridable in tests to exercise
+	// hour-boundary rotation deterministically.
+	now func() time.Time
+
 	ring *RingBuffer
 }
 
@@ -33,14 +37,12 @@ type WALWriter struct {
 // dataDir is the base directory (e.g., "data/logs").
 // It opens or creates the WAL file for the current hour.
 func NewWALWriter(dataDir string, ring *RingBuffer) (*WALWriter, error) {
-	now := time.Now().UTC()
-	segHour := SegmentHourFromTime(now)
-
 	w := &WALWriter{
-		dataDir:     dataDir,
-		segmentHour: segHour,
-		ring:        ring,
+		dataDir: dataDir,
+		ring:    ring,
+		now:     func() time.Time { return time.Now().UTC() },
 	}
+	segHour := SegmentHourFromTime(w.now())
 
 	if err := w.ensureWAL(segHour); err != nil {
 		return nil, err
@@ -59,15 +61,16 @@ func (w *WALWriter) Append(entries []chunk.Entry) ([]chunk.Entry, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	now := time.Now().UTC()
-	currentHour := SegmentHourFromTime(now)
+	now := w.now()
 
-	// Rotate WAL if the hour has changed
-	if currentHour != w.segmentHour {
-		if err := w.rotate(currentHour); err != nil {
-			return nil, fmt.Errorf("rotate WAL: %w", err)
-		}
-	}
+	// NOTE: Append never rotates. Rotation+seal is driven exclusively by the
+	// Store's sealing authority (the hourly seal + the engine's background
+	// sealer), which always seals the file it rotates. A previous version
+	// auto-rotated here without sealing, which orphaned whole hours and — by
+	// desyncing segmentHour from the ticker — caused ID collisions and segment
+	// overwrites. Entries that arrive in the first moments of a new hour before
+	// the sealer runs land in the still-open previous-hour WAL; they carry the
+	// correct Ts and remain searchable, then move into the sealed segment.
 
 	// Assign IDs and received_at
 	receivedAt := now.UnixMilli()
@@ -143,10 +146,9 @@ func (w *WALWriter) Rotate() (sealingPath string, sealHour int64, entryCount int
 		return "", sealHour, 0, nil // nothing to seal
 	}
 
-	now := time.Now().UTC()
-	nextHour := SegmentHourFromTime(now)
-	if nextHour == sealHour {
-		nextHour = sealHour + 1 // force rotation even within same hour (for testing)
+	nextHour := SegmentHourFromTime(w.now())
+	if nextHour <= sealHour {
+		nextHour = sealHour + 1 // force rotation even within same hour (explicit/forced seals)
 	}
 
 	if err = w.rotate(nextHour); err != nil {

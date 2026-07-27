@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"fmt"
+
+	"github.com/adham90/opentrace/internal/connector"
 )
 
 // ---------------------------------------------------------------------------
@@ -10,6 +12,12 @@ import (
 // ---------------------------------------------------------------------------
 
 func HandleKillQuery(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
+	// kill_query runs pg_cancel_backend / pg_terminate_backend, which are
+	// destructive. Restrict it to admins — members get a clear error.
+	if !deps.IsAdmin {
+		return NewToolResultError("admin privileges are required to cancel or terminate database backends (kill_query)"), nil
+	}
+
 	pidFloat, ok := args["pid"].(float64)
 	if !ok || pidFloat <= 0 {
 		return NewToolResultError("pid is required (positive integer). Use database action=activity to find PIDs of long-running queries."), nil
@@ -18,9 +26,17 @@ func HandleKillQuery(ctx context.Context, deps DatabaseDeps, args map[string]any
 
 	force := ArgBool(args, "force")
 
-	qe, errResult := getQueryExecutor(deps.Registry)
+	qe, errResult := getQueryExecutor(ctx, deps.Registry)
 	if errResult != nil {
 		return errResult, nil
+	}
+
+	// The cancel/terminate call must run through the privileged control path:
+	// the read-only guardrail now rejects pg_terminate_backend / pg_cancel_backend
+	// as side-effecting functions, so ExecuteReadQuery would refuse them.
+	control, ok := qe.(connector.ControlExecutor)
+	if !ok {
+		return NewToolResultError("the active database connector does not support cancelling or terminating backends"), nil
 	}
 
 	// First, check what the process is doing.
@@ -59,7 +75,7 @@ func HandleKillQuery(ctx context.Context, deps DatabaseDeps, args map[string]any
 		actionQuery = fmt.Sprintf("SELECT pg_cancel_backend(%d)", pid)
 	}
 
-	result, err := qe.ExecuteReadQuery(ctx, actionQuery)
+	result, err := control.ExecuteControlQuery(ctx, actionQuery)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to %s PID %d: %v", action[:len(action)-2], pid, err)), nil
 	}
@@ -97,7 +113,7 @@ func HandleKillQuery(ctx context.Context, deps DatabaseDeps, args map[string]any
 // ---------------------------------------------------------------------------
 
 func HandleLongTransactions(ctx context.Context, deps DatabaseDeps, args map[string]any) (*CallToolResult, error) {
-	qe, errResult := getQueryExecutor(deps.Registry)
+	qe, errResult := getQueryExecutor(ctx, deps.Registry)
 	if errResult != nil {
 		return errResult, nil
 	}

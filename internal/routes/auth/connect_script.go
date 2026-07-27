@@ -4,7 +4,27 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/adham90/opentrace/pkg/server"
 )
+
+// safeHost reports whether h is a plain host[:port] with no characters that
+// could break out of the SERVER="..." assignment in the emitted bash script.
+// Allowed: letters, digits, '.', '-', ':', and '[' / ']' for IPv6 literals.
+func safeHost(h string) bool {
+	if h == "" || len(h) > 253 {
+		return false
+	}
+	for _, c := range h {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '.' || c == '-' || c == ':' || c == '[' || c == ']':
+		default:
+			return false
+		}
+	}
+	return true
+}
 
 // handleConnectScript serves a self-contained bash script that authenticates
 // and creates .mcp.json. The user runs it with:
@@ -18,6 +38,12 @@ func (h *handler) handleConnectScript(w http.ResponseWriter, r *http.Request) {
 	scheme := "https"
 	if r.TLS == nil && !strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 		scheme = "http"
+	}
+	// r.Host is reflected into a script that is piped to bash; reject any host
+	// carrying shell metacharacters to prevent command injection via the Host header.
+	if !safeHost(r.Host) {
+		server.WriteError(w, http.StatusBadRequest, "invalid Host header")
+		return
 	}
 	serverURL := fmt.Sprintf("%s://%s", scheme, r.Host)
 

@@ -10,9 +10,15 @@ import (
 
 // File format constants.
 const (
-	Magic       = "OTCL"
-	Version     = 1
-	HeaderSize  = 64
+	Magic      = "OTCL"
+	Version    = 1
+	HeaderSize = 64
+
+	// Sanity bounds for header/directory fields read off disk, used to reject
+	// corrupt chunks before allocating. A chunk holds at most 50k rows; the
+	// generous caps leave headroom while still stopping multi-GB allocations.
+	maxChunkEntries = 1 << 20 // 1,048,576 (chunk cap is 50k; wide margin)
+	maxChunkColumns = 256     // column schema is small and fixed
 )
 
 // DirectoryEntry describes one column in the chunk footer.
@@ -104,6 +110,13 @@ func (w *Writer) Close() error {
 		return fmt.Errorf("write header: %w", err)
 	}
 
+	// Flush to disk before returning so the sealed chunk is durable. The seal
+	// path deletes the source WAL once sealing "succeeds"; without this fsync a
+	// crash could lose the segment (page cache only) and the WAL both.
+	if err := w.f.Sync(); err != nil {
+		w.f.Close()
+		return fmt.Errorf("fsync chunk: %w", err)
+	}
 	return w.f.Close()
 }
 

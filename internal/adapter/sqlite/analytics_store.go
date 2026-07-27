@@ -151,6 +151,12 @@ func (s *analyticsStore) TrafficSummary(ctx context.Context, params store.Analyt
 	var totalReqs, endpoints, errors int
 	var avgDur float64
 	if err := row.Scan(&totalReqs, &endpoints, &avgDur, &errors); err != nil && err != sql.ErrNoRows {
+		if isMissingRelationErr(err) {
+			// The request_summaries/logs source tables were removed when log
+			// storage moved to the segmented log store. Degrade to an empty
+			// summary instead of surfacing a raw driver error to callers.
+			return summary, nil
+		}
 		return nil, fmt.Errorf("querying traffic summary: %w", err)
 	}
 	summary.TotalRequests = totalReqs
@@ -243,6 +249,18 @@ func (s *analyticsStore) TrafficHeatmap(ctx context.Context, service string) ([]
 		results = append(results, c)
 	}
 	return results, rows.Err()
+}
+
+// isMissingRelationErr reports whether err is a "table/relation does not exist"
+// error (SQLite "no such table" / Postgres-style "does not exist"). Used to
+// degrade analytics queries gracefully when their source tables are absent.
+func isMissingRelationErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no such table") ||
+		strings.Contains(msg, "does not exist")
 }
 
 // Prune removes old endpoint stats.

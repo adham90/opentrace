@@ -3,6 +3,7 @@ package watcher
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
@@ -20,6 +21,14 @@ type WatchEvalResult struct {
 type WatchEvaluator struct {
 	metrics    *WatchMetrics
 	watchStore store.WatchStore
+
+	// transitionMu serializes the active→triggered check-and-set per watch.
+	// The periodic WatchScheduler and the reactive WatchStreamEvaluator (up to
+	// 16 concurrent) share one *WatchEvaluator, so without this both can read a
+	// stale "not triggered" snapshot and both create + notify. This is a single
+	// process (SQLite, one node), so an in-process keyed lock plus a fresh
+	// status re-read gives the same guarantee as a DB compare-and-swap.
+	transitionMu keyedMutex
 }
 
 // NewWatchEvaluator creates a new WatchEvaluator.
@@ -28,6 +37,29 @@ func NewWatchEvaluator(metrics *WatchMetrics, watchStore store.WatchStore) *Watc
 		metrics:    metrics,
 		watchStore: watchStore,
 	}
+}
+
+// keyedMutex provides per-key mutual exclusion. The zero value is ready to use.
+type keyedMutex struct {
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
+}
+
+// lock acquires the mutex for key and returns its unlock function.
+func (k *keyedMutex) lock(key string) func() {
+	k.mu.Lock()
+	if k.locks == nil {
+		k.locks = make(map[string]*sync.Mutex)
+	}
+	m, ok := k.locks[key]
+	if !ok {
+		m = &sync.Mutex{}
+		k.locks[key] = m
+	}
+	k.mu.Unlock()
+
+	m.Lock()
+	return m.Unlock
 }
 
 // Evaluate measures the watch's conditions and determines if an alert should fire.
@@ -92,8 +124,21 @@ func (e *WatchEvaluator) Evaluate(ctx context.Context, w *store.Watch) (*WatchEv
 		return result, nil
 	}
 
-	// Alert suppression: don't re-alert if already triggered.
+	// Alert suppression fast-path: the snapshot already shows triggered.
 	if w.Status == store.WatchStatusTriggered {
+		result.Summary = fmt.Sprintf("%s (already triggered, suppressing)", summary)
+		return result, nil
+	}
+
+	// Atomically flip active→triggered. Only the evaluation that actually wins
+	// the transition fires the alert; a concurrent evaluation working from the
+	// same stale snapshot loses and suppresses. This prevents duplicate/flapping
+	// alerts when the scheduler and stream evaluator race on the same watch.
+	won, err := e.transitionToTriggered(ctx, w.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !won {
 		result.Summary = fmt.Sprintf("%s (already triggered, suppressing)", summary)
 		return result, nil
 	}
@@ -102,11 +147,29 @@ func (e *WatchEvaluator) Evaluate(ctx context.Context, w *store.Watch) (*WatchEv
 	result.HasAlert = true
 	result.Summary = fmt.Sprintf("%s (%d consecutive breaches)", summary, breaches)
 
-	if err := e.watchStore.UpdateStatus(ctx, w.ID, store.WatchStatusTriggered); err != nil {
-		return nil, fmt.Errorf("updating watch to triggered: %w", err)
-	}
-
 	return result, nil
+}
+
+// transitionToTriggered atomically moves a watch from any non-triggered status
+// to "triggered". It returns true only for the caller that performed the
+// transition, so exactly one concurrent evaluation fires the alert. The keyed
+// lock serializes the read-check-write, and the authoritative status is
+// re-read from the store (not the caller's snapshot) inside the lock.
+func (e *WatchEvaluator) transitionToTriggered(ctx context.Context, id string) (bool, error) {
+	unlock := e.transitionMu.lock(id)
+	defer unlock()
+
+	cur, err := e.watchStore.GetByID(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("reading watch status: %w", err)
+	}
+	if cur.Status == store.WatchStatusTriggered {
+		return false, nil // another evaluation already won the transition
+	}
+	if err := e.watchStore.UpdateStatus(ctx, id, store.WatchStatusTriggered); err != nil {
+		return false, fmt.Errorf("updating watch to triggered: %w", err)
+	}
+	return true, nil
 }
 
 func compare(value float64, op store.WatchOperator, threshold float64) bool {

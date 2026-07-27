@@ -22,7 +22,14 @@ func CreateConnector(ctx context.Context, ds store.DataSource, logStore store.Lo
 			return nil, fmt.Errorf("database connector requires connection_string in config")
 		}
 		maxRows, stmtTimeout := resolveQueryGuardrails(ctx, cfg, ss)
-		return NewDatabaseConnector(ctx, connStr, maxRows, stmtTimeout)
+		conn, err := NewDatabaseConnector(ctx, connStr, maxRows, stmtTimeout)
+		if err != nil {
+			return nil, err
+		}
+		// Pin the connector to its data source's environment so the database
+		// tools can enforce the caller's env scope at query time.
+		conn.environment = ds.Environment
+		return conn, nil
 
 	case store.ConnectorMySQL:
 		connStr, ok := ds.Config["connection_string"].(string)

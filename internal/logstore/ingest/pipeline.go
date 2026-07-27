@@ -34,7 +34,7 @@ func (p *Pipeline) Process(entries []chunk.Entry) []chunk.Entry {
 	// Step 1: Sampling
 	entries = p.applySampling(entries)
 
-	// Steps 2-4: For each entry, process body if present
+	// Steps 2-4: For each entry, fingerprint, scrub PII (message + body), expand.
 	var result []chunk.Entry
 	for i := range entries {
 		e := &entries[i]
@@ -44,16 +44,14 @@ func (p *Pipeline) Process(entries []chunk.Entry) []chunk.Entry {
 			computeErrorFingerprint(e)
 		}
 
-		if len(e.Body) > 0 {
-			// Step 3: PII scrub body
-			e.Body = p.scrubBody(e.Body)
+		// Step 3: PII scrub — message, flat error message, and body.
+		p.scrubEntry(e)
 
-			// Step 4: Expand in-request logs
-			expanded := expandInRequestLogs(e)
-			result = append(result, *e)
-			result = append(result, expanded...)
-		} else {
-			result = append(result, *e)
+		result = append(result, *e)
+
+		// Step 4: Expand in-request logs (from the already-scrubbed body).
+		if len(e.Body) > 0 {
+			result = append(result, expandInRequestLogs(e)...)
 		}
 	}
 
@@ -140,11 +138,9 @@ var (
 	ssnRe        = regexp.MustCompile(`\b\d{3}-\d{2}-\d{4}\b`)
 )
 
-func (p *Pipeline) scrubBody(body json.RawMessage) json.RawMessage {
-	if !p.piiConfig.Enabled || len(body) == 0 {
-		return body
-	}
-
+// buildScrubbers returns the active regex patterns and sensitive-field set from
+// the PII config. Shared by message and body scrubbing so both stay consistent.
+func (p *Pipeline) buildScrubbers() ([]*regexp.Regexp, map[string]bool) {
 	var patterns []*regexp.Regexp
 	if p.piiConfig.ScrubCreditCards {
 		patterns = append(patterns, creditCardRe)
@@ -158,18 +154,48 @@ func (p *Pipeline) scrubBody(body json.RawMessage) json.RawMessage {
 	if p.piiConfig.ScrubSSN {
 		patterns = append(patterns, ssnRe)
 	}
-
 	sensitiveFields := make(map[string]bool, len(p.piiConfig.SensitiveFields))
 	for _, f := range p.piiConfig.SensitiveFields {
 		sensitiveFields[strings.ToLower(f)] = true
 	}
+	return patterns, sensitiveFields
+}
 
+// scrubEntry redacts PII from the entry's message, flat error message, and body.
+// Previously only the opaque body was scrubbed, so PII in the log message — the
+// single most common location — shipped unredacted even with scrubbing on.
+func (p *Pipeline) scrubEntry(e *chunk.Entry) {
+	if !p.piiConfig.Enabled {
+		return
+	}
+	patterns, sensitiveFields := p.buildScrubbers()
+	if len(patterns) == 0 && len(sensitiveFields) == 0 {
+		return
+	}
+	e.Message = scrubString(e.Message, patterns)
+	e.ErrorMessage = scrubString(e.ErrorMessage, patterns)
+	if len(e.Body) > 0 {
+		e.Body = scrubBodyWith(e.Body, patterns, sensitiveFields)
+	}
+}
+
+// scrubString applies the PII regex patterns to a plain string.
+func scrubString(s string, patterns []*regexp.Regexp) string {
+	if s == "" {
+		return s
+	}
+	for _, re := range patterns {
+		s = re.ReplaceAllString(s, filteredValue)
+	}
+	return s
+}
+
+func scrubBodyWith(body json.RawMessage, patterns []*regexp.Regexp, sensitiveFields map[string]bool) json.RawMessage {
 	var data any
 	if err := json.Unmarshal(body, &data); err != nil {
 		return body
 	}
-
-	scrubbed := scrubValue("", data, patterns, sensitiveFields)
+	scrubbed := scrubValue("", data, patterns, sensitiveFields, 0)
 	result, err := json.Marshal(scrubbed)
 	if err != nil {
 		return body
@@ -177,20 +203,36 @@ func (p *Pipeline) scrubBody(body json.RawMessage) json.RawMessage {
 	return result
 }
 
-func scrubValue(key string, val any, patterns []*regexp.Regexp, sensitiveFields map[string]bool) any {
+func (p *Pipeline) scrubBody(body json.RawMessage) json.RawMessage {
+	if !p.piiConfig.Enabled || len(body) == 0 {
+		return body
+	}
+	patterns, sensitiveFields := p.buildScrubbers()
+	return scrubBodyWith(body, patterns, sensitiveFields)
+}
+
+// maxScrubDepth bounds recursion into nested body JSON. json.Unmarshal already
+// caps nesting, but an explicit guard keeps scrubbing cheap and panic-free on
+// pathologically deep attacker-controlled bodies.
+const maxScrubDepth = 32
+
+func scrubValue(key string, val any, patterns []*regexp.Regexp, sensitiveFields map[string]bool, depth int) any {
+	if depth > maxScrubDepth {
+		return val
+	}
 	switch v := val.(type) {
 	case map[string]any:
 		for k, child := range v {
 			if sensitiveFields[strings.ToLower(k)] {
 				v[k] = filteredValue
 			} else {
-				v[k] = scrubValue(k, child, patterns, sensitiveFields)
+				v[k] = scrubValue(k, child, patterns, sensitiveFields, depth+1)
 			}
 		}
 		return v
 	case []any:
 		for i, child := range v {
-			v[i] = scrubValue(key, child, patterns, sensitiveFields)
+			v[i] = scrubValue(key, child, patterns, sensitiveFields, depth+1)
 		}
 		return v
 	case string:
@@ -221,6 +263,10 @@ func computeFingerprint(class, file string, line int) string {
 
 // --- In-Request Log Expansion ---
 
+// maxExpandedLogs bounds how many body.logs entries a single request may expand
+// into, so one crafted request can't amplify into unbounded WAL entries.
+const maxExpandedLogs = 1000
+
 // expandInRequestLogs extracts body.logs entries into separate log entries.
 func expandInRequestLogs(parent *chunk.Entry) []chunk.Entry {
 	if len(parent.Body) == 0 {
@@ -240,8 +286,15 @@ func expandInRequestLogs(parent *chunk.Entry) []chunk.Entry {
 		return nil
 	}
 
-	expanded := make([]chunk.Entry, 0, len(body.Logs))
-	for _, l := range body.Logs {
+	// Cap expansion so a single request with a huge body.logs array can't
+	// balloon memory/disk (the whole batch is appended under one fsync lock).
+	logs := body.Logs
+	if len(logs) > maxExpandedLogs {
+		logs = logs[:maxExpandedLogs]
+	}
+
+	expanded := make([]chunk.Entry, 0, len(logs))
+	for _, l := range logs {
 		level := l.Level
 		if level == "" {
 			level = "info"

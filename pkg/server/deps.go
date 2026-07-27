@@ -35,17 +35,6 @@ type Deps struct {
 	// Typed as interface to avoid importing internal/mcp.
 	ToolCatalog ToolCatalogProvider
 
-	// PageRouter is the top-level router group for page routes (with auth
-	// and onboarding-redirect middleware already applied). Modules that
-	// need to register HTML page handlers use this instead of the API
-	// sub-router passed to Mount.
-	PageRouter chi.Router
-
-	// AdminPageRouter is the top-level router group for admin-only page
-	// routes (with auth, onboarding-redirect, and RequireAdmin middleware
-	// already applied). Modules that need admin HTML pages use this.
-	AdminPageRouter chi.Router
-
 	// APIRouter is the top-level /api router (with decompression and CORS
 	// but no session auth). Modules use this to register routes that need
 	// API key auth instead of session auth (webhooks, agent endpoints).

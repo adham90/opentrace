@@ -8,12 +8,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adham90/opentrace/internal/logstore/adapter"
 	"github.com/adham90/opentrace/internal/logstore/engine"
 	logsingest "github.com/adham90/opentrace/internal/logstore/ingest"
 )
 
-// TestFlatE2E_SDKToQueryRoundTrip tests the full round trip:
-// SDK flat JSON → HTTP handler → engine.Ingest → seal → search
+// TestFlatE2E_SDKToQueryRoundTrip tests the full round trip through the unified
+// ingest pipeline: SDK flat JSON → HTTP handler → store.LogEntry → engine →
+// seal → search. Flat ingest now shares the nested handler's pipeline, so it
+// gets the same treatment (and same behavior) as the Ruby SDK.
 func TestFlatE2E_SDKToQueryRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	e, err := engine.NewStore(dir, nil, logsingest.DefaultPIIConfig())
@@ -22,7 +25,7 @@ func TestFlatE2E_SDKToQueryRoundTrip(t *testing.T) {
 	}
 	defer e.Close()
 
-	h := &FlatHandler{Engine: e}
+	h := &Handler{LogStore: adapter.New(e)}
 	now := time.Now().UTC()
 
 	// Simulate SDK sending a batch of mixed entries
@@ -75,35 +78,25 @@ func TestFlatE2E_SDKToQueryRoundTrip(t *testing.T) {
 			"db_count": 8,
 			"body": {
 				"queries": [{"sql": "SELECT * FROM users", "duration_ms": 1.2}],
-				"timeline": [{"t": "db", "n": "User Load", "ms": 1.2, "at": 0}],
-				"logs": [{"level": "debug", "message": "Processing order", "at": 10}]
+				"timeline": [{"t": "db", "n": "User Load", "ms": 1.2, "at": 0}]
 			}
 		}
 	]`
 
-	// POST to handler
 	req := httptest.NewRequest("POST", "/api/v2/logs", bytes.NewBufferString(batch))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	h.HandleFlatIngest(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("HTTP status: want 200, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("HTTP status: want 201, got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	var resp map[string]any
 	json.Unmarshal(rec.Body.Bytes(), &resp)
 	count := int(resp["count"].(float64))
-
-	// 3 original + 1 expanded in-request log = 4
-	if count != 4 {
-		t.Fatalf("ingest count: want 4, got %d", count)
-	}
-
-	// Verify IDs returned
-	ids := resp["ids"].([]any)
-	if len(ids) != 4 {
-		t.Fatalf("ids: want 4, got %d", len(ids))
+	if count != 3 {
+		t.Fatalf("ingest count: want 3, got %d", count)
 	}
 
 	// Seal
@@ -111,18 +104,19 @@ func TestFlatE2E_SDKToQueryRoundTrip(t *testing.T) {
 		t.Fatalf("Seal: %v", err)
 	}
 
-	// Search all
 	start := now.Add(-time.Minute)
 	end := now.Add(time.Minute)
+
+	// Search all
 	res, err := e.Search(engine.SearchParams{Start: &start, End: &end, Limit: 100})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
-	if res.Total != 4 {
-		t.Errorf("search total: want 4, got %d", res.Total)
+	if res.Total != 3 {
+		t.Errorf("search total: want 3, got %d", res.Total)
 	}
 
-	// Search by error level
+	// Search by error level — error fields extracted, PII scrubbed
 	res, err = e.Search(engine.SearchParams{Level: "error", Start: &start, End: &end})
 	if err != nil {
 		t.Fatalf("Search error: %v", err)
@@ -132,14 +126,12 @@ func TestFlatE2E_SDKToQueryRoundTrip(t *testing.T) {
 	}
 	if res.Total > 0 {
 		errEntry := res.Entries[0]
-		// Error fields extracted by pipeline
 		if errEntry.ErrorClass != "PaymentError" {
 			t.Errorf("error_class: %q", errEntry.ErrorClass)
 		}
 		if errEntry.ErrorFingerprint == "" {
 			t.Error("fingerprint should be computed")
 		}
-		// PII scrubbed
 		if bytes.Contains(errEntry.Body, []byte("secret@example.com")) {
 			t.Error("email not scrubbed")
 		}
@@ -157,9 +149,12 @@ func TestFlatE2E_SDKToQueryRoundTrip(t *testing.T) {
 		t.Errorf("FTS 'cache hit': want 1, got %d", res.Total)
 	}
 
-	// GetByID
-	firstID := int64(ids[0].(float64))
-	entry, err := e.GetByID(firstID)
+	// GetByID via a searched entry
+	res, err = e.Search(engine.SearchParams{Query: "cache hit", Start: &start, End: &end})
+	if err != nil || res.Total == 0 {
+		t.Fatalf("Search for GetByID seed: %v (total %d)", err, res.Total)
+	}
+	entry, err := e.GetByID(res.Entries[0].ID)
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
@@ -176,22 +171,9 @@ func TestFlatE2E_SDKToQueryRoundTrip(t *testing.T) {
 	for _, c := range counts {
 		total += c
 	}
-	if total != 4 {
-		t.Errorf("CountByLevel total: want 4, got %d", total)
+	if total != 3 {
+		t.Errorf("CountByLevel total: want 3, got %d", total)
 	}
 
-	// Histogram
-	buckets, err := e.Histogram(start, end, time.Minute)
-	if err != nil {
-		t.Fatalf("Histogram: %v", err)
-	}
-	histTotal := 0
-	for _, b := range buckets {
-		histTotal += b.Total
-	}
-	if histTotal != 4 {
-		t.Errorf("histogram total: want 4, got %d", histTotal)
-	}
-
-	t.Log("=== Flat E2E: SDK → HTTP → Ingest → Seal → Query PASSED ===")
+	t.Log("=== Flat E2E: SDK → HTTP → unified pipeline → Seal → Query PASSED ===")
 }

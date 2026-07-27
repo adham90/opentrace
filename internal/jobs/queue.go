@@ -221,6 +221,65 @@ func (q *Queue) Prune(ctx context.Context, olderThan time.Duration) (int64, erro
 	return res.RowsAffected()
 }
 
+// reapReason is recorded on jobs reclaimed from a stuck 'running' state.
+const reapReason = "reclaimed: worker stopped or crashed while running"
+
+// ReapOrphaned reclaims jobs wedged in the 'running' state. ClaimNext marks a
+// job 'running' with no lease, and nothing else resets it — so a crash (or a
+// worker killed mid-job) leaves the row 'running' forever, and the scheduler's
+// maybeEnqueue then skips that job type indefinitely because a 'running' row
+// still exists. This reclaims those rows so recurring jobs resume.
+//
+// When olderThan <= 0, every 'running' row is considered orphaned — the
+// intended use at startup, where no worker is live yet so any 'running' row is
+// necessarily from a previous process. When olderThan > 0 it acts as a
+// visibility timeout: only rows whose started_at is older than the deadline
+// (or NULL) are reclaimed, which is safe to run periodically alongside a live
+// worker.
+//
+// Reclaimed jobs that still have retry budget go back to 'pending' (run_at =
+// now) with attempts incremented; jobs that have exhausted their attempts are
+// marked 'dead'. Returns the number of rows reclaimed.
+func (q *Queue) ReapOrphaned(ctx context.Context, olderThan time.Duration) (int64, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// timePred narrows the reclaim to genuinely stale rows when a deadline is
+	// given; with olderThan <= 0 every running row qualifies.
+	timePred := ""
+	var timeArgs []any
+	if olderThan > 0 {
+		cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
+		timePred = " AND (started_at IS NULL OR started_at < ?)"
+		timeArgs = []any{cutoff}
+	}
+
+	// Orphaned jobs that have exhausted their retry budget become 'dead'.
+	deadArgs := append([]any{reapReason}, timeArgs...)
+	deadRes, err := q.db.ExecContext(ctx,
+		`UPDATE jobs SET status = 'dead', attempts = attempts + 1, last_error = ?
+		 WHERE status = 'running' AND attempts + 1 >= max_attempts`+timePred,
+		deadArgs...,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("reap orphaned jobs (dead): %w", err)
+	}
+	deadN, _ := deadRes.RowsAffected()
+
+	// Orphaned jobs with retry budget left go back to 'pending' to run again now.
+	pendArgs := append([]any{now, reapReason}, timeArgs...)
+	pendRes, err := q.db.ExecContext(ctx,
+		`UPDATE jobs SET status = 'pending', run_at = ?, attempts = attempts + 1, last_error = ?
+		 WHERE status = 'running' AND attempts + 1 < max_attempts`+timePred,
+		pendArgs...,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("reap orphaned jobs (pending): %w", err)
+	}
+	pendN, _ := pendRes.RowsAffected()
+
+	return deadN + pendN, nil
+}
+
 // getByID fetches a single job by its primary key.
 func (q *Queue) getByID(ctx context.Context, id int64) (*Job, error) {
 	var j Job

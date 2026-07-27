@@ -27,6 +27,13 @@ func ErrorsDetail(ctx context.Context, deps ErrorsDeps, args map[string]any) (*C
 		return NewToolResultError(fmt.Sprintf("error group not found: %v", err)), nil
 	}
 
+	// Env-scope gate: groups are fetched by fingerprint (no env filter), so a
+	// token scoped to one env must not read a group from another. Return the
+	// same "not found" message to avoid revealing cross-env existence.
+	if !scopeAllowsEnv(ctx, eg.Environment) {
+		return NewToolResultError("error group not found"), nil
+	}
+
 	// Fetch lifecycle events.
 	events, _ := deps.ErrorGroupStore.ListEvents(ctx, fingerprint, 10)
 
@@ -65,6 +72,7 @@ func ErrorsDetail(ctx context.Context, deps ErrorsDeps, args map[string]any) (*C
 	if deps.LogStore != nil {
 		recentLogs, _ := deps.LogStore.Search(ctx, store.LogSearchParams{
 			ErrorFingerprint: fingerprint,
+			Environment:      eg.Environment,
 			Limit:            5,
 		})
 		if len(recentLogs) > 0 {

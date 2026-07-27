@@ -23,10 +23,18 @@ func LogsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallTo
 
 	includeContext := ArgBool(args, "include_context")
 
+	// Resolve env scope so a trace assembled from another environment's logs
+	// cannot be read by a token scoped elsewhere.
+	environment, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
 	// Fetch all log entries for this trace.
 	traceResult, err := deps.Logs.Search(ctx, store.LogSearchParams{
-		TraceID: traceID,
-		Limit:   1000,
+		TraceID:     traceID,
+		Environment: environment,
+		Limit:       1000,
 	})
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to search logs: %v", err)), nil
@@ -166,10 +174,11 @@ func LogsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallTo
 			ctxStart := stats.firstTime.Add(-2 * time.Second)
 			ctxEnd := stats.lastTime.Add(2 * time.Second)
 			ctxResult, err := deps.Logs.Search(ctx, store.LogSearchParams{
-				Service: svc,
-				Start:   &ctxStart,
-				End:     &ctxEnd,
-				Limit:   50,
+				Service:     svc,
+				Environment: environment,
+				Start:       &ctxStart,
+				End:         &ctxEnd,
+				Limit:       50,
 			})
 			if err != nil {
 				continue

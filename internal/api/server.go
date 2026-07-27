@@ -256,6 +256,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 
 		// Log ingestion with dynamic API key auth + rate limiting
 		r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/logs", srv.ingestHandler.HandleIngestLogs)
+		// Flat SDK format (Node/JS SDKs). Shares the same pipeline as /api/logs.
+		r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/v2/logs", srv.ingestHandler.HandleFlatIngest)
 
 		// Expose the API router and middleware so domain modules can
 		// register webhook routes with API key auth (see servers module).
