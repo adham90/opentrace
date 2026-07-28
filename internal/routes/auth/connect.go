@@ -2,6 +2,7 @@ package auth
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -228,11 +229,16 @@ func (h *handler) handleConnectLogin(w http.ResponseWriter, r *http.Request, req
 		mcpToken = newToken
 	}
 
-	// Ensure MCP is enabled for this user
+	// Ensure MCP is enabled for this user. Not cosmetic: MCPTokenAuth resolves tokens via
+	// GetByMCPToken, which requires mcp_enabled = 1 — so if this update fails we hand back a
+	// token that will 401 on every MCP request, and the response looks like a success. The
+	// connect flow still returns 200 (the password check passed, which is what it attests),
+	// but the failure has to be in the log or the 401s are unattributable.
 	if !user.MCPEnabled {
 		enabled := true
 		if _, err := h.userStore.Update(ctx, user.ID, store.UpdateUserParams{MCPEnabled: &enabled}); err != nil {
-			// Non-fatal — token still works via MCPTokenAuth
+			slog.Error("connect: enabling MCP failed — token will be rejected as disabled",
+				"user_id", user.ID, "error", err)
 		}
 	}
 

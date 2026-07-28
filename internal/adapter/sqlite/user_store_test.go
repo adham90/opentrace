@@ -171,6 +171,43 @@ func TestUserStore_GetByMCPToken(t *testing.T) {
 	}
 }
 
+// A token handed out by Create must authenticate immediately. This is the /connect
+// first-admin path: it passes MCPToken to Create and returns that token to the caller,
+// so if Create leaves mcp_enabled at its schema default of 0 the token 401s as
+// "invalid or disabled" forever — and only a second connect (which flips the flag)
+// recovers it.
+func TestUserStore_CreateWithMCPToken_IsUsable(t *testing.T) {
+	db := setupTestDB(t)
+	us := NewUserStore(db)
+	ctx := context.Background()
+
+	token := "mcp_created_with_token"
+	user, err := us.Create(ctx, store.CreateUserParams{
+		Email:        "admin@example.com",
+		PasswordHash: "hash",
+		DisplayName:  "Admin",
+		Role:         store.RoleAdmin,
+		MCPToken:     &token,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if !user.MCPEnabled {
+		t.Error("returned user has MCPEnabled = false; a token was issued, so it must be usable")
+	}
+
+	got, err := us.GetByMCPToken(ctx, token)
+	if err != nil {
+		t.Fatalf("GetByMCPToken on a freshly created token: %v", err)
+	}
+	if got.ID != user.ID {
+		t.Errorf("ID = %q, want %q", got.ID, user.ID)
+	}
+	if !got.MCPEnabled {
+		t.Error("persisted mcp_enabled = 0, want 1")
+	}
+}
+
 func TestUserStore_ErrEmailTaken(t *testing.T) {
 	db := setupTestDB(t)
 	us := NewUserStore(db)

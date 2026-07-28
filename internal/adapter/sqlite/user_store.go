@@ -70,11 +70,15 @@ func (s *userStore) Create(ctx context.Context, params store.CreateUserParams) (
 	}
 	allowedEnvsJSON := encodeAllowedEnvs(allowedEnvs)
 
+	// mcp_enabled tracks whether the token is usable: GetByMCPToken filters on it, so a
+	// user created with a token but the column left at its schema default (0) authenticates
+	// as "invalid or disabled MCP token" — a valid secret that always 401s. Handing out a
+	// token and disabling it in the same INSERT is never what the caller meant.
 	_, err := s.db.NewRaw(`
-		INSERT INTO users (id, email, password_hash, display_name, role, mcp_token, allowed_environments, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO users (id, email, password_hash, display_name, role, mcp_token, mcp_enabled, allowed_environments, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, params.Email, params.PasswordHash, params.DisplayName,
-		string(role), mcpToken, allowedEnvsJSON, nowStr, nowStr,
+		string(role), mcpToken, boolToInt64(mcpToken.Valid), allowedEnvsJSON, nowStr, nowStr,
 	).Exec(ctx)
 	if err != nil {
 		if isUniqueConstraintError(err, "users.email") {
@@ -90,6 +94,7 @@ func (s *userStore) Create(ctx context.Context, params store.CreateUserParams) (
 		DisplayName:         params.DisplayName,
 		Role:                role,
 		MCPToken:            params.MCPToken,
+		MCPEnabled:          mcpToken.Valid,
 		IsActive:            true,
 		AllowedEnvironments: allowedEnvs,
 		CreatedAt:           now,
