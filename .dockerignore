@@ -1,0 +1,46 @@
+# The Dockerfile does `COPY . .`, so without this the build context is the whole
+# working tree — .git alone is 230MB+. That is uploaded to the remote builder on
+# every deploy before any layer can be cached, which is most of the deploy's wall
+# clock and none of its value: the build needs the Go sources and go.mod, nothing else.
+
+.git
+.github
+.gitignore
+
+# Local build output. The binary is rebuilt inside the image; shipping the host's
+# copy in is both useless and a 33MB tax — and a stale one, since it is whatever
+# was last compiled locally.
+/opentrace
+*.exe
+dist/
+bin/
+
+# Runtime and scratch data, including local log segments and SQLite files.
+tmp/
+data/
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Docs, deployment configs for other platforms, and editor state: none of it is
+# compiled and all of it invalidates the context on every edit.
+docs/
+deploy/
+*.md
+!README.md
+railway.toml
+render.yaml
+fly.toml
+docker-compose*.yml
+.env
+.env.*
+.mcp.json
+.claude/
+.vscode/
+.idea/
+.DS_Store
+
+# Tests do not run in the image build.
+**/*_test.go
+**/testdata/
