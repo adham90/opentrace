@@ -17,15 +17,21 @@ func HandleOverviewInvestigate(ctx context.Context, d OverviewDeps, args map[str
 		return NewToolResultError("service is required for the investigate action"), nil
 	}
 
+	env, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
 	since := GetSinceParam(args, 1*time.Hour)
 	now := time.Now().UTC()
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	resp := map[string]any{
-		"service": service,
-		"since":   since.Format(time.RFC3339),
-		"until":   now.Format(time.RFC3339),
+		"service":     service,
+		"environment": envLabel(env),
+		"since":       since.Format(time.RFC3339),
+		"until":       now.Format(time.RFC3339),
 	}
 
 	var unresolvedCount int
@@ -40,14 +46,15 @@ func HandleOverviewInvestigate(ctx context.Context, d OverviewDeps, args map[str
 		go func() {
 			defer wg.Done()
 			groups, err := d.ErrorGroupStore.List(ctx, store.ListErrorGroupParams{
-				Service: service,
-				Limit:   5,
-				SortBy:  "occurrence_count",
+				Service:     service,
+				Environment: env,
+				Limit:       5,
+				SortBy:      "occurrence_count",
 			})
 			if err != nil {
 				return
 			}
-			uc, _ := d.ErrorGroupStore.Count(ctx, store.ErrorGroupUnresolved)
+			uc, _ := d.ErrorGroupStore.Count(ctx, store.ErrorGroupUnresolved, env)
 
 			mu.Lock()
 			unresolvedCount = uc

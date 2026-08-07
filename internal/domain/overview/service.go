@@ -163,7 +163,7 @@ func (s *Service) Status(ctx context.Context) (*StatusReport, error) {
 	}
 
 	if s.ErrorGroups != nil {
-		unresolvedCount, err := s.ErrorGroups.Count(ctx, store.ErrorGroupUnresolved)
+		unresolvedCount, err := s.ErrorGroups.Count(ctx, store.ErrorGroupUnresolved, "")
 		if err == nil && unresolvedCount > 0 {
 			report.ErrorGroups = &ErrorGroupStats{Unresolved: unresolvedCount}
 		}

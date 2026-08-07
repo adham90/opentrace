@@ -27,17 +27,59 @@ func ErrorsResolve(ctx context.Context, deps ErrorsDeps, args map[string]any) (*
 		return NewToolResultError("reason is required (e.g. 'Fixed in PR #42')"), nil
 	}
 
-	if err := deps.ErrorGroupStore.Resolve(ctx, fingerprint, reason); err != nil {
+	env, err := resolveWriteEnv(ctx, deps, args, fingerprint)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
+	if err := deps.ErrorGroupStore.Resolve(ctx, fingerprint, env, reason); err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to resolve: %v", err)), nil
 	}
 
 	resp := map[string]any{
 		"status":      "resolved",
 		"fingerprint": fingerprint,
+		"environment": envLabel(env),
 		"reason":      reason,
 		"message":     "Error group marked as resolved. It will auto-reopen if the error recurs.",
 	}
 	return JSONResult(resp)
+}
+
+// resolveWriteEnv determines which environment's row a lifecycle write should
+// touch, and refuses the write if the caller may not touch it.
+//
+// Lifecycle writes are the one place where the read-path convention of "empty
+// env means every env" is dangerous: resolving a fingerprint that exists in
+// both staging and production would silently close the production incident
+// too. So a scoped caller always writes exactly its own env, and an unscoped
+// caller (tests, legacy wildcard tokens, the web UI) keeps blanket behaviour.
+func resolveWriteEnv(ctx context.Context, deps ErrorsDeps, args map[string]any, fingerprint string) (string, error) {
+	env, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return "", err
+	}
+	if env == "" {
+		return "", nil
+	}
+
+	// Confirm the group exists in the caller's env before mutating. Without
+	// this a resolve against a fingerprint that only lives in another env
+	// reports a bare "not found" from the store; here it says which env was
+	// searched, which is the difference between a confusing failure and an
+	// obvious one.
+	if _, err := deps.ErrorGroupStore.Get(ctx, fingerprint, env); err != nil {
+		return "", fmt.Errorf("error group %s not found in environment %q", fingerprint, env)
+	}
+	return env, nil
+}
+
+// envLabel describes the env a write landed on for the response body.
+func envLabel(env string) string {
+	if env == "" {
+		return "all"
+	}
+	return env
 }
 
 // ---------------------------------------------------------------------------
@@ -59,13 +101,19 @@ func ErrorsIgnore(ctx context.Context, deps ErrorsDeps, args map[string]any) (*C
 		return NewToolResultError("reason is required (e.g. 'Known noise from health checks')"), nil
 	}
 
-	if err := deps.ErrorGroupStore.Ignore(ctx, fingerprint, reason); err != nil {
+	env, err := resolveWriteEnv(ctx, deps, args, fingerprint)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
+	if err := deps.ErrorGroupStore.Ignore(ctx, fingerprint, env, reason); err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to ignore: %v", err)), nil
 	}
 
 	resp := map[string]any{
 		"status":      "ignored",
 		"fingerprint": fingerprint,
+		"environment": envLabel(env),
 		"reason":      reason,
 		"message":     "Error group permanently ignored. New occurrences will still be counted but won't reopen the group.",
 	}
@@ -91,13 +139,19 @@ func ErrorsReopen(ctx context.Context, deps ErrorsDeps, args map[string]any) (*C
 		return NewToolResultError("reason is required (e.g. 'Error is still occurring, undo ignore')"), nil
 	}
 
-	if err := deps.ErrorGroupStore.Reopen(ctx, fingerprint, reason); err != nil {
+	env, err := resolveWriteEnv(ctx, deps, args, fingerprint)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
+	if err := deps.ErrorGroupStore.Reopen(ctx, fingerprint, env, reason); err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to reopen: %v", err)), nil
 	}
 
 	resp := map[string]any{
 		"status":      "unresolved",
 		"fingerprint": fingerprint,
+		"environment": envLabel(env),
 		"reason":      reason,
 		"message":     "Error group reopened. It is now active and will appear in unresolved error lists.",
 	}
@@ -116,11 +170,17 @@ func HandleNewErrors(ctx context.Context, deps ErrorsDeps, args map[string]any) 
 	since := GetSinceParam(args, 24*time.Hour)
 	service := ArgString(args, "service")
 
+	env, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
 	groups, err := deps.ErrorGroupStore.List(ctx, store.ListErrorGroupParams{
-		Service: service,
-		Since:   &since,
-		Limit:   20,
-		SortBy:  "first_seen_at",
+		Service:     service,
+		Environment: env,
+		Since:       &since,
+		Limit:       20,
+		SortBy:      "first_seen_at",
 	})
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to list error groups: %v", err)), nil

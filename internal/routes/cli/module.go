@@ -62,6 +62,12 @@ func mount(_ chi.Router, deps *server.Deps) {
 
 			r.Get("/status", h.handleStatus)
 			r.Get("/logs/tail", h.handleLogsTail)
+			// /logs/search is the name every caller reaches for first. It was
+			// never registered, so requests fell through to /logs/{id} and came
+			// back as "invalid log id" — an error about a parameter the caller
+			// never sent. Same handler as tail, which already filters on
+			// search/level/service/env/since.
+			r.Get("/logs/search", h.handleLogsTail)
 			r.Get("/logs/stream", h.handleLogsStream)
 			r.Get("/logs/{id}", h.handleLogDetail)
 			r.Get("/errors/top", h.handleErrorsTop)

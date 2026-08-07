@@ -8,11 +8,18 @@ import (
 	"github.com/adham90/opentrace/pkg/store"
 )
 
-func collectErrors(ctx context.Context, d OverviewDeps, service string, since time.Time) map[string]any {
+// collectErrors summarizes unresolved errors that were active within the
+// window. The window is applied by the query (ActiveSince) rather than only
+// being used to label results: a diagnose over the last hour that lists errors
+// last seen a week ago is describing a different incident than the one being
+// diagnosed.
+func collectErrors(ctx context.Context, d OverviewDeps, service, env string, since time.Time) map[string]any {
 	params := store.ListErrorGroupParams{
-		Status: store.ErrorGroupUnresolved,
-		SortBy: "occurrence_count",
-		Limit:  5,
+		Status:      store.ErrorGroupUnresolved,
+		Environment: env,
+		ActiveSince: &since,
+		SortBy:      "occurrence_count",
+		Limit:       5,
 	}
 	if service != "" {
 		params.Service = service
@@ -23,7 +30,7 @@ func collectErrors(ctx context.Context, d OverviewDeps, service string, since ti
 		return map[string]any{"error": err.Error()}
 	}
 
-	totalUnresolved, _ := d.ErrorGroupStore.Count(ctx, store.ErrorGroupUnresolved)
+	totalUnresolved, _ := d.ErrorGroupStore.Count(ctx, store.ErrorGroupUnresolved, env)
 
 	newCount := 0
 	topErrors := make([]map[string]any, 0, len(groups))
@@ -31,17 +38,22 @@ func collectErrors(ctx context.Context, d OverviewDeps, service string, since ti
 		if g.FirstSeenAt.After(since) {
 			newCount++
 		}
-		topErrors = append(topErrors, map[string]any{
+		entry := map[string]any{
 			"fingerprint":      g.Fingerprint,
 			"exception_class":  g.ExceptionClass,
 			"message":          Truncate(g.Message, 100),
 			"occurrence_count": g.OccurrenceCount,
 			"last_seen_at":     g.LastSeenAt.Format(time.RFC3339),
-		})
+		}
+		if g.Environment != "" {
+			entry["environment"] = g.Environment
+		}
+		topErrors = append(topErrors, entry)
 	}
 
 	return map[string]any{
 		"total_unresolved": totalUnresolved,
+		"active_in_window": len(groups),
 		"new_fingerprints": newCount,
 		"top_errors":       topErrors,
 	}

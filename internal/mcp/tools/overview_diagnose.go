@@ -2,34 +2,45 @@ package tools
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 )
 
 // --- diagnose action ---
 
+// defaultDiagnoseWindow is the window used when the caller names none.
+const defaultDiagnoseWindow = time.Hour
+
 func HandleDiagnose(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
 	service := ArgString(args, "service")
 
-	// Parse timeframe (default 1h)
-	timeframe := ArgStringDefault(args, "timeframe", "1h")
-	duration, err := ParseTimeRange(timeframe)
+	env, err := ResolveEnv(ctx, args)
 	if err != nil {
-		return NewToolResultError(fmt.Sprintf("invalid timeframe %q: %v", timeframe, err)), nil
+		return NewToolResultError(err.Error()), nil
 	}
 
+	// Read the window through the shared helper so "since" works here like it
+	// does everywhere else. Reading "timeframe" directly meant a caller passing
+	// since=24h silently got a 1h report — the answer looked precise and
+	// covered the wrong day.
 	now := time.Now().UTC()
-	since := now.Add(-duration)
+	since, windowGiven := OptionalSinceParam(args)
+	if !windowGiven {
+		since = now.Add(-defaultDiagnoseWindow)
+	}
+	if !since.Before(now) {
+		return NewToolResultError("time window must start in the past"), nil
+	}
 
 	// Collect sections in parallel
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	resp := map[string]any{
-		"service":   service,
-		"timeframe": timeframe,
-		"since":     since.Format(time.RFC3339),
-		"until":     now.Format(time.RFC3339),
+		"service":     service,
+		"environment": envLabel(env),
+		"timeframe":   now.Sub(since).Round(time.Minute).String(),
+		"since":       since.Format(time.RFC3339),
+		"until":       now.Format(time.RFC3339),
 	}
 
 	// 1. Error summary
@@ -37,7 +48,7 @@ func HandleDiagnose(ctx context.Context, d OverviewDeps, args map[string]any) (*
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			section := collectErrors(ctx, d, service, since)
+			section := collectErrors(ctx, d, service, env, since)
 			mu.Lock()
 			resp["error_summary"] = section
 			mu.Unlock()

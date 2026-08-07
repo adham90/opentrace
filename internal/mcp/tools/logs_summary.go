@@ -6,7 +6,6 @@ import (
 	"sort"
 	"time"
 
-
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -268,13 +267,14 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 
 	// 6. Unresolved error groups (from ErrorGroupStore).
 	if deps.ErrorGroupStore != nil {
-		unresolvedCount, _ := deps.ErrorGroupStore.Count(ctx, store.ErrorGroupUnresolved)
+		unresolvedCount, _ := deps.ErrorGroupStore.Count(ctx, store.ErrorGroupUnresolved, environmentFilter)
 		if unresolvedCount > 0 {
 			resp["unresolved_error_groups"] = unresolvedCount
 			topErrors, _ := deps.ErrorGroupStore.List(ctx, store.ListErrorGroupParams{
-				Status: store.ErrorGroupUnresolved,
-				SortBy: "occurrence_count",
-				Limit:  3,
+				Status:      store.ErrorGroupUnresolved,
+				Environment: environmentFilter,
+				SortBy:      "occurrence_count",
+				Limit:       3,
 			})
 			if len(topErrors) > 0 {
 				var top []map[string]any

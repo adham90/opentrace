@@ -51,11 +51,16 @@ func (h *handler) handleErrorsTop(w http.ResponseWriter, r *http.Request) {
 	service := r.URL.Query().Get("service")
 
 	params := store.ListErrorGroupParams{
-		Status:  store.ErrorGroupUnresolved,
-		Since:   &since,
-		SortBy:  "occurrence_count",
-		Limit:   limit,
-		Service: service,
+		Status: store.ErrorGroupUnresolved,
+		// ActiveSince, not Since: "top errors in the last hour" means errors
+		// that fired in that hour, not errors whose very first occurrence was
+		// in it. Filtering on first_seen_at hid every long-running incident —
+		// exactly the ones worth ranking.
+		ActiveSince: &since,
+		SortBy:      "occurrence_count",
+		Limit:       limit,
+		Service:     service,
+		Environment: r.URL.Query().Get("env"),
 	}
 
 	groups, err := h.deps.ErrorGroupStore.List(ctx, params)

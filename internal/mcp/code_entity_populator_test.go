@@ -72,7 +72,7 @@ type mockErrorGroupStore struct {
 	groups map[string]*store.ErrorGroup
 }
 
-func (m *mockErrorGroupStore) Get(_ context.Context, fingerprint string) (*store.ErrorGroup, error) {
+func (m *mockErrorGroupStore) Get(_ context.Context, fingerprint, _ string) (*store.ErrorGroup, error) {
 	eg, ok := m.groups[fingerprint]
 	if !ok {
 		return nil, errors.New("not found")
@@ -80,16 +80,16 @@ func (m *mockErrorGroupStore) Get(_ context.Context, fingerprint string) (*store
 	return eg, nil
 }
 
-func (m *mockErrorGroupStore) Upsert(context.Context, store.LogEntry) error              { return nil }
+func (m *mockErrorGroupStore) Upsert(context.Context, store.LogEntry) error { return nil }
 func (m *mockErrorGroupStore) List(context.Context, store.ListErrorGroupParams) ([]store.ErrorGroup, error) {
 	return nil, nil
 }
-func (m *mockErrorGroupStore) Count(context.Context, store.ErrorGroupStatus) (int, error) {
+func (m *mockErrorGroupStore) Count(context.Context, store.ErrorGroupStatus, string) (int, error) {
 	return 0, nil
 }
-func (m *mockErrorGroupStore) Resolve(context.Context, string, string) error { return nil }
-func (m *mockErrorGroupStore) Ignore(context.Context, string, string) error  { return nil }
-func (m *mockErrorGroupStore) Reopen(context.Context, string, string) error  { return nil }
+func (m *mockErrorGroupStore) Resolve(context.Context, string, string, string) error { return nil }
+func (m *mockErrorGroupStore) Ignore(context.Context, string, string, string) error  { return nil }
+func (m *mockErrorGroupStore) Reopen(context.Context, string, string, string) error  { return nil }
 func (m *mockErrorGroupStore) ListEvents(context.Context, string, int) ([]store.ErrorGroupEvent, error) {
 	return nil, nil
 }
@@ -298,4 +298,3 @@ func TestPopulateFromErrorLog_SourceFileNotDuplicatedFromBacktrace(t *testing.T)
 		t.Errorf("users.rb called %d times, want 1", names["app/controllers/users.rb"])
 	}
 }
-

@@ -21,21 +21,21 @@ const (
 // the agent can cross-reference without scanning every row.
 type ErrorGroup struct {
 	bun.BaseModel   `bun:"table:error_groups" json:"-"`
-	Fingerprint     string            `bun:"fingerprint,pk" json:"fingerprint"`
-	Environment     string            `bun:"environment,pk" json:"environment"`
-	Service         string            `bun:"service" json:"service"`
-	ExceptionClass  string            `bun:"exception_class" json:"exception_class"`
-	Message         string            `bun:"message" json:"message"`
-	SourceFile      string            `bun:"source_file" json:"source_file"`
-	SourceLine      int               `bun:"source_line" json:"source_line"`
-	Status          ErrorGroupStatus  `bun:"status" json:"status"`
-	FirstSeenAt     time.Time         `bun:"first_seen_at" json:"first_seen_at"`
-	LastSeenAt      time.Time         `bun:"last_seen_at" json:"last_seen_at"`
-	OccurrenceCount int               `bun:"occurrence_count" json:"occurrence_count"`
-	LastLogID       *int64            `bun:"last_log_id" json:"last_log_id,omitempty"`
-	ReopenedCount   int               `bun:"reopened_count" json:"reopened_count"`
-	ResolvedAt      *time.Time        `bun:"resolved_at" json:"resolved_at,omitempty"`
-	IgnoredAt       *time.Time        `bun:"ignored_at" json:"ignored_at,omitempty"`
+	Fingerprint     string           `bun:"fingerprint,pk" json:"fingerprint"`
+	Environment     string           `bun:"environment,pk" json:"environment"`
+	Service         string           `bun:"service" json:"service"`
+	ExceptionClass  string           `bun:"exception_class" json:"exception_class"`
+	Message         string           `bun:"message" json:"message"`
+	SourceFile      string           `bun:"source_file" json:"source_file"`
+	SourceLine      int              `bun:"source_line" json:"source_line"`
+	Status          ErrorGroupStatus `bun:"status" json:"status"`
+	FirstSeenAt     time.Time        `bun:"first_seen_at" json:"first_seen_at"`
+	LastSeenAt      time.Time        `bun:"last_seen_at" json:"last_seen_at"`
+	OccurrenceCount int              `bun:"occurrence_count" json:"occurrence_count"`
+	LastLogID       *int64           `bun:"last_log_id" json:"last_log_id,omitempty"`
+	ReopenedCount   int              `bun:"reopened_count" json:"reopened_count"`
+	ResolvedAt      *time.Time       `bun:"resolved_at" json:"resolved_at,omitempty"`
+	IgnoredAt       *time.Time       `bun:"ignored_at" json:"ignored_at,omitempty"`
 	// SeenInEnvs is stored as a JSON array of env names in the seen_in_envs
 	// TEXT column; the sqlite store encodes/decodes on read/write.
 	SeenInEnvs []string          `bun:"-" json:"seen_in_envs,omitempty"`
@@ -60,12 +60,20 @@ type ErrorGroupEvent struct {
 }
 
 // ListErrorGroupParams defines filters for listing error groups.
+//
+// Since and ActiveSince answer different questions and are not interchangeable.
+// Since ("what started recently?") is the right filter for a new-errors feed.
+// ActiveSince ("what is broken right now?") is the right filter for a time
+// window like "the last hour" — an error group that first appeared months ago
+// but fired a minute ago belongs in that window, and filtering it on
+// first_seen_at would hide the loudest ongoing incidents.
 type ListErrorGroupParams struct {
 	Status      ErrorGroupStatus `json:"status,omitempty"`
 	Service     string           `json:"service,omitempty"`
 	Environment string           `json:"environment,omitempty"`
-	Since       *time.Time       `json:"since,omitempty"`       // only groups first seen after this time
-	SortBy      string           `json:"sort_by,omitempty"`     // "occurrence_count", "last_seen_at", "first_seen_at"
+	Since       *time.Time       `json:"since,omitempty"`        // only groups FIRST seen after this time
+	ActiveSince *time.Time       `json:"active_since,omitempty"` // only groups LAST seen after this time
+	SortBy      string           `json:"sort_by,omitempty"`      // "occurrence_count", "last_seen_at", "first_seen_at"
 	Limit       int              `json:"limit,omitempty"`
 	Offset      int              `json:"offset,omitempty"`
 }

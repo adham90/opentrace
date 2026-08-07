@@ -12,23 +12,35 @@ import (
 // --- triage action ---
 
 type triageEntry struct {
-	Type     string `json:"type"`
-	Severity string `json:"severity"`
-	Title    string `json:"title"`
-	Detail   string `json:"detail"`
-	Time     string `json:"time"`
-	ID       string `json:"id"`
+	Type        string `json:"type"`
+	Severity    string `json:"severity"`
+	Title       string `json:"title"`
+	Detail      string `json:"detail"`
+	Time        string `json:"time"`
+	ID          string `json:"id"`
+	Environment string `json:"environment,omitempty"`
 }
 
-func HandleTriage(ctx context.Context, d OverviewDeps) (*CallToolResult, error) {
+func HandleTriage(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
+	// Triage is a listing like any other, so it takes the caller's env scope.
+	// It used to query unfiltered, which made it the one tool that would show a
+	// production-scoped caller staging's error groups — and since every
+	// drill-down tool does enforce scope, the fingerprints it handed back could
+	// not be opened by the caller it handed them to.
+	env, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
 	var items []triageEntry
 
 	// Unresolved error groups (highest priority)
 	if d.ErrorGroupStore != nil {
 		groups, err := d.ErrorGroupStore.List(ctx, store.ListErrorGroupParams{
-			Status: store.ErrorGroupUnresolved,
-			SortBy: "occurrence_count",
-			Limit:  10,
+			Status:      store.ErrorGroupUnresolved,
+			Environment: env,
+			SortBy:      "occurrence_count",
+			Limit:       10,
 		})
 		if err == nil {
 			for _, eg := range groups {
@@ -40,13 +52,20 @@ func HandleTriage(ctx context.Context, d OverviewDeps) (*CallToolResult, error) 
 				if eg.ExceptionClass != "" {
 					title = eg.ExceptionClass + ": " + msg
 				}
+				detail := fmt.Sprintf("%d occurrences, last seen %s", eg.OccurrenceCount, eg.LastSeenAt.Format(time.RFC3339))
+				// Name the env when the caller can see more than one, so two
+				// rows for the same fingerprint are distinguishable.
+				if env == "" && eg.Environment != "" {
+					detail += " [" + eg.Environment + "]"
+				}
 				items = append(items, triageEntry{
-					Type:     "error_group",
-					Severity: "critical",
-					Title:    title,
-					Detail:   fmt.Sprintf("%d occurrences, last seen %s", eg.OccurrenceCount, eg.LastSeenAt.Format(time.RFC3339)),
-					Time:     eg.LastSeenAt.Format(time.RFC3339),
-					ID:       eg.Fingerprint,
+					Type:        "error_group",
+					Severity:    "critical",
+					Title:       title,
+					Detail:      detail,
+					Time:        eg.LastSeenAt.Format(time.RFC3339),
+					ID:          eg.Fingerprint,
+					Environment: eg.Environment,
 				})
 			}
 		}
@@ -57,13 +76,18 @@ func HandleTriage(ctx context.Context, d OverviewDeps) (*CallToolResult, error) 
 		alerts, err := d.WatchStore.ListAlerts(ctx, "", "pending", 10)
 		if err == nil {
 			for _, a := range alerts {
+				// ListAlerts has no env filter, so drop out-of-scope alerts here.
+				if env != "" && a.Environment != env {
+					continue
+				}
 				items = append(items, triageEntry{
-					Type:     "watch_alert",
-					Severity: "warning",
-					Title:    a.Summary,
-					Detail:   fmt.Sprintf("%s: %.2f (threshold: %.2f)", a.TriggerMetric(), a.TriggerValue(), a.ThresholdValue()),
-					Time:     a.CreatedAt.Format(time.RFC3339),
-					ID:       a.ID,
+					Type:        "watch_alert",
+					Severity:    "warning",
+					Title:       a.Summary,
+					Detail:      fmt.Sprintf("%s: %.2f (threshold: %.2f)", a.TriggerMetric(), a.TriggerValue(), a.ThresholdValue()),
+					Time:        a.CreatedAt.Format(time.RFC3339),
+					ID:          a.ID,
+					Environment: a.Environment,
 				})
 			}
 		}
@@ -164,10 +188,17 @@ func HandleTriage(ctx context.Context, d OverviewDeps) (*CallToolResult, error) 
 	top := items[0]
 	switch top.Type {
 	case "error_group":
-		suggestions = append(suggestions, Suggest("errors", "Investigate top error", map[string]any{
+		// Carry the env into the suggestion. A fingerprint alone is ambiguous
+		// when it exists in several envs, and following the suggestion would
+		// land on whichever row was touched most recently.
+		detailArgs := map[string]any{
 			"action":      "detail",
 			"fingerprint": top.ID,
-		}))
+		}
+		if top.Environment != "" {
+			detailArgs["environment"] = top.Environment
+		}
+		suggestions = append(suggestions, Suggest("errors", "Investigate top error", detailArgs))
 	case "watch_alert":
 		suggestions = append(suggestions, Suggest("watches", "Investigate top alert", map[string]any{
 			"action":   "investigate",

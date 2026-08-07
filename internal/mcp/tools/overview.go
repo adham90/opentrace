@@ -32,9 +32,9 @@ func OverviewHandler(d OverviewDeps) ToolHandlerFunc {
 
 		switch action {
 		case "status":
-			return HandleOverviewStatus(ctx, d)
+			return HandleOverviewStatus(ctx, d, args)
 		case "triage":
-			return HandleTriage(ctx, d)
+			return HandleTriage(ctx, d, args)
 		case "diagnose":
 			return HandleDiagnose(ctx, d, args)
 		case "timeline":

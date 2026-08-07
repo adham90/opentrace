@@ -25,7 +25,13 @@ func (h *handler) handleLogDetail(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		server.WriteError(w, http.StatusBadRequest, "invalid log id")
+		// Non-numeric segments land here because /logs/{id} is the catch-all
+		// under /logs. Name the paths that do exist: a caller who guessed a
+		// route gets a map instead of a puzzle about log ids they never used.
+		server.WriteError(w, http.StatusNotFound, fmt.Sprintf(
+			"no such logs endpoint %q — use /logs/tail (supports search, level, service, env, since, after, limit), /logs/search, /logs/stream, or /logs/{numeric-id}",
+			idStr,
+		))
 		return
 	}
 
@@ -90,6 +96,18 @@ func (h *handler) handleLogsTail(w http.ResponseWriter, r *http.Request) {
 	}
 	if v := r.URL.Query().Get("search"); v != "" {
 		params.Query = v
+	}
+	// A bad 'since' is rejected rather than ignored. Silently dropping it
+	// returns the newest logs regardless of the window, which reads as "nothing
+	// happened back then" — the worst possible answer to a question about a
+	// past incident.
+	if v := r.URL.Query().Get("since"); v != "" {
+		t, err := server.ParseSinceParam(v)
+		if err != nil {
+			server.WriteError(w, http.StatusBadRequest, "invalid 'since' value (use 15m, 6h, 7d or an RFC3339 timestamp)")
+			return
+		}
+		params.Start = &t
 	}
 
 	entries, err := h.deps.LogStore.Search(ctx, params)

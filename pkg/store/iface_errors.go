@@ -6,14 +6,22 @@ import (
 )
 
 // ErrorGroupStore manages error groups aggregated by fingerprint.
+//
+// Rows are keyed (fingerprint, environment): the same fingerprint legitimately
+// exists once per env, each with its own status and counts. Every method that
+// names a fingerprint therefore also takes an environment. Passing "" means
+// "across all envs" — correct for unscoped internal callers (retention, the
+// web UI), and never what an env-scoped MCP token should get. Callers holding
+// a token scope must resolve it first and pass the concrete env, otherwise a
+// production-scoped caller reads or mutates staging rows.
 type ErrorGroupStore interface {
 	Upsert(ctx context.Context, entry LogEntry) error
-	Get(ctx context.Context, fingerprint string) (*ErrorGroup, error)
+	Get(ctx context.Context, fingerprint, environment string) (*ErrorGroup, error)
 	List(ctx context.Context, params ListErrorGroupParams) ([]ErrorGroup, error)
-	Count(ctx context.Context, status ErrorGroupStatus) (int, error)
-	Resolve(ctx context.Context, fingerprint string, reason string) error
-	Ignore(ctx context.Context, fingerprint string, reason string) error
-	Reopen(ctx context.Context, fingerprint string, reason string) error
+	Count(ctx context.Context, status ErrorGroupStatus, environment string) (int, error)
+	Resolve(ctx context.Context, fingerprint, environment, reason string) error
+	Ignore(ctx context.Context, fingerprint, environment, reason string) error
+	Reopen(ctx context.Context, fingerprint, environment, reason string) error
 	ListEvents(ctx context.Context, fingerprint string, limit int) ([]ErrorGroupEvent, error)
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
 }

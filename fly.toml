@@ -1,5 +1,7 @@
 app = "opentrace"
-primary_region = "iad"
+# fra, not iad: this is the log sink for indemo (fra). Shipping every log record across the
+# Atlantic would add latency and egress to a write path that runs on every request.
+primary_region = "fra"
 
 [build]
   dockerfile = "Dockerfile"
@@ -15,14 +17,22 @@ primary_region = "iad"
   auto_start_machines = true
   min_machines_running = 1
 
-  [http_service.checks]
-    [http_service.checks.health]
-      interval = "30s"
-      timeout = "5s"
-      grace_period = "10s"
-      method = "GET"
-      path = "/healthz"
+  # Array-of-tables, not a named sub-table: flyctl rejects the latter outright. This config
+  # had never been deployed, so the error had never surfaced.
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/healthz"
 
 [mounts]
   source = "opentrace_data"
   destination = "/data"
+
+# One volume means one machine, so there is no HA and a deploy drops ~20s of logs. That is
+# acceptable here: the shipper in indemo is best-effort and drops on overflow by design.
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "1gb" # columnar seal peaks ~5MB; the rest is headroom for query fan-out

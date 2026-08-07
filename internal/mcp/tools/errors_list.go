@@ -60,6 +60,14 @@ func ErrorsList(ctx context.Context, deps ErrorsDeps, args map[string]any) (*Cal
 	}
 	params.Limit = ArgInt(args, "limit", 20, 100)
 
+	// since here means "still erroring in this window", not "first appeared in
+	// it" — a group from last month that fired a minute ago is exactly what
+	// someone asking for the last hour wants to see. Only applied when the
+	// caller actually passed a window; the default listing stays unbounded.
+	if since, ok := OptionalSinceParam(args); ok {
+		params.ActiveSince = &since
+	}
+
 	groups, err := deps.ErrorGroupStore.List(ctx, params)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to list error groups: %v", err)), nil
@@ -69,7 +77,9 @@ func ErrorsList(ctx context.Context, deps ErrorsDeps, args map[string]any) (*Cal
 		return EmptyResult("No error groups found matching the criteria.")
 	}
 
-	unresolvedCount, _ := deps.ErrorGroupStore.Count(ctx, store.ErrorGroupUnresolved)
+	// Count in the same env the rows came from, otherwise the summary total
+	// counts groups the caller was not shown and cannot open.
+	unresolvedCount, _ := deps.ErrorGroupStore.Count(ctx, store.ErrorGroupUnresolved, env)
 
 	summaries := make([]ErrorGroupSummary, len(groups))
 	for i, g := range groups {

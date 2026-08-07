@@ -20,7 +20,9 @@ type LogCounter interface {
 
 // ErrorCounter counts error groups by status.
 type ErrorCounter interface {
-	Count(ctx context.Context, status store.ErrorGroupStatus) (int, error)
+	// environment scopes the count; "" counts every env. This service backs
+	// the operator-facing CLI status, which is deliberately whole-system.
+	Count(ctx context.Context, status store.ErrorGroupStatus, environment string) (int, error)
 }
 
 // AlertCounter counts pending watch alerts.

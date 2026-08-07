@@ -83,15 +83,40 @@ func ParseSinceOr(s string, fallback time.Duration) time.Time {
 // helper rather than reading the argument directly. Do NOT rename the legacy
 // parameter names — that would break MCP clients that already use them.
 func GetSinceParam(args map[string]any, defaultDuration time.Duration) time.Time {
-	// Priority: "since" > "time_range" > "timeframe".
-	if v, ok := args["since"].(string); ok && v != "" {
-		return ParseSinceOr(v, defaultDuration)
-	}
-	if v, ok := args["time_range"].(string); ok && v != "" {
-		return ParseSinceOr(v, defaultDuration)
-	}
-	if v, ok := args["timeframe"].(string); ok && v != "" {
-		return ParseSinceOr(v, defaultDuration)
+	if t, ok := OptionalSinceParam(args); ok {
+		return t
 	}
 	return time.Now().UTC().Add(-defaultDuration)
+}
+
+// OptionalSinceParam reports whether the caller supplied a time window at all,
+// alongside the parsed value. Tools that are unbounded by default — listings
+// that should return everything unless asked otherwise — need to tell "no
+// window given" apart from "a window that happens to equal the default", which
+// GetSinceParam cannot express.
+//
+// Accepts the same three names in the same priority order as GetSinceParam:
+// "since" > "time_range" > "timeframe". An unparseable value counts as absent.
+func OptionalSinceParam(args map[string]any) (time.Time, bool) {
+	for _, key := range []string{"since", "time_range", "timeframe"} {
+		v, ok := args[key].(string)
+		if !ok || v == "" {
+			continue
+		}
+		t, err := ParseSince(v)
+		if err != nil {
+			continue
+		}
+		return t, true
+	}
+	return time.Time{}, false
+}
+
+// SinceLabel renders a window's start for a response body, or "all time" when
+// no window was applied.
+func SinceLabel(t time.Time, ok bool) string {
+	if !ok {
+		return "all time"
+	}
+	return t.Format(time.RFC3339)
 }

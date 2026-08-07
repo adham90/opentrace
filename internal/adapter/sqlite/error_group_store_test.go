@@ -30,7 +30,7 @@ func TestErrorGroupStore_Upsert_NewGroup(t *testing.T) {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	eg, err := s.Get(ctx, "fp_abc123")
+	eg, err := s.Get(ctx, "fp_abc123", "")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestErrorGroupStore_Upsert_IncrementExisting(t *testing.T) {
 		t.Fatalf("second Upsert: %v", err)
 	}
 
-	eg, err := s.Get(ctx, "fp_inc")
+	eg, err := s.Get(ctx, "fp_inc", "")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestErrorGroupStore_Upsert_SkipsNonError(t *testing.T) {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	_, err := s.Get(ctx, "fp_info")
+	_, err := s.Get(ctx, "fp_info", "")
 	if err != store.ErrNotFound {
 		t.Errorf("expected ErrNotFound for INFO-level entry, got: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestErrorGroupStore_Upsert_SkipsEmptyFingerprint(t *testing.T) {
 		t.Fatalf("Upsert: %v", err)
 	}
 	// No error group should be created.
-	count, err := s.Count(ctx, "")
+	count, err := s.Count(ctx, "", "")
 	if err != nil {
 		t.Fatalf("Count: %v", err)
 	}
@@ -127,10 +127,10 @@ func TestErrorGroupStore_Resolve_And_Reopen(t *testing.T) {
 	}
 
 	// Resolve.
-	if err := s.Resolve(ctx, "fp_resolve", "Fixed in PR #42"); err != nil {
+	if err := s.Resolve(ctx, "fp_resolve", "", "Fixed in PR #42"); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	eg, _ := s.Get(ctx, "fp_resolve")
+	eg, _ := s.Get(ctx, "fp_resolve", "")
 	if eg.Status != store.ErrorGroupResolved {
 		t.Errorf("Status = %q, want resolved", eg.Status)
 	}
@@ -142,7 +142,7 @@ func TestErrorGroupStore_Resolve_And_Reopen(t *testing.T) {
 	if err := s.Upsert(ctx, entry); err != nil {
 		t.Fatalf("Upsert reopen: %v", err)
 	}
-	eg, _ = s.Get(ctx, "fp_resolve")
+	eg, _ = s.Get(ctx, "fp_resolve", "")
 	if eg.Status != store.ErrorGroupUnresolved {
 		t.Errorf("Status = %q, want unresolved after reopen", eg.Status)
 	}
@@ -186,7 +186,7 @@ func TestErrorGroupStore_Ignore_StaysIgnored(t *testing.T) {
 	if err := s.Upsert(ctx, entry); err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
-	if err := s.Ignore(ctx, "fp_ignore", "Known noise"); err != nil {
+	if err := s.Ignore(ctx, "fp_ignore", "", "Known noise"); err != nil {
 		t.Fatalf("Ignore: %v", err)
 	}
 
@@ -194,7 +194,7 @@ func TestErrorGroupStore_Ignore_StaysIgnored(t *testing.T) {
 	if err := s.Upsert(ctx, entry); err != nil {
 		t.Fatalf("Upsert after ignore: %v", err)
 	}
-	eg, _ := s.Get(ctx, "fp_ignore")
+	eg, _ := s.Get(ctx, "fp_ignore", "")
 	if eg.Status != store.ErrorGroupIgnored {
 		t.Errorf("Status = %q, want ignored", eg.Status)
 	}
@@ -228,7 +228,7 @@ func TestErrorGroupStore_List(t *testing.T) {
 	}
 
 	// Filter by status.
-	if err := s.Resolve(ctx, "fp_b", "fixed"); err != nil {
+	if err := s.Resolve(ctx, "fp_b", "", "fixed"); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	unresolved, err := s.List(ctx, store.ListErrorGroupParams{Status: store.ErrorGroupUnresolved})
@@ -255,7 +255,7 @@ func TestErrorGroupStore_Count(t *testing.T) {
 		}
 	}
 
-	total, err := s.Count(ctx, "")
+	total, err := s.Count(ctx, "", "")
 	if err != nil {
 		t.Fatalf("Count all: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestErrorGroupStore_Count(t *testing.T) {
 		t.Errorf("total = %d, want 3", total)
 	}
 
-	unresolved, err := s.Count(ctx, store.ErrorGroupUnresolved)
+	unresolved, err := s.Count(ctx, store.ErrorGroupUnresolved, "")
 	if err != nil {
 		t.Fatalf("Count unresolved: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestErrorGroupStore_Resolve_NotFound(t *testing.T) {
 	s := NewErrorGroupStore(db)
 	ctx := context.Background()
 
-	err := s.Resolve(ctx, "nonexistent", "reason")
+	err := s.Resolve(ctx, "nonexistent", "", "reason")
 	if err != store.ErrNotFound {
 		t.Errorf("expected ErrNotFound, got: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestErrorGroupStore_Prune(t *testing.T) {
 		t.Errorf("pruned = %d, want 1", pruned)
 	}
 
-	remaining, _ := s.Count(ctx, "")
+	remaining, _ := s.Count(ctx, "", "")
 	if remaining != 1 {
 		t.Errorf("remaining = %d, want 1", remaining)
 	}
@@ -396,7 +396,7 @@ func TestErrorGroupStore_CompositePKAndSeenInEnvs(t *testing.T) {
 	}
 }
 
-func TestErrorGroupStore_ResolveForEnv(t *testing.T) {
+func TestErrorGroupStore_ResolveScopedToEnv(t *testing.T) {
 	db := setupTestDB(t)
 	egs := NewErrorGroupStore(db)
 	ctx := context.Background()
@@ -417,14 +417,8 @@ func TestErrorGroupStore_ResolveForEnv(t *testing.T) {
 	}
 
 	// Resolve only staging.
-	storeImpl, ok := egs.(interface {
-		ResolveForEnv(context.Context, string, string, string) error
-	})
-	if !ok {
-		t.Fatal("expected ResolveForEnv on sqlite impl")
-	}
-	if err := storeImpl.ResolveForEnv(ctx, "fp-2env", "staging", "fixed in staging first"); err != nil {
-		t.Fatalf("ResolveForEnv: %v", err)
+	if err := egs.Resolve(ctx, "fp-2env", "staging", "fixed in staging first"); err != nil {
+		t.Fatalf("Resolve(staging): %v", err)
 	}
 
 	// Staging row is resolved; production stays unresolved.
@@ -446,7 +440,7 @@ func TestErrorGroupStore_ResolveForEnv(t *testing.T) {
 	}
 
 	// Blanket Resolve closes both.
-	if err := egs.Resolve(ctx, "fp-2env", "fixed everywhere"); err != nil {
+	if err := egs.Resolve(ctx, "fp-2env", "", "fixed everywhere"); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	groups, _ = egs.List(ctx, store.ListErrorGroupParams{})

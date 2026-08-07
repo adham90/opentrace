@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -43,22 +42,30 @@ func HandleTestGenContext(ctx context.Context, d TestGenDeps, args map[string]an
 		return NewToolResultError("ErrorGroupStore not configured"), nil
 	}
 
-	// Get the error group
-	eg, err := d.ErrorGroupStore.Get(ctx, fingerprint)
+	env, err := ResolveEnv(ctx, args)
 	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
+	// Get the error group
+	eg, err := d.ErrorGroupStore.Get(ctx, fingerprint, env)
+	if err != nil {
+		return NewToolResultError("error group not found: " + fingerprint), nil
+	}
+	if !scopeAllowsEnv(ctx, eg.Environment) {
 		return NewToolResultError("error group not found: " + fingerprint), nil
 	}
 
 	result := map[string]any{
 		"error_group": map[string]any{
-			"fingerprint":      eg.Fingerprint,
-			"exception_class":  eg.ExceptionClass,
-			"message":          eg.Message,
-			"occurrences":      eg.OccurrenceCount,
-			"first_seen":       eg.FirstSeenAt.Format("2006-01-02T15:04:05Z"),
-			"last_seen":        eg.LastSeenAt.Format("2006-01-02T15:04:05Z"),
-			"service":          eg.Service,
-			"status":           string(eg.Status),
+			"fingerprint":     eg.Fingerprint,
+			"exception_class": eg.ExceptionClass,
+			"message":         eg.Message,
+			"occurrences":     eg.OccurrenceCount,
+			"first_seen":      eg.FirstSeenAt.Format("2006-01-02T15:04:05Z"),
+			"last_seen":       eg.LastSeenAt.Format("2006-01-02T15:04:05Z"),
+			"service":         eg.Service,
+			"status":          string(eg.Status),
 		},
 	}
 
@@ -75,9 +82,9 @@ func HandleTestGenContext(ctx context.Context, d TestGenDeps, args map[string]an
 		impact, err := d.ErrorImpactStore.GetImpact(ctx, fingerprint)
 		if err == nil && impact != nil {
 			result["impact"] = map[string]any{
-				"unique_users":   impact.UniqueUsers,
-				"impact_score":   impact.ImpactScore,
-				"common_traits":  impact.CommonTraits,
+				"unique_users":  impact.UniqueUsers,
+				"impact_score":  impact.ImpactScore,
+				"common_traits": impact.CommonTraits,
 			}
 		}
 	}
@@ -155,7 +162,6 @@ func HandleTestGenSuggest(ctx context.Context, d TestGenDeps, args map[string]an
 		"tip":         "Use test_gen(action: \"context\", fingerprint: \"...\") to get test-ready data for any error.",
 	})
 }
-
 
 func sanitizeTestName(s string) string {
 	// Simple: replace non-alphanumeric with underscore

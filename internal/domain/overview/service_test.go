@@ -26,7 +26,7 @@ type fakeErrorCounter struct {
 	err   error
 }
 
-func (f *fakeErrorCounter) Count(_ context.Context, _ store.ErrorGroupStatus) (int, error) {
+func (f *fakeErrorCounter) Count(_ context.Context, _ store.ErrorGroupStatus, _ string) (int, error) {
 	return f.count, f.err
 }
 
@@ -68,12 +68,12 @@ func (f *fakeServerLister) List(_ context.Context, _ store.ListServerParams) ([]
 
 // Compile-time interface checks for fakes.
 var (
-	_ LogCounter      = (*fakeLogCounter)(nil)
-	_ ErrorCounter    = (*fakeErrorCounter)(nil)
-	_ AlertCounter    = (*fakeAlertCounter)(nil)
+	_ LogCounter       = (*fakeLogCounter)(nil)
+	_ ErrorCounter     = (*fakeErrorCounter)(nil)
+	_ AlertCounter     = (*fakeAlertCounter)(nil)
 	_ HealthSummariser = (*fakeHealthSummariser)(nil)
-	_ ConnectorLister = (*fakeConnectorLister)(nil)
-	_ ServerLister    = (*fakeServerLister)(nil)
+	_ ConnectorLister  = (*fakeConnectorLister)(nil)
+	_ ServerLister     = (*fakeServerLister)(nil)
 )
 
 // ---------------------------------------------------------------------------

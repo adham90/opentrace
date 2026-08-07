@@ -57,7 +57,15 @@ type ServerStats struct {
 // Handler
 // ---------------------------------------------------------------------------
 
-func HandleOverviewStatus(ctx context.Context, d OverviewDeps) (*CallToolResult, error) {
+func HandleOverviewStatus(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
+	// Status is a health summary, so its numbers must describe the env the
+	// caller can actually inspect — otherwise it reports a problem count that
+	// no drill-down the caller is allowed to run can account for.
+	env, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
 	report := &StatusReport{}
 
 	// Logs (last hour)
@@ -85,7 +93,7 @@ func HandleOverviewStatus(ctx context.Context, d OverviewDeps) (*CallToolResult,
 
 	// Unresolved error groups
 	if d.ErrorGroupStore != nil {
-		unresolvedCount, err := d.ErrorGroupStore.Count(ctx, store.ErrorGroupUnresolved)
+		unresolvedCount, err := d.ErrorGroupStore.Count(ctx, store.ErrorGroupUnresolved, env)
 		if err == nil && unresolvedCount > 0 {
 			report.ErrorGroups = &ErrorGroupStats{Unresolved: unresolvedCount}
 		}

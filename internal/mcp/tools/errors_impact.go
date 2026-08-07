@@ -67,9 +67,11 @@ func ErrorsImpact(ctx context.Context, deps ErrorsDeps, args map[string]any) (*C
 		resp["affected_users"] = entries
 	}
 
-	// Include error group info if available.
+	// Include error group info if available. Read the group from the same env
+	// the impact row belongs to, so the message and status describe the impact
+	// just reported rather than another env's copy of the fingerprint.
 	if deps.ErrorGroupStore != nil {
-		eg, egErr := deps.ErrorGroupStore.Get(ctx, fingerprint)
+		eg, egErr := deps.ErrorGroupStore.Get(ctx, fingerprint, impact.Environment)
 		if egErr == nil {
 			resp["exception_class"] = eg.ExceptionClass
 			resp["message"] = eg.Message

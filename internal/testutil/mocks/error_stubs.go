@@ -31,11 +31,18 @@ func NewErrorGroupStore() *ErrorGroupStore {
 }
 
 func (m *ErrorGroupStore) Upsert(_ context.Context, _ store.LogEntry) error { return nil }
-func (m *ErrorGroupStore) Get(_ context.Context, fingerprint string) (*store.ErrorGroup, error) {
+
+// Get honours environment the way the real store does: a concrete env must
+// match the stored row, "" matches anything. Tests for env scoping depend on
+// this — a stub that ignored env would pass them no matter what the handler did.
+func (m *ErrorGroupStore) Get(_ context.Context, fingerprint, environment string) (*store.ErrorGroup, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	g, ok := m.Groups[fingerprint]
 	if !ok {
+		return nil, store.ErrNotFound
+	}
+	if environment != "" && g.Environment != environment {
 		return nil, store.ErrNotFound
 	}
 	return g, nil
@@ -43,12 +50,12 @@ func (m *ErrorGroupStore) Get(_ context.Context, fingerprint string) (*store.Err
 func (m *ErrorGroupStore) List(_ context.Context, _ store.ListErrorGroupParams) ([]store.ErrorGroup, error) {
 	return nil, nil
 }
-func (m *ErrorGroupStore) Count(_ context.Context, _ store.ErrorGroupStatus) (int, error) {
+func (m *ErrorGroupStore) Count(_ context.Context, _ store.ErrorGroupStatus, _ string) (int, error) {
 	return 0, nil
 }
-func (m *ErrorGroupStore) Resolve(_ context.Context, _ string, _ string) error { return nil }
-func (m *ErrorGroupStore) Ignore(_ context.Context, _ string, _ string) error  { return nil }
-func (m *ErrorGroupStore) Reopen(_ context.Context, _ string, _ string) error  { return nil }
+func (m *ErrorGroupStore) Resolve(_ context.Context, _, _, _ string) error { return nil }
+func (m *ErrorGroupStore) Ignore(_ context.Context, _, _, _ string) error  { return nil }
+func (m *ErrorGroupStore) Reopen(_ context.Context, _, _, _ string) error  { return nil }
 func (m *ErrorGroupStore) ListEvents(_ context.Context, _ string, _ int) ([]store.ErrorGroupEvent, error) {
 	return nil, nil
 }

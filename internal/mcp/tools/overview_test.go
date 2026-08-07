@@ -46,7 +46,7 @@ func TestHandleOverviewStatus_EmptyDB(t *testing.T) {
 		SettingsStore:    mocks.NewSettingsStore(),
 	}
 
-	result, err := HandleOverviewStatus(context.Background(), d)
+	result, err := HandleOverviewStatus(context.Background(), d, map[string]any{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestHandleTriage_EmptyDB(t *testing.T) {
 		HealthCheckStore: mocks.NewHealthCheckStore(),
 	}
 
-	result, err := HandleTriage(context.Background(), d)
+	result, err := HandleTriage(context.Background(), d, map[string]any{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

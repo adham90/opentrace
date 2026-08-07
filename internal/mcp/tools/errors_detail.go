@@ -22,14 +22,24 @@ func ErrorsDetail(ctx context.Context, deps ErrorsDeps, args map[string]any) (*C
 		return NewToolResultError("fingerprint is required"), nil
 	}
 
-	eg, err := deps.ErrorGroupStore.Get(ctx, fingerprint)
+	// Resolve the env first and fetch that env's row. Fetching by fingerprint
+	// alone returns whichever env was seen most recently, so a production-scoped
+	// caller asking about a fingerprint that exists in both envs used to get
+	// staging's row — and then be denied by the gate below, reporting "not
+	// found" for a group it is fully entitled to read.
+	env, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
+	eg, err := deps.ErrorGroupStore.Get(ctx, fingerprint, env)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("error group not found: %v", err)), nil
 	}
 
-	// Env-scope gate: groups are fetched by fingerprint (no env filter), so a
-	// token scoped to one env must not read a group from another. Return the
-	// same "not found" message to avoid revealing cross-env existence.
+	// Still gate the result: with an unscoped or wildcard token env resolves to
+	// "", so the row can come from any env. Same "not found" message either way,
+	// to avoid revealing cross-env existence.
 	if !scopeAllowsEnv(ctx, eg.Environment) {
 		return NewToolResultError("error group not found"), nil
 	}

@@ -148,7 +148,7 @@ func TestErrorImpactStore_ComputeImpactScores(t *testing.T) {
 	}
 
 	// Check that error group was updated
-	eg, err := egs.Get(ctx, "fp-score-1")
+	eg, err := egs.Get(ctx, "fp-score-1", "")
 	if err != nil {
 		t.Fatalf("Get error group: %v", err)
 	}
@@ -251,4 +251,3 @@ func TestErrorImpactStore_FindCommonTraits(t *testing.T) {
 		t.Errorf("Safari share = %v, want >= 0.5", browserTraits["Safari"])
 	}
 }
-

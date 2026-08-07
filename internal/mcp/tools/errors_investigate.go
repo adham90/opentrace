@@ -235,7 +235,9 @@ func ErrorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if eg, egErr := deps.ErrorGroupStore.Get(ctx, anchor.ErrorFingerprint); egErr == nil {
+			// The anchor log names its env; use it so the group's status and
+			// counts describe the same env as the log being investigated.
+			if eg, egErr := deps.ErrorGroupStore.Get(ctx, anchor.ErrorFingerprint, anchor.Environment); egErr == nil {
 				errorGroupInfo = map[string]any{
 					"fingerprint":      eg.Fingerprint,
 					"status":           string(eg.Status),

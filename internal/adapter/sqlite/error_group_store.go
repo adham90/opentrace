@@ -107,42 +107,18 @@ func (s *errorGroupStore) Upsert(ctx context.Context, entry store.LogEntry) erro
 	return nil
 }
 
-// Get returns the most recently seen row for a fingerprint. With the composite
-// (fingerprint, environment) PK, the same fingerprint can exist in multiple
-// envs; Get picks the row with the latest last_seen_at so the caller gets
-// current status without needing to know the env. Callers that need a specific
-// env should use GetForEnv instead.
-func (s *errorGroupStore) Get(ctx context.Context, fingerprint string) (*store.ErrorGroup, error) {
-	var eg errorGroupRow
-	err := s.db.NewRaw(`
-		SELECT fingerprint, service, environment, exception_class, message,
-			source_file, source_line, status, first_seen_at, last_seen_at,
-			occurrence_count, last_log_id, reopened_count, resolved_at, ignored_at,
-			unique_users, impact_score, COALESCE(common_context, '{}'),
-			COALESCE(seen_in_envs, '[]')
-		FROM error_groups
-		WHERE fingerprint = ?
-		ORDER BY last_seen_at DESC LIMIT 1`, fingerprint,
-	).Scan(ctx,
-		&eg.Fingerprint, &eg.Service, &eg.Environment, &eg.ExceptionClass, &eg.Message,
-		&eg.SourceFile, &eg.SourceLine, &eg.Status, &eg.FirstSeenAt, &eg.LastSeenAt,
-		&eg.OccurrenceCount, &eg.LastLogID, &eg.ReopenedCount, &eg.ResolvedAt, &eg.IgnoredAt,
-		&eg.UniqueUsers, &eg.ImpactScore, &eg.CommonContext,
-		&eg.SeenInEnvs,
-	)
-	if err == sql.ErrNoRows {
-		return nil, store.ErrNotFound
+// Get returns one row for a fingerprint. Because rows are keyed
+// (fingerprint, environment), environment selects which one: pass a concrete
+// env for an exact match, or "" to take the most recently seen row across all
+// envs. An env-scoped caller must always pass its env — the "" form can return
+// a row from an environment the caller may not read.
+func (s *errorGroupStore) Get(ctx context.Context, fingerprint, environment string) (*store.ErrorGroup, error) {
+	where, args := "WHERE fingerprint = ?", []any{fingerprint}
+	if environment != "" {
+		where += " AND environment = ?"
+		args = append(args, environment)
 	}
-	if err != nil {
-		return nil, err
-	}
-	return eg.toStore(), nil
-}
 
-// GetForEnv returns the row for an exact (fingerprint, environment) pair.
-// Used by PR 3 write handlers that resolve the caller's env before acting on
-// an error group.
-func (s *errorGroupStore) GetForEnv(ctx context.Context, fingerprint, environment string) (*store.ErrorGroup, error) {
 	var eg errorGroupRow
 	err := s.db.NewRaw(`
 		SELECT fingerprint, service, environment, exception_class, message,
@@ -151,7 +127,8 @@ func (s *errorGroupStore) GetForEnv(ctx context.Context, fingerprint, environmen
 			unique_users, impact_score, COALESCE(common_context, '{}'),
 			COALESCE(seen_in_envs, '[]')
 		FROM error_groups
-		WHERE fingerprint = ? AND environment = ?`, fingerprint, environment,
+		`+where+`
+		ORDER BY last_seen_at DESC LIMIT 1`, args...,
 	).Scan(ctx,
 		&eg.Fingerprint, &eg.Service, &eg.Environment, &eg.ExceptionClass, &eg.Message,
 		&eg.SourceFile, &eg.SourceLine, &eg.Status, &eg.FirstSeenAt, &eg.LastSeenAt,
@@ -182,6 +159,9 @@ func (s *errorGroupStore) List(ctx context.Context, params store.ListErrorGroupP
 	}
 	if params.Since != nil {
 		qb.where("first_seen_at >= ?", params.Since.UTC().Format(time.RFC3339))
+	}
+	if params.ActiveSince != nil {
+		qb.where("last_seen_at >= ?", params.ActiveSince.UTC().Format(time.RFC3339))
 	}
 
 	orderBy := "last_seen_at DESC"
@@ -232,43 +212,40 @@ func (s *errorGroupStore) List(ctx context.Context, params store.ListErrorGroupP
 	return groups, rows.Err()
 }
 
-func (s *errorGroupStore) Count(ctx context.Context, status store.ErrorGroupStatus) (int, error) {
-	var n int
+// Count returns the number of error groups with the given status. environment
+// scopes the count to one env; "" counts across all of them. Passing the
+// caller's env matters for more than tidiness: a summary count that includes
+// envs the caller cannot list produces a total that disagrees with the rows
+// it was shown.
+func (s *errorGroupStore) Count(ctx context.Context, status store.ErrorGroupStatus, environment string) (int, error) {
+	var qb queryBuilder
 	if status != "" {
-		err := s.db.NewRaw(`SELECT COUNT(*) FROM error_groups WHERE status = ?`, string(status)).Scan(ctx, &n)
-		return n, err
+		qb.where("status = ?", string(status))
 	}
-	err := s.db.NewRaw(`SELECT COUNT(*) FROM error_groups`).Scan(ctx, &n)
+	if environment != "" {
+		qb.where("environment = ?", environment)
+	}
+	query, args := qb.build(`SELECT COUNT(*) FROM error_groups`)
+
+	var n int
+	err := s.db.NewRaw(query, args...).Scan(ctx, &n)
 	return n, err
 }
 
-// Resolve / Ignore / Reopen operate across every env-scoped row for the
-// fingerprint. PR 3 will add env-scoped variants so tools can resolve just
-// one env's occurrence of a fingerprint. For now the old "blanket" semantics
-// are preserved — a resolve here closes the group in staging AND production.
-func (s *errorGroupStore) Resolve(ctx context.Context, fingerprint string, reason string) error {
-	return s.changeStatus(ctx, fingerprint, "", "resolved", reason)
-}
-
-func (s *errorGroupStore) Ignore(ctx context.Context, fingerprint string, reason string) error {
-	return s.changeStatus(ctx, fingerprint, "", "ignored", reason)
-}
-
-func (s *errorGroupStore) Reopen(ctx context.Context, fingerprint string, reason string) error {
-	return s.changeStatus(ctx, fingerprint, "", "reopened", reason)
-}
-
-// ResolveForEnv / IgnoreForEnv / ReopenForEnv apply the lifecycle transition
-// to a single (fingerprint, environment) row. Used by PR 3 write handlers.
-func (s *errorGroupStore) ResolveForEnv(ctx context.Context, fingerprint, environment, reason string) error {
+// Resolve / Ignore / Reopen apply the lifecycle transition to one
+// (fingerprint, environment) row. environment == "" keeps the old blanket
+// semantics — the transition lands on every env-scoped row for the
+// fingerprint — which is what unscoped internal callers want and what an
+// env-scoped caller must never use.
+func (s *errorGroupStore) Resolve(ctx context.Context, fingerprint, environment, reason string) error {
 	return s.changeStatus(ctx, fingerprint, environment, "resolved", reason)
 }
 
-func (s *errorGroupStore) IgnoreForEnv(ctx context.Context, fingerprint, environment, reason string) error {
+func (s *errorGroupStore) Ignore(ctx context.Context, fingerprint, environment, reason string) error {
 	return s.changeStatus(ctx, fingerprint, environment, "ignored", reason)
 }
 
-func (s *errorGroupStore) ReopenForEnv(ctx context.Context, fingerprint, environment, reason string) error {
+func (s *errorGroupStore) Reopen(ctx context.Context, fingerprint, environment, reason string) error {
 	return s.changeStatus(ctx, fingerprint, environment, "reopened", reason)
 }
 

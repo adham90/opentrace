@@ -115,16 +115,24 @@ func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallT
 		return NewToolResultText(hint), nil
 	}
 
-	// Pre-fetch error group info for entries with fingerprints.
-	errorGroupCache := make(map[string]*store.ErrorGroup)
+	// Pre-fetch error group info for entries with fingerprints. Key the cache by
+	// (fingerprint, env) and look each group up in its own log entry's env — the
+	// same fingerprint is a separate group per env, with its own status and
+	// counts, so a single-key cache would label staging lines with production's
+	// numbers.
+	type groupKey struct{ fingerprint, environment string }
+	errorGroupCache := make(map[groupKey]*store.ErrorGroup)
 	if deps.ErrorGroupStore != nil {
-		seen := make(map[string]bool)
 		for _, e := range entries {
-			if e.ErrorFingerprint != "" && !seen[e.ErrorFingerprint] {
-				seen[e.ErrorFingerprint] = true
-				if eg, err := deps.ErrorGroupStore.Get(ctx, e.ErrorFingerprint); err == nil {
-					errorGroupCache[e.ErrorFingerprint] = eg
-				}
+			if e.ErrorFingerprint == "" {
+				continue
+			}
+			key := groupKey{e.ErrorFingerprint, e.Environment}
+			if _, seen := errorGroupCache[key]; seen {
+				continue
+			}
+			if eg, err := deps.ErrorGroupStore.Get(ctx, e.ErrorFingerprint, e.Environment); err == nil {
+				errorGroupCache[key] = eg
 			}
 		}
 	}
@@ -185,7 +193,7 @@ func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallT
 		}
 		// Enrich with error group context when available.
 		if e.ErrorFingerprint != "" {
-			if eg, ok := errorGroupCache[e.ErrorFingerprint]; ok {
+			if eg, ok := errorGroupCache[groupKey{e.ErrorFingerprint, e.Environment}]; ok {
 				entry["error_group"] = map[string]any{
 					"status":           string(eg.Status),
 					"occurrence_count": eg.OccurrenceCount,
