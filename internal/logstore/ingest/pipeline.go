@@ -1,22 +1,20 @@
 package ingest
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"math/rand"
 	"regexp"
 	"strings"
 
+	"github.com/adham90/opentrace/internal/fingerprint"
 	"github.com/adham90/opentrace/internal/logstore/chunk"
 )
 
 // Pipeline processes raw SDK entries before WAL storage.
 // Steps: Parse → Sample → PII scrub body → Extract error fields → Expand in-request logs
 type Pipeline struct {
-	samplingRules  []SamplingRule
-	piiConfig      PIIConfig
+	samplingRules []SamplingRule
+	piiConfig     PIIConfig
 }
 
 // NewPipeline creates a new ingest pipeline.
@@ -109,12 +107,12 @@ func (p *Pipeline) applySampling(entries []chunk.Entry) []chunk.Entry {
 
 // PIIConfig controls what gets scrubbed from body JSON.
 type PIIConfig struct {
-	Enabled         bool     `json:"enabled"`
-	ScrubCreditCards bool    `json:"scrub_credit_cards"`
-	ScrubEmails      bool    `json:"scrub_emails"`
-	ScrubPhones      bool    `json:"scrub_phones"`
-	ScrubSSN         bool    `json:"scrub_ssn"`
-	SensitiveFields []string `json:"sensitive_fields"`
+	Enabled          bool     `json:"enabled"`
+	ScrubCreditCards bool     `json:"scrub_credit_cards"`
+	ScrubEmails      bool     `json:"scrub_emails"`
+	ScrubPhones      bool     `json:"scrub_phones"`
+	ScrubSSN         bool     `json:"scrub_ssn"`
+	SensitiveFields  []string `json:"sensitive_fields"`
 }
 
 // DefaultPIIConfig returns sensible PII scrubbing defaults.
@@ -249,16 +247,18 @@ func scrubValue(key string, val any, patterns []*regexp.Regexp, sensitiveFields 
 
 // computeErrorFingerprint sets the error_fingerprint from SDK-provided flat fields.
 // The SDK sends error_class, source_file, source_line as top-level fields.
-// The server only computes the fingerprint hash — no body parsing needed.
+//
+// This must produce the same value the error-group store keys rows by, which is why
+// it delegates to internal/fingerprint rather than hashing here. It previously used
+// its own SHA256("class:file:line"), so a log entry and the error group it belonged
+// to carried different fingerprints and nothing could join them: an error group's
+// "recent occurrences" looks up logs by the group's fingerprint and always came back
+// empty. Note the line number is excluded on purpose — see that package.
 func computeErrorFingerprint(e *chunk.Entry) {
-	if e.ErrorClass != "" || e.SourceFile != "" {
-		e.ErrorFingerprint = computeFingerprint(e.ErrorClass, e.SourceFile, e.SourceLine)
+	if e.ErrorClass == "" && e.SourceFile == "" {
+		return
 	}
-}
-
-func computeFingerprint(class, file string, line int) string {
-	h := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%d", class, file, line)))
-	return hex.EncodeToString(h[:8]) // 16-char hex
+	e.ErrorFingerprint = fingerprint.Compute(e.Service, e.ErrorClass, e.SourceFile, e.Message)
 }
 
 // --- In-Request Log Expansion ---

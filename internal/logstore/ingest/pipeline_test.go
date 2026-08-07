@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/adham90/opentrace/internal/fingerprint"
 	"github.com/adham90/opentrace/internal/logstore/chunk"
 )
 
@@ -96,11 +97,11 @@ func TestErrorFingerprintComputation(t *testing.T) {
 	// SDK sends error fields as flat top-level fields (not extracted from body)
 	entries := []chunk.Entry{{
 		Ts: 1000, Level: "error", Service: "api",
-		Message:        "NoMethodError: undefined method",
+		Message:    "NoMethodError: undefined method",
 		ErrorClass: "NoMethodError",
-		SourceFile:     "app/models/order.rb",
-		SourceLine:     42,
-		Body:           json.RawMessage(`{"exception":{"backtrace":["app/models/order.rb:42"]}}`),
+		SourceFile: "app/models/order.rb",
+		SourceLine: 42,
+		Body:       json.RawMessage(`{"exception":{"backtrace":["app/models/order.rb:42"]}}`),
 	}}
 
 	result := pipeline.Process(entries)
@@ -131,7 +132,7 @@ func TestErrorFingerprintNotOnInfo(t *testing.T) {
 	// Even if SDK sends error_class on an info entry, fingerprint should not be computed
 	entries := []chunk.Entry{{
 		Ts: 1000, Level: "info", Service: "api",
-		Message:        "test",
+		Message:    "test",
 		ErrorClass: "SomeError",
 	}}
 
@@ -300,13 +301,13 @@ func TestFullPipeline(t *testing.T) {
 	// SDK sends error fields flat (not extracted from body by server)
 	entries := []chunk.Entry{{
 		Ts: 1743760800000, Level: "error", Service: "billing-api",
-		Message:        "PaymentError: card declined",
-		TraceID:        "trace-123",
-		RequestID:      "req-456",
+		Message:    "PaymentError: card declined",
+		TraceID:    "trace-123",
+		RequestID:  "req-456",
 		ErrorClass: "PaymentError",
-		SourceFile:     "app/services/billing.rb",
-		SourceLine:     99,
-		Body:           body,
+		SourceFile: "app/services/billing.rb",
+		SourceLine: 99,
+		Body:       body,
 	}}
 
 	result := pipeline.Process(entries)
@@ -351,16 +352,61 @@ func TestFullPipeline(t *testing.T) {
 	}
 }
 
-func TestFingerprintDeterministic(t *testing.T) {
-	fp1 := computeFingerprint("NoMethodError", "app/models/order.rb", 42)
-	fp2 := computeFingerprint("NoMethodError", "app/models/order.rb", 42)
-	if fp1 != fp2 {
-		t.Errorf("fingerprints should be deterministic: %q vs %q", fp1, fp2)
+// The pipeline stamps error_fingerprint on log entries; the error-group store keys
+// its rows by the same value and joins the two on it. They ran different algorithms,
+// so a group's "recent occurrences" lookup never matched a single log line. This
+// pins the two to the shared definition.
+func TestPipelineFingerprintMatchesSharedDefinition(t *testing.T) {
+	e := &chunk.Entry{
+		Level:      "error",
+		Service:    "api",
+		Message:    "undefined method `total' for nil",
+		ErrorClass: "NoMethodError",
+		SourceFile: "app/models/order.rb",
+		SourceLine: 42,
 	}
+	computeErrorFingerprint(e)
 
-	fp3 := computeFingerprint("NoMethodError", "app/models/order.rb", 43)
-	if fp1 == fp3 {
-		t.Error("different line should produce different fingerprint")
+	want := fingerprint.Compute("api", "NoMethodError", "app/models/order.rb", "undefined method `total' for nil")
+	if e.ErrorFingerprint != want {
+		t.Errorf("pipeline fingerprint = %q, shared definition = %q", e.ErrorFingerprint, want)
+	}
+	if e.ErrorFingerprint == "" {
+		t.Error("fingerprint should be set for an error with a class and file")
+	}
+}
+
+// Errors drift down a file whenever something is inserted above them. If the line
+// number were part of the identity, an unrelated edit would fork one ongoing error
+// into a fresh group with no history — right when the deploy that touched the file
+// is what you want to correlate against.
+func TestFingerprintSurvivesLineShift(t *testing.T) {
+	at := func(line int) string {
+		e := &chunk.Entry{
+			Level: "error", Service: "api", Message: "boom",
+			ErrorClass: "NoMethodError", SourceFile: "app/models/order.rb", SourceLine: line,
+		}
+		computeErrorFingerprint(e)
+		return e.ErrorFingerprint
+	}
+	if at(42) != at(43) {
+		t.Error("a line shift split the error into a new group")
+	}
+}
+
+// Two different errors in the same file must stay separate, or a file's worth of
+// unrelated failures collapses into one unactionable group.
+func TestFingerprintSeparatesClassesInSameFile(t *testing.T) {
+	at := func(class string) string {
+		e := &chunk.Entry{
+			Level: "error", Service: "api", Message: "boom",
+			ErrorClass: class, SourceFile: "app/models/order.rb",
+		}
+		computeErrorFingerprint(e)
+		return e.ErrorFingerprint
+	}
+	if at("NoMethodError") == at("ArgumentError") {
+		t.Error("distinct error classes in one file collapsed into a single group")
 	}
 }
 

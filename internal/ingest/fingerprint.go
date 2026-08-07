@@ -1,23 +1,17 @@
 package ingest
 
 import (
-	"crypto/md5"
-	"encoding/hex"
-	"regexp"
 	"strings"
 
+	"github.com/adham90/opentrace/internal/fingerprint"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 // GenerateErrorFingerprint computes a server-side error fingerprint for a log entry.
-// The fingerprint groups "same error, different occurrence" using a language-agnostic
-// algorithm inspired by Bugsnag's default grouping:
-//
-//	MD5(service + error_class + source_file)[:16]
-//
-// When source_file is absent, falls back to:
-//
-//	MD5(service + error_class + normalized_message)[:16]
+// It resolves the error class and source file from the entry (including from a
+// backtrace when the SDK didn't send them as fields) and defers the hash itself to
+// internal/fingerprint, which is the one definition shared with the columnar ingest
+// pipeline. See that package for why the algorithm lives outside this one.
 //
 // This replaces SDK-side fingerprinting for consistency across all languages.
 func GenerateErrorFingerprint(e *store.LogEntry) string {
@@ -42,23 +36,7 @@ func GenerateErrorFingerprint(e *store.LogEntry) string {
 		sourceFile = extractSourceFileFromBacktrace(e.Metadata)
 	}
 
-	service := e.Service
-
-	h := md5.New()
-	h.Write([]byte(service))
-	h.Write([]byte{0}) // separator
-	h.Write([]byte(exceptionClass))
-	h.Write([]byte{0})
-
-	if sourceFile != "" {
-		// Primary: group by source file (no line number — survives refactors)
-		h.Write([]byte(sourceFile))
-	} else {
-		// Fallback: group by normalized message
-		h.Write([]byte(NormalizeMessage(e.Message)))
-	}
-
-	return hex.EncodeToString(h.Sum(nil))[:16]
+	return fingerprint.Compute(e.Service, exceptionClass, sourceFile, e.Message)
 }
 
 // extractSourceFileFromBacktrace pulls the first in-app file from the backtrace
@@ -139,30 +117,10 @@ func extractFileFromStackLine(stack string) string {
 	return ""
 }
 
-// Regex patterns for normalizing dynamic values in error messages.
-var (
-	reUUIDs    = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
-	reHexIDs   = regexp.MustCompile(`\b[0-9a-fA-F]{16,}\b`)
-	reNumbers  = regexp.MustCompile(`\b\d{2,}\b`)
-	reQuoted   = regexp.MustCompile(`"[^"]{4,}"`)
-	reSQuoted  = regexp.MustCompile(`'[^']{4,}'`)
-	reIPAddrs  = regexp.MustCompile(`\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?\b`)
-	reURLPaths = regexp.MustCompile(`/[a-zA-Z0-9_-]+/[0-9]+`)
-)
-
 // NormalizeMessage strips dynamic values from an error message so that
-// structurally identical messages produce the same fingerprint.
-// Order matters: replace most specific patterns first.
+// structurally identical messages produce the same fingerprint. Retained as the
+// package's public name for existing callers; the implementation is shared with
+// the columnar pipeline.
 func NormalizeMessage(msg string) string {
-	if len(msg) > 500 {
-		msg = msg[:500]
-	}
-	msg = reUUIDs.ReplaceAllString(msg, "<UUID>")
-	msg = reIPAddrs.ReplaceAllString(msg, "<IP>")
-	msg = reHexIDs.ReplaceAllString(msg, "<HEX>")
-	msg = reURLPaths.ReplaceAllString(msg, "/<PATH>/<N>")
-	msg = reNumbers.ReplaceAllString(msg, "<N>")
-	msg = reQuoted.ReplaceAllString(msg, "<STR>")
-	msg = reSQuoted.ReplaceAllString(msg, "<STR>")
-	return msg
+	return fingerprint.Normalize(msg)
 }

@@ -3,8 +3,29 @@ package ingest
 import (
 	"testing"
 
+	"github.com/adham90/opentrace/internal/fingerprint"
 	"github.com/adham90/opentrace/pkg/store"
 )
+
+// The error-group path and the columnar log pipeline must agree on a fingerprint,
+// because groups are joined to their occurrences by that value alone. They each had
+// their own hash for a while, so every group's "recent occurrences" was empty. The
+// pipeline side of this invariant is pinned in internal/logstore/ingest.
+func TestGenerateErrorFingerprint_MatchesSharedDefinition(t *testing.T) {
+	e := &store.LogEntry{
+		Level:          "error",
+		Service:        "api",
+		Message:        "undefined method `total' for nil",
+		ExceptionClass: "NoMethodError",
+		SourceFile:     "app/models/order.rb",
+		SourceLine:     42,
+	}
+	got := GenerateErrorFingerprint(e)
+	want := fingerprint.Compute("api", "NoMethodError", "app/models/order.rb", "undefined method `total' for nil")
+	if got != want {
+		t.Errorf("group fingerprint = %q, shared definition = %q", got, want)
+	}
+}
 
 func TestGenerateErrorFingerprint_BasicFields(t *testing.T) {
 	e := &store.LogEntry{
