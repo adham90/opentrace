@@ -14,8 +14,8 @@ import (
 
 // TrafficResponse is the typed response for the analytics traffic action.
 type TrafficResponse struct {
-	TimeRange      TimeRange       `json:"time_range"`
-	Summary        TrafficSummary  `json:"summary"`
+	TimeRange       TimeRange      `json:"time_range"`
+	Summary         TrafficSummary `json:"summary"`
 	StatusBreakdown map[string]int `json:"status_breakdown"`
 	MethodBreakdown map[string]int `json:"method_breakdown"`
 }
@@ -90,6 +90,29 @@ func HandleTraffic(ctx context.Context, d AnalyticsDeps, args map[string]any) (*
 			"analytics_available": false,
 			"note":                "traffic analytics are not available (aggregation is disabled or the source data is empty)",
 		})
+	}
+
+	// A zero here is ambiguous, and the ambiguity matters: analytics is fed by
+	// aggregators that are currently no-ops on the segmented log store, so an
+	// empty result is far more likely to mean "nothing computes this" than
+	// "nothing happened". Reporting a bare 0 requests next to a logs performance
+	// call that returns dozens is worse than reporting nothing — say which it is
+	// and name the tool that does have the data.
+	if summary.TotalRequests == 0 {
+		return JSONResult(map[string]any{
+			"time_range": TimeRange{
+				Start: since.Format(time.RFC3339),
+				End:   now.Format(time.RFC3339),
+			},
+			"summary":             TrafficSummary{},
+			"status_breakdown":    map[string]int{},
+			"method_breakdown":    map[string]int{},
+			"analytics_available": false,
+			"note":                "No aggregated traffic for this window. Endpoint aggregation is disabled on the segmented log-store backend, so this is not evidence that no requests were served — use logs(action:\"performance\") for request data measured from the logs themselves.",
+		}, Suggest("logs", "Request performance measured from the logs", map[string]any{
+			"action": "performance",
+			"since":  sinceStr,
+		}))
 	}
 
 	resp := &TrafficResponse{
@@ -170,6 +193,20 @@ func HandleEndpoints(ctx context.Context, d AnalyticsDeps, args map[string]any) 
 				"5xx": e.Status5xx,
 			},
 		})
+	}
+
+	// Same ambiguity as traffic: an empty endpoint list from a disabled
+	// aggregator is not the same claim as "no endpoints were hit".
+	if len(results) == 0 {
+		return JSONResult(map[string]any{
+			"sort_by":             sortBy,
+			"endpoints":           []EndpointResult{},
+			"analytics_available": false,
+			"note":                "No aggregated endpoint stats for this window. Endpoint aggregation is disabled on the segmented log-store backend, so this does not mean no endpoints were called — use logs(action:\"performance\") for per-request data measured from the logs.",
+		}, Suggest("logs", "Request performance measured from the logs", map[string]any{
+			"action": "performance",
+			"since":  sinceStr,
+		}))
 	}
 
 	resp := &EndpointsResponse{
