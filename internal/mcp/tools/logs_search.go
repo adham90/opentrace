@@ -14,6 +14,11 @@ import (
 // action: search — full-text log search with filters (from logSearchHandler)
 // ---------------------------------------------------------------------------
 
+// defaultSearchWindow is the range searched when the caller names none. It
+// matches the store's own default; keeping them equal means the window reported
+// back is the window actually queried.
+const defaultSearchWindow = time.Hour
+
 func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	InitLogsDeps(&deps)
 	query := ArgString(args, "query")
@@ -75,17 +80,21 @@ func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallT
 		MetadataFilter:   metadataFilter,
 	}
 
-	// Parse time range.
-	if v := ArgString(args, "time_range"); v != "" {
-		duration, err := ParseTimeRange(v)
-		if err != nil {
-			return NewToolResultError(fmt.Sprintf("invalid time_range: %v. Use formats like '15m', '1h', '6h', '24h', '7d'.", err)), nil
-		}
-		now := time.Now().UTC()
-		start := now.Add(-duration)
-		params.Start = &start
-		params.End = &now
+	// Window. Read through the shared helper so "since" works here too — this
+	// tool only ever looked at "time_range", so since=7d was accepted, dropped,
+	// and the store then applied its own 1h default. The search reported "no log
+	// entries found" for a week-old incident while looking only at the last hour,
+	// which reads as "it never happened".
+	now := time.Now().UTC()
+	start, windowGiven := OptionalSinceParam(args)
+	if !windowGiven {
+		start = now.Add(-defaultSearchWindow)
 	}
+	if !start.Before(now) {
+		return NewToolResultError("time window must start in the past"), nil
+	}
+	params.Start = &start
+	params.End = &now
 
 	result, err := deps.Logs.Search(ctx, params)
 	if err != nil {
@@ -105,9 +114,16 @@ func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallT
 	}
 
 	if len(entries) == 0 {
-		hint := "No log entries found matching your criteria."
+		// Always name the window that was actually searched. "Nothing found" and
+		// "nothing found in the last hour" lead to opposite conclusions, and the
+		// caller cannot tell them apart unless the result says which one it is.
+		hint := fmt.Sprintf("No log entries found matching your criteria in the window searched (%s to now).",
+			start.Format(time.RFC3339))
+		if !windowGiven {
+			hint += fmt.Sprintf(" That is the default %s window — pass since (e.g. since=\"7d\") to look further back.", defaultSearchWindow)
+		}
 		if query != "" {
-			hint += " Try broadening your search query or extending the time_range."
+			hint += " Try broadening your search query."
 		}
 		if level != "" {
 			hint += fmt.Sprintf(" Level filter '%s' is active — try removing it.", level)
@@ -264,6 +280,11 @@ func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallT
 		"total_returned": len(results),
 		"text_summary":   strings.Join(summaryLines, "\n"),
 		"entries":        results,
+		// Echo the window that was searched. A result set is only interpretable
+		// against the range it came from, and that range is defaulted when the
+		// caller doesn't pass one.
+		"searched_since": start.Format(time.RFC3339),
+		"searched_until": now.Format(time.RFC3339),
 	}
 
 	if len(results) == limit {

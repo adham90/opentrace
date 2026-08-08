@@ -60,7 +60,7 @@ func HandleDiagnose(ctx context.Context, d OverviewDeps, args map[string]any) (*
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			section := collectLogVolume(ctx, d, service, since, now)
+			section := collectLogVolume(ctx, d, service, env, since, now)
 			mu.Lock()
 			resp["log_volume"] = section
 			mu.Unlock()
@@ -106,12 +106,17 @@ func HandleDiagnose(ctx context.Context, d OverviewDeps, args map[string]any) (*
 	wg.Wait()
 
 	// Build suggested next tools
-	resp["suggested_tools"] = buildDiagnoseSuggestions(resp, service)
+	resp["suggested_tools"] = buildDiagnoseSuggestions(resp, service, since)
 
 	return JSONResult(resp)
 }
 
-func buildDiagnoseSuggestions(resp map[string]any, service string) []map[string]any {
+// buildDiagnoseSuggestions builds the follow-up calls. Each one carries this
+// report's window: a suggestion that drops it sends the caller to a default 1h
+// search for errors that were counted over 24h, which comes back empty and looks
+// like the report was wrong.
+func buildDiagnoseSuggestions(resp map[string]any, service string, since time.Time) []map[string]any {
+	window := since.Format(time.RFC3339)
 	var suggestions []map[string]any
 
 	if es, ok := resp["error_summary"].(map[string]any); ok {
@@ -127,7 +132,7 @@ func buildDiagnoseSuggestions(resp map[string]any, service string) []map[string]
 
 	if lv, ok := resp["log_volume"].(map[string]any); ok {
 		if ec, ok := lv["error_count"].(int); ok && ec > 0 {
-			args := map[string]any{"action": "search", "level": "error", "limit": float64(10)}
+			args := map[string]any{"action": "search", "level": "error", "limit": float64(10), "since": window}
 			if service != "" {
 				args["service"] = service
 			}

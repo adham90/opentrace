@@ -114,14 +114,17 @@ type SearchParams struct {
 	UserID           string     // exact match
 	TenantID         string     // exact match
 	EventType        string     // exact match
-	ErrorClass   string     // exact match
+	ErrorClass       string     // exact match
 	ErrorFingerprint string     // exact match
+	SourceFile       string     // exact match
+	CommitHash       string     // exact match
 	Method           string     // exact match
 	Path             string     // substring match
 	MinDurationMs    int        // minimum duration_ms
-	NPlusOneOnly    bool       // only n_plus_one entries
+	NPlusOneOnly     bool       // only n_plus_one entries
 	Start            *time.Time // event time range start
 	End              *time.Time // event time range end
+	SinceID          int64      // cursor: only entries with a strictly greater id
 	Limit            int
 	Offset           int
 	SortAsc          bool // true = oldest first
@@ -366,7 +369,7 @@ type HistogramBucket struct {
 // Histogram bucketing bounds. A caller-supplied interval down to 1ns over a
 // huge range previously produced ~10^17 buckets (CPU pin + OOM from one query).
 const (
-	maxHistogramBuckets = 10000
+	maxHistogramBuckets  = 10000
 	minHistogramInterval = time.Second
 )
 
@@ -927,7 +930,7 @@ func readEntryFromChunk(r *chunkpkg.Reader, row int) (*chunk.Entry, error) {
 	sparseStrings := map[string]*string{
 		"version": &e.Version, "host": &e.Host, "kind": &e.Kind,
 		"event_type": &e.EventType,
-		"trace_id": &e.TraceID, "span_id": &e.SpanID,
+		"trace_id":   &e.TraceID, "span_id": &e.SpanID,
 		"parent_span_id": &e.ParentSpanID, "request_id": &e.RequestID,
 		"user_id": &e.UserID, "tenant_id": &e.TenantID,
 		"session_id": &e.SessionID, "method": &e.Method,
@@ -1016,6 +1019,23 @@ func matchesParams(e *chunk.Entry, p SearchParams) bool {
 		return false
 	}
 	if p.TenantID != "" && e.TenantID != p.TenantID {
+		return false
+	}
+	// SourceFile, CommitHash and SinceID reach the engine but had no clause here,
+	// so they were accepted and ignored. A dropped filter is worse than an
+	// unsupported one: the caller gets a full result set and reads it as the
+	// answer to the narrower question it asked.
+	if p.SourceFile != "" && !strings.EqualFold(e.SourceFile, p.SourceFile) {
+		return false
+	}
+	// The commit is stored in the columnar entry's Version field (see the
+	// adapter's CommitHash <-> Version mapping).
+	if p.CommitHash != "" && !strings.EqualFold(e.Version, p.CommitHash) {
+		return false
+	}
+	// Cursor pagination: strictly greater, so a poller that passes back the last
+	// id it saw doesn't receive that row again on every tick.
+	if p.SinceID > 0 && e.ID <= p.SinceID {
 		return false
 	}
 	if p.Method != "" && !strings.EqualFold(e.Method, p.Method) {

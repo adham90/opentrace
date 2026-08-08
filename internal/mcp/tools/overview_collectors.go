@@ -59,8 +59,13 @@ func collectErrors(ctx context.Context, d OverviewDeps, service, env string, sin
 	}
 }
 
-func collectLogVolume(ctx context.Context, d OverviewDeps, service string, since, until time.Time) map[string]any {
-	params := store.LogCountParams{Since: since, Until: until}
+// collectLogVolume counts logs in the window for one environment. The env is not
+// optional bookkeeping: this count sat next to an env-scoped error summary while
+// itself aggregating every env, so diagnose could report 19 errors and then have
+// every error-level drill-down come back empty — the two numbers described
+// different systems.
+func collectLogVolume(ctx context.Context, d OverviewDeps, service, env string, since, until time.Time) map[string]any {
+	params := store.LogCountParams{Since: since, Until: until, Environment: env}
 	if service != "" {
 		params.Service = service
 	}
