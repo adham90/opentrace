@@ -177,10 +177,9 @@ func LogsAttributes(ctx context.Context, args map[string]any, deps LogsDeps) (*C
 	}
 
 	// Parse time range (default: 24h).
-	timeRange := ArgStringDefault(args, "time_range", "24h")
-	duration, err := ParseTimeRange(timeRange)
+	contextSince, _, err := ResolveWindow(args, "24h")
 	if err != nil {
-		return NewToolResultError(fmt.Sprintf("invalid time_range: %v", err)), nil
+		return NewToolResultError(err.Error()), nil
 	}
 	// Resolve env scope so attribute discovery only reveals values from
 	// environments the caller's token is authorized for.
@@ -191,7 +190,7 @@ func LogsAttributes(ctx context.Context, args map[string]any, deps LogsDeps) (*C
 
 	now := time.Now().UTC()
 	params := store.LogCountParams{
-		Since:       now.Add(-duration),
+		Since:       contextSince,
 		Until:       now,
 		Environment: environment,
 	}

@@ -112,6 +112,40 @@ func OptionalSinceParam(args map[string]any) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// ResolveWindow returns the start of the window a tool should query, plus a
+// label describing it for the response.
+//
+// Every tool here accepts "since", so a caller doesn't have to remember which of
+// the three legacy names a given action happens to read. Several used to take
+// only "time_range" and silently ignore "since", answering a question about the
+// last hour when asked about the last day — and reporting the small answer with
+// no indication the window had been substituted.
+func ResolveWindow(args map[string]any, defaultWindow string) (since time.Time, label string, err error) {
+	now := time.Now().UTC()
+
+	if t, ok := OptionalSinceParam(args); ok {
+		if !t.Before(now) {
+			return time.Time{}, "", fmt.Errorf("time window must start in the past")
+		}
+		return t, now.Sub(t).Round(time.Second).String(), nil
+	}
+
+	// Nothing usable passed. Distinguish "absent" from "present but malformed":
+	// silently falling back on a typo is how a caller ends up reading an
+	// unrelated window's numbers as the answer.
+	for _, key := range []string{"since", "time_range", "timeframe"} {
+		if v, ok := args[key].(string); ok && v != "" {
+			return time.Time{}, "", fmt.Errorf("invalid %s %q: use formats like 15m, 6h, 24h, 7d, or an RFC3339 timestamp", key, v)
+		}
+	}
+
+	d, err := ParseTimeRange(defaultWindow)
+	if err != nil {
+		return time.Time{}, "", fmt.Errorf("invalid default window %q: %w", defaultWindow, err)
+	}
+	return now.Add(-d), defaultWindow, nil
+}
+
 // SinceLabel renders a window's start for a response body, or "all time" when
 // no window was applied.
 func SinceLabel(t time.Time, ok bool) string {

@@ -649,6 +649,20 @@ func (s *Store) searchChunk(chunkPath, idxPath string, entryCount int, params Se
 	// FTS Query was already resolved via the inverted index above, so clear it.
 	filterParams := params
 	filterParams.Query = ""
+
+	// Narrow to the rows that can actually survive into the caller's page before
+	// materializing anything. Every row here becomes a full entry — a dozen-odd
+	// column reads each — and the caller then throws all but offset+limit of them
+	// away. On an unfiltered query that meant materializing every row of every
+	// hour in range: a 24h summary over a normal day's volume ran for minutes and
+	// timed out, on a query whose answer is 2000 rows.
+	//
+	// Only safe when no post-read filter can reject a row, since those decide
+	// which rows survive and are only knowable after the read.
+	if limit := params.Offset + params.Limit; limit > 0 && len(matchingRows) > limit && !needsPostReadFilter(filterParams) {
+		matchingRows = topRowsByTs(r, matchingRows, params.SortAsc, limit)
+	}
+
 	entries := make([]chunk.Entry, 0, len(matchingRows))
 	for _, row := range matchingRows {
 		entry, err := readEntryFromChunk(r, row)
@@ -662,6 +676,72 @@ func (s *Store) searchChunk(chunkPath, idxPath string, entryCount int, params Se
 	}
 
 	return entries, nil
+}
+
+// needsPostReadFilter reports whether matchesParams can still reject a row after
+// it is read. The column-indexed filters (level/service/env/trace/request/user/
+// event_type/error_class/error_fingerprint) and the time range have already been
+// applied to the row set by this point; these are the ones that have not.
+func needsPostReadFilter(p SearchParams) bool {
+	return p.Method != "" ||
+		p.Path != "" ||
+		p.TenantID != "" ||
+		p.SourceFile != "" ||
+		p.CommitHash != "" ||
+		p.MinDurationMs > 0 ||
+		p.NPlusOneOnly ||
+		p.SinceID > 0
+}
+
+// topRowsByTs picks the n rows that sort first by timestamp, reading only the ts
+// column rather than materializing entries. Returns rows in ascending row order
+// so the caller's sequential read stays cache-friendly; final ordering is applied
+// by the caller once segments are merged.
+func topRowsByTs(r *chunkpkg.Reader, rows []int, asc bool, n int) []int {
+	tsValues, err := r.ReadZstdInt64("ts")
+	if err != nil {
+		return rows // can't order cheaply; fall back to reading everything
+	}
+	return selectTopRows(tsValues, rows, asc, n)
+}
+
+// selectTopRows picks the n rows that sort first by timestamp and returns them
+// in ascending row order, so the caller's sequential read stays in order.
+func selectTopRows(tsValues []int64, rows []int, asc bool, n int) []int {
+	if n <= 0 || len(rows) <= n {
+		return rows
+	}
+
+	ordered := make([]int, len(rows))
+	copy(ordered, rows)
+	sort.Slice(ordered, func(i, j int) bool {
+		ti, tj := tsAt(tsValues, ordered[i]), tsAt(tsValues, ordered[j])
+		if ti != tj {
+			if asc {
+				return ti < tj
+			}
+			return ti > tj
+		}
+		// Stable tiebreak on row order, mirroring the ID tiebreak the caller
+		// applies after the merge (row order is id order within a chunk).
+		if asc {
+			return ordered[i] < ordered[j]
+		}
+		return ordered[i] > ordered[j]
+	})
+
+	ordered = ordered[:n]
+	sort.Ints(ordered)
+	return ordered
+}
+
+// tsAt reads a row's timestamp, treating a short column as "no timestamp" rather
+// than panicking on a truncated chunk.
+func tsAt(tsValues []int64, row int) int64 {
+	if row < 0 || row >= len(tsValues) {
+		return 0
+	}
+	return tsValues[row]
 }
 
 func (s *Store) searchActiveWAL(params SearchParams) []chunk.Entry {

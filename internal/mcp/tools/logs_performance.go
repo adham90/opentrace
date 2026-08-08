@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -14,11 +13,10 @@ import (
 // ---------------------------------------------------------------------------
 
 func LogsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
-	// Parse time range (default: 24h).
-	timeRange := ArgStringDefault(args, "time_range", "24h")
-	duration, err := ParseTimeRange(timeRange)
+	// Window (default: 24h). Accepts since / time_range / timeframe.
+	start, _, err := ResolveWindow(args, "24h")
 	if err != nil {
-		return NewToolResultError(fmt.Sprintf("invalid time_range: %v. Use formats like '1h', '24h', '7d'.", err)), nil
+		return NewToolResultError(err.Error()), nil
 	}
 	// Resolve env scope so performance data never spans unauthorized envs.
 	environment, err := ResolveEnv(ctx, args)
@@ -27,7 +25,6 @@ func LogsPerformance(ctx context.Context, args map[string]any, deps LogsDeps) (*
 	}
 
 	now := time.Now().UTC()
-	start := now.Add(-duration)
 
 	params := store.RequestSummarySearchParams{
 		Start:       &start,

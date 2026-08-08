@@ -15,13 +15,12 @@ import (
 
 func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	InitLogsDeps(&deps)
-	timeRange := ArgStringDefault(args, "time_range", "1h")
 	serviceFilter := ArgString(args, "service")
 	commitFilter := ArgString(args, "commit_hash")
 
-	duration, err := ParseTimeRange(timeRange)
+	since, timeRange, err := ResolveWindow(args, "1h")
 	if err != nil {
-		return NewToolResultError(fmt.Sprintf("invalid time_range: %v", err)), nil
+		return NewToolResultError(err.Error()), nil
 	}
 
 	// Resolve env scope (rejects out-of-scope environment args and auto-fills
@@ -32,7 +31,6 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 	}
 
 	now := time.Now().UTC()
-	since := now.Add(-duration)
 
 	// 1. Total and error counts by level.
 	countParams := store.LogCountParams{

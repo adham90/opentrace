@@ -16,15 +16,14 @@ import (
 
 func LogsStats(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	InitLogsDeps(&deps)
-	timeRange := ArgStringDefault(args, "time_range", "1h")
 	groupBy := ArgStringDefault(args, "group_by", "level")
 	serviceFilter := ArgString(args, "service")
 	levelFilter := ArgString(args, "level")
 	bucketInterval := ArgStringDefault(args, "bucket_interval", "5m")
 
-	duration, err := ParseTimeRange(timeRange)
+	since, _, err := ResolveWindow(args, "1h")
 	if err != nil {
-		return NewToolResultError(fmt.Sprintf("invalid time_range: %v", err)), nil
+		return NewToolResultError(err.Error()), nil
 	}
 
 	bucketDur, err := ParseTimeRange(bucketInterval)
@@ -40,7 +39,6 @@ func LogsStats(ctx context.Context, args map[string]any, deps LogsDeps) (*CallTo
 	}
 
 	now := time.Now().UTC()
-	since := now.Add(-duration)
 
 	params := store.LogCountParams{
 		Since:       since,
