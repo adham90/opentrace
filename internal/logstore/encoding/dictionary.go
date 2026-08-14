@@ -3,11 +3,18 @@ package encoding
 import (
 	"encoding/binary"
 	"fmt"
+	"log/slog"
 )
 
 // --- Encoding 2: Dictionary + Zstd ---
 // For low-cardinality string columns (service, env, event_type, method, status, controller, action).
 // Builds a string→uint16 mapping, stores uint16 indices, zstd compresses.
+
+// MaxDictEntries is the largest dictionary DictMarshal can represent: the
+// serialized entry count is a uint16, so 65535 entries (indices 0..65534) is
+// the ceiling. Beyond it the count would wrap and the whole column would decode
+// to garbage, so DictEncode stops growing the dictionary instead.
+const MaxDictEntries = 65535
 
 // DictEncoded holds the result of dictionary encoding.
 type DictEncoded struct {
@@ -18,6 +25,19 @@ type DictEncoded struct {
 // DictEncode builds a dictionary from string values and returns indices.
 // Null/empty strings are stored as index 0 with dict[0] = "".
 func DictEncode(values []string) *DictEncoded {
+	return DictEncodeLimit(values, MaxDictEntries)
+}
+
+// DictEncodeLimit is DictEncode with an explicit cap on dictionary size. Once
+// the cap is reached, further distinct values map to index 0 (the empty string)
+// and the dictionary stops growing — lossy, but bounded and never misframed.
+// Callers whose index width is narrower than uint16 (bitpacked columns) pass a
+// smaller limit.
+func DictEncodeLimit(values []string, limit int) *DictEncoded {
+	if limit < 1 || limit > MaxDictEntries {
+		limit = MaxDictEntries
+	}
+
 	dict := make(map[string]uint16)
 	order := make([]string, 0, 16)
 
@@ -29,12 +49,14 @@ func DictEncode(values []string) *DictEncoded {
 	for i, v := range values {
 		idx, ok := dict[v]
 		if !ok {
-			idx = uint16(len(order))
-			if int(idx) >= 65535 {
-				// Fallback: too many unique values for uint16.
-				// In practice this shouldn't happen for dict-encoded columns.
-				idx = 0
+			if len(order) >= limit {
+				// Dictionary full: fold the value onto index 0 without growing
+				// the dictionary, so indices stay unique and the entry count
+				// stays representable.
+				indices[i] = 0
+				continue
 			}
+			idx = uint16(len(order))
 			dict[v] = idx
 			order = append(order, v)
 		}
@@ -47,12 +69,22 @@ func DictEncode(values []string) *DictEncoded {
 // DictMarshal serializes a DictEncoded to bytes + zstd.
 // Format: [2 bytes dict_len] [dict entries: 2-byte len + string]... [zstd(uint16 indices)]
 func DictMarshal(d *DictEncoded) []byte {
+	// Defensive: the entry count is a uint16 on disk. DictEncode never exceeds
+	// MaxDictEntries; a hand-built DictEncoded might, and writing a wrapped count
+	// would corrupt the entire column. Drop the overflow instead — indices past
+	// the end resolve to "" in DictLookup.
+	entries := d.Dict
+	if len(entries) > MaxDictEntries {
+		slog.Error("dictionary exceeds max entries, truncating",
+			"entries", len(entries), "max", MaxDictEntries)
+		entries = entries[:MaxDictEntries]
+	}
+
 	// Serialize dictionary
-	dictBuf := make([]byte, 0, len(d.Dict)*16)
-	dictBuf = binary.LittleEndian.AppendUint16(dictBuf, uint16(len(d.Dict)))
-	for _, s := range d.Dict {
-		dictBuf = binary.LittleEndian.AppendUint16(dictBuf, uint16(len(s)))
-		dictBuf = append(dictBuf, s...)
+	dictBuf := make([]byte, 0, len(entries)*16)
+	dictBuf = binary.LittleEndian.AppendUint16(dictBuf, uint16(len(entries)))
+	for _, s := range entries {
+		dictBuf = AppendLenString(dictBuf, s)
 	}
 
 	// Serialize indices as raw uint16 LE, then compress
@@ -70,8 +102,9 @@ func DictMarshal(d *DictEncoded) []byte {
 	return result
 }
 
-// DictUnmarshal deserializes DictEncoded from bytes.
-func DictUnmarshal(data []byte, count int) (*DictEncoded, error) {
+// DictUnmarshal deserializes DictEncoded from bytes using the given length
+// framing (LenUint16 for chunk v1 files, LenExtended for v2+).
+func DictUnmarshal(data []byte, count int, f LenFormat) (*DictEncoded, error) {
 	if len(data) < 4 {
 		return nil, fmt.Errorf("dict data too short: %d bytes", len(data))
 	}
@@ -91,21 +124,19 @@ func DictUnmarshal(data []byte, count int) (*DictEncoded, error) {
 
 	dict := make([]string, 0, dictLen)
 	for i := 0; i < dictLen; i++ {
-		if offset+2 > len(dictBuf) {
-			return nil, fmt.Errorf("dict entry %d: truncated length", i)
+		var s string
+		var err error
+		s, offset, err = f.ReadString(dictBuf, offset)
+		if err != nil {
+			return nil, fmt.Errorf("dict entry %d: %w", i, err)
 		}
-		sLen := int(binary.LittleEndian.Uint16(dictBuf[offset:]))
-		offset += 2
-		if offset+sLen > len(dictBuf) {
-			return nil, fmt.Errorf("dict entry %d: truncated string", i)
-		}
-		dict = append(dict, string(dictBuf[offset:offset+sLen]))
-		offset += sLen
+		dict = append(dict, s)
 	}
 
 	// Decompress indices
 	compressedIdx := data[4+dictSize:]
-	rawIdx, err := Decompress(compressedIdx)
+	// Indices are raw uint16s: exactly two bytes per value.
+	rawIdx, err := DecompressBounded(compressedIdx, DecodeCeiling(count, 2))
 	if err != nil {
 		return nil, fmt.Errorf("decompress dict indices: %w", err)
 	}

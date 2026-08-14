@@ -58,6 +58,12 @@ func (s *Scheduler) run(ctx context.Context, sched Schedule) {
 	ticker := time.NewTicker(sched.Interval)
 	defer ticker.Stop()
 
+	// Fire once at startup. Without this a process that restarts more often than
+	// the interval (e.g. a 6h retention schedule on a service redeployed hourly)
+	// never reaches its first tick and the job never runs. maybeEnqueue is a
+	// no-op when the job is already pending/running, so this is safe to repeat.
+	s.maybeEnqueue(ctx, sched)
+
 	for {
 		select {
 		case <-ctx.Done():

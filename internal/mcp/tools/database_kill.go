@@ -40,12 +40,12 @@ func HandleKillQuery(ctx context.Context, deps DatabaseDeps, args map[string]any
 	}
 
 	// First, check what the process is doing.
-	infoQuery := fmt.Sprintf(`SELECT pid, state, COALESCE(application_name, '') AS app_name,
+	const infoQuery = `SELECT pid, state, COALESCE(application_name, '') AS app_name,
 		LEFT(query, 300) AS query_preview,
 		EXTRACT(EPOCH FROM (now() - query_start))::int AS duration_seconds
-	FROM pg_stat_activity WHERE pid = %d`, pid)
+	FROM pg_stat_activity WHERE pid = $1`
 
-	infoResult, err := qe.ExecuteReadQuery(ctx, infoQuery)
+	infoResult, err := executeReadQuery(ctx, qe, infoQuery, pid)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to look up PID %d: %v", pid, err)), nil
 	}
@@ -64,20 +64,20 @@ func HandleKillQuery(ctx context.Context, deps DatabaseDeps, args map[string]any
 		durationSec = toInt64(row[4])
 	}
 
-	// Cancel or terminate.
-	var actionQuery string
-	var action string
+	// Cancel or terminate. Each variant carries its own verb / past tense /
+	// function name — deriving them by slicing the past tense produced
+	// malformed text ("cancell", "pg_cancelle_backend").
+	var actionQuery, verb, action, pgFunc string
 	if force {
-		action = "terminated"
-		actionQuery = fmt.Sprintf("SELECT pg_terminate_backend(%d)", pid)
+		verb, action, pgFunc = "terminate", "terminated", "pg_terminate_backend"
 	} else {
-		action = "cancelled"
-		actionQuery = fmt.Sprintf("SELECT pg_cancel_backend(%d)", pid)
+		verb, action, pgFunc = "cancel", "cancelled", "pg_cancel_backend"
 	}
+	actionQuery = fmt.Sprintf("SELECT %s(%d)", pgFunc, pid)
 
 	result, err := control.ExecuteControlQuery(ctx, actionQuery)
 	if err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to %s PID %d: %v", action[:len(action)-2], pid, err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to %s PID %d: %v", verb, pid, err)), nil
 	}
 
 	success := false
@@ -98,7 +98,7 @@ func HandleKillQuery(ctx context.Context, deps DatabaseDeps, args map[string]any
 	}
 
 	if !success {
-		resp["note"] = fmt.Sprintf("pg_%s_backend returned false — the process may have already ended or you may lack permission. Use database action=activity to verify.", action[:len(action)-1])
+		resp["note"] = fmt.Sprintf("%s returned false — the process may have already ended or you may lack permission. Use database action=activity to verify.", pgFunc)
 	}
 
 	if !force && success {
@@ -120,7 +120,7 @@ func HandleLongTransactions(ctx context.Context, deps DatabaseDeps, args map[str
 
 	minDurationSec := ArgFloat(args, "min_duration_seconds", 30.0)
 
-	query := fmt.Sprintf(`SELECT
+	const query = `SELECT
 		pid,
 		usename,
 		application_name,
@@ -137,10 +137,10 @@ func HandleLongTransactions(ctx context.Context, deps DatabaseDeps, args map[str
 	FROM pg_stat_activity
 	WHERE xact_start IS NOT NULL
 		AND pid != pg_backend_pid()
-		AND EXTRACT(EPOCH FROM (now() - xact_start)) > %v
-	ORDER BY xact_start ASC`, minDurationSec)
+		AND EXTRACT(EPOCH FROM (now() - xact_start)) > $1
+	ORDER BY xact_start ASC`
 
-	result, err := qe.ExecuteReadQuery(ctx, query)
+	result, err := executeReadQuery(ctx, qe, query, minDurationSec)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("long transactions query failed: %v", err)), nil
 	}

@@ -6,13 +6,23 @@ import (
 	"sort"
 	"time"
 
-
 	"github.com/adham90/opentrace/pkg/store"
 )
 
 // ---------------------------------------------------------------------------
 // action: trace — distributed trace assembly (from traceLookupHandler)
 // ---------------------------------------------------------------------------
+
+const (
+	// defaultTraceWindow is how far back a trace lookup reaches when the caller
+	// names no window. Traces are looked up by exact ID, so the window exists
+	// only to bound the scan.
+	defaultTraceWindow = "30d"
+
+	// maxTraceEntries matches the store's own per-search ceiling. Asking for
+	// more does not raise it, it just hides the truncation.
+	maxTraceEntries = 500
+)
 
 func LogsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	InitLogsDeps(&deps)
@@ -30,16 +40,31 @@ func LogsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallTo
 		return NewToolResultError(err.Error()), nil
 	}
 
+	// Window. A trace ID is an exact identifier, not a time query, so the
+	// natural window is "as far back as we keep logs" — but the store defaults
+	// Start to now-1h when it is nil, which made every trace older than an hour
+	// report "no log entries found for this trace ID" as if it never happened.
+	// Derive the window explicitly and echo it back.
+	since, _, err := ResolveWindow(args, defaultTraceWindow)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+	now := time.Now().UTC()
+
 	// Fetch all log entries for this trace.
 	traceResult, err := deps.Logs.Search(ctx, store.LogSearchParams{
 		TraceID:     traceID,
 		Environment: environment,
-		Limit:       1000,
+		Start:       &since,
+		End:         &now,
+		Limit:       maxTraceEntries,
+		SortAsc:     true,
 	})
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to search logs: %v", err)), nil
 	}
 	entries := traceResult.Entries
+	truncated := len(entries) >= maxTraceEntries
 
 	// Sort by timestamp ascending.
 	sort.Slice(entries, func(i, j int) bool {
@@ -48,9 +73,13 @@ func LogsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallTo
 
 	if len(entries) == 0 {
 		return JSONResult(map[string]any{
-			"trace_id":      traceID,
-			"total_entries": 0,
-			"message":       "No log entries found for this trace ID",
+			"trace_id":       traceID,
+			"total_entries":  0,
+			"searched_since": since.Format(time.RFC3339),
+			"searched_until": now.Format(time.RFC3339),
+			"message": fmt.Sprintf(
+				"No log entries found for this trace ID in the window searched (%s to now). Pass since (e.g. since=\"30d\") to look further back.",
+				since.Format(time.RFC3339)),
 		})
 	}
 
@@ -157,6 +186,12 @@ func LogsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallTo
 
 	totalDuration := lastTime.Sub(firstTime).Milliseconds()
 
+	if truncated {
+		warnings = append(warnings, fmt.Sprintf(
+			"Trace truncated to the %d oldest entries the store will return — total_duration_ms and service_summary describe that prefix, not the whole trace.",
+			maxTraceEntries))
+	}
+
 	resp := map[string]any{
 		"trace_id":          traceID,
 		"total_entries":     len(entries),
@@ -165,6 +200,9 @@ func LogsTrace(ctx context.Context, args map[string]any, deps LogsDeps) (*CallTo
 		"has_errors":        hasErrors,
 		"timeline":          timeline,
 		"service_summary":   serviceSummary,
+		"searched_since":    since.Format(time.RFC3339),
+		"searched_until":    now.Format(time.RFC3339),
+		"complete":          !truncated,
 	}
 
 	// Context entries (surrounding logs from each service).

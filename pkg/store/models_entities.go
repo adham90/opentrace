@@ -39,21 +39,3 @@ type UpsertCodeEntityParams struct {
 	EntityName string
 	Service    string
 }
-
-// UncoveredErrorPath tracks production error paths that lack test coverage.
-type UncoveredErrorPath struct {
-	bun.BaseModel      `bun:"table:uncovered_error_paths" json:"-"`
-	ID                 int64     `bun:"id,pk,autoincrement" json:"id"`
-	Service            string    `bun:"service" json:"service"`
-	ErrorFingerprint   string    `bun:"error_fingerprint" json:"error_fingerprint"`
-	ErrorClass         string    `bun:"error_class" json:"error_class"`
-	SourceFile         string    `bun:"source_file" json:"source_file"`
-	Endpoint           string    `bun:"endpoint" json:"endpoint"`
-	ErrorCount         int       `bun:"error_count" json:"error_count"`
-	UserImpactScore    float64   `bun:"user_impact_score" json:"user_impact_score"`
-	InvestigationCount int       `bun:"investigation_count" json:"investigation_count"`
-	PriorityScore      float64   `bun:"priority_score" json:"priority_score"`
-	LastSeenAt         time.Time `bun:"last_seen_at" json:"last_seen_at"`
-	CreatedAt          time.Time `bun:"created_at" json:"created_at"`
-	UpdatedAt          time.Time `bun:"updated_at" json:"updated_at"`
-}

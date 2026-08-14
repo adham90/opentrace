@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/auth"
+
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/mcp/envscope"
 	srvpkg "github.com/adham90/opentrace/pkg/server"
@@ -39,21 +41,53 @@ func prepareSSE(next http.Handler) http.Handler {
 	})
 }
 
-// wrapCompressSkipMCP wraps chi's Compress middleware so that /mcp/ paths
-// bypass it entirely. Simply stripping Accept-Encoding is not enough because
-// chi's compressResponseWriter still wraps the http.ResponseWriter, which
-// breaks http.Flusher — causing SSE events to be buffered until close.
+// wrapCompressSkipMCP wraps chi's Compress middleware so that MCP paths bypass
+// it entirely. Simply stripping Accept-Encoding is not enough because chi's
+// compressResponseWriter still wraps the http.ResponseWriter, which breaks
+// http.Flusher — causing SSE events to be buffered until close.
 func wrapCompressSkipMCP(compressMw func(http.Handler) http.Handler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		compressed := compressMw(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasPrefix(r.URL.Path, "/mcp/") || strings.HasPrefix(r.URL.Path, "/mcp-sse") {
+			if isMCPPath(r.URL.Path) {
 				next.ServeHTTP(w, r)
 				return
 			}
 			compressed.ServeHTTP(w, r)
 		})
 	}
+}
+
+// isMCPPath reports whether a path belongs to an MCP transport. The exact path
+// "/mcp" matters: that is what Streamable HTTP clients POST to, and a
+// HasPrefix("/mcp/") test misses it.
+func isMCPPath(path string) bool {
+	return path == "/mcp" || strings.HasPrefix(path, "/mcp/") || strings.HasPrefix(path, "/mcp-sse")
+}
+
+// mcpTokenInfoTTL is how far ahead the synthesized TokenInfo expiry is set.
+// The SDK rejects a TokenInfo without an expiry; the real lifetime is the MCP
+// token's own validity, re-checked by MCPTokenAuth on every request.
+const mcpTokenInfoTTL = 5 * time.Minute
+
+// mcpTokenInfoBridge publishes the already-authenticated user as the SDK's
+// auth.TokenInfo. The StreamableHTTPHandler binds a session to the TokenInfo
+// UserID seen at initialize and rejects later requests from a different user
+// ("session user mismatch") — but that check is inert unless TokenInfo is set,
+// which our own MCPTokenAuth (srvpkg.WithUser) does not do. Without this, a
+// leaked Mcp-Session-Id lets any authenticated caller drive another user's
+// session, including an admin one.
+//
+// It must run after MCPTokenAuth; the verifier only reads the context.
+func mcpTokenInfoBridge(next http.Handler) http.Handler {
+	verifier := func(ctx context.Context, _ string, _ *http.Request) (*auth.TokenInfo, error) {
+		u := srvpkg.UserFromContext(ctx)
+		if u == nil {
+			return nil, auth.ErrInvalidToken
+		}
+		return &auth.TokenInfo{UserID: u.ID, Expiration: time.Now().Add(mcpTokenInfoTTL)}, nil
+	}
+	return auth.RequireBearerToken(verifier, nil)(next)
 }
 
 // MCPTokenAuth is middleware that authenticates requests using a Bearer token

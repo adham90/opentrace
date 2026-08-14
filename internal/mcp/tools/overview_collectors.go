@@ -100,12 +100,28 @@ func collectLogVolume(ctx context.Context, d OverviewDeps, service, env string, 
 	}
 }
 
-func collectPerformance(ctx context.Context, d OverviewDeps, service string, since, until time.Time) map[string]any {
+// Performance scan bounds. RequestSummarySearchParams has no Service field, so
+// a service filter cannot be pushed into the query and has to be applied in Go.
+// It therefore has to be applied to a scan wide enough to contain the service's
+// rows: filtering AFTER a 5-row limit meant a service-scoped diagnose reported
+// total_requests:0 whenever the five slowest requests overall belonged to other
+// services.
+const (
+	perfScanLimit       = 500
+	perfSlowestReported = 5
+)
+
+func collectPerformance(ctx context.Context, d OverviewDeps, service, env string, since, until time.Time) map[string]any {
+	limit := perfSlowestReported
+	if service != "" {
+		limit = perfScanLimit
+	}
 	params := store.RequestSummarySearchParams{
-		Start:  &since,
-		End:    &until,
-		SortBy: "duration_ms",
-		Limit:  5,
+		Start:       &since,
+		End:         &until,
+		Environment: env,
+		SortBy:      "duration_ms",
+		Limit:       limit,
 	}
 
 	results, err := d.LogStore.SearchRequestSummaries(ctx, params)
@@ -117,7 +133,9 @@ func collectPerformance(ctx context.Context, d OverviewDeps, service string, sin
 		return map[string]any{"total_requests": 0}
 	}
 
-	var filtered []store.RequestSummaryResult
+	scanTruncated := service != "" && len(results) >= perfScanLimit
+
+	filtered := make([]store.RequestSummaryResult, 0, len(results))
 	for _, r := range results {
 		if service == "" || r.Service == service {
 			filtered = append(filtered, r)
@@ -127,7 +145,7 @@ func collectPerformance(ctx context.Context, d OverviewDeps, service string, sin
 	var totalDuration float64
 	var totalSQL int
 	nPlusOne := 0
-	slowest := make([]map[string]any, 0, min(5, len(filtered)))
+	slowest := make([]map[string]any, 0, min(perfSlowestReported, len(filtered)))
 
 	for _, r := range filtered {
 		totalDuration += r.DurationMs
@@ -138,7 +156,7 @@ func collectPerformance(ctx context.Context, d OverviewDeps, service string, sin
 	}
 
 	for i, r := range filtered {
-		if i >= 5 {
+		if i >= perfSlowestReported {
 			break
 		}
 		entry := map[string]any{
@@ -162,13 +180,18 @@ func collectPerformance(ctx context.Context, d OverviewDeps, service string, sin
 		avgSQL = float64(totalSQL) / float64(len(filtered))
 	}
 
-	return map[string]any{
+	out := map[string]any{
 		"total_requests":    len(filtered),
 		"avg_duration_ms":   fmt.Sprintf("%.1f", avgDuration),
 		"avg_sql_count":     fmt.Sprintf("%.1f", avgSQL),
 		"n_plus_one_count":  nPlusOne,
 		"slowest_endpoints": slowest,
 	}
+	if scanTruncated {
+		out["coverage_note"] = fmt.Sprintf(
+			"counted from the %d slowest requests in the window (the store cannot filter by service), so total_requests is a lower bound", perfScanLimit)
+	}
+	return out
 }
 
 func collectWatchAlerts(ctx context.Context, d OverviewDeps, service string) map[string]any {

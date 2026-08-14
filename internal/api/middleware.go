@@ -56,10 +56,20 @@ type rateLimitEntry struct {
 	lastSeen time.Time
 }
 
+// evictRecord remembers the insertion order of a rate-limit key so the map can
+// be bounded in O(1) instead of scanning for the oldest entry on every evict.
+// The entry pointer disambiguates a key that was deleted and re-created.
+type evictRecord struct {
+	key   string
+	entry *rateLimitEntry
+}
+
 // RateLimiter provides per-IP rate limiting.
 type RateLimiter struct {
 	mu             sync.Mutex
 	entries        map[string]*rateLimitEntry
+	order          []evictRecord // FIFO of keys in creation order
+	orderHead      int           // index of the oldest live record in order
 	limit          int
 	window         time.Duration
 	done           chan struct{}
@@ -95,12 +105,26 @@ func (rl *RateLimiter) Stop() {
 	}
 }
 
-const maxRateLimitEntries = 10000
+const (
+	// maxRateLimitEntries bounds the per-key map so a flood of distinct keys
+	// cannot grow it without limit.
+	maxRateLimitEntries = 10000
+	// rateLimitCleanupInterval is how often expired entries are swept.
+	rateLimitCleanupInterval = 1 * time.Minute
+	// orderCompactThreshold is the smallest order slice worth compacting. Below
+	// it the slice is negligible, so compaction would only burn CPU.
+	orderCompactThreshold = 1024
+	// orderSlackFactor bounds how much dead weight the FIFO may carry relative
+	// to the number of live entries before it is compacted. Without this the
+	// common case leaks: every window rollover appends a record, and with fewer
+	// than maxRateLimitEntries distinct clients the eviction loop — the only
+	// other consumer of the FIFO — never runs, so nothing is ever reclaimed.
+	orderSlackFactor = 2
+)
 
 // cleanup periodically evicts expired entries to prevent unbounded map growth.
-// Also caps total entries to maxRateLimitEntries to mitigate random-IP DoS.
 func (rl *RateLimiter) cleanup() {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(rateLimitCleanupInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -114,34 +138,92 @@ func (rl *RateLimiter) cleanup() {
 					delete(rl.entries, ip)
 				}
 			}
-			// Emergency eviction if still too large — evict oldest entries first.
-			for len(rl.entries) > maxRateLimitEntries {
-				var oldestIP string
-				var oldestTime time.Time
-				for ip, entry := range rl.entries {
-					if oldestIP == "" || entry.lastSeen.Before(oldestTime) {
-						oldestIP = ip
-						oldestTime = entry.lastSeen
-					}
-				}
-				delete(rl.entries, oldestIP)
-			}
+			rl.compactOrderLocked()
 			rl.mu.Unlock()
 		}
 	}
 }
 
-// clientIP extracts the client IP from the request. It only trusts
-// X-Forwarded-For when the direct connection is from a configured trusted proxy.
+// addEntryLocked inserts a new entry, evicting the oldest one first if the map
+// is at capacity. Eviction is O(1) amortized: the FIFO records creation order,
+// and every entry shares the same window so creation order is expiry order.
+// Callers must hold rl.mu.
+func (rl *RateLimiter) addEntryLocked(key string, entry *rateLimitEntry) {
+	for len(rl.entries) >= maxRateLimitEntries && rl.orderHead < len(rl.order) {
+		rec := rl.order[rl.orderHead]
+		rl.orderHead++
+		// Skip records whose entry was already deleted or replaced.
+		if cur, ok := rl.entries[rec.key]; ok && cur == rec.entry {
+			delete(rl.entries, rec.key)
+		}
+	}
+	rl.entries[key] = entry
+	rl.order = append(rl.order, evictRecord{key: key, entry: entry})
+	rl.compactOrderLocked()
+}
+
+// orderNeedsCompactionLocked reports whether the FIFO carries enough dead
+// weight to be worth rebuilding. Two independent triggers, because the two ways
+// records go stale are independent: consumed slots accumulate under a flood of
+// distinct keys, while superseded records accumulate in the ordinary case where
+// a handful of clients roll their window over and over. Callers must hold rl.mu.
+func (rl *RateLimiter) orderNeedsCompactionLocked() bool {
+	if rl.orderHead >= orderCompactThreshold {
+		return true
+	}
+	return len(rl.order) >= orderCompactThreshold &&
+		len(rl.order) > orderSlackFactor*len(rl.entries)
+}
+
+// compactOrderLocked drops consumed FIFO slots and records for entries that no
+// longer exist. Compaction is O(len(order)) but only runs once the slice has at
+// least doubled past the live set, so eviction stays O(1) amortized.
+// Callers must hold rl.mu.
+func (rl *RateLimiter) compactOrderLocked() {
+	if !rl.orderNeedsCompactionLocked() {
+		return
+	}
+	live := make([]evictRecord, 0, len(rl.entries))
+	for _, rec := range rl.order[rl.orderHead:] {
+		if cur, ok := rl.entries[rec.key]; ok && cur == rec.entry {
+			live = append(live, rec)
+		}
+	}
+	rl.order = live
+	rl.orderHead = 0
+}
+
+// clientIP returns the address the rate limit is keyed on. It must not be
+// attacker-controlled: the leftmost X-Forwarded-For element is written by the
+// client (proxies append, they never replace), so keying on it lets a caller
+// mint a fresh bucket per request. Instead we walk X-Forwarded-For from the
+// right — the part the trusted proxy chain actually wrote — and use the first
+// address that is not itself a trusted proxy. Anything unparseable, or a
+// direct peer that is not a trusted proxy, falls back to the peer address.
 func (rl *RateLimiter) clientIP(r *http.Request) string {
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		ip = r.RemoteAddr
 	}
-	if len(rl.trustedProxies) > 0 && rl.trustedProxies[ip] {
-		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-			return strings.TrimSpace(strings.SplitN(fwd, ",", 2)[0])
+	if len(rl.trustedProxies) == 0 || !rl.trustedProxies[ip] {
+		return ip
+	}
+	fwd := r.Header.Get("X-Forwarded-For")
+	if fwd == "" {
+		return ip
+	}
+	parts := strings.Split(fwd, ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		hop := strings.TrimSpace(parts[i])
+		parsed := net.ParseIP(hop)
+		if parsed == nil {
+			// A forged/garbage hop: everything to its left is untrustworthy.
+			break
 		}
+		if rl.trustedProxies[parsed.String()] || rl.trustedProxies[hop] {
+			continue // our own proxy chain; keep walking left
+		}
+		return parsed.String()
 	}
 	return ip
 }
@@ -155,7 +237,7 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 		now := time.Now()
 		entry, ok := rl.entries[ip]
 		if !ok || now.After(entry.resetAt) {
-			rl.entries[ip] = &rateLimitEntry{count: 1, resetAt: now.Add(rl.window), lastSeen: now}
+			rl.addEntryLocked(ip, &rateLimitEntry{count: 1, resetAt: now.Add(rl.window), lastSeen: now})
 			rl.mu.Unlock()
 			next.ServeHTTP(w, r)
 			return
@@ -255,9 +337,19 @@ func APIKeyAuth(apiKey string) func(http.Handler) http.Handler {
 // DynamicAPIKeyAuth resolves the API key per-request (env var or DB) and
 // validates the Bearer token. If no key is configured, all requests pass.
 // Uses constant-time comparison to prevent timing side-channel attacks.
+//
+// If the key cannot be resolved (settings-store read error) the request is
+// rejected with 503: "we could not read the key" must never be mistaken for
+// "auth is disabled", which would let an unauthenticated client through for
+// the duration of a transient DB fault.
 func (s *Server) DynamicAPIKeyAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		apiKey := s.getEffectiveAPIKey(r.Context())
+		apiKey, err := s.getEffectiveAPIKey(r.Context())
+		if err != nil {
+			slog.Error("api key auth: resolving configured key failed", "error", err)
+			writeError(w, http.StatusServiceUnavailable, "authentication temporarily unavailable")
+			return
+		}
 		if apiKey == "" {
 			next.ServeHTTP(w, r)
 			return
@@ -287,4 +379,3 @@ func RequireAdmin(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-

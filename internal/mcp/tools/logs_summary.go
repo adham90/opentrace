@@ -13,6 +13,19 @@ import (
 // action: summary — debugging overview (from logSummaryHandler)
 // ---------------------------------------------------------------------------
 
+// maxSummarySample is the largest sample one search returns
+// (domain.ClampLimit(_, 50, 500)); the commit/error aggregations below run over
+// it, so it is reported alongside them.
+const maxSummarySample = 500
+
+// slowEndpointScanLimit is how many request summaries are scanned to find the
+// slowest ones. The store cannot filter request summaries by service, so a
+// service-filtered summary has to over-fetch and filter here.
+const slowEndpointScanLimit = 100
+
+// slowEndpointsReturned is how many slowest endpoints the response carries.
+const slowEndpointsReturned = 5
+
 func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*CallToolResult, error) {
 	InitLogsDeps(&deps)
 	serviceFilter := ArgString(args, "service")
@@ -48,14 +61,19 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 	errorCount := lc.ErrorCount
 	errorRatePct := lc.ErrorRate
 
-	// 2. Fetch recent logs to aggregate commits and errors in Go.
+	// 2. Fetch recent logs to aggregate commits and errors in Go. This is a
+	// *sample*: the log service clamps any search to maxSummarySample rows.
+	// Requesting 2000 never raised that ceiling, it only hid it — active_commits
+	// and unique_errors were then presented next to window-wide total_logs as if
+	// they covered the same range. Ask for exactly what the store returns and
+	// label the sample in the response.
 	searchParams := store.LogSearchParams{
 		Service:     serviceFilter,
 		Environment: environmentFilter,
 		CommitHash:  commitFilter,
 		Start:       &since,
 		End:         &now,
-		Limit:       2000,
+		Limit:       maxSummarySample,
 		SortAsc:     false,
 	}
 	searchResult, err := deps.Logs.Search(ctx, searchParams)
@@ -63,6 +81,7 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 		return NewToolResultError(fmt.Sprintf("failed to search logs: %v", err)), nil
 	}
 	entries := searchResult.Entries
+	sampleTruncated := len(entries) >= maxSummarySample
 
 	// 3. Aggregate by commit hash.
 	type commitInfo struct {
@@ -212,14 +231,37 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 	}
 
 	// 5. Slowest endpoints from request summaries.
+	// RequestSummarySearchParams has no Service field, so a service-filtered
+	// summary must over-fetch and filter on the result's own Service — showing
+	// other services' endpoints as "this service's slowest" sends the
+	// investigation to the wrong service.
+	scanLimit := slowEndpointsReturned
+	if serviceFilter != "" {
+		scanLimit = slowEndpointScanLimit
+	}
 	summaryParams := store.RequestSummarySearchParams{
 		Start:       &since,
 		End:         &now,
 		Environment: environmentFilter,
 		SortBy:      "duration_ms",
-		Limit:       5,
+		Limit:       scanLimit,
 	}
 	summaries, _ := deps.LogStore.SearchRequestSummaries(ctx, summaryParams)
+	if serviceFilter != "" {
+		kept := make([]store.RequestSummaryResult, 0, len(summaries))
+		for _, rs := range summaries {
+			if rs.Service == serviceFilter {
+				kept = append(kept, rs)
+			}
+		}
+		summaries = kept
+	}
+	sort.SliceStable(summaries, func(i, j int) bool {
+		return summaries[i].DurationMs > summaries[j].DurationMs
+	})
+	if len(summaries) > slowEndpointsReturned {
+		summaries = summaries[:slowEndpointsReturned]
+	}
 
 	var slowestEndpoints []map[string]any
 	for _, rs := range summaries {
@@ -252,6 +294,16 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 		"error_count":    errorCount,
 		"error_rate_pct": round2(errorRatePct),
 		"by_level":       lc.ByLevel,
+	}
+	// total_logs/error_count above are window-wide counts; active_commits and
+	// unique_errors below are derived from the sample. Say which is which.
+	if len(activeCommits) > 0 || len(uniqueErrors) > 0 {
+		resp["aggregation_sample"] = map[string]any{
+			"entries_scanned": len(entries),
+			"max_scannable":   maxSummarySample,
+			"truncated":       sampleTruncated,
+			"covers":          "active_commits, unique_errors",
+		}
 	}
 	if len(activeCommits) > 0 {
 		resp["active_commits"] = activeCommits
@@ -303,6 +355,11 @@ func LogsSummary(ctx context.Context, args map[string]any, deps LogsDeps) (*Call
 
 	// Warnings to draw attention.
 	var warnings []string
+	if sampleTruncated {
+		warnings = append(warnings, fmt.Sprintf(
+			"active_commits and unique_errors are computed from the %d most recent logs in the window (of %d total) — they do not cover the whole window. Narrow the window or filter by service for full coverage.",
+			len(entries), totalLogs))
+	}
 	if errorRatePct > 5 {
 		warnings = append(warnings, fmt.Sprintf("Error rate is %.1f%% — investigate the top unique errors below.", errorRatePct))
 	}

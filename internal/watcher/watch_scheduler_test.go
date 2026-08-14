@@ -166,6 +166,9 @@ func TestWatchScheduler_NotifiesOnAlert(t *testing.T) {
 	})
 
 	scheduler.tick(ctx)
+	// Notifications are dispatched off the tick so a wedged webhook cannot
+	// stall watch evaluation; drain the dispatcher before asserting.
+	scheduler.notify.wait()
 
 	if notifier.getCalls() != 1 {
 		t.Errorf("notifier calls = %d, want 1", notifier.getCalls())

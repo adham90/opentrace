@@ -73,10 +73,10 @@ func TestTruncateForBrief_LongArray(t *testing.T) {
 
 func TestTruncateForBrief_MultipleArrays(t *testing.T) {
 	data := map[string]any{
-		"errors":    []any{1, 2, 3, 4, 5, 6},
-		"warnings":  []any{"w1", "w2"},
-		"traces":    []any{"t1", "t2", "t3", "t4"},
-		"scalar":    "hello",
+		"errors":   []any{1, 2, 3, 4, 5, 6},
+		"warnings": []any{"w1", "w2"},
+		"traces":   []any{"t1", "t2", "t3", "t4"},
+		"scalar":   "hello",
 	}
 	modified := truncateForBrief(data)
 	if !modified {
@@ -131,70 +131,6 @@ func TestTruncateForBrief_EmptyArray(t *testing.T) {
 	modified := truncateForBrief(data)
 	if modified {
 		t.Error("expected modified=false for empty array")
-	}
-}
-
-// --- truncate (helper) ---
-
-func TestTruncate_Short(t *testing.T) {
-	result := truncate("hello", 10)
-	if result != "hello" {
-		t.Errorf("truncate(%q, 10) = %q, want %q", "hello", result, "hello")
-	}
-}
-
-func TestTruncate_ExactLength(t *testing.T) {
-	result := truncate("hello", 5)
-	if result != "hello" {
-		t.Errorf("truncate(%q, 5) = %q, want %q", "hello", result, "hello")
-	}
-}
-
-func TestTruncate_Long(t *testing.T) {
-	result := truncate("hello world", 5)
-	if result != "hello..." {
-		t.Errorf("truncate(%q, 5) = %q, want %q", "hello world", result, "hello...")
-	}
-}
-
-func TestTruncate_Empty(t *testing.T) {
-	result := truncate("", 5)
-	if result != "" {
-		t.Errorf("truncate(%q, 5) = %q, want %q", "", result, "")
-	}
-}
-
-// --- suggest / withSuggestions helpers ---
-
-func TestSuggest(t *testing.T) {
-	s := suggest("logs", "check recent errors", map[string]any{"level": "ERROR"})
-	if s.Tool != "logs" {
-		t.Errorf("Tool = %q, want %q", s.Tool, "logs")
-	}
-	if s.Why != "check recent errors" {
-		t.Errorf("Why = %q, want %q", s.Why, "check recent errors")
-	}
-	if s.Source != "static" {
-		t.Errorf("Source = %q, want %q", s.Source, "static")
-	}
-	if s.Args["level"] != "ERROR" {
-		t.Errorf("Args[level] = %v, want ERROR", s.Args["level"])
-	}
-}
-
-func TestWithSuggestions_NonEmpty(t *testing.T) {
-	resp := map[string]any{"data": "test"}
-	result := withSuggestions(resp, suggest("logs", "why", nil))
-	if _, ok := result["suggested_tools"]; !ok {
-		t.Error("expected suggested_tools key in response")
-	}
-}
-
-func TestWithSuggestions_Empty(t *testing.T) {
-	resp := map[string]any{"data": "test"}
-	result := withSuggestions(resp)
-	if _, ok := result["suggested_tools"]; ok {
-		t.Error("should not add suggested_tools when no suggestions provided")
 	}
 }
 
@@ -426,9 +362,9 @@ func TestGateway_Handler_QuietMode(t *testing.T) {
 	gw := NewGateway()
 	handler := func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		resp := map[string]any{
-			"data":                   "test",
-			"suggested_tools":        []any{"logs"},
-			"investigation_context":  "some context",
+			"data":                  "test",
+			"suggested_tools":       []any{"logs"},
+			"investigation_context": "some context",
 		}
 		data, _ := json.Marshal(resp)
 		return NewToolResultText(string(data)), nil
@@ -550,29 +486,6 @@ func TestGateway_DiscoverCategoryFilter(t *testing.T) {
 	}
 	if data["total_tools"] != 1.0 {
 		t.Errorf("filtered discover should return 1 tool, got %v", data["total_tools"])
-	}
-}
-
-func TestGateway_SetServer(t *testing.T) {
-	gw := NewGateway()
-	if gw.mcpServer != nil {
-		t.Error("mcpServer should be nil initially")
-	}
-	// SetServer with nil should not panic.
-	gw.SetServer(nil)
-	if gw.mcpServer != nil {
-		t.Error("mcpServer should still be nil after SetServer(nil)")
-	}
-}
-
-func TestGateway_Elicit_NoServer(t *testing.T) {
-	gw := NewGateway()
-	result, err := gw.Elicit(context.Background(), "test", nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result != nil {
-		t.Error("Elicit with no server should return nil")
 	}
 }
 
@@ -764,36 +677,6 @@ func TestGateway_Handler_DetailFromParams(t *testing.T) {
 	items := data["items"].([]any)
 	if len(items) != 3 {
 		t.Errorf("brief from params should truncate; got %d items", len(items))
-	}
-}
-
-func TestGateway_Elicit_WithServerNoSessions(t *testing.T) {
-	gw := NewGateway()
-	s := mcp.NewServer(
-		&mcp.Implementation{Name: "test", Version: "0.0.1"},
-		nil,
-	)
-	gw.SetServer(s)
-
-	// No sessions connected, so Elicit should return nil.
-	result, err := gw.Elicit(context.Background(), "confirm?", nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result != nil {
-		t.Error("Elicit with no sessions should return nil")
-	}
-}
-
-func TestGateway_SetServer_NonNil(t *testing.T) {
-	gw := NewGateway()
-	s := mcp.NewServer(
-		&mcp.Implementation{Name: "test", Version: "0.0.1"},
-		nil,
-	)
-	gw.SetServer(s)
-	if gw.mcpServer != s {
-		t.Error("SetServer should store the server reference")
 	}
 }
 

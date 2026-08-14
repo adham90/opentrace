@@ -94,6 +94,15 @@ func HandleOverviewDeleteNote(ctx context.Context, d OverviewDeps, args map[stri
 
 // --- settings action (read-only) ---
 
+// HandleOverviewSettings reports the non-secret server settings.
+//
+// It deliberately never returns the ingest API key. This action is registered
+// in registerReadOnlyTools, so every member — including read-only ones — can
+// call it, and the key it used to echo back is the same bearer credential that
+// authenticates ingest and CLI-read requests. Returning it turned a read-only
+// token into an ingest-capable one. The admin-only HandleAdminSettings has
+// always withheld it; nothing in the product needs the key echoed back, so it
+// is withheld here too rather than merely gated behind the admin role.
 func HandleOverviewSettings(ctx context.Context, d OverviewDeps) (*CallToolResult, error) {
 	if d.SettingsStore == nil {
 		return NewToolResultError("SettingsStore not configured"), nil
@@ -104,9 +113,6 @@ func HandleOverviewSettings(ctx context.Context, d OverviewDeps) (*CallToolResul
 	if retention, err := d.SettingsStore.GetRetention(ctx); err == nil {
 		resp["retention_days"] = retention.RetentionDays
 		resp["metric_retention_days"] = retention.MetricRetentionDays
-	}
-	if v, err := d.SettingsStore.GetAPIKey(ctx); err == nil && v != "" {
-		resp["api_key"] = v
 	}
 	if v, err := d.SettingsStore.GetMaxQueryRows(ctx); err == nil && v > 0 {
 		resp["max_query_rows"] = v

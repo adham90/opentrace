@@ -3,12 +3,15 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/adham90/opentrace/internal/connector"
+	"github.com/adham90/opentrace/internal/mcp/envscope"
 	"github.com/adham90/opentrace/internal/metrics"
+	srvpkg "github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -20,6 +23,52 @@ func wrapWithMetrics(toolName string, handler ToolHandlerFunc) ToolHandlerFunc {
 	}
 }
 
+const (
+	// activityPreviewMaxLen bounds the argument/result previews stored per
+	// activity row.
+	activityPreviewMaxLen = 500
+	// redactedPlaceholder replaces the value of a sensitive argument.
+	redactedPlaceholder = "[REDACTED]"
+	// defaultSessionID labels activity rows for calls that arrived without an
+	// MCP session (stdio transport, internal dispatch).
+	defaultSessionID = "stdio"
+)
+
+// sensitiveArgKeys are argument names whose values must never reach the
+// activity log. connectors create/update carry live DSNs and API tokens.
+var sensitiveArgKeys = map[string]bool{
+	"connection_string": true,
+	"auth_token":        true,
+	"password":          true,
+	"token":             true,
+	"secret":            true,
+	"api_key":           true,
+	"access_key":        true,
+	"private_key":       true,
+	"credentials":       true,
+	"dsn":               true,
+}
+
+// redactArgs returns a copy of args with sensitive values replaced. Nested
+// maps are walked too, so params={connection_string:...} is covered wherever
+// it sits in the argument tree.
+func redactArgs(args map[string]any) map[string]any {
+	out := make(map[string]any, len(args))
+	for k, v := range args {
+		switch {
+		case sensitiveArgKeys[strings.ToLower(k)]:
+			out[k] = redactedPlaceholder
+		default:
+			if nested, ok := v.(map[string]any); ok {
+				out[k] = redactArgs(nested)
+				continue
+			}
+			out[k] = v
+		}
+	}
+	return out
+}
+
 // wrapWithActivityLog wraps a tool handler to log its execution to the activity store.
 func wrapWithActivityLog(deps Deps, toolName string, handler ToolHandlerFunc) ToolHandlerFunc {
 	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -27,14 +76,12 @@ func wrapWithActivityLog(deps Deps, toolName string, handler ToolHandlerFunc) To
 		result, err := handler(ctx, request)
 		elapsed := time.Since(start).Milliseconds()
 
-		// Build a brief preview of args
+		// Build a brief preview of args, with credentials stripped — this row
+		// is persisted and re-served through the admin audit surfaces.
 		argsPreview := ""
 		if args := GetArguments(request); len(args) > 0 {
-			data, _ := json.Marshal(args)
-			argsPreview = string(data)
-			if len(argsPreview) > 500 {
-				argsPreview = argsPreview[:500]
-			}
+			data, _ := json.Marshal(redactArgs(args))
+			argsPreview = truncatePreview(string(data))
 		}
 
 		// Build result preview
@@ -42,20 +89,27 @@ func wrapWithActivityLog(deps Deps, toolName string, handler ToolHandlerFunc) To
 		resultPreview := ""
 		if result != nil && len(result.Content) > 0 {
 			if txt, ok := result.Content[0].(*mcp.TextContent); ok {
-				resultPreview = txt.Text
-				if len(resultPreview) > 500 {
-					resultPreview = resultPreview[:500]
-				}
+				resultPreview = truncatePreview(txt.Text)
 			}
 			isError = isError || result.IsError
 		}
 
-		sessionID := "mcp"
+		// Attribution: who called, on which session, for which env. All three
+		// are available from the authenticated ctx / request and the audit
+		// surfaces are useless without them.
+		sessionID := defaultSessionID
+		if request != nil && request.Session != nil {
+			if id := request.Session.ID(); id != "" {
+				sessionID = id
+			}
+		}
 
 		// Log via bounded activity logger to avoid unbounded goroutine growth.
 		if deps.ActivityLogger != nil {
 			deps.ActivityLogger.Log(store.LogMCPActivityParams{
 				SessionID:     sessionID,
+				UserID:        activityUserID(ctx),
+				Environment:   activityEnvironment(ctx),
 				ToolName:      toolName,
 				Arguments:     argsPreview,
 				ResultPreview: resultPreview,
@@ -67,6 +121,39 @@ func wrapWithActivityLog(deps Deps, toolName string, handler ToolHandlerFunc) To
 
 		return result, err
 	}
+}
+
+// truncatePreview clips a preview string to the persisted maximum.
+func truncatePreview(s string) string {
+	if len(s) <= activityPreviewMaxLen {
+		return s
+	}
+	return s[:activityPreviewMaxLen]
+}
+
+// activityUserID returns the authenticated user's ID, or "" when the call did
+// not come through the HTTP auth middleware (stdio serves a single fixed user).
+func activityUserID(ctx context.Context) string {
+	if u := srvpkg.UserFromContext(ctx); u != nil {
+		return u.ID
+	}
+	return ""
+}
+
+// activityEnvironment returns the env scope the call ran under: the single env
+// for a pinned token, "*" for a wildcard token, and "" when unscoped.
+func activityEnvironment(ctx context.Context) string {
+	scope, ok := envscope.FromOK(ctx)
+	if !ok {
+		return ""
+	}
+	if env, single := scope.SoleEnv(); single {
+		return env
+	}
+	if scope.AllowsAll() {
+		return envscope.WildcardEnv
+	}
+	return strings.Join(scope.Allowed, ",")
 }
 
 // wrapHandler applies activity logging and metrics to a handler.

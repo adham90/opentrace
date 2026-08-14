@@ -70,6 +70,10 @@ type Condition struct {
 	Window   string `json:"window,omitempty"`   // time window for count
 }
 
+// defaultCountWindow is the window a count condition uses when it does not
+// declare one.
+const defaultCountWindow = 1 * time.Hour
+
 // ConditionResult holds the evaluation result of a single condition node.
 type ConditionResult struct {
 	Breached bool    `json:"breached"`
@@ -80,11 +84,11 @@ type ConditionResult struct {
 // ParseCondition parses a JSON condition tree.
 func ParseCondition(raw json.RawMessage) (*Condition, error) {
 	if len(raw) == 0 {
-		return nil, fmt.Errorf("empty condition")
+		return nil, configErrorf("empty condition")
 	}
 	var c Condition
 	if err := json.Unmarshal(raw, &c); err != nil {
-		return nil, fmt.Errorf("parsing condition: %w", err)
+		return nil, configErrorf("parsing condition: %v", err)
 	}
 	return &c, nil
 }
@@ -124,7 +128,7 @@ func EvaluateCondition(ctx context.Context, c *Condition, metrics *WatchMetrics,
 	case "count":
 		return evalCount(ctx, c, metrics, environment)
 	default:
-		return nil, fmt.Errorf("unknown condition type: %q", c.Type)
+		return nil, configErrorf("unknown condition type: %q", c.Type)
 	}
 }
 
@@ -173,7 +177,10 @@ func evalThreshold(ctx context.Context, c *Condition, metrics *WatchMetrics, env
 	if err != nil {
 		return nil, fmt.Errorf("measuring %s: %w", c.Metric, err)
 	}
-	breached := compare(value, c.Op, c.Value)
+	breached, err := compare(value, c.Op, c.Value)
+	if err != nil {
+		return nil, err
+	}
 	return &ConditionResult{
 		Breached: breached,
 		Value:    value,
@@ -186,7 +193,11 @@ func evalRelative(ctx context.Context, c *Condition, metrics *WatchMetrics, base
 		return &ConditionResult{Summary: "no baseline available for relative comparison"}, nil
 	}
 
-	value, err := metrics.Measure(ctx, c.Metric, c.Service, c.Endpoint, environment, checkWindow)
+	// Measure over the same window the baseline was captured over. Comparing a
+	// 30s log_count against a baseline captured over an hour is meaningless;
+	// the baseline records the window it used, so use it.
+	window := parseDurationOr(baseline.WindowDuration, checkWindow)
+	value, err := metrics.Measure(ctx, c.Metric, c.Service, c.Endpoint, environment, window)
 	if err != nil {
 		return nil, fmt.Errorf("measuring %s: %w", c.Metric, err)
 	}
@@ -200,7 +211,10 @@ func evalRelative(ctx context.Context, c *Condition, metrics *WatchMetrics, base
 	}
 
 	threshold := baselineValue * c.BaselineMultiple
-	breached := compare(value, c.Op, threshold)
+	breached, err := compare(value, c.Op, threshold)
+	if err != nil {
+		return nil, err
+	}
 	return &ConditionResult{
 		Breached: breached,
 		Value:    value,
@@ -208,33 +222,37 @@ func evalRelative(ctx context.Context, c *Condition, metrics *WatchMetrics, base
 	}, nil
 }
 
+// evalDelta compares the metric over the current measurement window against the
+// same metric over the compare_window that immediately precedes it.
+//
+// The previous window is measured directly — [now-check-compare, now-check) —
+// rather than being approximated from a wide window that contains the current
+// one. The old approximation made previousValue a blend of both halves, which
+// bounded a rate delta inside ±100% and made any change_pct >= 100 threshold
+// mathematically unsatisfiable. Count metrics are extensive quantities, so when
+// the two windows have different lengths the previous count is scaled to the
+// current window's length before the comparison.
 func evalDelta(ctx context.Context, c *Condition, metrics *WatchMetrics, environment string, checkWindow time.Duration) (*ConditionResult, error) {
-	compareWindow := checkWindow
-	if c.CompareWindow != "" {
-		if d, err := time.ParseDuration(c.CompareWindow); err == nil {
-			compareWindow = d
-		}
-	}
+	compareWindow := parseDurationOr(c.CompareWindow, checkWindow)
 
-	currentValue, err := metrics.Measure(ctx, c.Metric, c.Service, c.Endpoint, environment, checkWindow)
+	now := time.Now().UTC()
+	currentStart := now.Add(-checkWindow)
+	previousStart := currentStart.Add(-compareWindow)
+
+	currentValue, err := metrics.MeasureRange(ctx, c.Metric, c.Service, c.Endpoint, environment, currentStart, now)
 	if err != nil {
 		return nil, fmt.Errorf("measuring current %s: %w", c.Metric, err)
 	}
 
-	// Measure the same metric for the previous window by shifting time.
-	// We can't directly shift time in WatchMetrics, so we use 2x the window
-	// and approximate: previousValue ≈ metric over (2*window) minus current.
-	// This is a pragmatic approximation for SQLite.
-	wideValue, err := metrics.Measure(ctx, c.Metric, c.Service, c.Endpoint, environment, checkWindow+compareWindow)
+	previousValue, err := metrics.MeasureRange(ctx, c.Metric, c.Service, c.Endpoint, environment, previousStart, currentStart)
 	if err != nil {
-		return nil, fmt.Errorf("measuring wide %s: %w", c.Metric, err)
+		return nil, fmt.Errorf("measuring previous %s: %w", c.Metric, err)
 	}
 
-	// For rate metrics (error_rate, cache_hit_rate), the wide window is already an average.
-	// For count metrics, we need to subtract. Approximate previous = wide - current.
-	previousValue := wideValue
-	if isCountMetric(c.Metric) {
-		previousValue = math.Max(0, wideValue-currentValue)
+	// Normalize extensive (count) metrics for unequal window lengths so a 24h
+	// compare window is not reported as a permanent -95% "drop".
+	if isCountMetric(c.Metric) && compareWindow != checkWindow && compareWindow > 0 {
+		previousValue *= checkWindow.Seconds() / compareWindow.Seconds()
 	}
 
 	if previousValue == 0 {
@@ -245,7 +263,10 @@ func evalDelta(ctx context.Context, c *Condition, metrics *WatchMetrics, environ
 	}
 
 	deltaPct := ((currentValue - previousValue) / math.Abs(previousValue)) * 100
-	breached := compare(math.Abs(deltaPct), c.Op, c.ChangePct)
+	breached, err := compare(math.Abs(deltaPct), c.Op, c.ChangePct)
+	if err != nil {
+		return nil, err
+	}
 	return &ConditionResult{
 		Breached: breached,
 		Value:    deltaPct,
@@ -258,30 +279,36 @@ func evalCount(ctx context.Context, c *Condition, metrics *WatchMetrics, environ
 		return nil, fmt.Errorf("LogStore not available for count condition")
 	}
 
-	window := 1 * time.Hour
-	if c.Window != "" {
-		if d, err := time.ParseDuration(c.Window); err == nil {
-			window = d
-		}
+	window := parseDurationOr(c.Window, defaultCountWindow)
+
+	// The documented `query` filter (e.g. "level:error") is applied for real.
+	// Anything the log store cannot express is rejected — silently ignoring it
+	// turned "count errors > 100" into "count all logs > 100".
+	filter, err := parseCountQuery(c.Query, c.Service)
+	if err != nil {
+		return nil, err
 	}
 
 	now := time.Now().UTC()
-	start := now.Add(-window)
+	params := filter.apply(store.LogCountParams{
+		Since:       now.Add(-window),
+		Until:       now,
+		Service:     c.Service,
+		Environment: environment,
+	})
 
 	if c.Distinct && c.Field != "" {
 		// COUNT DISTINCT via DistinctValues
 		field := c.Field
-		values, err := metrics.logStore.DistinctValues(ctx, field, store.LogCountParams{
-			Since:       start,
-			Until:       now,
-			Service:     c.Service,
-			Environment: environment,
-		})
+		values, err := metrics.logStore.DistinctValues(ctx, field, params)
 		if err != nil {
 			return nil, fmt.Errorf("counting distinct %s: %w", field, err)
 		}
 		count := float64(len(values))
-		breached := compare(count, c.Op, c.Value)
+		breached, err := compare(count, c.Op, c.Value)
+		if err != nil {
+			return nil, err
+		}
 		return &ConditionResult{
 			Breached: breached,
 			Value:    count,
@@ -289,13 +316,8 @@ func evalCount(ctx context.Context, c *Condition, metrics *WatchMetrics, environ
 		}, nil
 	}
 
-	// Plain count: use log count
-	counts, err := metrics.logStore.CountByLevel(ctx, store.LogCountParams{
-		Since:       start,
-		Until:       now,
-		Service:     c.Service,
-		Environment: environment,
-	})
+	// Plain count: use log count, honouring the query's level filter.
+	counts, err := metrics.logStore.CountByLevel(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("counting logs: %w", err)
 	}
@@ -305,7 +327,10 @@ func evalCount(ctx context.Context, c *Condition, metrics *WatchMetrics, environ
 		total += count
 	}
 	value := float64(total)
-	breached := compare(value, c.Op, c.Value)
+	breached, err := compare(value, c.Op, c.Value)
+	if err != nil {
+		return nil, err
+	}
 	return &ConditionResult{
 		Breached: breached,
 		Value:    value,

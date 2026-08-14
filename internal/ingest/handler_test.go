@@ -100,17 +100,17 @@ func (m *mockSettingsStore) GetSamplingRules(context.Context) ([]store.SamplingR
 func (m *mockSettingsStore) GetRetention(context.Context) (*store.RetentionSettings, error) {
 	return nil, nil
 }
-func (m *mockSettingsStore) SetRetention(context.Context, store.RetentionSettings) error { return nil }
-func (m *mockSettingsStore) GetAPIKey(context.Context) (string, error)                   { return "", nil }
-func (m *mockSettingsStore) SetAPIKey(context.Context, string) error                     { return nil }
-func (m *mockSettingsStore) GetCORSOrigins(context.Context) (string, error)              { return "", nil }
-func (m *mockSettingsStore) SetCORSOrigins(context.Context, string) error                { return nil }
-func (m *mockSettingsStore) GetMaxQueryRows(context.Context) (int, error)                { return 0, nil }
-func (m *mockSettingsStore) SetMaxQueryRows(context.Context, int) error                  { return nil }
-func (m *mockSettingsStore) GetStatementTimeout(context.Context) (int, error)            { return 0, nil }
-func (m *mockSettingsStore) SetStatementTimeout(context.Context, int) error              { return nil }
-func (m *mockSettingsStore) GetMCPName(context.Context) (string, error)                  { return "", nil }
-func (m *mockSettingsStore) SetMCPName(context.Context, string) error                    { return nil }
+func (m *mockSettingsStore) SetRetention(context.Context, store.RetentionSettings) error  { return nil }
+func (m *mockSettingsStore) GetAPIKey(context.Context) (string, error)                    { return "", nil }
+func (m *mockSettingsStore) SetAPIKey(context.Context, string) error                      { return nil }
+func (m *mockSettingsStore) GetCORSOrigins(context.Context) (string, error)               { return "", nil }
+func (m *mockSettingsStore) SetCORSOrigins(context.Context, string) error                 { return nil }
+func (m *mockSettingsStore) GetMaxQueryRows(context.Context) (int, error)                 { return 0, nil }
+func (m *mockSettingsStore) SetMaxQueryRows(context.Context, int) error                   { return nil }
+func (m *mockSettingsStore) GetStatementTimeout(context.Context) (int, error)             { return 0, nil }
+func (m *mockSettingsStore) SetStatementTimeout(context.Context, int) error               { return nil }
+func (m *mockSettingsStore) GetMCPName(context.Context) (string, error)                   { return "", nil }
+func (m *mockSettingsStore) SetMCPName(context.Context, string) error                     { return nil }
 func (m *mockSettingsStore) SetSamplingRules(context.Context, []store.SamplingRule) error { return nil }
 func (m *mockSettingsStore) GetTelegramConfig(context.Context) (*store.TelegramConfig, error) {
 	return &store.TelegramConfig{}, nil
@@ -770,10 +770,10 @@ func TestHandleIngestLogs_MsgpackSingleEntry(t *testing.T) {
 	h := newTestHandler(logStore)
 
 	entry := ingestLogEntry{
-		Ts: time.Now().UTC().Truncate(time.Second).Format(time.RFC3339Nano),
-		Level:     "info",
-		Message:   "msgpack single entry",
-		Service:   "test-svc",
+		Ts:      time.Now().UTC().Truncate(time.Second).Format(time.RFC3339Nano),
+		Level:   "info",
+		Message: "msgpack single entry",
+		Service: "test-svc",
 	}
 	req := makeMsgpackRequest(t, entry, nil)
 	rec := httptest.NewRecorder()
@@ -802,16 +802,16 @@ func TestHandleIngestLogs_MsgpackBatch(t *testing.T) {
 
 	batch := []ingestLogEntry{
 		{
-			Ts: time.Now().UTC().Truncate(time.Second).Format(time.RFC3339Nano),
-			Level:     "info",
-			Message:   "first msgpack",
-			Service:   "test-svc",
+			Ts:      time.Now().UTC().Truncate(time.Second).Format(time.RFC3339Nano),
+			Level:   "info",
+			Message: "first msgpack",
+			Service: "test-svc",
 		},
 		{
-			Ts: time.Now().UTC().Truncate(time.Second).Format(time.RFC3339Nano),
-			Level:     "warn",
-			Message:   "second msgpack",
-			Service:   "test-svc",
+			Ts:      time.Now().UTC().Truncate(time.Second).Format(time.RFC3339Nano),
+			Level:   "warn",
+			Message: "second msgpack",
+			Service: "test-svc",
 		},
 	}
 	req := makeMsgpackRequest(t, batch, nil)

@@ -6,6 +6,8 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -18,6 +20,10 @@ import (
 
 // maxTrackedBatches bounds the in-memory idempotency cache.
 const maxTrackedBatches = 20000
+
+// errLookupFailed is the user-facing error for an internal read failure. The
+// underlying error (which can embed on-disk paths) is logged, never returned.
+var errLookupFailed = errors.New("log entry lookup failed")
 
 // LogStore wraps engine.Store and implements pkg/store.LogStore.
 type LogStore struct {
@@ -61,6 +67,16 @@ func (a *LogStore) BatchInsert(ctx context.Context, entries []store.LogEntry) (i
 	if err != nil {
 		return 0, err
 	}
+
+	// Write the engine-assigned IDs back into the caller's slice. Post-insert
+	// processing runs on this same slice, and without this it saw ID 0 on every
+	// entry, so last_log_id linkage was never populated. The pipeline can drop
+	// or expand entries, so only a 1:1 result is safe to map positionally.
+	if len(result) == len(entries) {
+		for i := range entries {
+			entries[i].ID = result[i].ID
+		}
+	}
 	return len(result), nil
 }
 
@@ -85,6 +101,11 @@ func (a *LogStore) Search(ctx context.Context, params store.LogSearchParams) ([]
 		Limit:            params.Limit,
 		Offset:           params.Offset,
 		SortAsc:          params.SortAsc,
+		// Both of these used to be dropped between the tool boundary and the
+		// engine: the MCP metadata_filter argument was parsed and ignored, so a
+		// narrowed search returned every row and read as the answer.
+		MetadataFilter: params.MetadataFilter,
+		Exclude:        params.Exclude,
 	}
 
 	result, err := a.engine.Search(sp)
@@ -102,7 +123,14 @@ func (a *LogStore) Search(ctx context.Context, params store.LogSearchParams) ([]
 func (a *LogStore) GetByID(ctx context.Context, id int64) (*store.LogEntry, error) {
 	entry, err := a.engine.GetByID(id)
 	if err != nil {
-		return nil, err
+		// Callers must be able to tell a 404 from an I/O failure, and engine
+		// errors wrap *os.PathError — leaking data-directory paths into MCP
+		// tool output. Map the sentinel, and keep the detail in the log.
+		if errors.Is(err, engine.ErrEntryNotFound) {
+			return nil, store.ErrNotFound
+		}
+		slog.Error("logstore: get by id failed", "error", err, "id", id)
+		return nil, errLookupFailed
 	}
 	old := newToOld(*entry)
 	return &old, nil
@@ -132,16 +160,19 @@ func (a *LogStore) CountByLevel(ctx context.Context, params store.LogCountParams
 }
 
 func (a *LogStore) CountByService(ctx context.Context, params store.LogCountParams) ([]store.ServiceLogCount, error) {
-	counts, err := a.engine.CountByService(params.Since, params.Until, params.Environment)
+	counts, err := a.engine.CountByServiceDetailed(params.Since, params.Until, params.Environment)
 	if err != nil {
 		return nil, err
 	}
 
+	// ErrorCount was hardcoded to zero, which made the "compare errors" tooling
+	// report "0 errors, unchanged" in the middle of an incident.
 	result := make([]store.ServiceLogCount, 0, len(counts))
-	for svc, total := range counts {
+	for svc, c := range counts {
 		result = append(result, store.ServiceLogCount{
-			Service: svc,
-			Total:   total,
+			Service:    svc,
+			Total:      c.Total,
+			ErrorCount: c.Errors,
 		})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Total > result[j].Total })
@@ -149,7 +180,14 @@ func (a *LogStore) CountByService(ctx context.Context, params store.LogCountPara
 }
 
 func (a *LogStore) Histogram(ctx context.Context, params store.LogHistogramParams) ([]store.LogHistogramBucket, error) {
-	buckets, err := a.engine.Histogram(params.Since, params.Until, params.Interval)
+	// Service/Level/Environment are real filters here (the CLI stats endpoint
+	// passes ?service=): dropping them returned every service's volume under
+	// the caller's label.
+	buckets, err := a.engine.HistogramFiltered(params.Since, params.Until, params.Interval, engine.HistogramFilter{
+		Service:     params.Service,
+		Level:       params.Level,
+		Environment: params.Environment,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +204,9 @@ func (a *LogStore) Histogram(ctx context.Context, params store.LogHistogramParam
 }
 
 func (a *LogStore) DistinctValues(ctx context.Context, field string, params store.LogCountParams) ([]string, error) {
-	return a.engine.DistinctValues(field, params.Since, params.Until)
+	// Service and Environment scope the distinct set; without them a watcher's
+	// COUNT DISTINCT was computed across every service and environment.
+	return a.engine.DistinctValues(field, params.Since, params.Until, params.Service, params.Level, params.Environment)
 }
 
 func (a *LogStore) MetadataKeys(ctx context.Context, params store.LogCountParams) ([]string, error) {
@@ -177,119 +217,85 @@ func (a *LogStore) MetadataKeys(ctx context.Context, params store.LogCountParams
 // --- Request performance (adapted from sparse column queries) ---
 
 func (a *LogStore) SearchRequestSummaries(ctx context.Context, params store.RequestSummarySearchParams) ([]store.RequestSummaryResult, error) {
-	// Search for entries with duration_ms > 0 (i.e., HTTP request events)
+	// Every filter is pushed into the engine and the whole window is ordered
+	// before the limit is applied. Previously the engine truncated to the newest
+	// Limit rows first, so "slowest endpoints" meant "most recent requests,
+	// reordered" and n_plus_one_only reported nothing while hundreds existed
+	// earlier in the window. Environment is an authorization scope here — a
+	// staging-scoped token was receiving production paths, controllers and
+	// latencies.
 	sp := engine.SearchParams{
-		EventType: "http.request",
-		Start:     params.Start,
-		End:       params.End,
-		Limit:     params.Limit,
-	}
-	if sp.Limit <= 0 {
-		sp.Limit = 20
-	}
-	if params.Path != "" {
-		sp.Path = params.Path
+		RequestsOnly:  true,
+		Start:         params.Start,
+		End:           params.End,
+		Env:           params.Environment,
+		Path:          params.Path,
+		Handler:       params.Controller,
+		NPlusOneOnly:  params.NPlusOneOnly,
+		MinDurationMs: int(params.MinDurationMs),
+		MinSQLCount:   params.MinSQLCount,
+		// Rows without a duration can't be rendered as a request summary. The
+		// predicate belongs in the engine, before the limit: filtering them out
+		// here returned short pages while more qualifying rows existed.
+		PositiveDurationOnly: true,
 	}
 
-	result, err := a.engine.Search(sp)
+	limit := params.Limit
+	if limit <= 0 {
+		limit = defaultRequestLimit
+	}
+
+	entries, err := a.engine.SearchRequests(sp, params.SortBy, limit, params.Offset)
 	if err != nil {
 		return nil, err
 	}
 
-	var summaries []store.RequestSummaryResult
-	for _, e := range result.Entries {
-		if e.DurationMs <= 0 {
-			continue
-		}
-
-		if params.Controller != "" && e.Handler != params.Controller {
-			continue
-		}
-		if params.NPlusOneOnly && (e.NPlusOne == nil || !*e.NPlusOne) {
-			continue
-		}
-		if params.MinDurationMs > 0 && float64(e.DurationMs) < params.MinDurationMs {
-			continue
-		}
-		if params.MinSQLCount > 0 && e.DbCount < params.MinSQLCount {
-			continue
-		}
-
-		npo := false
-		if e.NPlusOne != nil {
-			npo = *e.NPlusOne
-		}
-
+	summaries := make([]store.RequestSummaryResult, 0, len(entries))
+	for _, e := range entries {
 		summaries = append(summaries, store.RequestSummaryResult{
-			RequestSummary: store.RequestSummary{
-				LogID:            e.ID,
-				Controller:       e.Handler,
-				Method:           e.Method,
-				Path:             e.Path,
-				Status:           e.Status,
-				DurationMs:       float64(e.DurationMs),
-				DBTimeMs:         float64(e.DbMs),
-				SQLCount:         e.DbCount,
-				NPlusOne:         npo,
-				DuplicateQueries: e.DupQueries,
-			},
-			Timestamp: time.UnixMilli(e.Ts),
-			Service:   e.Service,
-			TraceID:   e.TraceID,
+			RequestSummary: *requestSummaryFromEntry(e),
+			Timestamp:      time.UnixMilli(e.Ts),
+			Service:        e.Service,
+			TraceID:        e.TraceID,
 		})
-	}
-
-	// Sort by the requested field
-	switch params.SortBy {
-	case "sql_count":
-		sort.Slice(summaries, func(i, j int) bool { return summaries[i].SQLCount > summaries[j].SQLCount })
-	case "db_time_ms":
-		sort.Slice(summaries, func(i, j int) bool { return summaries[i].DBTimeMs > summaries[j].DBTimeMs })
-	case "duplicate_queries":
-		sort.Slice(summaries, func(i, j int) bool { return summaries[i].DuplicateQueries > summaries[j].DuplicateQueries })
-	default: // duration_ms
-		sort.Slice(summaries, func(i, j int) bool { return summaries[i].DurationMs > summaries[j].DurationMs })
-	}
-
-	if params.Limit > 0 && len(summaries) > params.Limit {
-		summaries = summaries[:params.Limit]
 	}
 
 	return summaries, nil
 }
 
+// defaultRequestLimit is the page size used when a caller doesn't set one.
+const defaultRequestLimit = 20
+
 func (a *LogStore) AggregateRequestSummaries(ctx context.Context, params store.RequestSummaryAggregateParams) (*store.RequestSummaryAggregates, error) {
+	// Aggregate over the whole range, not the newest 500 rows presented as if
+	// they were the range, and honour the environment scope.
 	sp := engine.SearchParams{
-		EventType: "http.request",
-		Start:     params.Start,
-		End:       params.End,
-		Service:   params.Service,
-		Limit:     500,
-	}
-	if params.Endpoint != "" {
-		sp.Path = params.Endpoint
+		RequestsOnly: true,
+		Start:        params.Start,
+		End:          params.End,
+		Service:      params.Service,
+		Env:          params.Environment,
+		Path:         params.Endpoint,
 	}
 
-	result, err := a.engine.Search(sp)
+	res, err := a.engine.AggregateRequests(sp)
 	if err != nil {
 		return nil, err
 	}
 
-	agg := &store.RequestSummaryAggregates{}
-	var totalDuration float64
-	var totalSQLCount float64
-	for _, e := range result.Entries {
-		if e.DurationMs <= 0 {
-			continue
-		}
-		agg.Count++
-		totalDuration += float64(e.DurationMs)
-		totalSQLCount += float64(e.DbCount)
+	agg := &store.RequestSummaryAggregates{
+		Count:      res.Count,
+		TotalReads: res.CacheReads,
+		TotalHits:  res.CacheHits,
 	}
-
-	if agg.Count > 0 {
-		agg.AvgDuration = totalDuration / float64(agg.Count)
-		agg.AvgSQLCount = totalSQLCount / float64(agg.Count)
+	if res.Count > 0 {
+		agg.AvgDuration = res.TotalDurationMs / float64(res.Count)
+		agg.AvgSQLCount = res.TotalSQLCount / float64(res.Count)
+	}
+	// Cache aggregates were never populated, so every cache-hit-rate baseline
+	// and watch computed 0 forever.
+	if res.CacheReads > 0 {
+		agg.CacheHitRate = float64(res.CacheHits) / float64(res.CacheReads)
 	}
 
 	return agg, nil
@@ -370,6 +376,36 @@ func oldToNew(e store.LogEntry) chunk.Entry {
 		SourceFile:       e.SourceFile,
 		SourceLine:       e.SourceLine,
 		ErrorFingerprint: e.ErrorFingerprint,
+
+		// Flat-SDK fields. The columnar schema has had a column for each of
+		// these all along; leaving them unmapped wrote zeros/empties to disk
+		// for values the ingest path had already parsed off the wire.
+		Host:         e.Host,
+		Kind:         e.Kind,
+		TenantID:     e.TenantID,
+		SessionID:    e.SessionID,
+		Route:        e.Route,
+		CacheMs:      e.CacheMs,
+		CacheHits:    e.CacheHits,
+		CacheMisses:  e.CacheMisses,
+		ExtMs:        e.ExtMs,
+		ExtCount:     e.ExtCount,
+		RenderMs:     e.RenderMs,
+		AllocCount:   e.AllocCount,
+		MemDeltaMb:   e.MemDeltaMb,
+		SlowQueries:  e.SlowQueries,
+		ErrorMessage: e.ErrorMessage,
+		// Timing for non-request rows (jobs, events). A RequestSummary, when
+		// present, overwrites these below — request rows stay authoritative
+		// through that path.
+		DurationMs: int(e.DurationMs),
+		DbMs:       int(e.DbMs),
+		DbCount:    e.DbCount,
+		Status:     e.Status,
+		JobClass:   e.JobClass,
+		JobQueue:   e.JobQueue,
+		JobID:      e.JobID,
+		QueueMs:    e.QueueMs,
 	}
 
 	// Convert metadata to body if present
@@ -382,7 +418,11 @@ func oldToNew(e store.LogEntry) chunk.Entry {
 	// Convert request summary to flat fields if present
 	if e.RequestSummary != nil {
 		rs := e.RequestSummary
-		ne.EventType = "http.request"
+		// Keep an SDK-supplied event_type on a request row rather than
+		// overwriting it.
+		if ne.EventType == "" {
+			ne.EventType = "http.request"
+		}
 		if rs.Action != "" {
 			ne.Handler = rs.Controller + "#" + rs.Action
 		} else {
@@ -395,8 +435,16 @@ func oldToNew(e store.LogEntry) chunk.Entry {
 		ne.DbMs = int(rs.DBTimeMs)
 		ne.DbCount = rs.SQLCount
 		ne.NPlusOne = &rs.NPlusOne
-		ne.SlowQueries = 0 // not tracked in old schema
 		ne.DupQueries = rs.DuplicateQueries
+
+		// Cache/view/memory metrics have dedicated columns; discarding them
+		// meant every cache-hit-rate baseline was computed from zeros.
+		setIfZero(&ne.CacheHits, rs.CacheHits)
+		setIfZero(&ne.CacheMisses, rs.CacheReads-rs.CacheHits)
+		setIfZero(&ne.RenderMs, int(rs.ViewTimeMs))
+		setIfZero(&ne.ExtMs, int(rs.HTTPExternalTotalMs))
+		setIfZero(&ne.ExtCount, rs.HTTPExternalCount)
+		setIfZero(&ne.MemDeltaMb, int(rs.MemoryDeltaMb*memDeltaScale))
 	}
 
 	// Handle MetadataJSON carrier field (pre-marshaled metadata)
@@ -405,6 +453,46 @@ func oldToNew(e store.LogEntry) chunk.Entry {
 	}
 
 	return ne
+}
+
+// memDeltaScale is the fixed-point factor the mem_delta_mb column uses
+// (stored as value * 100, i.e. two decimal places).
+const memDeltaScale = 100
+
+// setIfZero fills a destination that the flat-field mapping left at zero,
+// so an explicit flat value always wins over a RequestSummary-derived one.
+func setIfZero(dst *int, v int) {
+	if *dst == 0 && v > 0 {
+		*dst = v
+	}
+}
+
+// requestSummaryFromEntry rebuilds a RequestSummary from the columnar entry,
+// including the cache/view/external/memory metrics that used to be dropped in
+// both directions.
+func requestSummaryFromEntry(e chunk.Entry) *store.RequestSummary {
+	npo := false
+	if e.NPlusOne != nil {
+		npo = *e.NPlusOne
+	}
+	return &store.RequestSummary{
+		LogID:               e.ID,
+		Controller:          e.Handler,
+		Method:              e.Method,
+		Path:                e.Path,
+		Status:              e.Status,
+		DurationMs:          float64(e.DurationMs),
+		DBTimeMs:            float64(e.DbMs),
+		SQLCount:            e.DbCount,
+		NPlusOne:            npo,
+		DuplicateQueries:    e.DupQueries,
+		ViewTimeMs:          float64(e.RenderMs),
+		CacheHits:           e.CacheHits,
+		CacheReads:          e.CacheHits + e.CacheMisses,
+		HTTPExternalCount:   e.ExtCount,
+		HTTPExternalTotalMs: float64(e.ExtMs),
+		MemoryDeltaMb:       float64(e.MemDeltaMb) / memDeltaScale,
+	}
 }
 
 func newToOld(e chunk.Entry) store.LogEntry {
@@ -427,6 +515,32 @@ func newToOld(e chunk.Entry) store.LogEntry {
 		SourceLine:       e.SourceLine,
 		ErrorFingerprint: e.ErrorFingerprint,
 		CreatedAt:        time.UnixMilli(e.ReceivedAt).UTC(),
+
+		Host:         e.Host,
+		Kind:         e.Kind,
+		TenantID:     e.TenantID,
+		SessionID:    e.SessionID,
+		Route:        e.Route,
+		CacheMs:      e.CacheMs,
+		CacheHits:    e.CacheHits,
+		CacheMisses:  e.CacheMisses,
+		ExtMs:        e.ExtMs,
+		ExtCount:     e.ExtCount,
+		RenderMs:     e.RenderMs,
+		AllocCount:   e.AllocCount,
+		MemDeltaMb:   e.MemDeltaMb,
+		SlowQueries:  e.SlowQueries,
+		ErrorMessage: e.ErrorMessage,
+		JobClass:     e.JobClass,
+		JobQueue:     e.JobQueue,
+		JobID:        e.JobID,
+		QueueMs:      e.QueueMs,
+		// Restore non-request timing. Request rows also get a RequestSummary
+		// built below from the same columns, so both views agree.
+		DurationMs: float64(e.DurationMs),
+		DbMs:       float64(e.DbMs),
+		DbCount:    e.DbCount,
+		Status:     e.Status,
 	}
 
 	// Convert body to metadata for backward compat
@@ -441,22 +555,7 @@ func newToOld(e chunk.Entry) store.LogEntry {
 
 	// Convert flat performance fields to RequestSummary
 	if e.DurationMs > 0 {
-		npo := false
-		if e.NPlusOne != nil {
-			npo = *e.NPlusOne
-		}
-		old.RequestSummary = &store.RequestSummary{
-			LogID:            e.ID,
-			Controller:       e.Handler,
-			Method:           e.Method,
-			Path:             e.Path,
-			Status:           e.Status,
-			DurationMs:       float64(e.DurationMs),
-			DBTimeMs:         float64(e.DbMs),
-			SQLCount:         e.DbCount,
-			NPlusOne:         npo,
-			DuplicateQueries: e.DupQueries,
-		}
+		old.RequestSummary = requestSummaryFromEntry(e)
 	}
 
 	return old

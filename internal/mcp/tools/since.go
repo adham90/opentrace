@@ -112,6 +112,29 @@ func OptionalSinceParam(args map[string]any) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// OptionalSinceParamStrict is OptionalSinceParam for tools whose default window
+// is narrower than "everything": it reports a malformed value as an error
+// instead of treating it as absent.
+//
+// Silently falling back on a typo is how a caller ends up reading an unrelated
+// window's numbers as the answer — since="1w" quietly became "the last hour",
+// and the only hint was an echoed timestamp the caller had no reason to
+// re-read. ResolveWindow has always rejected these; the listing/search paths
+// that cannot use ResolveWindow (they must distinguish "no window given") use
+// this instead.
+func OptionalSinceParamStrict(args map[string]any) (time.Time, bool, error) {
+	if t, ok := OptionalSinceParam(args); ok {
+		return t, true, nil
+	}
+	for _, key := range []string{"since", "time_range", "timeframe"} {
+		if v, ok := args[key].(string); ok && v != "" {
+			return time.Time{}, false, fmt.Errorf(
+				"invalid %s %q: use formats like 15m, 6h, 24h, 7d, or an RFC3339 timestamp", key, v)
+		}
+	}
+	return time.Time{}, false, nil
+}
+
 // ResolveWindow returns the start of the window a tool should query, plus a
 // label describing it for the response.
 //

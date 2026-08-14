@@ -39,18 +39,15 @@ func (s *traceStore) UpsertTraceStatus(ctx context.Context, traceID string, entr
 			services    string
 			firstSeenAt string
 			hasErrors   int
-			earliestTS  string
-			latestTS    string
+			durationMs  float64
 		}
 
 		err := tx.QueryRowContext(ctx,
 			`SELECT span_count, COALESCE(root_span_id, ''), services,
-			        first_seen_at, has_errors,
-			        first_seen_at, last_updated_at
+			        first_seen_at, has_errors, duration_ms
 			 FROM trace_status WHERE trace_id = ?`, traceID,
 		).Scan(&existing.spanCount, &existing.rootSpanID, &existing.services,
-			&existing.firstSeenAt, &existing.hasErrors,
-			&existing.earliestTS, &existing.latestTS)
+			&existing.firstSeenAt, &existing.hasErrors, &existing.durationMs)
 
 		isError := isErrorLevel(entry.Level)
 		isRoot := entry.SpanID != "" && entry.ParentSpanID == ""
@@ -110,15 +107,22 @@ func (s *traceStore) UpsertTraceStatus(ctx context.Context, traceID string, entr
 			hasErrors = 1
 		}
 
+		// Duration spans the observed event timestamps, never ingestion
+		// wall-clock: last_updated_at records when we wrote the row, so folding
+		// it in would add the agent's shipping lag to every trace. There is no
+		// column for the latest event timestamp, but the stored pair
+		// (first_seen_at, duration_ms) encodes it exactly, so recover it.
 		earliestTS := existing.firstSeenAt
 		if ts < earliestTS {
 			earliestTS = ts
 		}
-		earliestTime, _ := time.Parse(time.RFC3339, earliestTS)
-		entryTime := entry.Timestamp.UTC()
-		latestTime, _ := time.Parse(time.RFC3339, existing.latestTS)
-		if entryTime.After(latestTime) {
-			latestTime = entryTime
+		earliestTime := parseTime(earliestTS)
+		prevLatest := parseTime(existing.firstSeenAt).
+			Add(time.Duration(existing.durationMs) * time.Millisecond)
+
+		latestTime := entry.Timestamp.UTC()
+		if prevLatest.After(latestTime) {
+			latestTime = prevLatest
 		}
 		durationMs := float64(latestTime.Sub(earliestTime).Milliseconds())
 
@@ -132,11 +136,12 @@ func (s *traceStore) UpsertTraceStatus(ctx context.Context, traceID string, entr
 			 SET span_count = ?,
 			     root_span_id = ?,
 			     services = ?,
+			     first_seen_at = ?,
 			     last_updated_at = ?,
 			     duration_ms = ?,
 			     has_errors = ?
 			 WHERE trace_id = ?`,
-			newSpanCount, rootSpanNull, string(servicesJSON), now, durationMs, hasErrors, traceID,
+			newSpanCount, rootSpanNull, string(servicesJSON), earliestTS, now, durationMs, hasErrors, traceID,
 		)
 		if err != nil {
 			return fmt.Errorf("update trace_status: %w", err)

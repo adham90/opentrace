@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
@@ -28,6 +29,91 @@ func (m *mockWatchStore) CompleteRun(_ context.Context, _ string, _ float64, _ b
 
 func (m *mockWatchStore) FailRun(_ context.Context, _ string, _ string) error {
 	return nil
+}
+
+// blockingStreamNotifier holds a delivery until released, so a test can observe
+// whether shutdown waits for it.
+type blockingStreamNotifier struct {
+	started   chan struct{}
+	release   chan struct{}
+	delivered atomic.Int32
+}
+
+func (n *blockingStreamNotifier) NotifyWatchAlert(_ context.Context, _ *store.WatchAlert, _ *store.Watch) error {
+	select {
+	case n.started <- struct{}{}:
+	default:
+	}
+	<-n.release
+	n.delivered.Add(1)
+	return nil
+}
+
+// TestWatchStreamEvaluator_StopDrainsNotifications pins the fix for alert
+// deliveries abandoned at shutdown: the stream evaluator dispatches alerts on a
+// background goroutine, so without a Stop that drains the dispatcher a delivery
+// in flight when the process exits is silently lost.
+func TestWatchStreamEvaluator_StopDrainsNotifications(t *testing.T) {
+	n := &blockingStreamNotifier{started: make(chan struct{}, 1), release: make(chan struct{})}
+	s := NewWatchStreamEvaluator(context.Background(), &mockWatchStore{}, nil, nil, []WatchAlertNotifier{n})
+
+	s.notify.dispatch(context.Background(), s.notifiers, &store.WatchAlert{ID: "a1"}, &store.Watch{ID: "w1"})
+	<-n.started
+
+	stopped := make(chan struct{})
+	go func() {
+		s.Stop()
+		close(stopped)
+	}()
+
+	select {
+	case <-stopped:
+		t.Fatal("Stop returned while a delivery was still in flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(n.release)
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not return after the delivery finished")
+	}
+	if got := n.delivered.Load(); got != 1 {
+		t.Errorf("delivered = %d, want 1", got)
+	}
+}
+
+// TestWatchStreamEvaluator_StopIsBoundedAndIdempotent proves a wedged notifier
+// cannot hold shutdown open forever, and that a second Stop returns at once.
+func TestWatchStreamEvaluator_StopIsBoundedAndIdempotent(t *testing.T) {
+	n := &blockingStreamNotifier{started: make(chan struct{}, 1), release: make(chan struct{})}
+	defer close(n.release)
+	s := NewWatchStreamEvaluator(context.Background(), &mockWatchStore{}, nil, nil, []WatchAlertNotifier{n})
+	s.notify.dispatch(context.Background(), s.notifiers, &store.WatchAlert{ID: "a1"}, &store.Watch{ID: "w1"})
+	<-n.started
+
+	start := time.Now()
+	s.Stop()
+	if elapsed := time.Since(start); elapsed > streamStopDrainTimeout*2 {
+		t.Fatalf("Stop took %s, want it bounded by %s", elapsed, streamStopDrainTimeout)
+	}
+
+	start = time.Now()
+	s.Stop()
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("second Stop took %s, want an immediate return", elapsed)
+	}
+}
+
+// TestWatchStreamEvaluator_StopRejectsNewWork proves OnLogsReceived is inert
+// after Stop, so shutdown cannot be extended by a late ingest batch.
+func TestWatchStreamEvaluator_StopRejectsNewWork(t *testing.T) {
+	s := NewWatchStreamEvaluator(context.Background(), &mockWatchStore{}, nil, nil, nil)
+	s.Stop()
+	s.OnLogsReceived([]store.LogEntry{{Service: "api"}})
+	if len(s.sem) != 0 {
+		t.Errorf("semaphore holds %d slots after Stop, want 0 — no new evaluations may start", len(s.sem))
+	}
 }
 
 func TestWatchStreamEvaluator_SemaphoreBounded(t *testing.T) {

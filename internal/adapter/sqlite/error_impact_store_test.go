@@ -33,7 +33,7 @@ func TestErrorImpactStore_TrackImpact(t *testing.T) {
 		t.Fatalf("TrackImpact user-2: %v", err)
 	}
 
-	impact, err := eis.GetImpact(ctx, "fp-001")
+	impact, err := eis.GetImpact(ctx, "fp-001", "")
 	if err != nil {
 		t.Fatalf("GetImpact: %v", err)
 	}

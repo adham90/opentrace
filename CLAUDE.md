@@ -19,9 +19,9 @@ go mod tidy                         # after adding new imports
 - Use `?` placeholders in SQLite queries — never string interpolation
 - Store booleans as INTEGER 0/1, timestamps as RFC3339 TEXT, UUIDs as TEXT
 - Cast MCP tool args from `float64` (JSON default) before using as `int`
-- When adding a store interface method, update ALL mock implementations (web, mcp, watcher)
-- When adding a new store, add to `pkg/store/` (interface + model), `internal/db/` (implementation), and `queries/` (sqlc SQL)
-- Use the `server.Module` pattern for new domain features — see `internal/domains/` for examples
+- When adding a store interface method, update ALL mock implementations (`internal/testutil/mocks/`, `internal/api/mock_test.go`, and any package-local test doubles — `grep` the method name)
+- When adding a new store, add to `pkg/store/` (interface + model) and `internal/adapter/sqlite/` (implementation, wired in `internal/adapter/sqlite/stores.go`)
+- Use the `server.Module` pattern for new HTTP features — see `internal/routes/<name>/module.go` for examples
 - Run `go mod tidy` after adding new imports
 - Cap all pagination `limit` params to a reasonable maximum (100-500)
 - Validate and sanitize all user input at handler boundaries
@@ -29,7 +29,7 @@ go mod tidy                         # after adding new imports
 ## Don't
 
 - Don't use `fmt.Println` or the old `log` package — use `slog.*` only
-- Don't name local vars `watcher` in `web/watchers.go` — conflicts with package import
+- Don't shadow an imported package name with a local variable (e.g. a local `watcher` in a file that imports `internal/watcher`)
 - Don't use CGO — all dependencies must be pure Go for cross-compilation
 - Don't leak internal error details (SQL, file paths, stack traces) in HTTP responses
 - Don't add store fields directly to `server.Deps` — embed them in `store.Stores` instead
@@ -40,12 +40,14 @@ go mod tidy                         # after adding new imports
 ## Conventions
 
 - **HTTP handlers**: Use Chi router, return JSON via `server.WriteJSON`/`server.WriteError`
-- **Store layer**: Interfaces in `pkg/store/iface_*.go`, models in `pkg/store/models_*.go`, implementations in `internal/db/`
-- **Queries**: Static SQL in `queries/*.sql` → `sqlc generate` → `internal/db/*.sql.go`. Dynamic queries use squirrel.
-- **Domains**: Each domain in `internal/domains/<name>/` with a `Module` var and `mount()` function
+- **Store layer**: Interfaces in `pkg/store/iface_*.go`, models in `pkg/store/models_*.go`, SQLite implementations in `internal/adapter/sqlite/`
+- **Queries**: Raw SQL written by hand and run through bun (`db.NewRaw(...)`), always with `?` placeholders. There is no sqlc and no query builder — don't generate code or add one.
+- **HTTP routes**: Each feature in `internal/routes/<name>/` with a `Module` var (`module.go`) and its handlers alongside
+- **Domain services**: Business logic in `internal/domain/<name>/` (service + repository interface), kept free of HTTP concerns
 - **MCP tools**: Consolidated tools in `internal/mcp/tools/`, registered via `internal/mcp/catalog.go`
-- **Migrations**: Sequential numbered SQL files in `migrations/`
-- **Tests**: In-memory SQLite for store tests, hand-written behavioral mocks in `web/mock_test.go`, shared helpers in `internal/testutil/`
+- **Migrations**: Sequential numbered SQL files in `migrations/`, embedded via `migrations/embed.go`
+- **Log storage**: Logs live in the columnar store under `internal/logstore/`, not in SQLite
+- **Tests**: In-memory SQLite for store tests, hand-written behavioral mocks in `internal/testutil/mocks/` and `internal/api/mock_test.go`, shared helpers in `internal/testutil/`
 
 ## Telegram Notifications
 
@@ -58,3 +60,6 @@ Use `telegram-cli` to send updates during long tasks:
 
 Send when: starting non-trivial tasks, hitting blockers, completing milestones, finishing tasks.
 Don't notify for trivial operations like reading files or small edits.
+
+If `telegram-cli` is not on PATH, skip the notification and carry on — it is a
+convenience, not a build dependency.

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,6 +22,86 @@ type ConnectorsDeps struct {
 	LogStore      store.LogStore
 	Config        *config.Config
 	SettingsStore store.SettingsStore
+	// IsAdmin reports whether the MCP server this tool is registered on serves
+	// an admin token. The connectors tool is mounted on the member (read-only)
+	// server too, so every action that mutates state or dials out with stored
+	// credentials — create, update, delete, test — requires it.
+	IsAdmin bool
+}
+
+// requireConnectorAdmin returns an error result when the caller is not an
+// admin. Write actions fail closed.
+func requireConnectorAdmin(d ConnectorsDeps, action string) *CallToolResult {
+	if d.IsAdmin {
+		return nil
+	}
+	return NewToolResultError(fmt.Sprintf(
+		"admin privileges are required to %s connectors", action))
+}
+
+// connectorView is the allowlisted, secret-free projection of a
+// store.DataSource. DataSource.Config holds raw credentials (the database
+// connection string, the Turso auth token, ...) so it is NEVER serialized:
+// only the fields named here ever reach an MCP client. Adding a new
+// secret-bearing config key therefore cannot leak by default.
+type connectorView struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Type          string   `json:"type"`
+	Status        string   `json:"status"`
+	StatusMessage string   `json:"status_message,omitempty"`
+	Environment   string   `json:"environment,omitempty"`
+	Endpoint      string   `json:"endpoint,omitempty"`
+	ConfigKeys    []string `json:"config_keys,omitempty"`
+	LastTestedAt  string   `json:"last_tested_at,omitempty"`
+	CreatedAt     string   `json:"created_at,omitempty"`
+	UpdatedAt     string   `json:"updated_at,omitempty"`
+	ActiveTools   []string `json:"active_tools,omitempty"`
+}
+
+// newConnectorView builds the redacted view of a connector. Endpoint is the
+// credential-free label derived from the connection string (scheme, host and
+// database only); ConfigKeys reports which config keys are set without
+// revealing any value.
+func newConnectorView(ds *store.DataSource) connectorView {
+	v := connectorView{
+		ID:          ds.ID.String(),
+		Name:        ds.Name,
+		Type:        string(ds.Type),
+		Status:      string(ds.Status),
+		Environment: ds.Environment,
+	}
+	if ds.StatusMessage != nil {
+		v.StatusMessage = connector.RedactSecrets(*ds.StatusMessage)
+	}
+	if ds.LastTestedAt != nil {
+		v.LastTestedAt = ds.LastTestedAt.Format(time.RFC3339)
+	}
+	if !ds.CreatedAt.IsZero() {
+		v.CreatedAt = ds.CreatedAt.Format(time.RFC3339)
+	}
+	if !ds.UpdatedAt.IsZero() {
+		v.UpdatedAt = ds.UpdatedAt.Format(time.RFC3339)
+	}
+
+	keys := make([]string, 0, len(ds.Config))
+	for k := range ds.Config {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	v.ConfigKeys = keys
+
+	if raw, ok := ds.Config["connection_string"].(string); ok && raw != "" {
+		v.Endpoint = connector.ConnectorLabel(raw)
+	}
+	return v
+}
+
+// connectorErrorText renders an error for the caller with any credential that
+// leaked into the driver's message stripped out. Driver errors routinely echo
+// the whole DSN back, password included.
+func connectorErrorText(format string, err error) string {
+	return connector.RedactSecrets(fmt.Sprintf(format, err))
 }
 
 // ConnectorsHandler returns a handler for the consolidated connectors tool.
@@ -48,6 +129,8 @@ func ConnectorsHandler(d ConnectorsDeps) ToolHandlerFunc {
 	}
 }
 
+// HandleConnectorList returns the redacted view of every connector. It never
+// includes Config values — see connectorView.
 func HandleConnectorList(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
 	if d.DSStore != nil {
 		var params store.ListDataSourceParams
@@ -57,20 +140,10 @@ func HandleConnectorList(ctx context.Context, d ConnectorsDeps, args map[string]
 
 		connectors, err := d.DSStore.List(ctx, params)
 		if err != nil {
-			return NewToolResultError(fmt.Sprintf("failed to list connectors: %v", err)), nil
+			return NewToolResultError(connectorErrorText("failed to list connectors: %v", err)), nil
 		}
 		if len(connectors) == 0 {
 			return EmptyResult("No connectors found.")
-		}
-
-		type connectorEntry struct {
-			ID            string   `json:"id"`
-			Name          string   `json:"name"`
-			Type          string   `json:"type"`
-			Status        string   `json:"status"`
-			StatusMessage string   `json:"status_message,omitempty"`
-			LastTestedAt  string   `json:"last_tested_at,omitempty"`
-			ActiveTools   []string `json:"active_tools,omitempty"`
 		}
 
 		activeToolNames := make([]string, 0)
@@ -80,20 +153,10 @@ func HandleConnectorList(ctx context.Context, d ConnectorsDeps, args map[string]
 			}
 		}
 
-		entries := make([]connectorEntry, 0, len(connectors))
-		for _, c := range connectors {
-			e := connectorEntry{
-				ID:     c.ID.String(),
-				Name:   c.Name,
-				Type:   string(c.Type),
-				Status: string(c.Status),
-			}
-			if c.StatusMessage != nil {
-				e.StatusMessage = *c.StatusMessage
-			}
-			if c.LastTestedAt != nil {
-				e.LastTestedAt = c.LastTestedAt.Format(time.RFC3339)
-			}
+		entries := make([]connectorView, 0, len(connectors))
+		for i := range connectors {
+			c := &connectors[i]
+			e := newConnectorView(c)
 			if c.Status == store.StatusConnected {
 				e.ActiveTools = activeToolNames
 			}
@@ -141,13 +204,18 @@ func HandleConnectorGet(ctx context.Context, d ConnectorsDeps, args map[string]a
 		if err == store.ErrNotFound {
 			return NewToolResultError(fmt.Sprintf("connector %s not found", idStr)), nil
 		}
-		return NewToolResultError(fmt.Sprintf("failed to fetch connector: %v", err)), nil
+		return NewToolResultError(connectorErrorText("failed to fetch connector: %v", err)), nil
 	}
 
-	return JSONResult(ds)
+	// Never return ds directly: its Config map holds the plaintext connection
+	// string / auth token.
+	return JSONResult(newConnectorView(ds))
 }
 
 func HandleConnectorCreate(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
+	if errResult := requireConnectorAdmin(d, "create"); errResult != nil {
+		return errResult, nil
+	}
 	if d.DSStore == nil {
 		return NewToolResultError("DataSourceStore not configured"), nil
 	}
@@ -204,13 +272,18 @@ func HandleConnectorCreate(ctx context.Context, d ConnectorsDeps, args map[strin
 		Environment: envArg,
 	})
 	if err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to create connector: %v", err)), nil
+		return NewToolResultError(connectorErrorText("failed to create connector: %v", err)), nil
 	}
 
 	return NewToolResultText(fmt.Sprintf("Connector %q created (id: %s, type: %s, status: %s). Use connectors with action=test to verify the connection.", ds.Name, ds.ID, ds.Type, ds.Status)), nil
 }
 
 func HandleConnectorTest(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
+	// test dials the target with the stored credentials and mutates the
+	// connector's status (and the live registry) — admin only.
+	if errResult := requireConnectorAdmin(d, "test"); errResult != nil {
+		return errResult, nil
+	}
 	if d.DSStore == nil {
 		return NewToolResultError("DataSourceStore not configured"), nil
 	}
@@ -230,28 +303,30 @@ func HandleConnectorTest(ctx context.Context, d ConnectorsDeps, args map[string]
 		if err == store.ErrNotFound {
 			return NewToolResultError(fmt.Sprintf("connector %s not found", idStr)), nil
 		}
-		return NewToolResultError(fmt.Sprintf("failed to fetch connector: %v", err)), nil
+		return NewToolResultError(connectorErrorText("failed to fetch connector: %v", err)), nil
 	}
 
+	// Driver errors echo the DSN (password included) — redact before the message
+	// is stored on the connector or returned to the caller.
 	c, err := connector.CreateConnector(ctx, *ds, d.LogStore, d.Config, d.SettingsStore)
 	if err != nil {
 		status := store.StatusError
-		msg := fmt.Sprintf("failed to create connector: %v", err)
+		msg := connectorErrorText("failed to create connector: %v", err)
 		d.DSStore.Update(ctx, id, store.UpdateDataSourceParams{
 			Status: &status, StatusMessage: &msg,
 		})
-		return NewToolResultError(fmt.Sprintf("failed to create connector: %v", err)), nil
+		return NewToolResultError(msg), nil
 	}
 
 	if err := c.TestConnection(ctx); err != nil {
 		c.Close()
 		status := store.StatusError
-		msg := fmt.Sprintf("connection test failed: %v", err)
+		msg := connectorErrorText("connection test failed: %v", err)
 		now := time.Now()
 		d.DSStore.Update(ctx, id, store.UpdateDataSourceParams{
 			Status: &status, StatusMessage: &msg, LastTestedAt: &now,
 		})
-		return NewToolResultError(fmt.Sprintf("connection test failed: %v", err)), nil
+		return NewToolResultError(msg), nil
 	}
 
 	if d.Registry != nil {
@@ -268,6 +343,9 @@ func HandleConnectorTest(ctx context.Context, d ConnectorsDeps, args map[string]
 }
 
 func HandleConnectorUpdate(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
+	if errResult := requireConnectorAdmin(d, "update"); errResult != nil {
+		return errResult, nil
+	}
 	if d.DSStore == nil {
 		return NewToolResultError("DataSourceStore not configured"), nil
 	}
@@ -287,7 +365,7 @@ func HandleConnectorUpdate(ctx context.Context, d ConnectorsDeps, args map[strin
 		if err == store.ErrNotFound {
 			return NewToolResultError(fmt.Sprintf("connector %s not found", idStr)), nil
 		}
-		return NewToolResultError(fmt.Sprintf("failed to fetch connector: %v", err)), nil
+		return NewToolResultError(connectorErrorText("failed to fetch connector: %v", err)), nil
 	}
 
 	var params store.UpdateDataSourceParams
@@ -311,7 +389,7 @@ func HandleConnectorUpdate(ctx context.Context, d ConnectorsDeps, args map[strin
 		if err == store.ErrNotFound {
 			return NewToolResultError(fmt.Sprintf("connector %s not found", idStr)), nil
 		}
-		return NewToolResultError(fmt.Sprintf("failed to update connector: %v", err)), nil
+		return NewToolResultError(connectorErrorText("failed to update connector: %v", err)), nil
 	}
 
 	msg := fmt.Sprintf("Connector %q updated successfully.", updated.Name)
@@ -323,6 +401,9 @@ func HandleConnectorUpdate(ctx context.Context, d ConnectorsDeps, args map[strin
 }
 
 func HandleConnectorDelete(ctx context.Context, d ConnectorsDeps, args map[string]any) (*CallToolResult, error) {
+	if errResult := requireConnectorAdmin(d, "delete"); errResult != nil {
+		return errResult, nil
+	}
 	if d.DSStore == nil {
 		return NewToolResultError("DataSourceStore not configured"), nil
 	}
@@ -342,7 +423,7 @@ func HandleConnectorDelete(ctx context.Context, d ConnectorsDeps, args map[strin
 		if err == store.ErrNotFound {
 			return NewToolResultError(fmt.Sprintf("connector %s not found", idStr)), nil
 		}
-		return NewToolResultError(fmt.Sprintf("failed to fetch connector: %v", err)), nil
+		return NewToolResultError(connectorErrorText("failed to fetch connector: %v", err)), nil
 	}
 
 	if d.Registry != nil {
@@ -350,7 +431,7 @@ func HandleConnectorDelete(ctx context.Context, d ConnectorsDeps, args map[strin
 	}
 
 	if err := d.DSStore.Delete(ctx, id); err != nil {
-		return NewToolResultError(fmt.Sprintf("failed to delete connector: %v", err)), nil
+		return NewToolResultError(connectorErrorText("failed to delete connector: %v", err)), nil
 	}
 
 	return NewToolResultText(fmt.Sprintf("Connector %q (%s) deleted and disconnected.", ds.Name, ds.Type)), nil

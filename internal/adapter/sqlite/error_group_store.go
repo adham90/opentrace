@@ -92,7 +92,7 @@ func (s *errorGroupStore) Upsert(ctx context.Context, entry store.LogEntry) erro
 	}
 	reopened, _ := res.RowsAffected()
 	if reopened > 0 {
-		now := time.Now().UTC().Format(time.RFC3339)
+		now := rfc3339(time.Now().UTC())
 		_, err = s.db.NewRaw(`
 			INSERT INTO error_group_events (fingerprint, environment, action, reason, created_at)
 			VALUES (?, ?, ?, ?, ?)`,
@@ -251,74 +251,111 @@ func (s *errorGroupStore) Reopen(ctx context.Context, fingerprint, environment, 
 
 // changeStatus is the shared implementation. env == "" means "apply to every
 // env-scoped row for this fingerprint"; otherwise only the matching row.
+//
+// The transition is idempotent: rows already in the target state are left
+// alone and reported as success, because "already resolved" is not "no such
+// group". ErrNotFound is reserved for a fingerprint (or fingerprint+env) that
+// genuinely has no row, so a retried resolve does not 404 a group the caller
+// can plainly list.
 func (s *errorGroupStore) changeStatus(ctx context.Context, fingerprint, environment, action, reason string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := rfc3339(time.Now().UTC())
 
-	var updateSQL, eventEnvExpr string
+	// statusGuard selects the rows that actually transition; it is applied to
+	// both the UPDATE and the event INSERT so no event is written for a row
+	// the UPDATE did not touch.
+	var setClause, statusGuard string
 	switch action {
 	case "resolved":
-		updateSQL = "UPDATE error_groups SET status = 'resolved', resolved_at = ? WHERE fingerprint = ? AND status != 'resolved'"
+		setClause = "status = 'resolved', resolved_at = ?"
+		statusGuard = "status != 'resolved'"
 	case "ignored":
-		updateSQL = "UPDATE error_groups SET status = 'ignored', ignored_at = ? WHERE fingerprint = ? AND status != 'ignored'"
+		setClause = "status = 'ignored', ignored_at = ?"
+		statusGuard = "status != 'ignored'"
 	case "reopened":
-		updateSQL = "UPDATE error_groups SET status = 'unresolved' WHERE fingerprint = ? AND status IN ('resolved', 'ignored')"
+		setClause = "status = 'unresolved'"
+		statusGuard = "status IN ('resolved', 'ignored')"
 	default:
 		return fmt.Errorf("unknown action %q", action)
 	}
 
-	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		var args []any
-		sql := updateSQL
-		if action == "reopened" {
-			args = []any{fingerprint}
-		} else {
-			args = []any{now, fingerprint}
-		}
-		if environment != "" {
-			sql += " AND environment = ?"
-			args = append(args, environment)
-			eventEnvExpr = environment
-		} else {
-			eventEnvExpr = ""
-		}
+	envFilter, envArgs := "", []any{}
+	if environment != "" {
+		envFilter = " AND environment = ?"
+		envArgs = append(envArgs, environment)
+	}
 
-		res, err := tx.NewRaw(sql, args...).Exec(ctx)
-		if err != nil {
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		// Existence is checked separately from the transition so "no such
+		// group" and "already in that state" stay distinguishable.
+		var exists int
+		if err := tx.NewRaw(
+			`SELECT COUNT(*) FROM error_groups WHERE fingerprint = ?`+envFilter,
+			append([]any{fingerprint}, envArgs...)...,
+		).Scan(ctx, &exists); err != nil {
 			return fmt.Errorf("%s: %w", action, err)
 		}
-		n, _ := res.RowsAffected()
-		if n == 0 {
+		if exists == 0 {
 			return store.ErrNotFound
 		}
 
-		// Insert one audit event per affected row so the env is accurate.
-		// For env-scoped calls that's a single insert; for blanket calls we
-		// emit one event per env row that exists for this fingerprint.
-		if environment != "" {
-			_, err = tx.NewRaw(`
+		// The envs that will actually transition, captured before the UPDATE:
+		// the event log must record exactly these and no others.
+		var envs []string
+		if err := tx.NewRaw(
+			`SELECT environment FROM error_groups
+			 WHERE fingerprint = ? AND `+statusGuard+envFilter,
+			append([]any{fingerprint}, envArgs...)...,
+		).Scan(ctx, &envs); err != nil {
+			return fmt.Errorf("%s: %w", action, err)
+		}
+		if len(envs) == 0 {
+			// Already in the target state everywhere in scope — nothing to do,
+			// and nothing to record. Idempotent success.
+			return nil
+		}
+
+		args := make([]any, 0, len(envArgs)+2)
+		if action != "reopened" {
+			args = append(args, now)
+		}
+		args = append(args, fingerprint)
+		args = append(args, envArgs...)
+
+		if _, err := tx.NewRaw(
+			`UPDATE error_groups SET `+setClause+
+				` WHERE fingerprint = ? AND `+statusGuard+envFilter,
+			args...,
+		).Exec(ctx); err != nil {
+			return fmt.Errorf("%s: %w", action, err)
+		}
+
+		for _, env := range envs {
+			if _, err := tx.NewRaw(`
 				INSERT INTO error_group_events (fingerprint, environment, action, reason, created_at)
 				VALUES (?, ?, ?, ?, ?)`,
-				fingerprint, eventEnvExpr, action, reason, now,
-			).Exec(ctx)
-		} else {
-			_, err = tx.NewRaw(`
-				INSERT INTO error_group_events (fingerprint, environment, action, reason, created_at)
-				SELECT ?, environment, ?, ?, ?
-				FROM error_groups WHERE fingerprint = ?`,
-				fingerprint, action, reason, now, fingerprint,
-			).Exec(ctx)
-		}
-		if err != nil {
-			return fmt.Errorf("insert %s event: %w", action, err)
+				fingerprint, env, action, reason, now,
+			).Exec(ctx); err != nil {
+				return fmt.Errorf("insert %s event: %w", action, err)
+			}
 		}
 
 		return nil
 	})
 }
 
-func (s *errorGroupStore) ListEvents(ctx context.Context, fingerprint string, limit int) ([]store.ErrorGroupEvent, error) {
+const (
+	// defaultEventLimit applies when a caller passes limit <= 0.
+	defaultEventLimit = 20
+	// maxEventLimit caps ListEvents so a caller cannot pull the whole table.
+	maxEventLimit = 500
+)
+
+func (s *errorGroupStore) ListEvents(ctx context.Context, fingerprint, environment string, limit int) ([]store.ErrorGroupEvent, error) {
 	if limit <= 0 {
-		limit = 20
+		limit = defaultEventLimit
+	}
+	if limit > maxEventLimit {
+		limit = maxEventLimit
 	}
 
 	type row struct {
@@ -329,14 +366,27 @@ func (s *errorGroupStore) ListEvents(ctx context.Context, fingerprint string, li
 		CreatedAt   string `bun:"created_at"`
 	}
 
-	var rows []row
-	err := s.db.NewRaw(`
+	// environment "" means "every env" (unscoped internal callers); a concrete
+	// env must not see another environment's lifecycle events.
+	query := `
 		SELECT fingerprint, environment, action, reason, created_at
 		FROM error_group_events
 		WHERE fingerprint = ?
 		ORDER BY created_at DESC
-		LIMIT ?`, fingerprint, limit,
-	).Scan(ctx, &rows)
+		LIMIT ?`
+	args := []any{fingerprint, limit}
+	if environment != "" {
+		query = `
+		SELECT fingerprint, environment, action, reason, created_at
+		FROM error_group_events
+		WHERE fingerprint = ? AND environment = ?
+		ORDER BY created_at DESC
+		LIMIT ?`
+		args = []any{fingerprint, environment, limit}
+	}
+
+	var rows []row
+	err := s.db.NewRaw(query, args...).Scan(ctx, &rows)
 	if err != nil {
 		return nil, fmt.Errorf("list events: %w", err)
 	}
@@ -355,7 +405,7 @@ func (s *errorGroupStore) ListEvents(ctx context.Context, fingerprint string, li
 }
 
 func (s *errorGroupStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
-	cutoff := time.Now().Add(-olderThan).UTC().Format(time.RFC3339)
+	cutoff := rfc3339(time.Now().Add(-olderThan))
 	res, err := s.db.NewRaw(`DELETE FROM error_groups WHERE last_seen_at < ?`, cutoff).Exec(ctx)
 	if err != nil {
 		return 0, err

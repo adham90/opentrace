@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-
 	"github.com/adham90/opentrace/internal/connector"
 )
 
@@ -20,6 +19,9 @@ func HandleIndexes(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 	}
 
 	tableName := ArgString(args, "table_name")
+	if errResult := validateCatalogName("table_name", tableName); errResult != nil {
+		return errResult, nil
+	}
 	includeSuggestions := true
 	if v, ok := args["include_suggestions"].(bool); ok {
 		includeSuggestions = v
@@ -142,7 +144,7 @@ func HandleIndexes(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 		resp["bloat_estimate"] = map[string]any{
 			"tables":                bloatTables,
 			"total_estimated_bloat": fmt.Sprintf("%.0f bytes", totalBloatBytes),
-			"recommendations":      bloatRecommendations,
+			"recommendations":       bloatRecommendations,
 		}
 	}
 
@@ -162,12 +164,14 @@ func fetchUnusedIndexes(ctx context.Context, qe connector.QueryExecutor, tableNa
 	  AND NOT pi.indisunique
 	  AND NOT pi.indisprimary`
 
+	var queryArgs []any
 	if tableName != "" {
-		query += fmt.Sprintf(` AND relname = '%s'`, sanitizeIdentifier(tableName))
+		query += ` AND relname = $1`
+		queryArgs = append(queryArgs, tableName)
 	}
 	query += ` ORDER BY pg_relation_size(i.indexrelid) DESC`
 
-	qr, err := qe.ExecuteReadQuery(ctx, query)
+	qr, err := executeReadQuery(ctx, qe, query, queryArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -211,12 +215,14 @@ func fetchMissingIndexes(ctx context.Context, qe connector.QueryExecutor, tableN
 	WHERE n_live_tup > 10000
 	  AND seq_scan > COALESCE(idx_scan, 0) * 10`
 
+	var queryArgs []any
 	if tableName != "" {
-		query += fmt.Sprintf(` AND relname = '%s'`, sanitizeIdentifier(tableName))
+		query += ` AND relname = $1`
+		queryArgs = append(queryArgs, tableName)
 	}
 	query += ` ORDER BY seq_scan DESC`
 
-	qr, err := qe.ExecuteReadQuery(ctx, query)
+	qr, err := executeReadQuery(ctx, qe, query, queryArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -262,8 +268,10 @@ func fetchDuplicateIndexes(ctx context.Context, qe connector.QueryExecutor, tabl
 		FROM pg_indexes
 		WHERE schemaname = 'public'`
 
+	var queryArgs []any
 	if tableName != "" {
-		query += fmt.Sprintf(` AND tablename = '%s'`, sanitizeIdentifier(tableName))
+		query += ` AND tablename = $1`
+		queryArgs = append(queryArgs, tableName)
 	}
 
 	query += `
@@ -272,7 +280,7 @@ func fetchDuplicateIndexes(ctx context.Context, qe connector.QueryExecutor, tabl
 	HAVING count(*) > 1
 	ORDER BY tablename`
 
-	qr, err := qe.ExecuteReadQuery(ctx, query)
+	qr, err := executeReadQuery(ctx, qe, query, queryArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -309,12 +317,14 @@ func fetchBloatedIndexes(ctx context.Context, qe connector.QueryExecutor, tableN
 	WHERE pg_relation_size(s.indexrelid) > pg_relation_size(s.relid)
 	  AND pg_relation_size(s.relid) > 0`
 
+	var queryArgs []any
 	if tableName != "" {
-		query += fmt.Sprintf(` AND s.relname = '%s'`, sanitizeIdentifier(tableName))
+		query += ` AND s.relname = $1`
+		queryArgs = append(queryArgs, tableName)
 	}
 	query += ` ORDER BY pg_relation_size(s.indexrelid) DESC`
 
-	qr, err := qe.ExecuteReadQuery(ctx, query)
+	qr, err := executeReadQuery(ctx, qe, query, queryArgs...)
 	if err != nil {
 		return nil, err
 	}

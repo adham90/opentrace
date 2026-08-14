@@ -89,14 +89,16 @@ func TestActivityLogger_CancelledContextStopsWorker(t *testing.T) {
 	mock := &mockMCPActivityStore{}
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Cancel immediately — workers should still drain, but writes get cancelled ctx
+	// Cancel immediately — workers must still drain. Writes detach from the
+	// lifecycle ctx (context.WithoutCancel) precisely so entries buffered at
+	// shutdown are persisted rather than failing with "context canceled".
 	cancel()
 
 	al := NewActivityLogger(ctx, mock, 10, 1)
 	al.Log(store.LogMCPActivityParams{ToolName: "test"})
 	al.Close()
 
-	// The write was attempted (worker drained the channel) but the context was cancelled
-	// so the store.Log call received a cancelled context. The worker still runs to drain.
-	// We just verify Close() returns promptly and doesn't hang.
+	if mock.count.Load() != 1 {
+		t.Errorf("processed %d entries, want 1 — entries buffered at shutdown must still be written", mock.count.Load())
+	}
 }

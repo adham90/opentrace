@@ -10,6 +10,15 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// Caps on how much of a single key redis_get pulls from the server. Redis is
+// single threaded, so an unbounded HGETALL / XRANGE on a huge key blocks every
+// other client as well as exhausting this process's memory.
+const (
+	redisMaxHashFields    = 100 // fields shown for a hash key
+	redisMaxStreamEntries = 10  // entries shown for a stream key
+	redisHashScanBatch    = 100 // COUNT hint per HSCAN round trip
+)
+
 // RedisConnector implements DataSource for inspecting a target Redis instance.
 type RedisConnector struct {
 	client *redis.Client
@@ -38,7 +47,7 @@ func NewRedisConnector(ctx context.Context, connStr string) (*RedisConnector, er
 
 	return &RedisConnector{
 		client: client,
-		cb:     NewCircuitBreaker(connStr, DefaultCircuitBreakerConfig()),
+		cb:     NewCircuitBreaker(ConnectorLabel(connStr), DefaultCircuitBreakerConfig()),
 	}, nil
 }
 
@@ -359,17 +368,24 @@ func (c *RedisConnector) handleRedisGet(ctx context.Context, args map[string]any
 		}
 
 	case "hash":
-		vals, err := c.client.HGetAll(ctx, key).Result()
+		total, _ := c.client.HLen(ctx, key).Result()
+		// HSCAN with a bounded cursor walk: HGetAll would pull a multi-million
+		// field hash into memory (and block single-threaded Redis) just to
+		// print the first redisMaxHashFields.
+		fields, err := scanHashFields(ctx, c.client, key, redisMaxHashFields)
 		if err != nil {
 			if c.cb != nil {
 				c.cb.RecordFailure()
 			}
 			return "", fmt.Errorf("getting hash value: %w", err)
 		}
-		for k, v := range vals {
+		for k, v := range fields {
 			sb.WriteString(fmt.Sprintf("  %s: %s\n", k, truncateValue(v, 512)))
 		}
-		sb.WriteString(fmt.Sprintf("\n(%d fields)", len(vals)))
+		if int64(len(fields)) < total {
+			sb.WriteString(fmt.Sprintf("\n... (showing %d of %d fields)", len(fields), total))
+		}
+		sb.WriteString(fmt.Sprintf("\n(%d fields)", total))
 
 	case "list":
 		length, _ := c.client.LLen(ctx, key).Result()
@@ -426,18 +442,17 @@ func (c *RedisConnector) handleRedisGet(ctx context.Context, args map[string]any
 
 	case "stream":
 		length, _ := c.client.XLen(ctx, key).Result()
-		// Show last 10 entries
-		vals, err := c.client.XRevRange(ctx, key, "+", "-").Result()
+		// Ask Redis for only the last redisMaxStreamEntries entries: XRevRange
+		// without a count returns the WHOLE stream, which may be millions of
+		// entries, just to display a handful.
+		vals, err := c.client.XRevRangeN(ctx, key, "+", "-", redisMaxStreamEntries).Result()
 		if err != nil {
 			if c.cb != nil {
 				c.cb.RecordFailure()
 			}
 			return "", fmt.Errorf("getting stream value: %w", err)
 		}
-		showCount := 10
-		if len(vals) < showCount {
-			showCount = len(vals)
-		}
+		showCount := len(vals)
 		for i := 0; i < showCount; i++ {
 			sb.WriteString(fmt.Sprintf("  %s:\n", vals[i].ID))
 			for k, v := range vals[i].Values {
@@ -504,6 +519,36 @@ func (c *RedisConnector) handleRedisSlowlog(ctx context.Context, args map[string
 		c.cb.RecordSuccess()
 	}
 	return sb.String(), nil
+}
+
+// hashScanner is the slice of the Redis client scanHashFields needs; it keeps
+// the cursor walk unit-testable without a live server.
+type hashScanner interface {
+	HScan(ctx context.Context, key string, cursor uint64, match string, count int64) *redis.ScanCmd
+}
+
+// scanHashFields returns at most limit fields of a hash using HSCAN, so a large
+// hash is never materialised in full. HSCAN returns a flat [field, value, ...]
+// reply and may return fewer (or slightly more) than COUNT per call.
+func scanHashFields(ctx context.Context, s hashScanner, key string, limit int) (map[string]string, error) {
+	out := make(map[string]string, limit)
+	var cursor uint64
+	for {
+		pairs, next, err := s.HScan(ctx, key, cursor, "", redisHashScanBatch).Result()
+		if err != nil {
+			return nil, err
+		}
+		for i := 0; i+1 < len(pairs); i += 2 {
+			if len(out) >= limit {
+				return out, nil
+			}
+			out[pairs[i]] = pairs[i+1]
+		}
+		cursor = next
+		if cursor == 0 || len(out) >= limit {
+			return out, nil
+		}
+	}
 }
 
 // truncateValue truncates a string to maxLen and appends "..." if truncated.

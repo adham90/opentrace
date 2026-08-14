@@ -26,7 +26,14 @@ func HandleSchema(ctx context.Context, deps DatabaseDeps, args map[string]any) (
 		schema = v
 	}
 
+	if errResult := validateCatalogName("schema", schema); errResult != nil {
+		return errResult, nil
+	}
+
 	tableName := ArgString(args, "table")
+	if errResult := validateCatalogName("table", tableName); errResult != nil {
+		return errResult, nil
+	}
 
 	if tableName != "" {
 		schemaResult, err := schemaTableDetail(ctx, qe, schema, tableName)
@@ -37,8 +44,9 @@ func HandleSchema(ctx context.Context, deps DatabaseDeps, args map[string]any) (
 		return schemaResult, nil
 	}
 
-	// All tables overview.
-	tableQuery := fmt.Sprintf(`SELECT
+	// All tables overview. The schema name is caller-supplied, so it is bound as
+	// a parameter ($1) and compared as a literal — it can never become SQL.
+	const tableQuery = `SELECT
 		t.table_name,
 		(SELECT count(*) FROM information_schema.columns c WHERE c.table_schema = t.table_schema AND c.table_name = t.table_name) AS column_count,
 		pg_size_pretty(pg_total_relation_size(quote_ident(t.table_schema) || '.' || quote_ident(t.table_name))) AS size,
@@ -46,10 +54,10 @@ func HandleSchema(ctx context.Context, deps DatabaseDeps, args map[string]any) (
 		s.n_live_tup AS estimated_rows
 	FROM information_schema.tables t
 	LEFT JOIN pg_stat_user_tables s ON s.schemaname = t.table_schema AND s.relname = t.table_name
-	WHERE t.table_schema = '%s' AND t.table_type = 'BASE TABLE'
-	ORDER BY t.table_name`, schema)
+	WHERE t.table_schema = $1 AND t.table_type = 'BASE TABLE'
+	ORDER BY t.table_name`
 
-	tableResult, err := qe.ExecuteReadQuery(ctx, tableQuery)
+	tableResult, err := executeReadQuery(ctx, qe, tableQuery, schema)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("schema query failed: %v", err)), nil
 	}
@@ -82,7 +90,7 @@ func HandleSchema(ctx context.Context, deps DatabaseDeps, args map[string]any) (
 	}
 
 	// Foreign key dependencies.
-	depQuery := fmt.Sprintf(`SELECT
+	const depQuery = `SELECT
 		tc.table_name AS from_table,
 		ccu.table_name AS to_table,
 		kcu.column_name AS from_column,
@@ -92,10 +100,10 @@ func HandleSchema(ctx context.Context, deps DatabaseDeps, args map[string]any) (
 		ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
 	JOIN information_schema.constraint_column_usage ccu
 		ON tc.constraint_name = ccu.constraint_name AND tc.table_schema = ccu.table_schema
-	WHERE tc.table_schema = '%s' AND tc.constraint_type = 'FOREIGN KEY'
-	ORDER BY tc.table_name`, schema)
+	WHERE tc.table_schema = $1 AND tc.constraint_type = 'FOREIGN KEY'
+	ORDER BY tc.table_name`
 
-	depResult, err := qe.ExecuteReadQuery(ctx, depQuery)
+	depResult, err := executeReadQuery(ctx, qe, depQuery, schema)
 	if err == nil && depResult.RowCount > 0 {
 		fkDeps := make([]map[string]any, 0, len(depResult.Rows))
 		for _, row := range depResult.Rows {
@@ -260,18 +268,19 @@ func HandleSchema(ctx context.Context, deps DatabaseDeps, args map[string]any) (
 
 // schemaTableDetail returns detailed information for a specific table.
 func schemaTableDetail(ctx context.Context, qe connector.QueryExecutor, schema, tableName string) (*CallToolResult, error) {
-	// Columns query.
-	colQuery := fmt.Sprintf(`SELECT
+	// Columns query. schema/tableName are caller-supplied and therefore bound as
+	// parameters — never interpolated into the SQL text.
+	const colQuery = `SELECT
 		column_name,
 		data_type,
 		is_nullable,
 		column_default,
 		character_maximum_length
 	FROM information_schema.columns
-	WHERE table_schema = '%s' AND table_name = '%s'
-	ORDER BY ordinal_position`, schema, tableName)
+	WHERE table_schema = $1 AND table_name = $2
+	ORDER BY ordinal_position`
 
-	colResult, err := qe.ExecuteReadQuery(ctx, colQuery)
+	colResult, err := executeReadQuery(ctx, qe, colQuery, schema, tableName)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("columns query failed: %v", err)), nil
 	}
@@ -300,15 +309,15 @@ func schemaTableDetail(ctx context.Context, qe connector.QueryExecutor, schema, 
 	}
 
 	// Indexes query.
-	idxQuery := fmt.Sprintf(`SELECT
+	const idxQuery = `SELECT
 		indexname,
 		indexdef
 	FROM pg_indexes
-	WHERE schemaname = '%s' AND tablename = '%s'
-	ORDER BY indexname`, schema, tableName)
+	WHERE schemaname = $1 AND tablename = $2
+	ORDER BY indexname`
 
 	indexes := make([]map[string]any, 0)
-	idxResult, err := qe.ExecuteReadQuery(ctx, idxQuery)
+	idxResult, err := executeReadQuery(ctx, qe, idxQuery, schema, tableName)
 	if err == nil {
 		for _, row := range idxResult.Rows {
 			if len(row) < 2 {
@@ -322,7 +331,7 @@ func schemaTableDetail(ctx context.Context, qe connector.QueryExecutor, schema, 
 	}
 
 	// Foreign keys query.
-	fkQuery := fmt.Sprintf(`SELECT
+	const fkQuery = `SELECT
 		tc.constraint_name,
 		kcu.column_name,
 		ccu.table_name AS foreign_table,
@@ -332,10 +341,10 @@ func schemaTableDetail(ctx context.Context, qe connector.QueryExecutor, schema, 
 		ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
 	JOIN information_schema.constraint_column_usage ccu
 		ON tc.constraint_name = ccu.constraint_name AND tc.table_schema = ccu.table_schema
-	WHERE tc.table_schema = '%s' AND tc.table_name = '%s' AND tc.constraint_type = 'FOREIGN KEY'`, schema, tableName)
+	WHERE tc.table_schema = $1 AND tc.table_name = $2 AND tc.constraint_type = 'FOREIGN KEY'`
 
 	foreignKeys := make([]map[string]any, 0)
-	fkResult, err := qe.ExecuteReadQuery(ctx, fkQuery)
+	fkResult, err := executeReadQuery(ctx, qe, fkQuery, schema, tableName)
 	if err == nil {
 		for _, row := range fkResult.Rows {
 			if len(row) < 4 {

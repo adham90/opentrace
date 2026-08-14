@@ -27,3 +27,17 @@ func scopeAllowsEnv(ctx context.Context, env string) bool {
 	}
 	return scope.Allows(env)
 }
+
+// scopeIsPinned reports whether the caller is restricted to specific
+// environments — i.e. a scope is attached and it is not the legacy wildcard.
+//
+// Handlers use it to decide whether cross-env data has to be filtered out or
+// withheld. When no scope is attached (unit tests, non-MCP callers) or the
+// token is a wildcard, nothing needs withholding, mirroring scopeAllowsEnv.
+func scopeIsPinned(ctx context.Context) bool {
+	scope, ok := envscope.FromOK(ctx)
+	if !ok {
+		return false
+	}
+	return !scope.AllowsAll()
+}

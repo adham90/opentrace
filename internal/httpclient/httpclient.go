@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -17,41 +18,82 @@ var baseDialer = &net.Dialer{
 	KeepAlive: 30 * time.Second,
 }
 
-// guardedDialContext blocks connections to link-local addresses (169.254.0.0/16,
-// fe80::/10), which is where cloud metadata services live (169.254.169.254).
-// Health-check URLs and connector hosts are user-supplied, so this closes the
-// highest-value SSRF target. Private ranges (10/8, 172.16/12, 192.168/16) and
+// allowLinkLocalEnv disables the SSRF guard when set to "true".
+const allowLinkLocalEnv = "OPENTRACE_ALLOW_LINK_LOCAL"
+
+// blockedMetadataIPs are cloud instance-metadata endpoints that fall outside the
+// link-local ranges and therefore need to be named explicitly. The IPv4 IMDS
+// address (169.254.169.254) and the ECS task metadata address (169.254.170.2)
+// are already covered by the link-local check.
+var blockedMetadataIPs = []net.IP{
+	net.ParseIP("fd00:ec2::254"),   // AWS IMDS over IPv6 (unique-local, not link-local)
+	net.ParseIP("100.100.100.200"), // Alibaba Cloud metadata
+	net.ParseIP("192.0.0.192"),     // Oracle Cloud metadata
+}
+
+// parseHostIP parses a host taken from an address, tolerating the forms the
+// stdlib's net.ParseIP rejects: bracketed IPv6 literals and zone-qualified
+// literals such as "fe80::1%en0". Without stripping the zone, ParseIP returns
+// nil and a zoned link-local address slips past the guard entirely.
+// Returns nil when the host is a DNS name rather than an IP literal.
+func parseHostIP(host string) net.IP {
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
+	if i := strings.IndexByte(host, '%'); i >= 0 {
+		host = host[:i]
+	}
+	return net.ParseIP(host)
+}
+
+// checkBlockedAddr reports an error when addr targets a link-local address
+// (169.254.0.0/16, fe80::/10) or a known cloud metadata endpoint. Health-check
+// URLs and connector hosts are user-supplied, so this closes the highest-value
+// SSRF target. Private ranges (10/8, 172.16/12, 192.168/16, fc00::/7) and
 // loopback are intentionally ALLOWED — monitoring internal/self-hosted infra is
-// the tool's purpose. Set OPENTRACE_ALLOW_LINK_LOCAL=true to disable this guard.
+// the tool's purpose. Set OPENTRACE_ALLOW_LINK_LOCAL=true to disable the guard.
+func checkBlockedAddr(addr string) error {
+	if os.Getenv(allowLinkLocalEnv) == "true" {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	ip := parseHostIP(host)
+	if ip == nil {
+		return nil // a DNS name; the Control hook re-checks the resolved IP
+	}
+	// Normalise IPv4-mapped IPv6 ("::ffff:169.254.169.254") to its IPv4 form so
+	// the range checks below cannot be dodged by spelling.
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() {
+		return fmt.Errorf("connection to link-local address %s blocked", host)
+	}
+	for _, blocked := range blockedMetadataIPs {
+		if ip.Equal(blocked) {
+			return fmt.Errorf("connection to cloud metadata address %s blocked", host)
+		}
+	}
+	return nil
+}
+
+// guardedDialContext rejects blocked destinations given as literals in the URL.
 func guardedDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	if os.Getenv("OPENTRACE_ALLOW_LINK_LOCAL") != "true" {
-		host, _, err := net.SplitHostPort(addr)
-		if err != nil {
-			host = addr
-		}
-		// The address is already resolved to an IP:port by the resolver only for
-		// literal IPs; for hostnames we check via a control hook below instead.
-		if ip := net.ParseIP(host); ip != nil && ip.IsLinkLocalUnicast() {
-			return nil, fmt.Errorf("connection to link-local address %s blocked", host)
-		}
+	if err := checkBlockedAddr(addr); err != nil {
+		return nil, err
 	}
 	return baseDialer.DialContext(ctx, network, addr)
 }
 
 // controlBlockLinkLocal runs after DNS resolution, before connect, so it also
-// catches hostnames that resolve to link-local IPs (DNS-rebinding to metadata).
+// catches hostnames that resolve to blocked IPs. Because it inspects the exact
+// address the kernel is about to connect to, it also closes DNS rebinding
+// within a single dial: a name that resolved to a benign IP at check time
+// cannot be swapped for a metadata IP afterwards.
 func controlBlockLinkLocal(network, address string, c syscall.RawConn) error {
-	if os.Getenv("OPENTRACE_ALLOW_LINK_LOCAL") == "true" {
-		return nil
-	}
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		host = address
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLinkLocalUnicast() {
-		return fmt.Errorf("connection to link-local address %s blocked", host)
-	}
-	return nil
+	return checkBlockedAddr(address)
 }
 
 // sharedTransport is a pooled HTTP transport reused across all clients.

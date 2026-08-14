@@ -1,11 +1,13 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -252,5 +254,245 @@ func TestRestore_CreatesSafetyBackup(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected a .pre-restore.* safety backup file to be created")
+	}
+}
+
+// TestRestore_PreservesFileMode proves the swap keeps the live database's
+// permissions instead of widening them to 0666&^umask via os.Create.
+func TestRestore_PreservesFileMode(t *testing.T) {
+	dbPath := createTestDB(t)
+	backupPath := filepath.Join(t.TempDir(), "backup.db")
+
+	ctx := context.Background()
+	if err := Backup(ctx, dbPath, backupPath); err != nil {
+		t.Fatalf("Backup: %v", err)
+	}
+	if err := os.Chmod(dbPath, 0o600); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	if err := Restore(ctx, backupPath, dbPath); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("restored db mode = %o, want 600", got)
+	}
+}
+
+// TestRestore_LeavesNoTempFile proves the staged copy is renamed, not left
+// behind.
+func TestRestore_LeavesNoTempFile(t *testing.T) {
+	dbPath := createTestDB(t)
+	backupPath := filepath.Join(t.TempDir(), "backup.db")
+
+	ctx := context.Background()
+	if err := Backup(ctx, dbPath, backupPath); err != nil {
+		t.Fatalf("Backup: %v", err)
+	}
+	if err := Restore(ctx, backupPath, dbPath); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if _, err := os.Stat(dbPath + restoreTempSuffix); !os.IsNotExist(err) {
+		t.Errorf("staging file still present: %v", err)
+	}
+}
+
+// TestCopyDatabaseSet_IncludesWAL proves the safety-backup fallback copies the
+// -wal (and -shm) sidecars. Copying only the main file would silently discard
+// every transaction committed to the WAL but not yet checkpointed — and the
+// restore deletes the WAL immediately afterwards.
+func TestCopyDatabaseSet_IncludesWAL(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.db")
+	for _, suffix := range []string{"", walSuffix, shmSuffix} {
+		if err := os.WriteFile(src+suffix, []byte("payload"+suffix), 0o600); err != nil {
+			t.Fatalf("write %s: %v", suffix, err)
+		}
+	}
+
+	dst := filepath.Join(dir, "dst.db")
+	if err := copyDatabaseSet(src, dst); err != nil {
+		t.Fatalf("copyDatabaseSet: %v", err)
+	}
+
+	for _, suffix := range []string{"", walSuffix, shmSuffix} {
+		got, err := os.ReadFile(dst + suffix)
+		if err != nil {
+			t.Fatalf("read copy %q: %v", suffix, err)
+		}
+		if string(got) != "payload"+suffix {
+			t.Errorf("copy %q = %q, want %q", suffix, got, "payload"+suffix)
+		}
+	}
+}
+
+// TestCopyDatabaseSet_MissingSidecars proves a database without WAL files copies
+// cleanly.
+func TestCopyDatabaseSet_MissingSidecars(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.db")
+	if err := os.WriteFile(src, []byte("main"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	dst := filepath.Join(dir, "dst.db")
+	if err := copyDatabaseSet(src, dst); err != nil {
+		t.Fatalf("copyDatabaseSet: %v", err)
+	}
+	if _, err := os.Stat(dst + walSuffix); !os.IsNotExist(err) {
+		t.Errorf("unexpected -wal copy: %v", err)
+	}
+}
+
+// TestRestore_RoundTripWithWALResidentRows proves committed rows that live only
+// in the WAL are present in the backup and survive a restore.
+func TestRestore_RoundTripWithWALResidentRows(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "wal.db")
+
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE schema_version (version INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatalf("create schema_version: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO schema_version (version) VALUES (1)`); err != nil {
+		t.Fatalf("insert version: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE rows_t (id INTEGER PRIMARY KEY, v TEXT)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	for i := 0; i < 200; i++ {
+		if _, err := db.Exec(`INSERT INTO rows_t (v) VALUES (?)`, "row"); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+	db.Close()
+
+	ctx := context.Background()
+	backupPath := filepath.Join(dir, "backup.db")
+	if err := Backup(ctx, dbPath, backupPath); err != nil {
+		t.Fatalf("Backup: %v", err)
+	}
+	if err := Restore(ctx, backupPath, dbPath); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	restored, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer restored.Close()
+	var count int
+	if err := restored.QueryRow(`SELECT COUNT(*) FROM rows_t`).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 200 {
+		t.Errorf("restored row count = %d, want 200", count)
+	}
+}
+
+// TestRestore_SafetyBackupFallsBackToFileSet forces the VACUUM INTO path to
+// fail (its output path already exists, which SQLite rejects) and proves
+// Restore still produces a usable safety backup via the whole-file-set copy.
+//
+// It goes through Restore(), not createSafetyBackup() or copyDatabaseSet()
+// directly, so the fallback *wiring* is pinned: dropping the fallback, or
+// narrowing it to copyFile — which loses the WAL the restore deletes moments
+// later — fails this test.
+func TestRestore_SafetyBackupFallsBackToFileSet(t *testing.T) {
+	backupPath := filepath.Join(t.TempDir(), "backup.db")
+	ctx := context.Background()
+	if err := Backup(ctx, createTestDB(t), backupPath); err != nil {
+		t.Fatalf("Backup: %v", err)
+	}
+
+	dbPath, release := newWALDatabase(t)
+	defer release()
+
+	wantDB, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatalf("reading live db: %v", err)
+	}
+	wantWAL, err := os.ReadFile(dbPath + walSuffix)
+	if err != nil {
+		t.Fatalf("the live database has no WAL sidecar to preserve: %v", err)
+	}
+
+	// createSafetyBackup names its output with a second-resolution timestamp.
+	// Occupying every name it could pick makes VACUUM INTO fail, because
+	// SQLite refuses to write into an existing file.
+	const placeholder = "occupied"
+	const candidateWindowSecs = 5
+	var candidates []string
+	for i := 0; i < candidateWindowSecs; i++ {
+		p := dbPath + ".pre-restore." + time.Now().Add(time.Duration(i)*time.Second).Format("20060102-150405")
+		if err := os.WriteFile(p, []byte(placeholder), 0o600); err != nil {
+			t.Fatalf("occupying %s: %v", p, err)
+		}
+		candidates = append(candidates, p)
+	}
+
+	if err := Restore(ctx, backupPath, dbPath); err != nil {
+		t.Fatalf("Restore must survive a failed VACUUM INTO: %v", err)
+	}
+
+	var safety string
+	for _, p := range candidates {
+		got, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("reading candidate: %v", err)
+		}
+		if string(got) != placeholder {
+			safety = p
+			if !bytes.Equal(got, wantDB) {
+				t.Errorf("safety backup does not hold the pre-restore database bytes")
+			}
+		}
+	}
+	if safety == "" {
+		t.Fatal("VACUUM INTO failed and nothing was written: the file-set fallback is not wired into Restore")
+	}
+
+	gotWAL, err := os.ReadFile(safety + walSuffix)
+	if err != nil {
+		t.Fatalf("the fallback dropped the -wal sidecar, discarding uncheckpointed transactions: %v", err)
+	}
+	if !bytes.Equal(gotWAL, wantWAL) {
+		t.Error("safety backup WAL does not match the live WAL")
+	}
+}
+
+// newWALDatabase creates a SQLite database in WAL mode with an uncommitted
+// transaction held open, so a populated -wal sidecar exists on disk for the
+// duration of the test. The returned func releases the connection.
+func newWALDatabase(t *testing.T) (string, func()) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "live.db")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)")
+	if err != nil {
+		t.Fatalf("opening live db: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`CREATE TABLE schema_version (version INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatalf("creating schema_version: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO schema_version (version) VALUES (1)`); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_version (version) VALUES (2)`); err != nil {
+		t.Fatalf("write in tx: %v", err)
+	}
+	return dbPath, func() {
+		_ = tx.Rollback()
+		_ = db.Close()
 	}
 }

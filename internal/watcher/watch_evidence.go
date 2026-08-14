@@ -8,6 +8,20 @@ import (
 	"github.com/adham90/opentrace/pkg/store"
 )
 
+const (
+	// evidenceErrorLimit caps the error rows pulled into an alert's evidence.
+	evidenceErrorLimit = 20
+	// evidenceLogLimit caps the recent log rows pulled into evidence.
+	evidenceLogLimit = 20
+	// evidenceSummaryLimit caps the request summaries scanned for endpoint deltas.
+	evidenceSummaryLimit = 100
+	// evidenceMessageMaxLen truncates log messages stored in evidence.
+	evidenceMessageMaxLen = 200
+	// endpointDegradationPct is the minimum slowdown for an endpoint to be
+	// reported as affected.
+	endpointDegradationPct = 10.0
+)
+
 // WatchEvidenceBuilder collects evidence when a watch alert fires.
 type WatchEvidenceBuilder struct {
 	logStore store.LogStore
@@ -25,21 +39,21 @@ func NewWatchEvidenceBuilder(logStore store.LogStore, metrics *WatchMetrics) *Wa
 // Build collects all evidence for a triggered watch.
 func (b *WatchEvidenceBuilder) Build(ctx context.Context, w *store.Watch, result *WatchEvalResult) (*store.WatchEvidenceBundle, error) {
 	now := time.Now().UTC()
-	window, err := time.ParseDuration(w.BaselineWindow)
-	if err != nil {
-		window = 1 * time.Hour
-	}
+	window := parseDurationOr(w.BaselineWindow, defaultBaselineWindow)
 	start := now.Add(-window)
 
 	evidence := &store.WatchEvidenceBundle{}
 
 	// 1. Recent errors
+	// Every evidence query is scoped to the watch's environment: an alert for
+	// production must not be illustrated with staging errors and trace IDs.
 	recentErrors, err := b.logStore.Search(ctx, store.LogSearchParams{
-		Service: w.Service,
-		Level:   "error",
-		Start:   &start,
-		End:     &now,
-		Limit:   20,
+		Service:     w.Service,
+		Environment: w.Environment,
+		Level:       "error",
+		Start:       &start,
+		End:         &now,
+		Limit:       evidenceErrorLimit,
 	})
 	if err == nil {
 		errorCounts := make(map[string]*store.WatchEvidenceError)
@@ -53,7 +67,7 @@ func (b *WatchEvidenceBuilder) Build(ctx context.Context, w *store.Watch, result
 			} else {
 				errorCounts[cls] = &store.WatchEvidenceError{
 					ExceptionClass: cls,
-					Message:        truncate(entry.Message, 200),
+					Message:        truncate(entry.Message, evidenceMessageMaxLen),
 					Count:          1,
 				}
 			}
@@ -79,9 +93,10 @@ func (b *WatchEvidenceBuilder) Build(ctx context.Context, w *store.Watch, result
 
 	// 2. Affected endpoints
 	summaries, err := b.logStore.SearchRequestSummaries(ctx, store.RequestSummarySearchParams{
-		Start: &start,
-		End:   &now,
-		Limit: 100,
+		Start:       &start,
+		End:         &now,
+		Environment: w.Environment,
+		Limit:       evidenceSummaryLimit,
 	})
 	if err == nil && w.BaselineJSON != nil {
 		baselineByPath := make(map[string]store.WatchEndpointBaseline)
@@ -110,7 +125,7 @@ func (b *WatchEvidenceBuilder) Build(ctx context.Context, w *store.Watch, result
 			avgMs := current.totalMs / float64(current.count)
 			if baseline, ok := baselineByPath[path]; ok && baseline.AvgDurationMs > 0 {
 				deltaPct := ((avgMs - baseline.AvgDurationMs) / baseline.AvgDurationMs) * 100
-				if deltaPct > 10 { // Only report endpoints that degraded >10%
+				if deltaPct > endpointDegradationPct { // Only report degraded endpoints
 					evidence.AffectedEndpoints = append(evidence.AffectedEndpoints, store.WatchEndpointDelta{
 						Path:               path,
 						CurrentDurationMs:  avgMs,
@@ -124,17 +139,18 @@ func (b *WatchEvidenceBuilder) Build(ctx context.Context, w *store.Watch, result
 
 	// 3. Relevant logs (most recent)
 	recentLogs, err := b.logStore.Search(ctx, store.LogSearchParams{
-		Service: w.Service,
-		Start:   &start,
-		End:     &now,
-		Limit:   20,
+		Service:     w.Service,
+		Environment: w.Environment,
+		Start:       &start,
+		End:         &now,
+		Limit:       evidenceLogLimit,
 	})
 	if err == nil {
 		for _, entry := range recentLogs {
 			evidence.RelevantLogs = append(evidence.RelevantLogs, store.WatchEvidenceLog{
 				Timestamp: entry.Timestamp,
 				Level:     entry.Level,
-				Message:   truncate(entry.Message, 200),
+				Message:   truncate(entry.Message, evidenceMessageMaxLen),
 				Service:   entry.Service,
 				TraceID:   entry.TraceID,
 			})
@@ -194,7 +210,6 @@ func (b *WatchEvidenceBuilder) Build(ctx context.Context, w *store.Watch, result
 
 	return evidence, nil
 }
-
 
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {

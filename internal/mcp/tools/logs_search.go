@@ -3,12 +3,26 @@ package tools
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
+
+// entryMatchesMetadata reports whether every key/value pair in filter is present
+// on the entry's metadata, compared as strings (the filter arrives as JSON, so
+// 200 and "200" must match).
+func entryMatchesMetadata(e store.LogEntry, filter map[string]string) bool {
+	for k, want := range filter {
+		got, ok := e.Metadata[k]
+		if !ok || fmt.Sprintf("%v", got) != want {
+			return false
+		}
+	}
+	return true
+}
 
 // ---------------------------------------------------------------------------
 // action: search — full-text log search with filters (from logSearchHandler)
@@ -86,7 +100,13 @@ func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallT
 	// entries found" for a week-old incident while looking only at the last hour,
 	// which reads as "it never happened".
 	now := time.Now().UTC()
-	start, windowGiven := OptionalSinceParam(args)
+	start, windowGiven, err := OptionalSinceParamStrict(args)
+	if err != nil {
+		// A malformed window is an error, not a silent fall back to the 1h
+		// default: "OOM occurred N times this week" computed over one hour is a
+		// confidently wrong answer.
+		return NewToolResultError(err.Error()), nil
+	}
 	if !windowGiven {
 		start = now.Add(-defaultSearchWindow)
 	}
@@ -111,6 +131,30 @@ func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallT
 		if fb, err := deps.Logs.Search(ctx, fallbackParams); err == nil {
 			entries = fb.Entries
 		}
+	}
+
+	// Enforce metadata_filter on the way out as well as passing it down. The
+	// store is expected to apply it, but a filter that is advertised, accepted
+	// and then dropped returns every host's logs labelled as one host's — the
+	// worst failure mode there is. Verifying here means the result set is
+	// correct whether or not the storage layer honours the filter.
+	rawReturned := len(entries)
+	metadataFiltered := 0
+	if len(metadataFilter) > 0 {
+		kept := make([]store.LogEntry, 0, len(entries))
+		for _, e := range entries {
+			if entryMatchesMetadata(e, metadataFilter) {
+				kept = append(kept, e)
+			}
+		}
+		metadataFiltered = len(entries) - len(kept)
+		if metadataFiltered > 0 {
+			slog.Warn("metadata_filter not applied by the log store; filtered in the tool layer",
+				"event", "metadata_filter_post_filtered",
+				"dropped", metadataFiltered,
+			)
+		}
+		entries = kept
 	}
 
 	if len(entries) == 0 {
@@ -287,10 +331,18 @@ func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallT
 		"searched_until": now.Format(time.RFC3339),
 	}
 
-	if len(results) == limit {
+	if rawReturned == limit {
 		resp["has_more"] = true
 		resp["next_offset"] = offset + limit
 		resp["hint"] = "More results may be available. Use the 'offset' parameter to paginate."
+	}
+	if len(metadataFilter) > 0 {
+		resp["metadata_filter_applied"] = metadataFilter
+		if metadataFiltered > 0 {
+			// Say so rather than quietly shrinking the page: the caller's limit
+			// no longer describes what came back.
+			resp["metadata_filter_dropped"] = metadataFiltered
+		}
 	}
 
 	// Summary: distribution of returned entries by level and service.

@@ -15,6 +15,15 @@ type QueryExecutor interface {
 	ExecuteReadQuery(ctx context.Context, query string) (*QueryResult, error)
 }
 
+// ParameterizedQueryExecutor is implemented by connectors that can execute a
+// read-only query with bound parameters. Callers MUST prefer it over
+// interpolating caller-supplied values into the SQL text: a bound parameter is
+// data to the server and can never change the statement's meaning, which is
+// what keeps the fixed introspection queries injection-proof.
+type ParameterizedQueryExecutor interface {
+	ExecuteReadQueryArgs(ctx context.Context, query string, args ...any) (*QueryResult, error)
+}
+
 // EnvironmentScoped is implemented by connectors pinned to a specific
 // environment. The database tools use it to reject cross-env queries at query
 // time. An empty or "*" environment means the connector is shared / any-env.

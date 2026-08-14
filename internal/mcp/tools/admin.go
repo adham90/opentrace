@@ -91,20 +91,59 @@ func HandleAdminSettings(ctx context.Context, d AdminDeps) (*CallToolResult, err
 	return JSONResult(resp)
 }
 
+// Retention bounds, in days. SetRetention persists the whole settings struct,
+// so anything outside this range would be written verbatim into the pruner's
+// cutoff calculation.
+const (
+	minRetentionDays = 1
+	maxRetentionDays = 365
+)
+
+// HandleUpdateRetention changes the global retention window.
+//
+// It reads the current settings first and only replaces RetentionDays.
+// SetRetention marshals the entire RetentionSettings struct and upserts it, so
+// constructing a fresh struct here wrote MetricRetentionDays back as 0 — a lost
+// update that silently reverted a separately configured metric retention policy
+// to "follow the global window".
 func HandleUpdateRetention(ctx context.Context, d AdminDeps, args map[string]any) (*CallToolResult, error) {
 	if d.SettingsStore == nil {
 		return NewToolResultError("SettingsStore not configured"), nil
 	}
 
+	// MCP numeric args arrive as float64.
 	daysF, ok := args["retention_days"].(float64)
-	if !ok || daysF < 1 || daysF > 365 {
-		return NewToolResultError("retention_days is required and must be between 1 and 365"), nil
+	if !ok || daysF < minRetentionDays || daysF > maxRetentionDays {
+		return NewToolResultError(fmt.Sprintf("retention_days is required and must be between %d and %d", minRetentionDays, maxRetentionDays)), nil
 	}
 	days := int(daysF)
 
-	if err := d.SettingsStore.SetRetention(ctx, store.RetentionSettings{RetentionDays: days}); err != nil {
+	current, err := d.SettingsStore.GetRetention(ctx)
+	if err != nil {
+		return NewToolResultError(fmt.Sprintf("failed to read current retention settings: %v", err)), nil
+	}
+
+	updated := *current
+	updated.RetentionDays = days
+
+	if err := d.SettingsStore.SetRetention(ctx, updated); err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to update retention: %v", err)), nil
 	}
 
-	return NewToolResultText(fmt.Sprintf("Data retention updated to %d days. Logs, alerts, and watcher runs older than %d days will be pruned on the next cleanup cycle.", days, days)), nil
+	// Be precise about what this number governs. It drives the pruner in
+	// cmd/opentrace/background_jobs.go: logs, MCP activity, the audit log,
+	// error groups, agent notes, code entities and healthcheck results. Watch
+	// runs and watch alerts are pruned from the separate `retention_policy`
+	// config blob (internal/jobs/retention.go) and are NOT affected, which the
+	// old message claimed they were.
+	msg := fmt.Sprintf(
+		"Data retention updated to %d days. Logs, MCP activity, audit entries, error groups, agent notes, code entities and healthcheck results older than %d days will be pruned on the next cleanup cycle. "+
+			"Watch runs and watch alerts follow the separate retention_policy config, not this setting.",
+		days, days)
+	if updated.MetricRetentionDays > 0 {
+		msg += fmt.Sprintf(" Metric buckets keep their own %d-day window.", updated.MetricRetentionDays)
+	} else {
+		msg += " Metric buckets have no separate window, so they follow this one."
+	}
+	return NewToolResultText(msg), nil
 }

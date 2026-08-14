@@ -1,9 +1,84 @@
 package mcp
 
 import (
+	"context"
+	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/adham90/opentrace/internal/domain/logs"
 	"github.com/adham90/opentrace/internal/mcp/tools"
 )
+
+// adminOnlyActions lists, per tool, the actions that must never be reachable
+// from the read-only (member) server. These write instance-wide configuration
+// (deep_capture PII/retention), mutate or probe arbitrary network targets
+// (connectors create/update/delete/test — an SSRF primitive), or remove
+// monitoring (healthchecks create/delete).
+//
+// The gateway dispatches purely by tool name, so this is enforced by wrapping
+// the handler at registration time and by trimming the advertised action list.
+var adminOnlyActions = map[string][]string{
+	"connectors":   {"create", "update", "delete", "test"},
+	"deep_capture": {"update_pii_config", "update_retention"},
+	"healthchecks": {"create", "delete"},
+}
+
+// denyAdminActions wraps a tool handler so the listed actions are refused.
+// Registration-side enforcement: it holds regardless of whether the tool
+// handler itself performs a role check.
+func denyAdminActions(toolName string, handler ToolHandlerFunc) ToolHandlerFunc {
+	denied := adminOnlyActions[toolName]
+	if len(denied) == 0 {
+		return handler
+	}
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		action, _ := GetArguments(request)["action"].(string)
+		if slices.Contains(denied, action) {
+			return NewToolResultError(fmt.Sprintf(
+				"action %q requires an admin token", action)), nil
+		}
+		return handler(ctx, request)
+	}
+}
+
+// memberActions removes the admin-only actions from a tool's advertised action
+// list so discover/describe do not offer what the member server will refuse.
+func memberActions(toolName string, actions []string) []string {
+	denied := adminOnlyActions[toolName]
+	if len(denied) == 0 {
+		return actions
+	}
+	out := make([]string, 0, len(actions))
+	for _, a := range actions {
+		if !slices.Contains(denied, a) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// applyRole finalises a gateway entry and handler for the server being built.
+// On the admin server everything passes through; on the member server the
+// admin-only actions are stripped from both the handler and the catalog, which
+// also makes the entry non-destructive (and its description honest).
+func applyRole(toolName string, isAdmin bool, handler ToolHandlerFunc, entry GatewayEntry) (ToolHandlerFunc, GatewayEntry) {
+	if isAdmin || len(adminOnlyActions[toolName]) == 0 {
+		return handler, entry
+	}
+	entry.Actions = memberActions(toolName, entry.Actions)
+	entry.Destructive = false
+	entry.ReadOnly = true
+	entry.Description = describeActions(toolName, entry.Actions)
+	return denyAdminActions(toolName, handler), entry
+}
+
+// describeActions rebuilds a tool description from its remaining actions.
+func describeActions(toolName string, actions []string) string {
+	return fmt.Sprintf("%s (read-only): %s", toolName, strings.Join(actions, ", "))
+}
 
 // ---------------------------------------------------------------------------
 // Gateway-based tool registration
@@ -26,13 +101,14 @@ func buildGateway(deps Deps, isAdmin bool, b *CatalogBuilder) *Gateway {
 // destructive kill_query action of the (otherwise read) database tool.
 func registerReadOnlyTools(gw *Gateway, deps Deps, isAdmin bool, b *CatalogBuilder) {
 	// --- connectors ---
-	gw.Register("connectors",
+	connectorsHandler, connectorsEntry := applyRole("connectors", isAdmin,
 		wrapHandler(deps, "connectors", tools.ConnectorsHandler(tools.ConnectorsDeps{
 			DSStore:       deps.DSStore,
 			Registry:      deps.Registry,
 			LogStore:      deps.LogStore,
 			Config:        deps.Config,
 			SettingsStore: deps.SettingsStore,
+			IsAdmin:       isAdmin,
 		})),
 		GatewayEntry{
 			Description: "Connector management: list, get, create, test, update, delete",
@@ -43,7 +119,8 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, isAdmin bool, b *CatalogBuild
 			Destructive: true,
 			Params:      map[string]string{"type": "Filter by connector type", "id": "Connector ID for get/update/delete"},
 		})
-	b.Add("connectors", "Connector management: list, get, create, test, update, delete", "Connectors", "read", "")
+	gw.Register("connectors", connectorsHandler, connectorsEntry)
+	b.Add("connectors", connectorsEntry.Description, "Connectors", "read", "")
 
 	// --- database ---
 	gw.Register("database",
@@ -105,7 +182,7 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, isAdmin bool, b *CatalogBuild
 
 	// --- healthchecks ---
 	if deps.HealthCheckStore != nil {
-		gw.Register("healthchecks",
+		hcHandler, hcEntry := applyRole("healthchecks", isAdmin,
 			wrapHandler(deps, "healthchecks", tools.HealthchecksHandler(tools.HealthchecksDeps{
 				HealthCheckStore: deps.HealthCheckStore,
 			})),
@@ -118,7 +195,8 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, isAdmin bool, b *CatalogBuild
 				Destructive: true,
 				Params:      map[string]string{"url": "Health check URL (create)", "id": "Health check ID (delete/uptime)"},
 			})
-		b.Add("healthchecks", "Health check management: list, uptime, create, delete", "Uptime", "read", "")
+		gw.Register("healthchecks", hcHandler, hcEntry)
+		b.Add("healthchecks", hcEntry.Description, "Uptime", "read", "")
 	}
 
 	// --- overview (includes agent memory: notes) ---
@@ -238,6 +316,7 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, isAdmin bool, b *CatalogBuild
 			UserStore:     deps.UserStore,
 			SettingsStore: deps.SettingsStore,
 			DSStore:       deps.DSStore,
+			IsAdmin:       isAdmin,
 		})),
 		GatewayEntry{
 			Description: "Onboarding assistant: check status, detect framework, get SDK guide, verify data flow",
@@ -251,9 +330,11 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, isAdmin bool, b *CatalogBuild
 
 	// --- deep_capture ---
 	if deps.DB != nil {
-		gw.Register("deep_capture",
+		dcHandler, dcEntry := applyRole("deep_capture", isAdmin,
 			wrapHandler(deps, "deep_capture", tools.DeepCaptureHandler(tools.DeepCaptureDeps{
-				DB: deps.DB,
+				DB:       deps.DB,
+				LogStore: deps.LogStore,
+				IsAdmin:  isAdmin,
 			})),
 			GatewayEntry{
 				Description: "Deep capture data: request/response details, SQL queries, HTTP calls, emails, audit trail, file operations, PII config, retention policy",
@@ -267,20 +348,21 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, isAdmin bool, b *CatalogBuild
 				ReadOnly:   false,
 				Idempotent: false,
 				Params: map[string]string{
-					"log_id":         "Log entry ID (for per-request captures)",
-					"record_type":    "Record type (audit_trail)",
-					"record_id":      "Record ID (audit_trail)",
-					"actor_id":       "Actor ID (search_audit)",
-					"action":         "Action filter (search_audit)",
-					"fingerprint":    "SQL fingerprint (search_sql)",
-					"table_name":     "Table name (search_sql)",
+					"log_id":          "Log entry ID (for per-request captures)",
+					"record_type":     "Record type (audit_trail)",
+					"record_id":       "Record ID (audit_trail)",
+					"actor_id":        "Actor ID (search_audit)",
+					"action":          "Action filter (search_audit)",
+					"fingerprint":     "SQL fingerprint (search_sql)",
+					"table_name":      "Table name (search_sql)",
 					"min_duration_ms": "Minimum SQL duration in ms (search_sql)",
-					"last":           "Time window: 1h, 24h, 7d (email_captures, search_audit, search_sql)",
-					"limit":          "Max results (search_sql, default 50)",
-					"config":         "JSON config object (update_pii_config, update_retention)",
+					"last":            "Time window: 1h, 24h, 7d (email_captures, search_audit, search_sql)",
+					"limit":           "Max results (search_sql, default 50)",
+					"config":          "JSON config object (update_pii_config, update_retention)",
 				},
 			})
-		b.Add("deep_capture", "Deep capture data: request/response, SQL, HTTP, emails, audit, files, PII config, retention", "Deep Capture", "read", "")
+		gw.Register("deep_capture", dcHandler, dcEntry)
+		b.Add("deep_capture", dcEntry.Description, "Deep Capture", "read", "")
 	}
 }
 
@@ -288,15 +370,20 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, isAdmin bool, b *CatalogBuild
 func registerWriteTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 	// Dynamic connector tools — registered individually (not through gateway).
 	// These are still added to the gateway as pass-through handlers.
-	for _, t := range deps.Registry.AllTools() {
-		handler := bridgeHandler(t)
-		gw.Register(t.Name,
-			wrapHandler(deps, t.Name, handler),
-			GatewayEntry{
-				Description: t.Description,
-				Category:    "Connector Queries",
-				Access:      "admin",
-			})
+	if deps.Registry != nil {
+		for _, t := range deps.Registry.AllTools() {
+			handler := bridgeHandler(t)
+			gw.Register(t.Name,
+				wrapHandler(deps, t.Name, handler),
+				GatewayEntry{
+					Description: t.Description,
+					Category:    "Connector Queries",
+					Access:      "admin",
+				})
+			// The web /tools page is built from the same registration pass, so
+			// dynamic connector tools must be added to the catalog too.
+			b.Add(t.Name, t.Description, "Connector Queries", "admin", "database connector")
+		}
 	}
 
 	// --- admin (settings, users, audit — no notes/session_summary, those are in overview for all users) ---
@@ -319,4 +406,3 @@ func registerWriteTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 		})
 	b.Add("admin", "Admin operations: settings, users, audit, notes, retention, activity, session_summary", "Admin", "admin", "")
 }
-

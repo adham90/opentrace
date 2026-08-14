@@ -79,10 +79,11 @@ func HandleOverviewInvestigate(ctx context.Context, d OverviewDeps, args map[str
 			defer wg.Done()
 			sinceTime := since
 			logs, err := d.LogStore.Search(ctx, store.LogSearchParams{
-				Service: service,
-				Level:   "error",
-				Start:   &sinceTime,
-				Limit:   10,
+				Service:     service,
+				Environment: env,
+				Level:       "error",
+				Start:       &sinceTime,
+				Limit:       10,
 			})
 			if err != nil {
 				return
@@ -100,19 +101,27 @@ func HandleOverviewInvestigate(ctx context.Context, d OverviewDeps, args map[str
 		}()
 	}
 
-	// 3. Active watch alerts.
+	// 3. Active watch alerts for THIS service and environment.
+	//
+	// This used to include every pending alert on the instance and then report
+	// the global count as "%d active alerts" inside a per-service report, so an
+	// investigation of "api" claimed eight alerts that all belonged to other
+	// services. Alerts carry no service column, so filterAlerts resolves it
+	// through the parent watch.
 	if d.WatchStore != nil {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			alerts, err := d.WatchStore.ListAlerts(ctx, "", "pending", 20)
+			alerts, err := d.WatchStore.ListAlerts(ctx, "", "pending", maxAlertList)
+			if err != nil {
+				return
+			}
+			scoped, err := filterAlerts(ctx, d.WatchStore, alerts, service, env)
 			if err != nil {
 				return
 			}
 			mu.Lock()
-			for _, a := range alerts {
-				// Alert doesn't have service directly; include all and let
-				// the summary note them. Filter via watch if possible.
+			for _, a := range scoped {
 				alertsList = append(alertsList, map[string]any{
 					"id":              a.ID,
 					"summary":         a.Summary,
@@ -133,9 +142,10 @@ func HandleOverviewInvestigate(ctx context.Context, d OverviewDeps, args map[str
 		go func() {
 			defer wg.Done()
 			byLevel, err := d.LogStore.CountByLevel(ctx, store.LogCountParams{
-				Since:   since,
-				Until:   now,
-				Service: service,
+				Since:       since,
+				Until:       now,
+				Service:     service,
+				Environment: env,
 			})
 			if err != nil {
 				return
@@ -168,8 +178,8 @@ func HandleOverviewInvestigate(ctx context.Context, d OverviewDeps, args map[str
 	// Build summary.
 	errorLogCount := len(recentErrorLogs)
 	alertCount := len(alertsList)
-	resp["summary"] = fmt.Sprintf("%d unresolved errors, %d error logs in last hour, %d active alerts",
-		unresolvedCount, errorLogCount, alertCount)
+	resp["summary"] = fmt.Sprintf("%d unresolved errors, %d error logs in the last %s, %d active alerts for %s",
+		unresolvedCount, errorLogCount, now.Sub(since).Round(time.Minute), alertCount, service)
 
 	// Suggestions.
 	var suggestions []ToolSuggestion

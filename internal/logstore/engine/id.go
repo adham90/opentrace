@@ -10,12 +10,27 @@ const (
 	chunkBits = 8
 	rowMask   = (1 << rowBits) - 1   // 0x7FFFFF = 8,388,607
 	chunkMask = (1 << chunkBits) - 1 // 0xFF = 255
-	chunkSize = 50000                 // max entries per chunk
+	chunkSize = 50000                // max entries per chunk
+
+	// maxChunksPerSegment is how many chunk numbers the ID layout can encode.
+	maxChunksPerSegment = chunkMask + 1
+
+	// MaxEntriesPerSegment is the number of entries a single segment hour can
+	// address. Beyond it the chunk number would carry into the segment-hour
+	// bits, producing IDs that decode to a different hour (wrong-segment
+	// GetByID lookups and colliding tail cursors), so the writer seals early
+	// instead of encoding an overflowing ID.
+	MaxEntriesPerSegment = chunkSize * maxChunksPerSegment // 12,800,000
 )
 
-// EncodeID builds a composite int64 ID from segment hour, chunk number, and row offset.
+// EncodeID builds a composite int64 ID from segment hour, chunk number, and row
+// offset. chunkNum and row are masked to their field widths: an out-of-range
+// value used to carry silently into the next field (and into the segment hour),
+// which produced IDs that decoded to a different hour entirely.
 func EncodeID(segmentHour int64, chunkNum, row int) int64 {
-	return (segmentHour << (rowBits + chunkBits)) | (int64(chunkNum) << rowBits) | int64(row)
+	return (segmentHour << (rowBits + chunkBits)) |
+		((int64(chunkNum) & chunkMask) << rowBits) |
+		(int64(row) & rowMask)
 }
 
 // DecodeID extracts segment hour, chunk number, and row offset from a composite ID.
@@ -42,8 +57,15 @@ func SegmentDirName(h int64) string {
 }
 
 // IDForPosition computes the composite ID for a given position in the active WAL.
+// entryIndex must be < MaxEntriesPerSegment; callers check SegmentHasRoom first.
 func IDForPosition(segmentHour int64, entryIndex int) int64 {
 	chunkNum := entryIndex / chunkSize
 	row := entryIndex % chunkSize
 	return EncodeID(segmentHour, chunkNum, row)
+}
+
+// SegmentHasRoom reports whether n more entries fit in a segment hour that
+// already holds have entries without overflowing the ID layout.
+func SegmentHasRoom(have, n int) bool {
+	return have >= 0 && n >= 0 && have+n <= MaxEntriesPerSegment
 }

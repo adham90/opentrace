@@ -23,7 +23,13 @@ func (f *fakeDBConnector) Tools() []connector.Tool                { return nil }
 func (f *fakeDBConnector) Close() error                           { return nil }
 func (f *fakeDBConnector) Environment() string                    { return f.env }
 
-func (f *fakeDBConnector) ExecuteReadQuery(_ context.Context, _ string) (*connector.QueryResult, error) {
+func (f *fakeDBConnector) ExecuteReadQuery(ctx context.Context, query string) (*connector.QueryResult, error) {
+	return f.ExecuteReadQueryArgs(ctx, query)
+}
+
+// ExecuteReadQueryArgs implements connector.ParameterizedQueryExecutor — the
+// tools bind every caller-supplied value, so the fake must accept parameters.
+func (f *fakeDBConnector) ExecuteReadQueryArgs(_ context.Context, _ string, _ ...any) (*connector.QueryResult, error) {
 	return &connector.QueryResult{
 		Columns:  []string{"pid", "state", "app_name", "query_preview", "duration_seconds"},
 		Rows:     f.readRows,

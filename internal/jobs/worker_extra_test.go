@@ -317,3 +317,95 @@ func TestEnqueueAt_FutureTime(t *testing.T) {
 		t.Fatal("should not claim a future job")
 	}
 }
+
+// TestWorkerCompletesJobAfterContextCancel proves the completion write uses a
+// context detached from the poll context. Shutdown cancels the poll context
+// before the in-flight handler returns; if Complete used that context the row
+// would stay 'running' and the finished work would be re-executed after the
+// next boot's reap.
+func TestWorkerCompletesJobAfterContextCancel(t *testing.T) {
+	db := setupTestDB(t)
+	q := NewQueue(db)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	job, err := q.Enqueue(ctx, "shutdown.task", nil)
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	done := make(chan struct{})
+	w := NewWorker(q,
+		WithPollInterval(10*time.Millisecond),
+		WithReapInterval(0),
+	)
+	w.Register("shutdown.task", func(context.Context, json.RawMessage) error {
+		// Simulate SIGTERM arriving while the handler is finishing.
+		cancel()
+		close(done)
+		return nil
+	})
+
+	w.Start(ctx)
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		w.Stop()
+		t.Fatal("handler never ran")
+	}
+	w.Stop()
+
+	got, err := q.getByID(context.Background(), job.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != StatusCompleted {
+		t.Errorf("job status = %q, want %q (last_error=%q)", got.Status, StatusCompleted, got.LastError)
+	}
+}
+
+// TestWorkerReapsWedgedRunningJob proves the worker reclaims a job stuck in
+// 'running' past the visibility timeout, so a failed bookkeeping write cannot
+// block a job type for the rest of the process's lifetime.
+func TestWorkerReapsWedgedRunningJob(t *testing.T) {
+	db := setupTestDB(t)
+	q := NewQueue(db)
+	ctx := context.Background()
+
+	job, err := q.Enqueue(ctx, "wedged.task", nil)
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?`,
+		time.Now().UTC().Add(-time.Hour).Format(time.RFC3339), job.ID,
+	); err != nil {
+		t.Fatalf("wedge job: %v", err)
+	}
+
+	w := NewWorker(q,
+		WithPollInterval(time.Hour), // never claim; only the reaper should act
+		WithReapInterval(10*time.Millisecond),
+		WithVisibilityTimeout(time.Minute),
+	)
+	w.Start(ctx)
+	defer w.Stop()
+
+	deadline := time.After(3 * time.Second)
+	for {
+		got, err := q.getByID(ctx, job.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Status != StatusRunning {
+			return // reclaimed (pending or dead)
+		}
+		select {
+		case <-deadline:
+			t.Fatal("wedged 'running' job was never reclaimed by the periodic reap")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}

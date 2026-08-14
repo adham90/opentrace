@@ -27,7 +27,7 @@ func NewServerStore(db *bun.DB) store.ServerStore {
 // Register uses a transaction for upsert-on-hostname logic.
 func (s *serverStore) Register(ctx context.Context, params store.RegisterServerParams) (*store.Server, error) {
 	now := time.Now().UTC()
-	nowStr := now.Format(time.RFC3339)
+	nowStr := rfc3339(now)
 
 	labelsJSON := "{}"
 	if params.Labels != nil {
@@ -149,7 +149,7 @@ func (s *serverStore) Update(ctx context.Context, id uuid.UUID, params store.Upd
 	if params.DisplayName != nil {
 		_, err := s.db.NewUpdate().Model((*store.Server)(nil)).
 			Set("display_name = ?", *params.DisplayName).
-			Set("updated_at = ?", now).
+			Set("updated_at = ?", rfc3339(now)).
 			Where("id = ?", id.String()).
 			Exec(ctx)
 		if err != nil {
@@ -160,11 +160,17 @@ func (s *serverStore) Update(ctx context.Context, id uuid.UUID, params store.Upd
 	return s.GetByID(ctx, id)
 }
 
+// UpdateHeartbeat records a fresh heartbeat. It writes last_seen_at in the
+// canonical RFC3339 form MarkStaleOffline compares against, and brings the
+// server back online: a server that was swept offline while its agent was
+// unreachable is live again the moment it reports in, without waiting for a
+// re-register.
 func (s *serverStore) UpdateHeartbeat(ctx context.Context, id uuid.UUID) error {
-	now := time.Now().UTC()
+	now := rfc3339(time.Now().UTC())
 	res, err := s.db.NewUpdate().Model((*store.Server)(nil)).
 		Set("last_seen_at = ?", now).
 		Set("updated_at = ?", now).
+		Set("status = ?", string(store.ServerOnline)).
 		Where("id = ?", id.String()).
 		Exec(ctx)
 	if err != nil {
@@ -192,11 +198,10 @@ func (s *serverStore) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (s *serverStore) MarkStaleOffline(ctx context.Context, threshold time.Duration) (int, error) {
-	cutoff := time.Now().UTC().Add(-threshold).Format(time.RFC3339)
-	now := time.Now().UTC()
+	cutoff := rfc3339(time.Now().UTC().Add(-threshold))
 	res, err := s.db.NewUpdate().Model((*store.Server)(nil)).
 		Set("status = ?", string(store.ServerOffline)).
-		Set("updated_at = ?", now).
+		Set("updated_at = ?", rfc3339(time.Now().UTC())).
 		Where("status = ?", string(store.ServerOnline)).
 		Where("last_seen_at < ?", cutoff).
 		Exec(ctx)

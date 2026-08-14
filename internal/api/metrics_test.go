@@ -1,11 +1,14 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/adham90/opentrace/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
 
@@ -76,6 +79,81 @@ func TestPrometheusMiddleware_SkipsMetricsEndpoint(t *testing.T) {
 	val := getCounterVecValue(t, "GET", "/debug/metrics", "200")
 	if val > 0 {
 		t.Errorf("expected no metric recording for /debug/metrics, got %f", val)
+	}
+}
+
+// collectMethodLabels returns every distinct value of the "method" label
+// currently present in the HTTPRequestsTotal series set.
+func collectMethodLabels(t *testing.T) map[string]bool {
+	t.Helper()
+	ch := make(chan prometheus.Metric, 1024)
+	go func() {
+		metrics.HTTPRequestsTotal.Collect(ch)
+		close(ch)
+	}()
+	seen := make(map[string]bool)
+	for m := range ch {
+		var pb dto.Metric
+		if err := m.Write(&pb); err != nil {
+			t.Fatalf("writing metric: %v", err)
+		}
+		for _, lp := range pb.GetLabel() {
+			if lp.GetName() == "method" {
+				seen[lp.GetValue()] = true
+			}
+		}
+	}
+	return seen
+}
+
+// TestPrometheusMiddleware_BoundsMethodLabel proves the method label is bounded.
+// net/http hands any RFC 7230 token through to the handler, and this middleware
+// runs before any authentication, so an unauthenticated `curl -X <random>` loop
+// would otherwise mint one permanent time series per request.
+func TestPrometheusMiddleware_BoundsMethodLabel(t *testing.T) {
+	handler := PrometheusMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	const junkRequests = 50
+	before := getCounterVecValue(t, otherMethodLabel, "/api/logs", "200")
+
+	for i := 0; i < junkRequests; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/logs", nil)
+		// Bypass httptest.NewRequest's method validation the same way a raw
+		// socket client does: set the field directly.
+		req.Method = fmt.Sprintf("ZZQQ%04d", i)
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	for method := range collectMethodLabels(t) {
+		if strings.HasPrefix(method, "ZZQQ") {
+			t.Fatalf("attacker-chosen method %q became a permanent label value", method)
+		}
+	}
+
+	after := getCounterVecValue(t, otherMethodLabel, "/api/logs", "200")
+	if after != before+junkRequests {
+		t.Errorf("%q series incremented by %v, want %d", otherMethodLabel, after-before, junkRequests)
+	}
+}
+
+// TestMetricMethod_KnownMethodsPreserved guards against the fold being so broad
+// it destroys the label's usefulness.
+func TestMetricMethod_KnownMethodsPreserved(t *testing.T) {
+	for _, m := range []string{
+		http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+		http.MethodPatch, http.MethodDelete, http.MethodConnect,
+		http.MethodOptions, http.MethodTrace,
+	} {
+		if got := metricMethod(m); got != m {
+			t.Errorf("metricMethod(%q) = %q, want %q", m, got, m)
+		}
+	}
+	for _, m := range []string{"", "get", "X-RANDOM-9f8a7b", "PROPFIND"} {
+		if got := metricMethod(m); got != otherMethodLabel {
+			t.Errorf("metricMethod(%q) = %q, want %q", m, got, otherMethodLabel)
+		}
 	}
 }
 

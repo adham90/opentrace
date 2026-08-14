@@ -11,9 +11,13 @@ func HandleSetupGuide(ctx context.Context, d SetupDeps, args map[string]any) (*C
 		return NewToolResultError("framework is required. Use: rails, node, express, nextjs, django, fastapi, python, go"), nil
 	}
 
-	// Get the real API key from settings
+	// Admins get the real key inlined so the guide is copy-pasteable. Members
+	// get the placeholder: this key authenticates ingest and CLI-read
+	// requests, so returning it to a read-only caller escalates them to
+	// ingest-capable. Same credential, same reason, as the overview settings
+	// action that no longer echoes it either.
 	apiKey := ""
-	if d.SettingsStore != nil {
+	if d.IsAdmin && d.SettingsStore != nil {
 		if k, err := d.SettingsStore.GetAPIKey(ctx); err == nil && k != "" {
 			apiKey = k
 		}

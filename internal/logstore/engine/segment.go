@@ -49,6 +49,10 @@ func (sm *SegmentManager) scan() error {
 		return fmt.Errorf("read data dir: %w", err)
 	}
 
+	// The WAL writer owns the current hour's active.wal; every earlier hour's is
+	// an orphan left by a restart and must be recovered here.
+	currentHour := SegmentHourFromTime(time.Now().UTC())
+
 	var segments []*LoadedSegment
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -56,24 +60,7 @@ func (sm *SegmentManager) scan() error {
 		}
 
 		dirPath := filepath.Join(sm.dataDir, entry.Name())
-
-		// Check for incomplete seals
-		sealingFiles, _ := filepath.Glob(filepath.Join(dirPath, "sealing_*.wal"))
-		if len(sealingFiles) > 0 && !IsSealComplete(dirPath) {
-			slog.Warn("segment: incomplete seal detected, cleaning up", "dir", entry.Name())
-			CleanIncompleteSeal(dirPath)
-
-			// Re-seal from the WAL
-			hour := parseSegmentHour(entry.Name())
-			if hour > 0 {
-				for _, walFile := range sealingFiles {
-					slog.Info("segment: re-sealing from WAL", "wal", walFile)
-					if _, err := Seal(walFile, hour); err != nil {
-						slog.Error("segment: re-seal failed", "error", err, "wal", walFile)
-					}
-				}
-			}
-		}
+		sm.recoverDir(dirPath, entry.Name(), currentHour)
 
 		// Skip if not a sealed segment
 		if !IsSealComplete(dirPath) {
@@ -114,6 +101,56 @@ func (sm *SegmentManager) scan() error {
 
 	slog.Info("segment: loaded segments", "count", len(segments))
 	return nil
+}
+
+// recoverDir brings one segment directory into a loadable state at startup:
+// it finishes an interrupted seal, and it seals a previous hour's orphaned
+// active.wal. An orphan is left behind by any restart that crosses an hour
+// boundary — the writer only ever opens the current hour, nothing else reads
+// old active.wal files, and Prune only touches registered segments, so those
+// entries used to be invisible to every query forever and the directory leaked.
+func (sm *SegmentManager) recoverDir(dirPath, dirName string, currentHour int64) {
+	if IsSealComplete(dirPath) {
+		return
+	}
+	hour := parseSegmentHour(dirName)
+	if hour <= 0 {
+		return
+	}
+
+	// Finish an interrupted seal first (its sealing_*.wal is authoritative).
+	sealingFiles, _ := filepath.Glob(filepath.Join(dirPath, "sealing_*.wal"))
+	if len(sealingFiles) > 0 {
+		slog.Warn("segment: incomplete seal detected, cleaning up", "dir", dirName)
+		CleanIncompleteSeal(dirPath)
+		for _, walFile := range sealingFiles {
+			slog.Info("segment: re-sealing from WAL", "wal", walFile)
+			if _, err := Seal(walFile, hour); err != nil {
+				slog.Error("segment: re-seal failed", "error", err, "wal", walFile)
+			}
+		}
+		return
+	}
+
+	// Orphaned active.wal from an earlier hour: rename it into the normal
+	// sealing path (so a crash mid-seal is recoverable by the branch above),
+	// then seal it so the hour becomes searchable and prunable again.
+	if hour >= currentHour {
+		return // current hour belongs to the live writer
+	}
+	activePath := filepath.Join(dirPath, "active.wal")
+	if _, err := os.Stat(activePath); err != nil {
+		return
+	}
+	sealingPath := filepath.Join(dirPath, fmt.Sprintf("sealing_%s.wal", SegmentDirName(hour)))
+	if err := os.Rename(activePath, sealingPath); err != nil {
+		slog.Error("segment: cannot rename orphaned WAL for sealing", "error", err, "dir", dirName)
+		return
+	}
+	slog.Warn("segment: sealing orphaned active WAL from a previous hour", "dir", dirName)
+	if _, err := Seal(sealingPath, hour); err != nil {
+		slog.Error("segment: orphan seal failed", "error", err, "dir", dirName)
+	}
 }
 
 // Register adds a newly sealed segment to the manager.

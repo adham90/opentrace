@@ -22,7 +22,10 @@ type ErrorGroupStore interface {
 	Resolve(ctx context.Context, fingerprint, environment, reason string) error
 	Ignore(ctx context.Context, fingerprint, environment, reason string) error
 	Reopen(ctx context.Context, fingerprint, environment, reason string) error
-	ListEvents(ctx context.Context, fingerprint string, limit int) ([]ErrorGroupEvent, error)
+	// ListEvents returns lifecycle events for a fingerprint. environment ""
+	// means "across all envs" — env-scoped callers must pass a concrete env,
+	// otherwise they see another environment's resolve/ignore history.
+	ListEvents(ctx context.Context, fingerprint, environment string, limit int) ([]ErrorGroupEvent, error)
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
 }
 
@@ -32,10 +35,12 @@ type ErrorImpactStore interface {
 	// env of the error_groups row the impact belongs to.
 	TrackImpact(ctx context.Context, fingerprint, environment, userID string, contextData map[string]any, logID int64, service string) error
 
-	// Query. GetImpact aggregates across every env the fingerprint has been
-	// observed in; callers that want env-specific numbers should filter
-	// GetAffectedUsers results.
-	GetImpact(ctx context.Context, fingerprint string) (*ErrorImpact, error)
+	// Query. GetImpact reports the impact of a fingerprint within one
+	// environment. Pass "" to aggregate across every env the fingerprint was
+	// observed in; the returned ErrorImpact.Environment then names the
+	// highest-impact env rather than the whole aggregate, so env-scoped callers
+	// must pass their own env instead of gating on the result.
+	GetImpact(ctx context.Context, fingerprint, environment string) (*ErrorImpact, error)
 	GetAffectedUsers(ctx context.Context, fingerprint string, limit int) ([]AffectedUser, error)
 	GetUserErrors(ctx context.Context, userID string, since time.Time) ([]ErrorSummary, error)
 

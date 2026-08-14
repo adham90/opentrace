@@ -3,10 +3,25 @@ package watcher
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/adham90/opentrace/internal/safe"
 	"github.com/adham90/opentrace/pkg/store"
+)
+
+const (
+	// maxConcurrentStreamEvals bounds reactive evaluations triggered by ingest.
+	maxConcurrentStreamEvals = 16
+	// streamEvalTimeout bounds one reactive evaluation pass.
+	streamEvalTimeout = 30 * time.Second
+	// defaultStreamCheckInterval is used when a watch's check_interval is bad.
+	defaultStreamCheckInterval = 30 * time.Second
+	// streamStopDrainTimeout bounds how long Stop waits for in-flight reactive
+	// evaluations and their alert deliveries. It must stay comfortably inside
+	// the process-wide shutdown budget so a wedged notifier delays exit rather
+	// than blocking it, while a healthy delivery still gets to land.
+	streamStopDrainTimeout = 5 * time.Second
 )
 
 // WatchStreamEvaluator reactively checks watches when new logs arrive.
@@ -18,12 +33,21 @@ type WatchStreamEvaluator struct {
 	evaluator       *WatchEvaluator
 	evidenceBuilder *WatchEvidenceBuilder
 	notifiers       []WatchAlertNotifier
+	notify          *notifyDispatcher
 
 	// Parent context for deriving per-evaluation timeouts.
 	ctx context.Context
 
 	// Semaphore to limit concurrent evaluations.
 	sem chan struct{}
+
+	// mu guards stopped and serialises evalWG.Add against Stop's Wait.
+	mu sync.RWMutex
+	// stopped rejects new reactive evaluations once shutdown has begun.
+	stopped bool
+	// evalWG tracks in-flight reactive evaluations so Stop can drain the
+	// alert deliveries they are about to dispatch.
+	evalWG sync.WaitGroup
 }
 
 // NewWatchStreamEvaluator creates a reactive stream evaluator.
@@ -43,7 +67,8 @@ func NewWatchStreamEvaluator(
 		evaluator:       evaluator,
 		evidenceBuilder: evidenceBuilder,
 		notifiers:       notifiers,
-		sem:             make(chan struct{}, 16),
+		notify:          newNotifyDispatcher(),
+		sem:             make(chan struct{}, maxConcurrentStreamEvals),
 	}
 }
 
@@ -63,19 +88,72 @@ func (s *WatchStreamEvaluator) OnLogsReceived(entries []store.LogEntry) {
 		}
 	}
 
+	if !s.beginEval() {
+		// Shutting down, or semaphore full — skip to prevent goroutine explosion.
+		return
+	}
+	go func() {
+		defer s.endEval()
+		safe.Run("watcher.evaluateMatching", func() { s.evaluateMatching(services) })
+	}()
+}
+
+// beginEval reserves a semaphore slot and registers the evaluation with the
+// shutdown drain. It reports false when the evaluator is stopping or saturated.
+// Taking the read lock here (and the write lock in Stop) guarantees no
+// evalWG.Add races Stop's Wait.
+func (s *WatchStreamEvaluator) beginEval() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.stopped {
+		return false
+	}
 	select {
 	case s.sem <- struct{}{}:
-		go func() {
-			defer func() { <-s.sem }()
-			safe.Run("watcher.evaluateMatching", func() { s.evaluateMatching(services) })
-		}()
+		s.evalWG.Add(1)
+		return true
 	default:
-		// Semaphore full — skip to prevent goroutine explosion.
+		return false
+	}
+}
+
+func (s *WatchStreamEvaluator) endEval() {
+	<-s.sem
+	s.evalWG.Done()
+}
+
+// Stop shuts the reactive evaluator down: it refuses new evaluations, then
+// drains the ones already running and the alert deliveries they dispatched.
+// Without this, an alert that fired during the last ingest batch before exit
+// would be created in the database but never delivered.
+func (s *WatchStreamEvaluator) Stop() {
+	s.mu.Lock()
+	already := s.stopped
+	s.stopped = true
+	s.mu.Unlock()
+	if already {
+		return
+	}
+
+	deadline := time.Now().Add(streamStopDrainTimeout)
+	if !waitGroupFor(&s.evalWG, streamStopDrainTimeout) {
+		slog.Warn("watch stream: in-flight evaluations did not finish before shutdown deadline",
+			"timeout", streamStopDrainTimeout)
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		slog.Warn("watch stream: alert deliveries abandoned at shutdown deadline",
+			"timeout", streamStopDrainTimeout)
+		return
+	}
+	if s.notify != nil && !s.notify.waitFor(remaining) {
+		slog.Warn("watch stream: alert deliveries abandoned at shutdown deadline",
+			"timeout", streamStopDrainTimeout)
 	}
 }
 
 func (s *WatchStreamEvaluator) evaluateMatching(services map[string]bool) {
-	ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(s.ctx, streamEvalTimeout)
 	defer cancel()
 
 	watches, err := s.watchStore.List(ctx, store.ListWatchParams{Status: store.WatchStatusActive})
@@ -96,10 +174,7 @@ func (s *WatchStreamEvaluator) evaluateMatching(services map[string]bool) {
 		// Both paths write last_checked_at via UpdateAfterCheck, so this is the single
 		// source of truth — no in-memory state needed.
 		if w.LastCheckedAt != nil {
-			ci, err := time.ParseDuration(w.CheckInterval)
-			if err != nil {
-				ci = 30 * time.Second
-			}
+			ci := parseDurationOr(w.CheckInterval, defaultStreamCheckInterval)
 			// Use half the check interval as the minimum gap for reactive checks.
 			// This gives the stream evaluator a chance to fire mid-cycle while
 			// still preventing duplicate evaluations.
@@ -137,19 +212,19 @@ func (s *WatchStreamEvaluator) evaluateOne(ctx context.Context, w *store.Watch) 
 			}
 		}
 		alert, err := s.watchStore.CreateAlert(ctx, store.CreateWatchAlertParams{
-			WatchID:        w.ID,
-			RunID:          run.ID,
-			Urgency:        w.Urgency,
-			Summary:        result.Summary,
+			WatchID:            w.ID,
+			RunID:              run.ID,
+			Urgency:            w.Urgency,
+			Summary:            result.Summary,
 			ConditionsSnapshot: store.BuildConditionsSnapshot(store.ConditionsSummary(w.ConditionsJSON), result.Value, store.ConditionsThreshold(w.ConditionsJSON)),
-			Evidence:       evidence,
+			Evidence:           evidence,
 		})
 		if err != nil {
 			slog.Error("watch stream: creating alert", "watch_id", w.ID, "error", err)
 			return
 		}
-		if len(s.notifiers) > 0 {
-			NotifyAllWatchAlert(ctx, s.notifiers, alert, w)
-		}
+		// Dispatch off this goroutine: it holds one of the semaphore slots
+		// that bound reactive evaluation.
+		s.notify.dispatch(ctx, s.notifiers, alert, w)
 	}
 }

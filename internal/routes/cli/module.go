@@ -196,24 +196,66 @@ func (h *handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, resp)
 }
 
+const (
+	// defaultSinceWindow is the lookback used when no 'since' is supplied.
+	defaultSinceWindow = 1 * time.Hour
+	// watchCountPageSize is how many watches are fetched per page when
+	// tallying statuses.
+	watchCountPageSize = 500
+	// maxWatchCountPages bounds the tally so a pathological install cannot
+	// turn `opentrace status` into an unbounded scan.
+	maxWatchCountPages = 40
+)
+
+// parseSinceOrError resolves the 'since' query param, defaulting to the last
+// hour. A malformed value is rejected with 400 rather than silently dropped:
+// answering a question about a past window with the last hour's data reads as
+// "nothing happened back then" — the worst possible answer. Returns false when
+// a response has already been written.
+func parseSinceOrError(w http.ResponseWriter, r *http.Request) (time.Time, bool) {
+	v := r.URL.Query().Get("since")
+	if v == "" {
+		return time.Now().Add(-defaultSinceWindow), true
+	}
+	t, err := server.ParseSinceParam(v)
+	if err != nil {
+		server.WriteError(w, http.StatusBadRequest, "invalid 'since' value (use 15m, 6h, 7d or an RFC3339 timestamp)")
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// countWatchesByStatus tallies watches by status. It pages through the store
+// instead of tallying a single capped page: a truncated tally silently reports
+// zero triggered watches while alerts are firing.
 func countWatchesByStatus(ctx context.Context, ws store.WatchStore) *watchesStatus {
 	result := &watchesStatus{}
-	watches, err := ws.List(ctx, store.ListWatchParams{Limit: 500})
-	if err != nil {
-		return result
-	}
-	for _, w := range watches {
-		switch w.Status {
-		case store.WatchStatusActive:
-			result.Active++
-		case store.WatchStatusTriggered:
-			result.Triggered++
-		case store.WatchStatusResolved:
-			result.Resolved++
-		case store.WatchStatusExpired:
-			result.Expired++
+	for page := 0; page < maxWatchCountPages; page++ {
+		watches, err := ws.List(ctx, store.ListWatchParams{
+			Limit:  watchCountPageSize,
+			Offset: page * watchCountPageSize,
+		})
+		if err != nil {
+			slog.Error("cli status: listing watches failed", "error", err)
+			return result
+		}
+		for _, w := range watches {
+			switch w.Status {
+			case store.WatchStatusActive:
+				result.Active++
+			case store.WatchStatusTriggered:
+				result.Triggered++
+			case store.WatchStatusResolved:
+				result.Resolved++
+			case store.WatchStatusExpired:
+				result.Expired++
+			}
+		}
+		if len(watches) < watchCountPageSize {
+			return result
 		}
 	}
+	slog.Warn("cli status: watch tally truncated", "max_watches", maxWatchCountPages*watchCountPageSize)
 	return result
 }
 

@@ -10,15 +10,28 @@ import (
 
 // File format constants.
 const (
-	Magic      = "OTCL"
-	Version    = 1
-	HeaderSize = 64
+	Magic = "OTCL"
+	// Version is the format version written by this build.
+	//
+	// v1 framed every string value with a bare uint16 length, which wrapped for
+	// values over 65535 bytes and misframed the rest of the column. v2 uses the
+	// extended framing (enc.LenExtended). Only the string framing changed, so v1
+	// files are still readable — see readerLenFormat.
+	Version = 2
+	// MinReadableVersion is the oldest chunk version this build can read.
+	MinReadableVersion = 1
+	HeaderSize         = 64
 
 	// Sanity bounds for header/directory fields read off disk, used to reject
 	// corrupt chunks before allocating. A chunk holds at most 50k rows; the
 	// generous caps leave headroom while still stopping multi-GB allocations.
 	maxChunkEntries = 1 << 20 // 1,048,576 (chunk cap is 50k; wide margin)
 	maxChunkColumns = 256     // column schema is small and fixed
+
+	// maxBitpackDictEntries caps the dictionary of a bitpacked column. Bitpack
+	// indices are uint8 packed into at most 8 bits, so a wider dictionary cannot
+	// be represented (and BitsNeeded would panic in BitpackEncode).
+	maxBitpackDictEntries = 256
 )
 
 // DirectoryEntry describes one column in the chunk footer.
@@ -33,10 +46,10 @@ type DirectoryEntry struct {
 
 // Writer writes a columnar chunk file.
 type Writer struct {
-	f          *os.File
-	entries    []Entry
-	offset     uint64
-	directory  []DirectoryEntry
+	f         *os.File
+	entries   []Entry
+	offset    uint64
+	directory []DirectoryEntry
 }
 
 // NewWriter creates a chunk writer that will write to the given path.
@@ -136,7 +149,9 @@ func (w *Writer) encodeColumn(col ColumnDef) ([]byte, int, error) {
 
 	case ColDictBitpack:
 		values := w.extractString(col.Name)
-		d := enc.DictEncode(values)
+		// Indices are packed into at most 8 bits, so the dictionary must stay
+		// within maxBitpackDictEntries; values beyond it fold onto index 0.
+		d := enc.DictEncodeLimit(values, maxBitpackDictEntries)
 		bits := enc.BitsNeeded(len(d.Dict))
 		indices8 := make([]uint8, len(d.Indices))
 		for i, idx := range d.Indices {
@@ -363,12 +378,12 @@ func (w *Writer) extractOptionalBool(name string) []*bool {
 	return values
 }
 
-// serializeDictOnly writes a dictionary as [2 bytes count][entries: 2-byte len + string]
+// serializeDictOnly writes a dictionary as [2 bytes count][length-prefixed entries].
+// Entries use the extended length framing (chunk v2).
 func serializeDictOnly(dict []string) []byte {
 	buf := binary.LittleEndian.AppendUint16(nil, uint16(len(dict)))
 	for _, s := range dict {
-		buf = binary.LittleEndian.AppendUint16(buf, uint16(len(s)))
-		buf = append(buf, s...)
+		buf = enc.AppendLenString(buf, s)
 	}
 	return buf
 }

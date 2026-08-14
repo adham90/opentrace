@@ -323,3 +323,46 @@ func TestGenerateErrorFingerprint_ConsistentAcrossLanguages(t *testing.T) {
 		t.Errorf("same service + error_class + source_file should produce same fingerprint across languages: ruby=%q node=%q", fpRuby, fpNode)
 	}
 }
+
+// TestExtractSourceFile_StackTraceOnly covers the Node SDK payload shape: a
+// stack_trace string with no source_file and no backtrace array. The
+// stack_trace branch used to sit behind an early return on a missing backtrace
+// and never executed, so these errors fell back to a message-only fingerprint
+// and one bug split across several error groups.
+func TestExtractSourceFile_StackTraceOnly(t *testing.T) {
+	md := map[string]any{
+		"stack_trace": "TypeError: x is undefined\n    at charge (app/pay.js:87:12)",
+	}
+	if got := extractSourceFileFromBacktrace(md); got != "app/pay.js" {
+		t.Fatalf("source file = %q, want %q", got, "app/pay.js")
+	}
+}
+
+func TestExtractSourceFile_BacktraceStillWins(t *testing.T) {
+	md := map[string]any{
+		"backtrace":   []any{"app/models/order.rb:12:in `save'"},
+		"stack_trace": "TypeError: x\n    at charge (app/pay.js:87:12)",
+	}
+	if got := extractSourceFileFromBacktrace(md); got != "app/models/order.rb" {
+		t.Fatalf("source file = %q, want backtrace to win", got)
+	}
+}
+
+// TestGenerateErrorFingerprint_StackTraceGroupsDifferentMessages proves the
+// practical effect: two occurrences at the same code site with structurally
+// different messages now land in one error group.
+func TestGenerateErrorFingerprint_StackTraceGroupsDifferentMessages(t *testing.T) {
+	mk := func(msg string) *store.LogEntry {
+		return &store.LogEntry{
+			Level: "error", Service: "api", ExceptionClass: "TypeError", Message: msg,
+			Metadata: map[string]any{
+				"stack_trace": "TypeError: boom\n    at charge (app/pay.js:87:12)",
+			},
+		}
+	}
+	a := GenerateErrorFingerprint(mk("cannot read 'id' of undefined"))
+	b := GenerateErrorFingerprint(mk("undefined is not an object"))
+	if a == "" || a != b {
+		t.Fatalf("stack_trace-only errors from one site split into groups: %q vs %q", a, b)
+	}
+}

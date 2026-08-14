@@ -10,6 +10,14 @@ import (
 	"github.com/adham90/opentrace/pkg/store"
 )
 
+const (
+	// defaultPollInterval is how often the scheduler looks for due watches.
+	defaultPollInterval = 15 * time.Second
+	// maxTriggeredWatchesPerPoll bounds the triggered-watch auto-resolve sweep
+	// so one poll cannot fan out over an unbounded backlog.
+	maxTriggeredWatchesPerPoll = 500
+)
+
 // WatchSchedulerOpts configures the watch scheduler.
 type WatchSchedulerOpts struct {
 	WatchStore      store.WatchStore
@@ -29,6 +37,7 @@ type WatchScheduler struct {
 	sessionManager  *WatchSessionManager
 	notifiers       []WatchAlertNotifier
 	poll            time.Duration
+	notify          *notifyDispatcher
 	cancel          context.CancelFunc
 	wg              sync.WaitGroup
 }
@@ -37,7 +46,7 @@ type WatchScheduler struct {
 func NewWatchScheduler(opts WatchSchedulerOpts) *WatchScheduler {
 	poll := opts.PollInterval
 	if poll <= 0 {
-		poll = 15 * time.Second
+		poll = defaultPollInterval
 	}
 	notifiers := opts.Notifiers
 	if len(notifiers) == 0 {
@@ -50,6 +59,7 @@ func NewWatchScheduler(opts WatchSchedulerOpts) *WatchScheduler {
 		sessionManager:  opts.SessionManager,
 		notifiers:       notifiers,
 		poll:            poll,
+		notify:          newNotifyDispatcher(),
 	}
 }
 
@@ -85,6 +95,7 @@ func (s *WatchScheduler) Stop() {
 		s.cancel()
 	}
 	s.wg.Wait()
+	s.notify.wait()
 }
 
 func (s *WatchScheduler) tick(ctx context.Context) {
@@ -115,14 +126,27 @@ func (s *WatchScheduler) checkTriggeredWatches(ctx context.Context) {
 	if s.sessionManager == nil {
 		return
 	}
-	watches, err := s.watchStore.List(ctx, store.ListWatchParams{Status: store.WatchStatusTriggered})
+	watches, err := s.watchStore.List(ctx, store.ListWatchParams{
+		Status: store.WatchStatusTriggered,
+		Limit:  maxTriggeredWatchesPerPoll,
+	})
 	if err != nil {
 		slog.Error("watch scheduler: listing triggered watches", "error", err)
 		return
 	}
+	now := time.Now().UTC()
 	for _, w := range watches {
 		if ctx.Err() != nil {
 			return
+		}
+		// ExpireWatches only touches active rows, so a watch that triggered
+		// before its expiry would otherwise stay triggered — and be
+		// re-measured on every poll — for the lifetime of the database.
+		if w.ExpiresAt != nil && !w.ExpiresAt.After(now) {
+			if err := s.watchStore.UpdateStatus(ctx, w.ID, store.WatchStatusExpired); err != nil {
+				slog.Warn("watch scheduler: expiring triggered watch", "watch_id", w.ID, "error", err)
+			}
+			continue
 		}
 		if err := s.sessionManager.CheckAutoResolve(ctx, &w); err != nil {
 			slog.Warn("watch scheduler: auto-resolve check failed", "watch_id", w.ID, "error", err)
@@ -181,12 +205,12 @@ func (s *WatchScheduler) createAlert(ctx context.Context, w *store.Watch, run *s
 	}
 
 	alert, err := s.watchStore.CreateAlert(ctx, store.CreateWatchAlertParams{
-		WatchID:        w.ID,
-		RunID:          run.ID,
-		Urgency:        w.Urgency,
-		Summary:        result.Summary,
+		WatchID:            w.ID,
+		RunID:              run.ID,
+		Urgency:            w.Urgency,
+		Summary:            result.Summary,
 		ConditionsSnapshot: store.BuildConditionsSnapshot(store.ConditionsSummary(w.ConditionsJSON), result.Value, store.ConditionsThreshold(w.ConditionsJSON)),
-		Evidence:       evidence,
+		Evidence:           evidence,
 	})
 	if err != nil {
 		slog.Error("watch scheduler: creating alert", "watch_id", w.ID, "error", err)
@@ -195,8 +219,7 @@ func (s *WatchScheduler) createAlert(ctx context.Context, w *store.Watch, run *s
 
 	slog.Info("watch alert created", "watch_id", w.ID, "conditions", store.ConditionsSummary(w.ConditionsJSON), "value", result.Value)
 
-	// Dispatch notifications asynchronously
-	if len(s.notifiers) > 0 {
-		NotifyAllWatchAlert(ctx, s.notifiers, alert, w)
-	}
+	// Dispatch notifications asynchronously — a wedged webhook must not stall
+	// the evaluation of the remaining due watches.
+	s.notify.dispatch(ctx, s.notifiers, alert, w)
 }

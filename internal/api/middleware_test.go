@@ -337,6 +337,74 @@ func TestRateLimiter_DifferentIPsTrackedSeparately(t *testing.T) {
 	}
 }
 
+// TestRateLimiter_OrderSliceBoundedByLiveEntries drives the real middleware
+// through many window rollovers for a handful of clients and asserts the
+// eviction FIFO stays proportional to the live entry set.
+//
+// This is the *benign* case — far below maxRateLimitEntries — which is exactly
+// the one the FIFO's own eviction loop never reaches. Before the fix the slice
+// grew by one record per rollover per IP and nothing ever reclaimed it
+// (entries=1 order=20000 orderHead=0).
+func TestRateLimiter_OrderSliceBoundedByLiveEntries(t *testing.T) {
+	const (
+		rollovers = 20000
+		clients   = 4
+	)
+	// A 1ns window means every request finds its entry expired and creates a
+	// fresh one — one FIFO record per request.
+	rl := NewRateLimiter(100, time.Nanosecond, nil)
+	defer rl.Stop()
+
+	handler := rl.Middleware(noReadHandler())
+	for i := 0; i < rollovers; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = fmt.Sprintf("10.0.0.%d:1000", i%clients)
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	rl.mu.Lock()
+	entries, order, head := len(rl.entries), len(rl.order), rl.orderHead
+	rl.mu.Unlock()
+
+	// Bound: the compaction floor plus the tolerated slack over the live set.
+	limit := orderCompactThreshold + orderSlackFactor*entries
+	if order > limit {
+		t.Fatalf("order slice grew unbounded: entries=%d order=%d orderHead=%d (want order <= %d after %d rollovers)",
+			entries, order, head, limit, rollovers)
+	}
+}
+
+// TestRateLimiter_CleanupReclaimsOrderRecords proves the periodic sweep, not
+// just entry insertion, reclaims FIFO records: once the expired entries are
+// dropped, the records pointing at them must go too.
+func TestRateLimiter_CleanupReclaimsOrderRecords(t *testing.T) {
+	rl := NewRateLimiter(100, time.Nanosecond, nil)
+	defer rl.Stop()
+
+	handler := rl.Middleware(noReadHandler())
+	for i := 0; i < orderCompactThreshold*2; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = fmt.Sprintf("10.%d.%d.%d:1000", i/65536, (i/256)%256, i%256)
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	// Simulate the cleanup tick body: drop expired entries, then compact.
+	rl.mu.Lock()
+	now := time.Now()
+	for ip, entry := range rl.entries {
+		if now.After(entry.resetAt) {
+			delete(rl.entries, ip)
+		}
+	}
+	rl.compactOrderLocked()
+	order := len(rl.order)
+	rl.mu.Unlock()
+
+	if order != 0 {
+		t.Fatalf("cleanup left %d order records with no live entries, want 0", order)
+	}
+}
+
 // ---------- RateLimiter.clientIP ----------
 
 func TestClientIP_DirectHostPort(t *testing.T) {
@@ -1070,11 +1138,11 @@ func TestMCPTokenAuth_AttachesEnvScope(t *testing.T) {
 			token := "scope-test-token-" + tc.name
 			user := &store.User{
 				ID:                  "scope-user-" + tc.name,
-				Email:                tc.name + "@test.com",
-				IsActive:             true,
-				MCPEnabled:           true,
-				MCPToken:             &token,
-				AllowedEnvironments:  tc.allowedEnvs,
+				Email:               tc.name + "@test.com",
+				IsActive:            true,
+				MCPEnabled:          true,
+				MCPToken:            &token,
+				AllowedEnvironments: tc.allowedEnvs,
 			}
 			mockUsers.mu.Lock()
 			mockUsers.users[user.ID] = user

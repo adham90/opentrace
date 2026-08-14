@@ -22,10 +22,10 @@ var ErrCircuitOpen = errors.New("circuit breaker is open: connector unavailable"
 // CircuitBreaker implements the circuit breaker pattern for connector operations.
 type CircuitBreaker struct {
 	mu           sync.Mutex
-	name         string        // connector name for logging
+	name         string // connector name for logging
 	state        CircuitState
 	failCount    int
-	successCount int           // consecutive successes in half-open
+	successCount int // consecutive successes in half-open
 	lastFailTime time.Time
 	threshold    int           // failures before opening
 	resetTimeout time.Duration // how long to wait before half-open
@@ -60,7 +60,9 @@ func NewCircuitBreaker(name string, cfg CircuitBreakerConfig) *CircuitBreaker {
 		cfg.HalfOpenMax = 2
 	}
 	return &CircuitBreaker{
-		name:         name,
+		// The name is logged on every state transition; callers derive it from
+		// a connection string, so strip any credential that survived.
+		name:         RedactSecrets(name),
 		state:        CircuitClosed,
 		threshold:    cfg.Threshold,
 		resetTimeout: cfg.ResetTimeout,

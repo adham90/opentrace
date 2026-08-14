@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/adham90/opentrace/internal/httpclient"
 )
 
 // errRoundTripper always fails the request without touching the network. The
@@ -94,5 +96,14 @@ func TestTelegramSender_SendTest_NotConfigured(t *testing.T) {
 	err := sender.SendTest(context.Background())
 	if err == nil {
 		t.Error("expected error for unconfigured sender")
+	}
+}
+
+// TestTelegramSender_UsesGuardedTransport proves the sender is wired to the
+// shared SSRF-guarded client rather than a bare http.Client.
+func TestTelegramSender_UsesGuardedTransport(t *testing.T) {
+	s := NewTelegramSender(func() *TelegramConfig { return nil })
+	if s.client.Transport != httpclient.New(telegramRequestTimeout).Transport {
+		t.Fatal("telegram sender does not use the shared guarded transport")
 	}
 }

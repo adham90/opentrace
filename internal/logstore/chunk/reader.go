@@ -2,16 +2,25 @@ package chunk
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 
 	enc "github.com/adham90/opentrace/internal/logstore/encoding"
 )
 
+// ErrColumnMissing reports that a column is absent from the chunk directory.
+// This is the only readColumnRaw failure the Read* helpers are allowed to paper
+// over with default values — it is expected under schema evolution. Every other
+// failure (corrupt directory entry, I/O error) must reach the caller.
+var ErrColumnMissing = errors.New("column not found in chunk")
+
 // Reader reads columns from a sealed chunk file.
 type Reader struct {
 	f          *os.File
 	EntryCount int
+	Version    int
+	lenFormat  enc.LenFormat
 	directory  map[string]DirectoryEntry
 }
 
@@ -34,8 +43,8 @@ func OpenReader(path string) (*Reader, error) {
 		return nil, fmt.Errorf("invalid magic: %q", header[0:4])
 	}
 
-	version := binary.LittleEndian.Uint16(header[4:])
-	if version != Version {
+	version := int(binary.LittleEndian.Uint16(header[4:]))
+	if version < MinReadableVersion || version > Version {
 		f.Close()
 		return nil, fmt.Errorf("unsupported version: %d", version)
 	}
@@ -87,8 +96,20 @@ func OpenReader(path string) (*Reader, error) {
 	return &Reader{
 		f:          f,
 		EntryCount: entryCount,
+		Version:    version,
+		lenFormat:  readerLenFormat(version),
 		directory:  dirMap,
 	}, nil
+}
+
+// readerLenFormat maps a chunk format version to its string length framing.
+// v1 files were written with a bare uint16 prefix; v2 added the extended
+// framing that can represent values over 65535 bytes.
+func readerLenFormat(version int) enc.LenFormat {
+	if version < 2 {
+		return enc.LenUint16
+	}
+	return enc.LenExtended
 }
 
 // Close closes the chunk file.
@@ -114,7 +135,7 @@ func (r *Reader) NullCount(name string) int {
 func (r *Reader) readColumnRaw(name string) ([]byte, ColumnType, error) {
 	entry, ok := r.directory[name]
 	if !ok {
-		return nil, 0, fmt.Errorf("column %q not found (schema evolution: treat as all-null)", name)
+		return nil, 0, fmt.Errorf("%w: %q", ErrColumnMissing, name)
 	}
 
 	// Guard against a corrupt directory entry claiming an absurd size.
@@ -128,11 +149,21 @@ func (r *Reader) readColumnRaw(name string) ([]byte, ColumnType, error) {
 	return data, entry.Type, nil
 }
 
+// missingColumn reports whether err means "this chunk predates the column".
+// Only that case may be answered with default values; corruption and I/O errors
+// must propagate so callers see a failure instead of fabricated data.
+func missingColumn(err error) bool {
+	return errors.Is(err, ErrColumnMissing)
+}
+
 // ReadDeltaInt64 reads a delta+varint encoded int64 column.
 func (r *Reader) ReadDeltaInt64(name string) ([]int64, error) {
 	data, _, err := r.readColumnRaw(name)
 	if err != nil {
-		return make([]int64, r.EntryCount), nil // schema evolution: all zeros
+		if missingColumn(err) {
+			return make([]int64, r.EntryCount), nil // schema evolution: all zeros
+		}
+		return nil, err
 	}
 	return enc.DeltaDecode(data, r.EntryCount)
 }
@@ -141,7 +172,10 @@ func (r *Reader) ReadDeltaInt64(name string) ([]int64, error) {
 func (r *Reader) ReadZstdInt64(name string) ([]int64, error) {
 	data, _, err := r.readColumnRaw(name)
 	if err != nil {
-		return make([]int64, r.EntryCount), nil
+		if missingColumn(err) {
+			return make([]int64, r.EntryCount), nil
+		}
+		return nil, err
 	}
 	return enc.ZstdBlockDecodeInt64(data, r.EntryCount)
 }
@@ -151,7 +185,10 @@ func (r *Reader) ReadZstdInt64(name string) ([]int64, error) {
 func (r *Reader) ReadDictBitpack(name string) ([]string, error) {
 	data, _, err := r.readColumnRaw(name)
 	if err != nil {
-		return make([]string, r.EntryCount), nil
+		if missingColumn(err) {
+			return make([]string, r.EntryCount), nil
+		}
+		return nil, err
 	}
 
 	if len(data) < 4 {
@@ -166,8 +203,8 @@ func (r *Reader) ReadDictBitpack(name string) ([]string, error) {
 	dictData := data[4 : 4+dictLen]
 	bitpackData := data[4+dictLen:]
 
-	// Parse dictionary: [2 bytes count] [entries: 2-byte len + string]
-	dict, err := deserializeDictOnly(dictData)
+	// Parse dictionary: [2 bytes count] [length-prefixed entries]
+	dict, err := deserializeDictOnly(dictData, r.lenFormat)
 	if err != nil {
 		return nil, fmt.Errorf("dict parse: %w", err)
 	}
@@ -188,8 +225,8 @@ func (r *Reader) ReadDictBitpack(name string) ([]string, error) {
 	return result, nil
 }
 
-// deserializeDictOnly reads [2 bytes count][entries: 2-byte len + string]
-func deserializeDictOnly(data []byte) ([]string, error) {
+// deserializeDictOnly reads [2 bytes count][length-prefixed entries].
+func deserializeDictOnly(data []byte, f enc.LenFormat) ([]string, error) {
 	if len(data) < 2 {
 		return nil, fmt.Errorf("dict too short")
 	}
@@ -197,16 +234,13 @@ func deserializeDictOnly(data []byte) ([]string, error) {
 	offset := 2
 	dict := make([]string, 0, count)
 	for range count {
-		if offset+2 > len(data) {
-			return nil, fmt.Errorf("dict entry %d: truncated length", len(dict))
+		var s string
+		var err error
+		s, offset, err = f.ReadString(data, offset)
+		if err != nil {
+			return nil, fmt.Errorf("dict entry %d: %w", len(dict), err)
 		}
-		sLen := int(binary.LittleEndian.Uint16(data[offset:]))
-		offset += 2
-		if offset+sLen > len(data) {
-			return nil, fmt.Errorf("dict entry %d: truncated string", len(dict))
-		}
-		dict = append(dict, string(data[offset:offset+sLen]))
-		offset += sLen
+		dict = append(dict, s)
 	}
 	return dict, nil
 }
@@ -215,9 +249,12 @@ func deserializeDictOnly(data []byte) ([]string, error) {
 func (r *Reader) ReadDictZstd(name string) ([]string, error) {
 	data, _, err := r.readColumnRaw(name)
 	if err != nil {
-		return make([]string, r.EntryCount), nil
+		if missingColumn(err) {
+			return make([]string, r.EntryCount), nil
+		}
+		return nil, err
 	}
-	d, err := enc.DictUnmarshal(data, r.EntryCount)
+	d, err := enc.DictUnmarshal(data, r.EntryCount, r.lenFormat)
 	if err != nil {
 		return nil, fmt.Errorf("dict unmarshal %s: %w", name, err)
 	}
@@ -228,25 +265,34 @@ func (r *Reader) ReadDictZstd(name string) ([]string, error) {
 func (r *Reader) ReadZstdBlockStrings(name string) ([]string, error) {
 	data, _, err := r.readColumnRaw(name)
 	if err != nil {
-		return make([]string, r.EntryCount), nil
+		if missingColumn(err) {
+			return make([]string, r.EntryCount), nil
+		}
+		return nil, err
 	}
-	return enc.ZstdBlockDecodeStrings(data, r.EntryCount)
+	return enc.ZstdBlockDecodeStrings(data, r.EntryCount, r.lenFormat)
 }
 
 // ReadSparseStrings reads a sparse+zstd encoded string column.
 func (r *Reader) ReadSparseStrings(name string) ([]string, error) {
 	data, _, err := r.readColumnRaw(name)
 	if err != nil {
-		return make([]string, r.EntryCount), nil
+		if missingColumn(err) {
+			return make([]string, r.EntryCount), nil
+		}
+		return nil, err
 	}
-	return enc.UnsparseStrings(data, r.EntryCount)
+	return enc.UnsparseStrings(data, r.EntryCount, r.lenFormat)
 }
 
 // ReadSparseInt64 reads a sparse+varint+zstd encoded int64 column.
 func (r *Reader) ReadSparseInt64(name string) ([]*int64, error) {
 	data, _, err := r.readColumnRaw(name)
 	if err != nil {
-		return make([]*int64, r.EntryCount), nil
+		if missingColumn(err) {
+			return make([]*int64, r.EntryCount), nil
+		}
+		return nil, err
 	}
 	return enc.UnsparseInt64(data, r.EntryCount)
 }
@@ -255,7 +301,10 @@ func (r *Reader) ReadSparseInt64(name string) ([]*int64, error) {
 func (r *Reader) ReadSparseBool(name string) ([]*bool, error) {
 	data, _, err := r.readColumnRaw(name)
 	if err != nil {
-		return make([]*bool, r.EntryCount), nil
+		if missingColumn(err) {
+			return make([]*bool, r.EntryCount), nil
+		}
+		return nil, err
 	}
 	return enc.UnsparseBool(data, r.EntryCount)
 }
@@ -264,7 +313,10 @@ func (r *Reader) ReadSparseBool(name string) ([]*bool, error) {
 func (r *Reader) ReadSparseBytes(name string) ([][]byte, error) {
 	data, _, err := r.readColumnRaw(name)
 	if err != nil {
-		return make([][]byte, r.EntryCount), nil
+		if missingColumn(err) {
+			return make([][]byte, r.EntryCount), nil
+		}
+		return nil, err
 	}
 	return enc.UnsparseBytes(data, r.EntryCount)
 }

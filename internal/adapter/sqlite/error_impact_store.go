@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -50,14 +51,25 @@ func (s *errorImpactStore) TrackImpact(ctx context.Context, fingerprint, environ
 }
 
 // GetImpact returns a summary of the user impact for an error fingerprint.
-func (s *errorImpactStore) GetImpact(ctx context.Context, fingerprint string) (*store.ErrorImpact, error) {
+//
+// A non-empty environment scopes every number to that env, which is what
+// env-pinned callers need: the cross-env aggregate names only its
+// highest-impact env, so gating on that env would deny a caller whose own env
+// simply scores lower. Passing "" keeps the all-env aggregate.
+func (s *errorImpactStore) GetImpact(ctx context.Context, fingerprint, environment string) (*store.ErrorImpact, error) {
 	var uniqueUsers int
 	var totalOccurrences sql.NullFloat64
 
-	err := s.db.NewRaw(`
+	impactQuery := `
 		SELECT COUNT(*) AS unique_users, SUM(occurrence_count) AS total_occurrences
-		FROM error_impacts WHERE error_fingerprint = ?`, fingerprint,
-	).Scan(ctx, &uniqueUsers, &totalOccurrences)
+		FROM error_impacts WHERE error_fingerprint = ?`
+	impactArgs := []any{fingerprint}
+	if environment != "" {
+		impactQuery += ` AND environment = ?`
+		impactArgs = append(impactArgs, environment)
+	}
+
+	err := s.db.NewRaw(impactQuery, impactArgs...).Scan(ctx, &uniqueUsers, &totalOccurrences)
 	if err != nil {
 		return nil, fmt.Errorf("getting impact: %w", err)
 	}
@@ -70,20 +82,34 @@ func (s *errorImpactStore) GetImpact(ctx context.Context, fingerprint string) (*
 		ei.TotalOccurrences = int(totalOccurrences.Float64)
 	}
 
-	// Get the impact score from error_groups. With the composite PK,
-	// a fingerprint can have multiple rows (one per env). Take the max
-	// score — the aggregate GetImpact view mirrors the highest-impact env.
+	// Score and environment come from the same error_groups row. With the
+	// composite PK a fingerprint has one row per env; the aggregate GetImpact
+	// view mirrors the highest-impact env, so report that env alongside its
+	// score. Environment must be populated: env-scoped callers gate on it, and
+	// an empty value fails every scope check.
+	var env string
 	var score float64
-	err = s.db.NewRaw(
-		`SELECT COALESCE(MAX(impact_score), 0) FROM error_groups WHERE fingerprint = ?`,
-		fingerprint,
-	).Scan(ctx, &score)
+	groupQuery := `
+		SELECT environment, impact_score FROM error_groups
+		WHERE fingerprint = ?`
+	groupArgs := []any{fingerprint}
+	if environment != "" {
+		groupQuery += ` AND environment = ?`
+		groupArgs = append(groupArgs, environment)
+	}
+	groupQuery += `
+		ORDER BY impact_score DESC, last_seen_at DESC
+		LIMIT 1`
+	err = s.db.NewRaw(groupQuery, groupArgs...).Scan(ctx, &env, &score)
 	if err == nil {
+		ei.Environment = env
 		ei.ImpactScore = score
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("getting impact score: %w", err)
 	}
 
-	// Get common traits
-	traits, err := s.FindCommonTraits(ctx, fingerprint)
+	// Get common traits, scoped to the same environment as the numbers above.
+	traits, err := s.findCommonTraits(ctx, fingerprint, environment)
 	if err == nil {
 		ei.CommonTraits = traits
 	}
@@ -102,7 +128,7 @@ func (s *errorImpactStore) GetAffectedUsers(ctx context.Context, fingerprint str
 		OccurrenceCount int    `bun:"occurrence_count"`
 		FirstSeenAt     string `bun:"first_seen_at"`
 		LastSeenAt      string `bun:"last_seen_at"`
-		LastContext      string `bun:"last_context"`
+		LastContext     string `bun:"last_context"`
 	}
 
 	var rows []row
@@ -181,96 +207,113 @@ func (s *errorImpactStore) GetUserErrors(ctx context.Context, userID string, sin
 	return results, nil
 }
 
+// maxTraitComputations caps how many groups get the expensive common-trait
+// analysis per scoring run (avoids an N+1 over long-tail errors).
+const maxTraitComputations = 50
+
+// scoredImpact is one (fingerprint, environment) group with its computed score.
+type scoredImpact struct {
+	fingerprint      string
+	environment      string
+	uniqueUsers      int
+	totalOccurrences int
+	lastSeen         time.Time
+	score            float64
+}
+
 // ComputeImpactScores recalculates impact scores for all error groups.
 // score = unique_users * log2(total_occurrences + 1) * recency_weight
+//
+// error_groups is keyed (fingerprint, environment) and error_impacts rows are
+// env-scoped, so the aggregation is per environment: a fingerprint hit by 40
+// staging testers and 2 production users must not stamp 42 unique users and a
+// staging-derived score onto its production row.
 func (s *errorImpactStore) ComputeImpactScores(ctx context.Context) error {
-	now := time.Now().UTC()
+	impacts, err := s.collectScoredImpacts(ctx)
+	if err != nil {
+		return err
+	}
 
-	// Collect impact data per fingerprint
+	// Highest-scoring groups first, so the trait budget goes to the ones that
+	// matter.
+	sort.Slice(impacts, func(i, j int) bool {
+		return impacts[i].score > impacts[j].score
+	})
+
+	for i, d := range impacts {
+		if i < maxTraitComputations {
+			traits, _ := s.findCommonTraits(ctx, d.fingerprint, d.environment)
+			traitsJSON, mErr := json.Marshal(traits)
+			if mErr == nil && len(traitsJSON) > 0 {
+				_, err = s.db.NewRaw(`
+					UPDATE error_groups
+					SET unique_users = ?, impact_score = ?, common_context = ?
+					WHERE fingerprint = ? AND environment = ?`,
+					d.uniqueUsers, round2(d.score), string(traitsJSON),
+					d.fingerprint, d.environment,
+				).Exec(ctx)
+			}
+		} else {
+			// Outside the trait budget: leave common_context alone rather than
+			// overwriting previously computed traits with "{}".
+			_, err = s.db.NewRaw(`
+				UPDATE error_groups SET unique_users = ?, impact_score = ?
+				WHERE fingerprint = ? AND environment = ?`,
+				d.uniqueUsers, round2(d.score), d.fingerprint, d.environment,
+			).Exec(ctx)
+		}
+		if err != nil {
+			return fmt.Errorf("updating impact score for %s (%s): %w",
+				d.fingerprint, d.environment, err)
+		}
+	}
+
+	return nil
+}
+
+// collectScoredImpacts aggregates error_impacts per (fingerprint, environment)
+// and computes each group's impact score.
+func (s *errorImpactStore) collectScoredImpacts(ctx context.Context) ([]scoredImpact, error) {
 	type impactRow struct {
 		ErrorFingerprint string          `bun:"error_fingerprint"`
+		Environment      string          `bun:"environment"`
 		UniqueUsers      int             `bun:"unique_users"`
 		TotalOccurrences sql.NullFloat64 `bun:"total_occurrences"`
 		LastSeen         string          `bun:"last_seen"`
 	}
 
-	var impactRows []impactRow
+	var rows []impactRow
 	err := s.db.NewRaw(`
 		SELECT error_fingerprint,
+			environment,
 			COUNT(*) AS unique_users,
 			SUM(occurrence_count) AS total_occurrences,
 			MAX(last_seen_at) AS last_seen
 		FROM error_impacts
-		GROUP BY error_fingerprint`,
-	).Scan(ctx, &impactRows)
+		GROUP BY error_fingerprint, environment`,
+	).Scan(ctx, &rows)
 	if err != nil {
-		return fmt.Errorf("querying impact data: %w", err)
+		return nil, fmt.Errorf("querying impact data: %w", err)
 	}
 
-	type impactData struct {
-		fingerprint      string
-		uniqueUsers      int
-		totalOccurrences int
-		lastSeen         time.Time
-	}
-	var impacts []impactData
-	for _, row := range impactRows {
-		d := impactData{
+	now := time.Now().UTC()
+	impacts := make([]scoredImpact, len(rows))
+	for i, row := range rows {
+		d := scoredImpact{
 			fingerprint: row.ErrorFingerprint,
+			environment: row.Environment,
 			uniqueUsers: row.UniqueUsers,
+			lastSeen:    parseTime(row.LastSeen),
 		}
 		if row.TotalOccurrences.Valid {
 			d.totalOccurrences = int(row.TotalOccurrences.Float64)
 		}
-		d.lastSeen, _ = time.Parse(time.RFC3339, row.LastSeen)
-		impacts = append(impacts, d)
+		d.score = float64(d.uniqueUsers) *
+			math.Log2(float64(d.totalOccurrences+1)) *
+			computeRecencyWeight(now, d.lastSeen)
+		impacts[i] = d
 	}
-
-	// First pass: compute scores for all error groups (cheap — no extra queries).
-	type scored struct {
-		impactData
-		score float64
-	}
-	scoredImpacts := make([]scored, len(impacts))
-	for i, d := range impacts {
-		recencyWeight := computeRecencyWeight(now, d.lastSeen)
-		scoredImpacts[i] = scored{
-			impactData: d,
-			score:      float64(d.uniqueUsers) * math.Log2(float64(d.totalOccurrences+1)) * recencyWeight,
-		}
-	}
-
-	// Second pass: update all scores, but only compute expensive common traits
-	// for the top 50 error groups by score (avoids N+1 for long-tail errors).
-	// Sort by score descending.
-	sort.Slice(scoredImpacts, func(i, j int) bool {
-		return scoredImpacts[i].score > scoredImpacts[j].score
-	})
-
-	const maxTraitComputations = 50
-	for i, d := range scoredImpacts {
-		var traitsJSON []byte
-		if i < maxTraitComputations {
-			traits, _ := s.FindCommonTraits(ctx, d.fingerprint)
-			traitsJSON, _ = json.Marshal(traits)
-		}
-
-		traitStr := "{}"
-		if len(traitsJSON) > 0 {
-			traitStr = string(traitsJSON)
-		}
-
-		_, err := s.db.NewRaw(`
-			UPDATE error_groups SET unique_users = ?, impact_score = ?, common_context = ?
-			WHERE fingerprint = ?`,
-			d.uniqueUsers, round2(d.score), traitStr, d.fingerprint,
-		).Exec(ctx)
-		if err != nil {
-			return fmt.Errorf("updating impact score for %s: %w", d.fingerprint, err)
-		}
-	}
-
-	return nil
+	return impacts, nil
 }
 
 // TopByImpact returns error groups ranked by impact.
@@ -366,13 +409,32 @@ func (s *errorImpactStore) TopByImpact(ctx context.Context, params store.ImpactQ
 // FindCommonTraits analyzes the context data across all affected users to find
 // common patterns (e.g., "87% Safari", "92% iOS").
 func (s *errorImpactStore) FindCommonTraits(ctx context.Context, fingerprint string) (map[string]any, error) {
-	var contexts []string
-	err := s.db.NewRaw(`
+	return s.findCommonTraits(ctx, fingerprint, "")
+}
+
+// maxTraitContexts caps how many context blobs one trait analysis reads.
+const maxTraitContexts = 100
+
+// findCommonTraits is FindCommonTraits scoped to one environment. environment
+// "" analyses every env, which is what the exported aggregate view wants; the
+// per-env scoring path passes a concrete env so a production group's traits
+// are not dominated by staging context.
+func (s *errorImpactStore) findCommonTraits(ctx context.Context, fingerprint, environment string) (map[string]any, error) {
+	query := `
 		SELECT last_context FROM error_impacts
 		WHERE error_fingerprint = ? AND last_context != '{}'
-		ORDER BY last_seen_at DESC LIMIT 100`,
-		fingerprint,
-	).Scan(ctx, &contexts)
+		ORDER BY last_seen_at DESC LIMIT ?`
+	args := []any{fingerprint, maxTraitContexts}
+	if environment != "" {
+		query = `
+		SELECT last_context FROM error_impacts
+		WHERE error_fingerprint = ? AND environment = ? AND last_context != '{}'
+		ORDER BY last_seen_at DESC LIMIT ?`
+		args = []any{fingerprint, environment, maxTraitContexts}
+	}
+
+	var contexts []string
+	err := s.db.NewRaw(query, args...).Scan(ctx, &contexts)
 	if err != nil {
 		return nil, fmt.Errorf("querying contexts: %w", err)
 	}

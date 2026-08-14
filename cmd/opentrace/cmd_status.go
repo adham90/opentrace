@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -38,11 +39,36 @@ func runStatus() error {
 	if jsonOutput {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(status)
+		if err := enc.Encode(status); err != nil {
+			return fmt.Errorf("encoding status: %w", err)
+		}
+	} else {
+		printStatusText(cfg.Endpoint, status)
 	}
 
-	printStatusText(cfg.Endpoint, status)
+	// The documented contract is "exit 0 = healthy, 1 = unhealthy/unreachable",
+	// and monitoring scripts rely on it. The server answers HTTP 200 with
+	// Database.Healthy=false when its DB ping fails, so an unhealthy server used
+	// to exit 0 and never fire the alert.
+	if !statusHealthy(status) {
+		return errUnhealthy
+	}
 	return nil
+}
+
+// errUnhealthy is returned by `opentrace status` when the server responded but
+// reported itself unhealthy. The message is already on stdout, so it stays terse.
+var errUnhealthy = errors.New("server reported unhealthy state")
+
+// statusHealthy reports whether the server's self-reported state is healthy.
+func statusHealthy(s *apiclient.StatusResponse) bool {
+	if s == nil {
+		return false
+	}
+	if s.Database != nil && !s.Database.Healthy {
+		return false
+	}
+	return true
 }
 
 func printStatusText(endpoint string, s *apiclient.StatusResponse) {

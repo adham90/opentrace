@@ -72,7 +72,7 @@ func HandleDiagnose(ctx context.Context, d OverviewDeps, args map[string]any) (*
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			section := collectPerformance(ctx, d, service, since, now)
+			section := collectPerformance(ctx, d, service, env, since, now)
 			mu.Lock()
 			resp["request_performance"] = section
 			mu.Unlock()

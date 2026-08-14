@@ -64,7 +64,15 @@ func ErrorsList(ctx context.Context, deps ErrorsDeps, args map[string]any) (*Cal
 	// it" — a group from last month that fired a minute ago is exactly what
 	// someone asking for the last hour wants to see. Only applied when the
 	// caller actually passed a window; the default listing stays unbounded.
-	if since, ok := OptionalSinceParam(args); ok {
+	//
+	// A malformed value is rejected rather than treated as absent: silently
+	// answering with the unbounded listing when the caller asked for "1w" is a
+	// different question with a confident-looking answer.
+	since, windowGiven, err := OptionalSinceParamStrict(args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+	if windowGiven {
 		params.ActiveSince = &since
 	}
 

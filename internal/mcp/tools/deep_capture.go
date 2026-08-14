@@ -7,12 +7,37 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/adham90/opentrace/internal/mcp/envscope"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // DeepCaptureDeps holds the database connection for deep capture queries.
 // These tables have no formal store interface — we query SQLite directly.
 type DeepCaptureDeps struct {
 	DB *sql.DB
+	// LogStore resolves the environment of the log entry a capture belongs to.
+	// Capture rows carry no environment column of their own, so this is the
+	// only way to enforce the caller's env scope on request/response bodies,
+	// cookies, session data and SQL bind values. When a scope is attached to
+	// the request and LogStore is nil the read is denied — we fail closed
+	// rather than serve cross-env data we cannot classify.
+	LogStore store.LogStore
+	// IsAdmin reports whether the MCP server this tool is registered on serves
+	// an admin token. The config-mutating actions (update_pii_config,
+	// update_retention) require it — a member must not be able to disable PII
+	// scrubbing or shorten retention globally.
+	IsAdmin bool
+}
+
+// requireDeepCaptureAdmin returns an error result when the caller is not an
+// admin. Write actions fail closed.
+func requireDeepCaptureAdmin(deps DeepCaptureDeps, action string) *CallToolResult {
+	if deps.IsAdmin {
+		return nil
+	}
+	return NewToolResultError(fmt.Sprintf(
+		"admin privileges are required for deep_capture action %q", action))
 }
 
 // DeepCaptureHandler returns a handler that dispatches to deep capture actions.
@@ -56,6 +81,91 @@ func DeepCaptureHandler(deps DeepCaptureDeps) ToolHandlerFunc {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Env-scope authorization
+// ---------------------------------------------------------------------------
+
+// captureEnvGuard decides whether the caller's environment scope permits
+// reading captures attached to a given log entry. Capture rows are keyed by
+// log_id only, so the environment comes from the log entry itself; results are
+// memoized because a single search can span many rows.
+type captureEnvGuard struct {
+	// enforced is false when no scope is attached to the context (unit tests
+	// and non-MCP callers), mirroring scopeAllowsEnv's fallback.
+	enforced bool
+	logStore store.LogStore
+	envByLog map[int64]string
+}
+
+func newCaptureEnvGuard(ctx context.Context, deps DeepCaptureDeps) *captureEnvGuard {
+	_, scoped := envscope.FromOK(ctx)
+	return &captureEnvGuard{
+		enforced: scoped,
+		logStore: deps.LogStore,
+		envByLog: make(map[int64]string),
+	}
+}
+
+// allows reports whether captures belonging to logID are readable by the
+// caller. A log entry that cannot be resolved (missing store, lookup failure,
+// or no log_id at all) is treated as unknown-env and only readable by a
+// wildcard / unscoped token — the same policy scopeAllowsEnv applies to rows
+// with an empty environment.
+func (g *captureEnvGuard) allows(ctx context.Context, logID int64) bool {
+	if !g.enforced {
+		return true
+	}
+	if g.logStore == nil {
+		return false
+	}
+	env, cached := g.envByLog[logID]
+	if !cached {
+		if logID > 0 {
+			entry, err := g.logStore.GetByID(ctx, logID)
+			if err != nil || entry == nil {
+				return false
+			}
+			env = entry.Environment
+		}
+		g.envByLog[logID] = env
+	}
+	return scopeAllowsEnv(ctx, env)
+}
+
+// filter drops every capture row the caller's env scope does not permit.
+func (g *captureEnvGuard) filter(ctx context.Context, captures []map[string]any) []map[string]any {
+	if !g.enforced {
+		return captures
+	}
+	kept := make([]map[string]any, 0, len(captures))
+	for _, c := range captures {
+		if g.allows(ctx, captureLogID(c)) {
+			kept = append(kept, c)
+		}
+	}
+	return kept
+}
+
+// captureLogID extracts the log_id from a capture row, returning 0 when it is
+// absent or NULL.
+func captureLogID(c map[string]any) int64 {
+	switch v := c["log_id"].(type) {
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	default:
+		return 0
+	}
+}
+
+// captureNotFound is the response for a capture the caller is not authorized to
+// read. It is deliberately identical to the genuinely-missing case so a
+// cross-env log_id cannot be probed for existence.
+func captureNotFound(logID int64) (*CallToolResult, error) {
+	return EmptyResult(fmt.Sprintf("No capture found for log_id %d", logID))
+}
+
 // handleGetRequestCapture returns full request/response details for a log entry.
 func handleGetRequestCapture(ctx context.Context, deps DeepCaptureDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.DB == nil {
@@ -64,6 +174,9 @@ func handleGetRequestCapture(ctx context.Context, deps DeepCaptureDeps, args map
 	logID := ArgInt(args, "log_id", 0, 1<<31)
 	if logID == 0 {
 		return NewToolResultError("log_id is required"), nil
+	}
+	if !newCaptureEnvGuard(ctx, deps).allows(ctx, int64(logID)) {
+		return captureNotFound(int64(logID))
 	}
 
 	row := deps.DB.QueryRowContext(ctx,
@@ -139,6 +252,10 @@ func handleGetSQLCaptures(ctx context.Context, deps DeepCaptureDeps, args map[st
 	logID := ArgInt(args, "log_id", 0, 1<<31)
 	if logID == 0 {
 		return NewToolResultError("log_id is required"), nil
+	}
+
+	if !newCaptureEnvGuard(ctx, deps).allows(ctx, int64(logID)) {
+		return captureNotFound(int64(logID))
 	}
 
 	rows, err := deps.DB.QueryContext(ctx,
@@ -223,6 +340,10 @@ func handleGetHTTPCaptures(ctx context.Context, deps DeepCaptureDeps, args map[s
 		return NewToolResultError("log_id is required"), nil
 	}
 
+	if !newCaptureEnvGuard(ctx, deps).allows(ctx, int64(logID)) {
+		return captureNotFound(int64(logID))
+	}
+
 	rows, err := deps.DB.QueryContext(ctx,
 		`SELECT id, log_id, method, url, host, vendor, status, duration_ms,
 		        request_headers, request_body, response_headers, response_body,
@@ -304,6 +425,11 @@ func handleGetEmailCaptures(ctx context.Context, deps DeepCaptureDeps, args map[
 
 	if logID == 0 && last == "" {
 		return NewToolResultError("log_id or last is required"), nil
+	}
+
+	guard := newCaptureEnvGuard(ctx, deps)
+	if logID > 0 && !guard.allows(ctx, int64(logID)) {
+		return captureNotFound(int64(logID))
 	}
 
 	var (
@@ -406,6 +532,10 @@ func handleGetEmailCaptures(ctx context.Context, deps DeepCaptureDeps, args map[
 		return NewToolResultError(fmt.Sprintf("iteration failed: %v", err)), nil
 	}
 
+	// Drop rows whose log entry belongs to an environment the caller's token
+	// does not cover (the time-window path is not otherwise env-filtered).
+	captures = guard.filter(ctx, captures)
+
 	if len(captures) == 0 {
 		return EmptyResult("No email captures found")
 	}
@@ -444,6 +574,7 @@ func handleGetAuditTrail(ctx context.Context, deps DeepCaptureDeps, args map[str
 	if err := rows.Err(); err != nil {
 		return NewToolResultError(fmt.Sprintf("iteration failed: %v", err)), nil
 	}
+	captures = newCaptureEnvGuard(ctx, deps).filter(ctx, captures)
 
 	if len(captures) == 0 {
 		return EmptyResult(fmt.Sprintf("No audit captures found for %s/%s", recordType, recordID))
@@ -505,6 +636,7 @@ func handleSearchAudit(ctx context.Context, deps DeepCaptureDeps, args map[strin
 	if err := rows.Err(); err != nil {
 		return NewToolResultError(fmt.Sprintf("iteration failed: %v", err)), nil
 	}
+	captures = newCaptureEnvGuard(ctx, deps).filter(ctx, captures)
 
 	if len(captures) == 0 {
 		return EmptyResult("No audit captures found matching filters")
@@ -623,6 +755,8 @@ func handleSearchSQL(ctx context.Context, deps DeepCaptureDeps, args map[string]
 		return NewToolResultError(fmt.Sprintf("iteration failed: %v", err)), nil
 	}
 
+	captures = newCaptureEnvGuard(ctx, deps).filter(ctx, captures)
+
 	if len(captures) == 0 {
 		return EmptyResult("No SQL captures found matching filters")
 	}
@@ -642,6 +776,10 @@ func handleGetFileCaptures(ctx context.Context, deps DeepCaptureDeps, args map[s
 	logID := ArgInt(args, "log_id", 0, 1<<31)
 	if logID == 0 {
 		return NewToolResultError("log_id is required"), nil
+	}
+
+	if !newCaptureEnvGuard(ctx, deps).allows(ctx, int64(logID)) {
+		return captureNotFound(int64(logID))
 	}
 
 	rows, err := deps.DB.QueryContext(ctx,
@@ -725,6 +863,9 @@ func handleGetPIIConfig(ctx context.Context, deps DeepCaptureDeps) (*CallToolRes
 
 // handleUpdatePIIConfig writes the PII scrubbing configuration to app_config.
 func handleUpdatePIIConfig(ctx context.Context, deps DeepCaptureDeps, args map[string]any) (*CallToolResult, error) {
+	if errResult := requireDeepCaptureAdmin(deps, "update_pii_config"); errResult != nil {
+		return errResult, nil
+	}
 	if deps.DB == nil {
 		return NewToolResultError("database connection not available"), nil
 	}
@@ -747,8 +888,8 @@ func handleUpdatePIIConfig(ctx context.Context, deps DeepCaptureDeps, args map[s
 	}
 
 	return JSONResult(map[string]any{
-		"status":  "updated",
-		"config":  config,
+		"status": "updated",
+		"config": config,
 	})
 }
 
@@ -777,6 +918,9 @@ func handleGetRetention(ctx context.Context, deps DeepCaptureDeps) (*CallToolRes
 
 // handleUpdateRetention writes the retention policy configuration to app_config.
 func handleUpdateRetention(ctx context.Context, deps DeepCaptureDeps, args map[string]any) (*CallToolResult, error) {
+	if errResult := requireDeepCaptureAdmin(deps, "update_retention"); errResult != nil {
+		return errResult, nil
+	}
 	if deps.DB == nil {
 		return NewToolResultError("database connection not available"), nil
 	}

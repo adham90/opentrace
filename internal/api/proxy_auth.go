@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -26,11 +27,42 @@ func peerTrustedProxy(remoteAddr string, trusted map[string]bool) bool {
 	return parsed != nil && parsed.IsLoopback()
 }
 
+// defaultProxyRole is the role granted to a proxy-authenticated user whose
+// asserted role is absent, unknown, or not allowed to come from a header.
+const defaultProxyRole = store.RoleMember
+
+// resolveProxyRole validates the role asserted by the reverse proxy against the
+// roles this codebase actually defines. An unknown value (typo, injection
+// attempt like "superadmin") never reaches the store. Admin is only honoured
+// when the operator explicitly opted in with
+// OPENTRACE_TRUST_PROXY_AUTH_ADMIN=true: a proxy that forwards inbound
+// X-Forwarded-* headers unchanged (nginx's default for custom headers) would
+// otherwise turn a request header into remote admin creation.
+func resolveProxyRole(header string, allowAdmin bool) store.UserRole {
+	switch store.UserRole(header) {
+	case store.RoleAdmin:
+		if allowAdmin {
+			return store.RoleAdmin
+		}
+		slog.Warn("proxy auth: ignoring X-Forwarded-User-Role: admin (set OPENTRACE_TRUST_PROXY_AUTH_ADMIN=true to allow proxy-asserted admins)")
+		return defaultProxyRole
+	case store.RoleMember:
+		return store.RoleMember
+	case "":
+		return defaultProxyRole
+	default:
+		slog.Warn("proxy auth: ignoring unknown X-Forwarded-User-Role", "role", header)
+		return defaultProxyRole
+	}
+}
+
 // ProxyAuth trusts X-Forwarded-User and X-Forwarded-User-Role headers from the
 // platform reverse proxy. Only active when OPENTRACE_TRUST_PROXY_AUTH=true, and
 // only when the direct peer is a trusted proxy — otherwise any client could send
 // X-Forwarded-User-Role: admin and mint an admin. Untrusted peers fall through
-// to normal auth (headers ignored), not a hard failure.
+// to normal auth (headers ignored), not a hard failure. The asserted role is
+// validated (see resolveProxyRole): the proxy asserts identity, and privilege
+// only within what the operator explicitly allowed.
 func (s *Server) ProxyAuth(next http.Handler) http.Handler {
 	if os.Getenv("OPENTRACE_TRUST_PROXY_AUTH") != "true" {
 		return next
@@ -44,6 +76,7 @@ func (s *Server) ProxyAuth(next http.Handler) http.Handler {
 	if len(trusted) == 0 {
 		slog.Warn("OPENTRACE_TRUST_PROXY_AUTH=true but OPENTRACE_TRUSTED_PROXIES is empty; only loopback peers will be trusted to assert X-Forwarded-User")
 	}
+	allowAdminHeader := os.Getenv("OPENTRACE_TRUST_PROXY_AUTH_ADMIN") == "true"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !peerTrustedProxy(r.RemoteAddr, trusted) {
 			next.ServeHTTP(w, r) // ignore identity headers from an untrusted peer
@@ -55,19 +88,22 @@ func (s *Server) ProxyAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		role := r.Header.Get("X-Forwarded-User-Role")
-		if role == "" {
-			role = "member"
-		}
+		role := resolveProxyRole(r.Header.Get("X-Forwarded-User-Role"), allowAdminHeader)
 
 		// Auto-create or fetch the user
 		user, err := s.userStore.GetByEmail(r.Context(), email)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			// A store failure is not "user doesn't exist" — do not auto-create.
+			slog.Error("proxy auth: user lookup failed", "email", email, "error", err)
+			server.WriteError(w, http.StatusServiceUnavailable, "failed to establish user identity")
+			return
+		}
 		if err != nil {
 			// User doesn't exist, auto-create
 			user, err = s.userStore.Create(r.Context(), store.CreateUserParams{
 				Email:        email,
 				DisplayName:  email,
-				Role:         store.UserRole(role),
+				Role:         role,
 				PasswordHash: "-", // no password needed with proxy auth
 			})
 			if err != nil {

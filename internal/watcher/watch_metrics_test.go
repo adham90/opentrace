@@ -2,6 +2,7 @@ package watcher
 
 import (
 	"context"
+	"errors"
 	"math"
 	"testing"
 	"time"
@@ -361,62 +362,28 @@ func TestMeasure_SQLCount(t *testing.T) {
 // 9. Cache Hit Rate
 // ---------------------------------------------------------------------------
 
-func TestMeasure_CacheHitRate(t *testing.T) {
-	t.Run("no summaries returns 0", func(t *testing.T) {
-		_, logStore := setupWatchTestDB(t)
-		m := NewWatchMetrics(logStore)
-		ctx := context.Background()
+// TestMeasure_CacheHitRate_Unsupported pins the fix for the dead cache metric.
+// The segmented log store never populates cache reads/hits, so the old code
+// returned 0 for every measurement and a "cache_hit_rate lt 0.8" watch breached
+// on every single check. Measuring it must now be an explicit config error.
+func TestMeasure_CacheHitRate_Unsupported(t *testing.T) {
+	_, logStore := setupWatchTestDB(t)
+	m := NewWatchMetrics(logStore)
+	ctx := context.Background()
 
-		val, err := m.Measure(ctx, store.WatchMetricCacheHitRate, "web", "", "", time.Hour)
-		if err != nil {
-			t.Fatalf("Measure: %v", err)
-		}
-		if val != 0 {
-			t.Errorf("got %v, want 0", val)
-		}
+	// Even with request summaries that carry cache counters, the store cannot
+	// express the metric — it must fail loudly rather than report a fake 0.
+	insertTestRequestSummaries(t, logStore, "web", []store.RequestSummary{
+		{Path: "/api/a", DurationMs: 100.0, CacheReads: 10, CacheHits: 8},
 	})
 
-	t.Run("summaries with cache reads and hits returns correct ratio", func(t *testing.T) {
-		t.Skip("cache metrics not yet in segmented log store flat schema — needs column promotion")
-		_, logStore := setupWatchTestDB(t)
-		m := NewWatchMetrics(logStore)
-		ctx := context.Background()
-
-		// Summary 1: 10 reads, 8 hits. Summary 2: 10 reads, 6 hits.
-		// Total: 20 reads, 14 hits → ratio = 0.7
-		insertTestRequestSummaries(t, logStore, "web", []store.RequestSummary{
-			{Path: "/api/a", DurationMs: 100.0, CacheReads: 10, CacheHits: 8},
-			{Path: "/api/b", DurationMs: 100.0, CacheReads: 10, CacheHits: 6},
-		})
-
-		val, err := m.Measure(ctx, store.WatchMetricCacheHitRate, "web", "", "", time.Hour)
-		if err != nil {
-			t.Fatalf("Measure: %v", err)
-		}
-		if val != 0.7 {
-			t.Errorf("got %v, want 0.7", val)
-		}
-	})
-
-	t.Run("zero cache reads returns 0", func(t *testing.T) {
-		_, logStore := setupWatchTestDB(t)
-		m := NewWatchMetrics(logStore)
-		ctx := context.Background()
-
-		// Summaries with no cache reads at all
-		insertTestRequestSummaries(t, logStore, "web", []store.RequestSummary{
-			{Path: "/api/a", DurationMs: 100.0, CacheReads: 0, CacheHits: 0},
-			{Path: "/api/b", DurationMs: 100.0, CacheReads: 0, CacheHits: 0},
-		})
-
-		val, err := m.Measure(ctx, store.WatchMetricCacheHitRate, "web", "", "", time.Hour)
-		if err != nil {
-			t.Fatalf("Measure: %v", err)
-		}
-		if val != 0 {
-			t.Errorf("got %v, want 0", val)
-		}
-	})
+	val, err := m.Measure(ctx, store.WatchMetricCacheHitRate, "web", "", "", time.Hour)
+	if err == nil {
+		t.Fatalf("Measure(cache_hit_rate) = (%v, nil), want a config error", val)
+	}
+	if !errors.Is(err, ErrInvalidWatchConfig) {
+		t.Errorf("error = %v, want it to wrap ErrInvalidWatchConfig", err)
+	}
 }
 
 // ---------------------------------------------------------------------------

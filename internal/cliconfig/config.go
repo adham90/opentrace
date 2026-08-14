@@ -40,17 +40,19 @@ type ProjectConfig struct {
 func Load() (*ProjectConfig, error) {
 	cfg := &ProjectConfig{}
 
-	// Try project config file (walk up from cwd)
+	// Global config first: it is the lowest-precedence file layer, so the
+	// project file (and then env vars) overwrite whatever it sets. Loading it
+	// afterwards instead — gated on an empty endpoint — let a global api_key
+	// clobber a project api_key whenever the project file omitted endpoint.
+	if path, err := globalConfigPath(); err == nil {
+		loadYAML(path, cfg) //nolint:errcheck // file may not exist
+	}
+
+	// Project config file (walk up from cwd) overrides the global one. Only
+	// keys actually present in the file are overwritten by yaml.Unmarshal.
 	if path, err := findProjectConfig(); err == nil {
 		if err := loadYAML(path, cfg); err != nil {
 			return nil, fmt.Errorf("parsing %s: %w", path, err)
-		}
-	}
-
-	// Try global config if no project config found
-	if cfg.Endpoint == "" {
-		if path, err := globalConfigPath(); err == nil {
-			loadYAML(path, cfg) // ignore error — file may not exist
 		}
 	}
 

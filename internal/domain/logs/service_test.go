@@ -12,14 +12,14 @@ import (
 
 // fake implements Repository for testing.
 type fake struct {
-	entries    []store.LogEntry
-	levels     map[string]int
-	services   []store.ServiceLogCount
-	searchErr  error
-	countErr   error
-	values     []string
-	keys       []string
-	summaries  []store.RequestSummaryResult
+	entries   []store.LogEntry
+	levels    map[string]int
+	services  []store.ServiceLogCount
+	searchErr error
+	countErr  error
+	values    []string
+	keys      []string
+	summaries []store.RequestSummaryResult
 }
 
 func (f *fake) Search(_ context.Context, _ store.LogSearchParams) ([]store.LogEntry, error) {
@@ -242,26 +242,5 @@ func TestTrace_NoEntries(t *testing.T) {
 	}
 	if result.TotalEntries != 0 {
 		t.Errorf("total = %d, want 0", result.TotalEntries)
-	}
-}
-
-// --- Performance ---
-
-func TestPerformance_NilRepo(t *testing.T) {
-	svc := &Service{}
-	_, err := svc.Performance(context.Background(), time.Now(), time.Now(), "")
-	if !errors.Is(err, domain.ErrNotConfigured) {
-		t.Errorf("expected ErrNotConfigured, got %v", err)
-	}
-}
-
-func TestPerformance_Empty(t *testing.T) {
-	svc := NewService(&fake{})
-	result, err := svc.Performance(context.Background(), time.Now().Add(-time.Hour), time.Now(), "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.TotalRequests != 0 {
-		t.Errorf("total = %d, want 0", result.TotalRequests)
 	}
 }

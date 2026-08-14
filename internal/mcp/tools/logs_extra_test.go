@@ -89,8 +89,17 @@ func TestLogsTrace_Empty(t *testing.T) {
 	if parsed["total_entries"] != float64(0) {
 		t.Errorf("total_entries = %v, want 0", parsed["total_entries"])
 	}
-	if parsed["message"] != "No log entries found for this trace ID" {
+	// The message now names the window that was actually searched — "nothing
+	// found" and "nothing found in this window" lead to opposite conclusions.
+	msg, _ := parsed["message"].(string)
+	if !strings.Contains(msg, "No log entries found for this trace ID") {
 		t.Errorf("unexpected message: %v", parsed["message"])
+	}
+	if !strings.Contains(msg, "window searched") {
+		t.Errorf("message should name the searched window, got: %v", msg)
+	}
+	if parsed["searched_since"] == nil {
+		t.Error("expected searched_since in the empty-trace response")
 	}
 }
 

@@ -20,25 +20,24 @@ func NewAgentNoteStore(db *bun.DB) store.AgentNoteStore {
 	return &agentNoteStore{db: db}
 }
 
+// Upsert writes the note with RFC3339 timestamps. They are formatted here
+// rather than handed to bun as time.Time values because Prune compares
+// updated_at lexicographically against an RFC3339 cutoff, and bun's own
+// rendering of a time sorts below that for the same instant.
 func (s *agentNoteStore) Upsert(ctx context.Context, entityType, entityID, note string) (*store.AgentNote, error) {
-	now := time.Now().UTC()
-	an := &store.AgentNote{
-		EntityType: entityType,
-		EntityID:   entityID,
-		Note:       note,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	}
-	_, err := s.db.NewInsert().Model(an).
-		On("CONFLICT (entity_type, entity_id) DO UPDATE").
-		Set("note = EXCLUDED.note").
-		Set("updated_at = EXCLUDED.updated_at").
-		Returning("*").
-		Exec(ctx)
+	now := rfc3339(time.Now().UTC())
+	_, err := s.db.NewRaw(`
+		INSERT INTO agent_notes (entity_type, entity_id, note, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (entity_type, entity_id) DO UPDATE SET
+			note = excluded.note,
+			updated_at = excluded.updated_at`,
+		entityType, entityID, note, now, now,
+	).Exec(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return an, nil
+	return s.Get(ctx, entityType, entityID)
 }
 
 func (s *agentNoteStore) Get(ctx context.Context, entityType, entityID string) (*store.AgentNote, error) {
@@ -84,9 +83,9 @@ func (s *agentNoteStore) Delete(ctx context.Context, entityType, entityID string
 }
 
 func (s *agentNoteStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
-	cutoff := time.Now().UTC().Add(-olderThan)
+	cutoff := rfc3339(time.Now().UTC().Add(-olderThan))
 	res, err := s.db.NewDelete().Model((*store.AgentNote)(nil)).
-		Where("updated_at < ?", cutoff.Format(time.RFC3339)).
+		Where("updated_at < ?", cutoff).
 		Exec(ctx)
 	if err != nil {
 		return 0, err

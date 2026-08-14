@@ -12,7 +12,11 @@ import (
 	"time"
 
 	"github.com/adham90/opentrace/internal/guardrail"
+	"github.com/adham90/opentrace/internal/httpclient"
 )
+
+// tursoRequestTimeout bounds a single Turso HTTP pipeline call.
+const tursoRequestTimeout = 30 * time.Second
 
 // TursoConnector implements DataSource for querying a Turso/libSQL database
 // via the Turso HTTP pipeline API. No CGO required.
@@ -36,20 +40,18 @@ func NewTursoConnector(ctx context.Context, dbURL, authToken string, maxRows int
 	}
 
 	c := &TursoConnector{
-		baseURL:   baseURL,
-		authToken: authToken,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		baseURL:     baseURL,
+		authToken:   authToken,
+		httpClient:  httpclient.New(tursoRequestTimeout),
 		maxRows:     maxRows,
 		schemaCache: make(map[string]schemaCacheEntry),
 		cacheTTL:    5 * time.Minute,
-		cb:          NewCircuitBreaker(baseURL, DefaultCircuitBreakerConfig()),
+		cb:          NewCircuitBreaker(ConnectorLabel(baseURL), DefaultCircuitBreakerConfig()),
 	}
 
 	// Verify connection
 	if err := c.TestConnection(ctx); err != nil {
-		return nil, fmt.Errorf("connecting to Turso: %s", err)
+		return nil, fmt.Errorf("connecting to Turso: %s", RedactSecrets(err.Error()))
 	}
 
 	return c, nil
@@ -148,7 +150,7 @@ func (c *TursoConnector) ExecuteReadQuery(ctx context.Context, query string) (*Q
 
 	limitedQuery := query
 	if !guardrail.HasLimitGeneric(query) {
-		limitedQuery = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(query, "; "), c.maxRows)
+		limitedQuery = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(query, "; \t\r\n"), c.maxRows)
 	}
 
 	result, err := c.executeSQL(ctx, limitedQuery)
@@ -226,7 +228,7 @@ func (c *TursoConnector) handleTursoSearch(ctx context.Context, args map[string]
 
 	limitedQuery := query
 	if !guardrail.HasLimitGeneric(query) {
-		limitedQuery = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(query, "; "), c.maxRows)
+		limitedQuery = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(query, "; \t\r\n"), c.maxRows)
 	}
 
 	result, err := c.executeSQL(ctx, limitedQuery)
@@ -466,18 +468,18 @@ type tursoResultEntry struct {
 }
 
 type tursoResultPayload struct {
-	Type   string            `json:"type"` // "execute"
-	Result tursoQueryResult  `json:"result"`
+	Type   string           `json:"type"` // "execute"
+	Result tursoQueryResult `json:"result"`
 }
 
 type tursoQueryResult struct {
 	Cols             []tursoColumn `json:"cols"`
 	Rows             []tursoRow    `json:"rows"`
-	AffectedRowCount int          `json:"affected_row_count"`
+	AffectedRowCount int           `json:"affected_row_count"`
 }
 
 type tursoColumn struct {
-	Name    string `json:"name"`
+	Name     string `json:"name"`
 	Decltype string `json:"decltype"`
 }
 

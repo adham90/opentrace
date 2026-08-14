@@ -14,15 +14,15 @@ func ZstdBlockEncodeStrings(values []string) []byte {
 	// Pre-allocate: average string ~100 bytes + 2 byte prefix
 	buf := make([]byte, 0, len(values)*102)
 	for _, v := range values {
-		buf = binary.LittleEndian.AppendUint16(buf, uint16(len(v)))
-		buf = append(buf, v...)
+		buf = AppendLenString(buf, v)
 	}
 	return Compress(buf)
 }
 
-// ZstdBlockDecodeStrings decodes zstd + length-prefixed strings.
-func ZstdBlockDecodeStrings(data []byte, count int) ([]string, error) {
-	raw, err := Decompress(data)
+// ZstdBlockDecodeStrings decodes zstd + length-prefixed strings using the given
+// length framing (LenUint16 for chunk v1 files, LenExtended for v2+).
+func ZstdBlockDecodeStrings(data []byte, count int, f LenFormat) ([]string, error) {
+	raw, err := DecompressBounded(data, DecodeCeiling(count, MaxColumnValueBytes+MaxLenFramingBytes))
 	if err != nil {
 		return nil, fmt.Errorf("decompress zstd block strings: %w", err)
 	}
@@ -30,16 +30,12 @@ func ZstdBlockDecodeStrings(data []byte, count int) ([]string, error) {
 	result := make([]string, 0, count)
 	offset := 0
 	for i := 0; i < count; i++ {
-		if offset+2 > len(raw) {
-			return nil, fmt.Errorf("zstd block string %d: truncated length at offset %d", i, offset)
+		var v string
+		v, offset, err = f.ReadString(raw, offset)
+		if err != nil {
+			return nil, fmt.Errorf("zstd block string %d: %w", i, err)
 		}
-		sLen := int(binary.LittleEndian.Uint16(raw[offset:]))
-		offset += 2
-		if offset+sLen > len(raw) {
-			return nil, fmt.Errorf("zstd block string %d: truncated data (need %d, have %d)", i, sLen, len(raw)-offset)
-		}
-		result = append(result, string(raw[offset:offset+sLen]))
-		offset += sLen
+		result = append(result, v)
 	}
 	return result, nil
 }
@@ -56,7 +52,7 @@ func ZstdBlockEncodeInt64(values []int64) []byte {
 
 // ZstdBlockDecodeInt64 decodes zstd + raw LE int64 values.
 func ZstdBlockDecodeInt64(data []byte, count int) ([]int64, error) {
-	raw, err := Decompress(data)
+	raw, err := DecompressBounded(data, DecodeCeiling(count, 8))
 	if err != nil {
 		return nil, fmt.Errorf("decompress zstd block int64: %w", err)
 	}

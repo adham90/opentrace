@@ -18,8 +18,7 @@ func SparseStrings(values []string) []byte {
 	var buf []byte
 	for _, v := range values {
 		if v != "" {
-			buf = binary.LittleEndian.AppendUint16(buf, uint16(len(v)))
-			buf = append(buf, v...)
+			buf = AppendLenString(buf, v)
 		}
 	}
 	compressed := Compress(buf)
@@ -27,8 +26,9 @@ func SparseStrings(values []string) []byte {
 	return marshalSparse(nonNullCount, bitmap, compressed)
 }
 
-// UnsparseStrings decodes sparse string column.
-func UnsparseStrings(data []byte, count int) ([]string, error) {
+// UnsparseStrings decodes sparse string column using the given length framing
+// (LenUint16 for chunk v1 files, LenExtended for v2+).
+func UnsparseStrings(data []byte, count int, f LenFormat) ([]string, error) {
 	nonNullCount, bitmap, compressedValues, err := unmarshalSparse(data)
 	if err != nil {
 		return nil, err
@@ -36,7 +36,7 @@ func UnsparseStrings(data []byte, count int) ([]string, error) {
 
 	var raw []byte
 	if nonNullCount > 0 {
-		raw, err = Decompress(compressedValues)
+		raw, err = DecompressBounded(compressedValues, DecodeCeiling(count, MaxColumnValueBytes+MaxLenFramingBytes))
 		if err != nil {
 			return nil, fmt.Errorf("decompress sparse strings: %w", err)
 		}
@@ -46,16 +46,12 @@ func UnsparseStrings(data []byte, count int) ([]string, error) {
 	offset := 0
 	for i := 0; i < count; i++ {
 		if getBit(bitmap, i) {
-			if offset+2 > len(raw) {
-				return nil, fmt.Errorf("sparse string %d: truncated length", i)
+			var v string
+			v, offset, err = f.ReadString(raw, offset)
+			if err != nil {
+				return nil, fmt.Errorf("sparse string %d: %w", i, err)
 			}
-			sLen := int(binary.LittleEndian.Uint16(raw[offset:]))
-			offset += 2
-			if offset+sLen > len(raw) {
-				return nil, fmt.Errorf("sparse string %d: truncated data", i)
-			}
-			result[i] = string(raw[offset : offset+sLen])
-			offset += sLen
+			result[i] = v
 		}
 	}
 	return result, nil
@@ -86,7 +82,7 @@ func UnsparseInt64(data []byte, count int) ([]*int64, error) {
 
 	var raw []byte
 	if nonNullCount > 0 {
-		raw, err = Decompress(compressedValues)
+		raw, err = DecompressBounded(compressedValues, DecodeCeiling(count, MaxVarintBytes))
 		if err != nil {
 			return nil, fmt.Errorf("decompress sparse int64: %w", err)
 		}
@@ -96,6 +92,9 @@ func UnsparseInt64(data []byte, count int) ([]*int64, error) {
 	offset := 0
 	for i := 0; i < count; i++ {
 		if getBit(bitmap, i) {
+			if offset >= len(raw) {
+				return nil, fmt.Errorf("sparse int64 %d: truncated at offset %d", i, offset)
+			}
 			v, n := binary.Varint(raw[offset:])
 			if n <= 0 {
 				return nil, fmt.Errorf("sparse int64 %d: invalid varint", i)
@@ -176,7 +175,7 @@ func UnsparseBytes(data []byte, count int) ([][]byte, error) {
 
 	var raw []byte
 	if nonNullCount > 0 {
-		raw, err = Decompress(compressedValues)
+		raw, err = DecompressBounded(compressedValues, DecodeCeiling(count, MaxColumnValueBytes+MaxLenFramingBytes))
 		if err != nil {
 			return nil, fmt.Errorf("decompress sparse bytes: %w", err)
 		}

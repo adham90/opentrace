@@ -154,7 +154,7 @@ func TestErrorGroupStore_Resolve_And_Reopen(t *testing.T) {
 	}
 
 	// Verify events.
-	events, err := s.ListEvents(ctx, "fp_resolve", 10)
+	events, err := s.ListEvents(ctx, "fp_resolve", "", 10)
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -483,7 +483,7 @@ func TestErrorImpactStore_EnvIsolation(t *testing.T) {
 	// GetImpact aggregates across both envs: 2 unique "user rows", even though
 	// it's the same user in two envs, because the unique constraint is
 	// (fingerprint, environment, user_id).
-	impact, err := eis.GetImpact(ctx, "fp-impact")
+	impact, err := eis.GetImpact(ctx, "fp-impact", "")
 	if err != nil {
 		t.Fatalf("GetImpact: %v", err)
 	}

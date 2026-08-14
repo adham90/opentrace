@@ -44,14 +44,14 @@ func TestIntegrationEndToEnd(t *testing.T) {
 
 		// Error with body (triggers PII scrub + fingerprint computation + log expansion)
 		{Ts: now.UnixMilli(), Level: "error", Service: "api", Env: "production",
-			Message:        "PaymentError: card declined",
-			TraceID:        "trace-payment-123",
-			RequestID:      "req-abc",
-			UserID:         "42",
+			Message:    "PaymentError: card declined",
+			TraceID:    "trace-payment-123",
+			RequestID:  "req-abc",
+			UserID:     "42",
 			ErrorClass: "PaymentError",
-			SourceFile:     "app/services/billing.rb",
-			SourceLine:     99,
-			Body:           body},
+			SourceFile: "app/services/billing.rb",
+			SourceLine: 99,
+			Body:       body},
 
 		// Structured log
 		{Ts: now.UnixMilli(), Level: "warn", Service: "api", Env: "production",
@@ -213,7 +213,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	}
 
 	// --- DistinctValues ---
-	services, err := s.DistinctValues("service", start, end)
+	services, err := s.DistinctValues("service", start, end, "", "", "")
 	if err != nil {
 		t.Fatalf("DistinctValues: %v", err)
 	}

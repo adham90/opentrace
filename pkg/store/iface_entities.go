@@ -16,11 +16,3 @@ type CodeEntityStore interface {
 	BatchRecomputeRisk(ctx context.Context) error
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
 }
-
-// TestCorrelationStore manages uncovered error path analysis.
-type TestCorrelationStore interface {
-	RefreshUncoveredPaths(ctx context.Context) error
-	TopByPriority(ctx context.Context, service string, limit int) ([]UncoveredErrorPath, error)
-	GetByFingerprint(ctx context.Context, fingerprint string) (*UncoveredErrorPath, error)
-	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
-}

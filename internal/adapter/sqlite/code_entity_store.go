@@ -21,19 +21,19 @@ func NewCodeEntityStore(db *bun.DB) store.CodeEntityStore {
 }
 
 func (s *codeEntityStore) Upsert(ctx context.Context, params store.UpsertCodeEntityParams) (*store.CodeEntity, error) {
-	now := time.Now().UTC()
-	e := store.CodeEntity{
-		EntityType: params.EntityType,
-		EntityName: params.EntityName,
-		Service:    params.Service,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	}
+	// RFC3339 strings, matching IncrementError/IncrementInvestigation and the
+	// RFC3339 cutoff Prune compares against. A bun model insert would render
+	// these timestamps in bun's own format and leave two incomparable formats
+	// in the same columns of this table.
+	now := rfc3339(time.Now().UTC())
 
-	_, err := s.db.NewInsert().Model(&e).
-		On("CONFLICT (entity_type, entity_name, service) DO UPDATE").
-		Set("updated_at = EXCLUDED.updated_at").
-		Exec(ctx)
+	_, err := s.db.NewRaw(`
+		INSERT INTO code_entities (entity_type, entity_name, service, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (entity_type, entity_name, service) DO UPDATE SET
+			updated_at = excluded.updated_at`,
+		string(params.EntityType), params.EntityName, params.Service, now, now,
+	).Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("upserting code entity: %w", err)
 	}
@@ -93,7 +93,7 @@ func (s *codeEntityStore) BatchGetRisk(ctx context.Context, entityType store.Cod
 }
 
 func (s *codeEntityStore) IncrementError(ctx context.Context, entityType store.CodeEntityType, entityName, service string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := rfc3339(time.Now().UTC())
 	_, err := s.db.NewRaw(`
 		INSERT INTO code_entities (entity_type, entity_name, service, error_count, last_error_at, created_at, updated_at)
 		VALUES (?, ?, ?, 1, ?, ?, ?)
@@ -110,7 +110,7 @@ func (s *codeEntityStore) IncrementError(ctx context.Context, entityType store.C
 }
 
 func (s *codeEntityStore) IncrementInvestigation(ctx context.Context, entityType store.CodeEntityType, entityName, service string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := rfc3339(time.Now().UTC())
 	_, err := s.db.NewRaw(`
 		INSERT INTO code_entities (entity_type, entity_name, service, investigation_count, last_investigation_at, created_at, updated_at)
 		VALUES (?, ?, ?, 1, ?, ?, ?)
@@ -127,7 +127,7 @@ func (s *codeEntityStore) IncrementInvestigation(ctx context.Context, entityType
 }
 
 func (s *codeEntityStore) BatchRecomputeRisk(ctx context.Context) error {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := rfc3339(time.Now().UTC())
 	_, err := s.db.NewRaw(`
 		UPDATE code_entities SET
 		  risk_score = (
@@ -154,7 +154,7 @@ func (s *codeEntityStore) BatchRecomputeRisk(ctx context.Context) error {
 }
 
 func (s *codeEntityStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
-	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
+	cutoff := rfc3339(time.Now().UTC().Add(-olderThan))
 	res, err := s.db.NewDelete().Model((*store.CodeEntity)(nil)).
 		Where("error_count = 0 AND investigation_count = 0 AND updated_at < ?", cutoff).
 		Exec(ctx)

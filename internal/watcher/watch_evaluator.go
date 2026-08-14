@@ -2,12 +2,18 @@ package watcher
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
+
+// defaultCheckInterval is used when a watch's check_interval is missing or
+// malformed.
+const defaultCheckInterval = 30 * time.Second
 
 // WatchEvalResult holds the result of evaluating a single watch.
 type WatchEvalResult struct {
@@ -22,12 +28,14 @@ type WatchEvaluator struct {
 	metrics    *WatchMetrics
 	watchStore store.WatchStore
 
-	// transitionMu serializes the active→triggered check-and-set per watch.
-	// The periodic WatchScheduler and the reactive WatchStreamEvaluator (up to
-	// 16 concurrent) share one *WatchEvaluator, so without this both can read a
-	// stale "not triggered" snapshot and both create + notify. This is a single
-	// process (SQLite, one node), so an in-process keyed lock plus a fresh
-	// status re-read gives the same guarantee as a DB compare-and-swap.
+	// transitionMu serializes each watch's whole evaluation: the breach-counter
+	// read-modify-write and the active→triggered check-and-set. The periodic
+	// WatchScheduler and the reactive WatchStreamEvaluator (up to 16
+	// concurrent) share one *WatchEvaluator, so without this both can read a
+	// stale snapshot and both increment from it (losing one increment) and
+	// both create + notify. This is a single process (SQLite, one node), so an
+	// in-process keyed lock plus a fresh re-read gives the same guarantee as a
+	// DB compare-and-swap.
 	transitionMu keyedMutex
 }
 
@@ -40,43 +48,91 @@ func NewWatchEvaluator(metrics *WatchMetrics, watchStore store.WatchStore) *Watc
 }
 
 // keyedMutex provides per-key mutual exclusion. The zero value is ready to use.
+// Entries are reference-counted and removed once the last holder releases them,
+// so a long-lived evaluator does not accumulate one map entry per ephemeral
+// watch for the process lifetime.
 type keyedMutex struct {
 	mu    sync.Mutex
-	locks map[string]*sync.Mutex
+	locks map[string]*refCountedMutex
+}
+
+type refCountedMutex struct {
+	mu   sync.Mutex
+	refs int
 }
 
 // lock acquires the mutex for key and returns its unlock function.
 func (k *keyedMutex) lock(key string) func() {
 	k.mu.Lock()
 	if k.locks == nil {
-		k.locks = make(map[string]*sync.Mutex)
+		k.locks = make(map[string]*refCountedMutex)
 	}
 	m, ok := k.locks[key]
 	if !ok {
-		m = &sync.Mutex{}
+		m = &refCountedMutex{}
 		k.locks[key] = m
 	}
+	m.refs++
 	k.mu.Unlock()
 
-	m.Lock()
-	return m.Unlock
+	m.mu.Lock()
+	return func() {
+		m.mu.Unlock()
+		k.mu.Lock()
+		m.refs--
+		if m.refs == 0 {
+			delete(k.locks, key)
+		}
+		k.mu.Unlock()
+	}
+}
+
+// size reports how many per-key mutexes are currently tracked (test hook).
+func (k *keyedMutex) size() int {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return len(k.locks)
 }
 
 // Evaluate measures the watch's conditions and determines if an alert should fire.
-// If the watch has a JSON conditions tree, it uses the tree evaluator.
-// Otherwise, it falls back to the flat metric/operator/threshold fields.
+//
+// The whole evaluation runs under the watch's keyed lock and re-reads the
+// authoritative row from the store, so the consecutive-breach counter is a
+// read-modify-write over fresh state rather than over the caller's snapshot.
+// The scheduler tick and the reactive stream evaluator share one
+// *WatchEvaluator in a single process, so serializing here is what keeps two
+// concurrent observations of the same breach from collapsing into one
+// increment (UpdateAfterCheck is a plain overwrite, not a SQL increment).
 func (e *WatchEvaluator) Evaluate(ctx context.Context, w *store.Watch) (*WatchEvalResult, error) {
-	// Parse the check interval for the measurement window.
-	window, err := time.ParseDuration(w.CheckInterval)
+	unlock := e.transitionMu.lock(w.ID)
+	defer unlock()
+
+	// Re-read the authoritative state; the caller's snapshot may predate a
+	// concurrent evaluation's write.
+	cur, err := e.watchStore.GetByID(ctx, w.ID)
 	if err != nil {
-		window = 30 * time.Second
-	}
-	bw, err := time.ParseDuration(w.BaselineWindow)
-	if err == nil && bw > window {
-		window = bw
+		return nil, fmt.Errorf("reading watch: %w", err)
 	}
 
-	// Parse and evaluate the conditions tree.
+	result, err := e.evaluateLocked(ctx, cur)
+	if err != nil {
+		e.recordFailedCheck(ctx, cur, err)
+		return nil, err
+	}
+	return result, nil
+}
+
+// evaluateLocked performs the measurement and state transition for a watch.
+// The caller must hold the watch's keyed lock and pass a freshly read row.
+func (e *WatchEvaluator) evaluateLocked(ctx context.Context, w *store.Watch) (*WatchEvalResult, error) {
+	// The measurement window is the check interval. It is deliberately NOT
+	// widened to baseline_window: doing so measured a "logs per 30s check"
+	// threshold over a trailing hour (120x inflation at the defaults) and made
+	// min_consecutive meaningless because successive checks re-measured the
+	// same data. Relative conditions measure over the baseline's own window
+	// (see evalRelative), which is where the baseline comparison needs it.
+	window := parseDurationOr(w.CheckInterval, defaultCheckInterval)
+
 	cond, err := ParseCondition(w.ConditionsJSON)
 	if err != nil {
 		return nil, fmt.Errorf("parsing conditions: %w", err)
@@ -89,18 +145,13 @@ func (e *WatchEvaluator) Evaluate(ctx context.Context, w *store.Watch) (*WatchEv
 	breached := condResult.Breached
 	summary := condResult.Summary
 
-	// Update consecutive breaches.
+	// Update consecutive breaches from the authoritative counter.
 	breaches := 0
 	if breached {
 		breaches = w.ConsecutiveBreaches + 1
 	}
 
-	// Calculate next check time.
-	ci, err := time.ParseDuration(w.CheckInterval)
-	if err != nil {
-		ci = 30 * time.Second
-	}
-	nextCheck := time.Now().UTC().Add(ci)
+	nextCheck := time.Now().UTC().Add(parseDurationOr(w.CheckInterval, defaultCheckInterval))
 
 	// Persist the check result.
 	if err := e.watchStore.UpdateAfterCheck(ctx, w.ID, value, breaches, nextCheck); err != nil {
@@ -124,23 +175,15 @@ func (e *WatchEvaluator) Evaluate(ctx context.Context, w *store.Watch) (*WatchEv
 		return result, nil
 	}
 
-	// Alert suppression fast-path: the snapshot already shows triggered.
+	// Alert suppression: the authoritative row already shows triggered, so a
+	// concurrent evaluation won the transition first.
 	if w.Status == store.WatchStatusTriggered {
 		result.Summary = fmt.Sprintf("%s (already triggered, suppressing)", summary)
 		return result, nil
 	}
 
-	// Atomically flip active→triggered. Only the evaluation that actually wins
-	// the transition fires the alert; a concurrent evaluation working from the
-	// same stale snapshot loses and suppresses. This prevents duplicate/flapping
-	// alerts when the scheduler and stream evaluator race on the same watch.
-	won, err := e.transitionToTriggered(ctx, w.ID)
-	if err != nil {
-		return nil, err
-	}
-	if !won {
-		result.Summary = fmt.Sprintf("%s (already triggered, suppressing)", summary)
-		return result, nil
+	if err := e.watchStore.UpdateStatus(ctx, w.ID, store.WatchStatusTriggered); err != nil {
+		return nil, fmt.Errorf("updating watch to triggered: %w", err)
 	}
 
 	// Fire alert.
@@ -150,43 +193,59 @@ func (e *WatchEvaluator) Evaluate(ctx context.Context, w *store.Watch) (*WatchEv
 	return result, nil
 }
 
-// transitionToTriggered atomically moves a watch from any non-triggered status
-// to "triggered". It returns true only for the caller that performed the
-// transition, so exactly one concurrent evaluation fires the alert. The keyed
-// lock serializes the read-check-write, and the authoritative status is
-// re-read from the store (not the caller's snapshot) inside the lock.
-func (e *WatchEvaluator) transitionToTriggered(ctx context.Context, id string) (bool, error) {
-	unlock := e.transitionMu.lock(id)
-	defer unlock()
+// recordFailedCheck advances the watch's schedule after a failed evaluation.
+//
+// Without this, next_check_at and last_checked_at never move: GetDueWatches
+// returns the watch on every 15s tick, and the stream evaluator's
+// last_checked_at gate never engages, so one malformed watch is re-evaluated
+// on every ingest batch forever. A permanently invalid definition is disabled
+// outright rather than retried — it can never succeed.
+func (e *WatchEvaluator) recordFailedCheck(ctx context.Context, w *store.Watch, evalErr error) {
+	if errors.Is(evalErr, ErrInvalidWatchConfig) {
+		slog.Warn("disabling watch with an invalid definition",
+			"watch_id", w.ID,
+			"conditions", store.ConditionsSummary(w.ConditionsJSON),
+			"error", evalErr,
+		)
+		// No dedicated "errored" status exists; expired is the terminal state
+		// that stops both the scheduler and the stream evaluator from picking
+		// the watch up again.
+		if err := e.watchStore.UpdateStatus(ctx, w.ID, store.WatchStatusExpired); err != nil {
+			slog.Error("disabling invalid watch failed", "watch_id", w.ID, "error", err)
+		}
+		return
+	}
 
-	cur, err := e.watchStore.GetByID(ctx, id)
-	if err != nil {
-		return false, fmt.Errorf("reading watch status: %w", err)
+	// Transient failure: keep the counter, but move the schedule forward so the
+	// failure is retried on the normal cadence instead of every tick.
+	value := 0.0
+	if w.CurrentValue != nil {
+		value = *w.CurrentValue
 	}
-	if cur.Status == store.WatchStatusTriggered {
-		return false, nil // another evaluation already won the transition
+	nextCheck := time.Now().UTC().Add(parseDurationOr(w.CheckInterval, defaultCheckInterval))
+	if err := e.watchStore.UpdateAfterCheck(ctx, w.ID, value, w.ConsecutiveBreaches, nextCheck); err != nil {
+		slog.Error("rescheduling failed watch check", "watch_id", w.ID, "error", err)
 	}
-	if err := e.watchStore.UpdateStatus(ctx, id, store.WatchStatusTriggered); err != nil {
-		return false, fmt.Errorf("updating watch to triggered: %w", err)
-	}
-	return true, nil
 }
 
-func compare(value float64, op store.WatchOperator, threshold float64) bool {
+// compare applies a watch operator. An unrecognized operator is a
+// configuration error, not a non-breach: silently returning false produced
+// watches that ran green forever and could never fire.
+func compare(value float64, op store.WatchOperator, threshold float64) (bool, error) {
 	switch op {
 	case store.WatchOpGreaterThan:
-		return value > threshold
+		return value > threshold, nil
 	case store.WatchOpGreaterThanEqual:
-		return value >= threshold
+		return value >= threshold, nil
 	case store.WatchOpLessThan:
-		return value < threshold
+		return value < threshold, nil
 	case store.WatchOpLessThanEqual:
-		return value <= threshold
+		return value <= threshold, nil
 	case store.WatchOpEqual:
-		return value == threshold
+		return value == threshold, nil
 	case store.WatchOpNotEqual:
-		return value != threshold
+		return value != threshold, nil
 	default:
-		return false
+		return false, configErrorf("unknown comparison operator %q (want gt, gte, lt, lte, eq or neq)", op)
 	}
 }

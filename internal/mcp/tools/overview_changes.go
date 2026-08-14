@@ -11,14 +11,23 @@ import (
 // --- changes action ---
 
 func HandleChanges(ctx context.Context, d OverviewDeps, args map[string]any) (*CallToolResult, error) {
+	// Changes is a listing, so it takes the caller's env scope like status,
+	// triage and diagnose do. Querying unfiltered put production fingerprints,
+	// log lines and volume counts in front of a staging-scoped token.
+	env, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+
 	since := GetSinceParam(args, 2*time.Hour)
 	now := time.Now().UTC()
 	windowDuration := now.Sub(since)
 	service := ArgString(args, "service")
 
 	resp := map[string]any{
-		"since": since.Format(time.RFC3339),
-		"until": now.Format(time.RFC3339),
+		"since":       since.Format(time.RFC3339),
+		"until":       now.Format(time.RFC3339),
+		"environment": envLabel(env),
 	}
 	if service != "" {
 		resp["service"] = service
@@ -28,9 +37,10 @@ func HandleChanges(ctx context.Context, d OverviewDeps, args map[string]any) (*C
 	var newErrors []map[string]any
 	if d.ErrorGroupStore != nil {
 		groups, err := d.ErrorGroupStore.List(ctx, store.ListErrorGroupParams{
-			Service: service,
-			Limit:   20,
-			SortBy:  "first_seen_at",
+			Service:     service,
+			Environment: env,
+			Limit:       20,
+			SortBy:      "first_seen_at",
 		})
 		if err == nil {
 			for _, g := range groups {
@@ -54,10 +64,11 @@ func HandleChanges(ctx context.Context, d OverviewDeps, args map[string]any) (*C
 	if d.LogStore != nil {
 		sinceTime := since
 		logs, err := d.LogStore.Search(ctx, store.LogSearchParams{
-			Service: service,
-			Level:   "error",
-			Start:   &sinceTime,
-			Limit:   10,
+			Service:     service,
+			Environment: env,
+			Level:       "error",
+			Start:       &sinceTime,
+			Limit:       10,
 		})
 		if err == nil {
 			for _, l := range logs {
@@ -78,14 +89,16 @@ func HandleChanges(ctx context.Context, d OverviewDeps, args map[string]any) (*C
 		prevStart := since.Add(-windowDuration)
 
 		currentCounts, currErr := d.LogStore.CountByLevel(ctx, store.LogCountParams{
-			Since:   since,
-			Until:   now,
-			Service: service,
+			Since:       since,
+			Until:       now,
+			Service:     service,
+			Environment: env,
 		})
 		prevCounts, prevErr := d.LogStore.CountByLevel(ctx, store.LogCountParams{
-			Since:   prevStart,
-			Until:   since,
-			Service: service,
+			Since:       prevStart,
+			Until:       since,
+			Service:     service,
+			Environment: env,
 		})
 
 		currentErrors := 0

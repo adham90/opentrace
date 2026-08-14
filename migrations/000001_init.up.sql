@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at           TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+-- No idx_users_email: the UNIQUE constraint on users.email already creates an
+-- implicit unique index, so an explicit one is pure write amplification.
 CREATE INDEX IF NOT EXISTS idx_users_mcp_token ON users(mcp_token) WHERE mcp_token IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -34,7 +35,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
+-- No idx_sessions_token: sessions.token is UNIQUE, which SQLite already backs
+-- with an implicit index; a duplicate one doubles index maintenance on login.
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 
 CREATE TABLE IF NOT EXISTS app_config (
@@ -69,11 +71,11 @@ CREATE TABLE IF NOT EXISTS jobs (
     priority     INTEGER NOT NULL DEFAULT 0,
     attempts     INTEGER NOT NULL DEFAULT 0,
     max_attempts INTEGER NOT NULL DEFAULT 3,
-    run_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    run_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
     started_at   TEXT,
     completed_at TEXT,
     last_error   TEXT,
-    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(queue, status, run_at, priority);
@@ -86,14 +88,15 @@ CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 
 CREATE TABLE IF NOT EXISTS data_sources (
     id             TEXT PRIMARY KEY,
-    type           TEXT NOT NULL CHECK(type IN ('logs', 'database', 'monitoring')),
+    -- Keep in sync with the ConnectorType constants in pkg/store/models_connectors.go.
+    type           TEXT NOT NULL CHECK(type IN ('logs', 'database', 'mysql', 'redis', 'turso', 'monitoring', 'server_metrics')),
     name           TEXT NOT NULL DEFAULT '',
     config         TEXT NOT NULL DEFAULT '{}',
     status         TEXT NOT NULL DEFAULT 'disconnected' CHECK(status IN ('connected', 'disconnected', 'error')),
     status_message TEXT,
     last_tested_at TEXT,
-    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    updated_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
     environment    TEXT NOT NULL DEFAULT ''
 );
 
@@ -440,7 +443,10 @@ CREATE TABLE IF NOT EXISTS mcp_activity (
     duration_ms              INTEGER,
     event_type               TEXT NOT NULL DEFAULT 'tool_call'
         CHECK(event_type IN ('tool_call', 'connect', 'disconnect')),
-    created_at               TEXT NOT NULL DEFAULT (datetime('now')),
+    -- RFC3339 UTC, matching every other timestamp column: the store compares
+    -- created_at against RFC3339 cutoffs and time.Parse(time.RFC3339, ...) it
+    -- back, both of which break on datetime('now')'s "YYYY-MM-DD HH:MM:SS".
+    created_at               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     investigation_session_id TEXT NOT NULL DEFAULT '',
     step_index               INTEGER NOT NULL DEFAULT 0,
     was_suggested            INTEGER NOT NULL DEFAULT 0,
@@ -470,8 +476,8 @@ CREATE TABLE IF NOT EXISTS code_entities (
     last_error_at        TEXT DEFAULT NULL,
     last_investigation_at TEXT DEFAULT NULL,
     metadata_json        TEXT NOT NULL DEFAULT '{}',
-    created_at           TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at           TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    updated_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_code_entities_type_name_service ON code_entities(entity_type, entity_name, service);
@@ -514,3 +520,13 @@ UPDATE healthchecks       SET environment = 'production' WHERE environment = '';
 UPDATE servers            SET environment = 'production' WHERE environment = '';
 UPDATE audit_log          SET environment = 'production' WHERE environment = '';
 UPDATE mcp_activity       SET environment = 'production' WHERE environment = '';
+
+-- ============================================================================
+-- Timestamp format backfill lives in 000002, not here.
+--
+-- This file is only ever executed on a database whose schema_version is 0, so
+-- any repair statement placed here reaches exactly the installs that have
+-- nothing to repair. The legacy "2006-01-02 15:04:05.999999-07:00" rows that
+-- need rewriting to RFC3339 are on installs already recorded at version 1,
+-- which skip this file entirely. See 000002 for the guarded UPDATEs.
+-- ============================================================================

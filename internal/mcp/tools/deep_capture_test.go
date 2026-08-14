@@ -704,7 +704,9 @@ func TestGetPIIConfig(t *testing.T) {
 }
 
 func TestUpdatePIIConfig(t *testing.T) {
+	// The config-mutating actions are admin-only (see requireDeepCaptureAdmin).
 	deps := setupDeepCaptureDB(t)
+	deps.IsAdmin = true
 
 	// Seed initial config.
 	_, err := deps.DB.Exec(
@@ -750,7 +752,9 @@ func TestUpdatePIIConfig(t *testing.T) {
 }
 
 func TestUpdatePIIConfig_MissingConfig(t *testing.T) {
+	// The config-mutating actions are admin-only (see requireDeepCaptureAdmin).
 	deps := setupDeepCaptureDB(t)
+	deps.IsAdmin = true
 
 	args := map[string]any{"action": "update_pii_config"}
 	result, err := handleUpdatePIIConfig(context.Background(), deps, args)
@@ -792,7 +796,9 @@ func TestGetRetention(t *testing.T) {
 }
 
 func TestUpdateRetention(t *testing.T) {
+	// The config-mutating actions are admin-only (see requireDeepCaptureAdmin).
 	deps := setupDeepCaptureDB(t)
+	deps.IsAdmin = true
 
 	args := map[string]any{
 		"action": "update_retention",
