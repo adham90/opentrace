@@ -19,21 +19,20 @@ func NewAuditStore(db *bun.DB) store.AuditStore {
 	return &auditStore{db: db}
 }
 
+// Log appends an audit entry. created_at is written as an RFC3339 string
+// rather than through a bun model: Prune compares the column against an
+// RFC3339 cutoff, and bun's own time rendering sorts below that for the same
+// instant, which would delete audit records up to a day before their
+// retention window actually elapses.
 func (s *auditStore) Log(ctx context.Context, params store.LogAuditParams) error {
-	entry := &store.AuditEntry{
-		UserID:      params.UserID,
-		UserEmail:   params.UserEmail,
-		Action:      params.Action,
-		TargetType:  params.TargetType,
-		TargetID:    params.TargetID,
-		Details:     params.Details,
-		IPAddress:   params.IPAddress,
-		Environment: params.Environment,
-		CreatedAt:   time.Now().UTC(),
-	}
-	_, err := s.db.NewInsert().Model(entry).
-		ExcludeColumn("id").
-		Exec(ctx)
+	_, err := s.db.NewRaw(`
+		INSERT INTO audit_log (user_id, user_email, action, target_type, target_id,
+			details, ip_address, environment, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		params.UserID, params.UserEmail, params.Action,
+		params.TargetType, params.TargetID, params.Details,
+		params.IPAddress, params.Environment, rfc3339(time.Now().UTC()),
+	).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("logging audit entry: %w", err)
 	}
@@ -57,7 +56,7 @@ func (s *auditStore) Recent(ctx context.Context, limit int) ([]store.AuditEntry,
 }
 
 func (s *auditStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
-	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
+	cutoff := rfc3339(time.Now().UTC().Add(-olderThan))
 	var totalDeleted int64
 	for {
 		res, err := s.db.NewRaw(

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"sort"
 	"time"
@@ -57,31 +58,17 @@ func LogsCompareErrors(ctx context.Context, svc *logs.Service, curStart, curEnd,
 	curParams := store.LogCountParams{Since: curStart, Until: curEnd, Service: service, Environment: environment}
 	baseParams := store.LogCountParams{Since: baseStart, Until: baseEnd, Service: service, Environment: environment}
 
-	curSvc, err := svc.CountByService(ctx, curParams)
+	// Error counts come from CountByLevel, per service. ServiceLogCount.ErrorCount
+	// is not populated by the production adapter, so summing it reported
+	// "0 errors, unchanged" during an incident with thousands of errors —
+	// CountByService is used only to enumerate which services were active.
+	curByService, curTotal, err := logsErrorsByService(ctx, svc, curParams)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to count current errors: %v", err)), nil
 	}
-	baseSvc, err := svc.CountByService(ctx, baseParams)
+	baseByService, baseTotal, err := logsErrorsByService(ctx, svc, baseParams)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to count baseline errors: %v", err)), nil
-	}
-
-	curTotal := 0
-	curByService := map[string]int{}
-	for _, s := range curSvc {
-		curTotal += s.ErrorCount
-		if s.ErrorCount > 0 {
-			curByService[s.Service] = s.ErrorCount
-		}
-	}
-
-	baseTotal := 0
-	baseByService := map[string]int{}
-	for _, s := range baseSvc {
-		baseTotal += s.ErrorCount
-		if s.ErrorCount > 0 {
-			baseByService[s.Service] = s.ErrorCount
-		}
 	}
 
 	changePct, direction := logsCalcChange(baseTotal, curTotal)
@@ -113,14 +100,25 @@ func LogsCompareErrors(ctx context.Context, svc *logs.Service, curStart, curEnd,
 	}
 
 	var warnings []string
-	if direction == "increase" && math.Abs(changePct) > 50 {
+	switch {
+	case direction == "new":
+		// Errors appearing where the baseline had none is the loudest signal
+		// there is; it used to be silent because the label wasn't "increase".
+		warnings = append(warnings, fmt.Sprintf(
+			"Errors appeared where the baseline period had none: 0 → %d", curTotal))
+	case direction == "increase" && math.Abs(changePct) > 50:
 		warnings = append(warnings, fmt.Sprintf("Error rate increased %.0f%% compared to the baseline period", changePct))
 	}
 	if len(movers) > 0 {
 		topMover := movers[0]
 		topPct := math.Abs(topMover["change_pct"].(float64))
 		if topPct > 100 {
-			warnings = append(warnings, fmt.Sprintf("Service '%s' errors changed %.0f%% — largest contributor", topMover["service"], topMover["change_pct"]))
+			if topMover["from"].(int) == 0 {
+				warnings = append(warnings, fmt.Sprintf(
+					"Service '%s' went from 0 to %d errors — largest contributor", topMover["service"], topMover["to"]))
+			} else {
+				warnings = append(warnings, fmt.Sprintf("Service '%s' errors changed %.0f%% — largest contributor", topMover["service"], topMover["change_pct"]))
+			}
 		}
 	}
 
@@ -147,6 +145,42 @@ func LogsCompareErrors(ctx context.Context, svc *logs.Service, curStart, curEnd,
 	}
 
 	return JSONResult(resp)
+}
+
+// logsErrorsByService returns error+fatal counts per service for a window,
+// plus their total. Services are enumerated with CountByService (whose only
+// reliable field is Service) and counted with CountByLevel, which honours
+// Service/Level/Environment.
+func logsErrorsByService(ctx context.Context, svc *logs.Service, params store.LogCountParams) (map[string]int, int, error) {
+	services, err := svc.CountByService(ctx, params)
+	if err != nil {
+		return nil, 0, err
+	}
+	sort.Slice(services, func(i, j int) bool { return services[i].Total > services[j].Total })
+	if len(services) > maxServiceBreakdown {
+		services = services[:maxServiceBreakdown]
+	}
+
+	byService := make(map[string]int, len(services))
+	total := 0
+	for _, s := range services {
+		p := params
+		p.Service = s.Service
+		lc, lcErr := svc.CountByLevel(ctx, p)
+		if lcErr != nil {
+			slog.Warn("compare per-service error count failed",
+				"event", "logs_compare_service_count_failed",
+				"service", s.Service,
+				"error", lcErr,
+			)
+			continue
+		}
+		if lc.ErrorCount > 0 {
+			byService[s.Service] = lc.ErrorCount
+		}
+		total += lc.ErrorCount
+	}
+	return byService, total, nil
 }
 
 func LogsCompareLogVolume(ctx context.Context, svc *logs.Service, curStart, curEnd, baseStart, baseEnd time.Time, service, environment string) (*CallToolResult, error) {

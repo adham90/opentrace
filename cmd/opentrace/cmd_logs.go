@@ -4,8 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,50 +38,186 @@ func runLogs() error {
 		noColor = true
 	}
 
+	// Reject a bad --since up front, on both paths. Silently ignoring it prints
+	// "nothing happened" for a window the user explicitly asked about.
+	if since != "" && !validSince(since) {
+		return fmt.Errorf("invalid --since value %q (use 15m, 6h, 7d or an RFC3339 timestamp)", since)
+	}
+
 	client := apiclient.New(cfg.Endpoint, cfg.APIKey)
+	filters := logFilters{
+		endpoint: cfg.Endpoint,
+		apiKey:   cfg.APIKey,
+		level:    level,
+		service:  service,
+		env:      env,
+		since:    since,
+	}
 
 	if follow {
-		return streamLogs(client, level, service, "", env, jsonOutput, noColor)
+		// With --since, print that history first and then stream. The flag used
+		// to be dropped entirely in follow mode, so `opentrace logs --since 1h`
+		// printed nothing until a new log happened to arrive. Without --since,
+		// follow keeps its "only new logs" behaviour.
+		var lastID int64
+		if since != "" {
+			lastID, err = dumpLogs(filters, jsonOutput, noColor)
+			if err != nil {
+				return err
+			}
+		}
+		return streamLogs(client, level, service, "", env, jsonOutput, noColor, lastID)
 	}
 
 	// One-shot: dump logs and exit
-	return dumpLogs(client, level, service, since, env, jsonOutput, noColor)
+	_, err = dumpLogs(filters, jsonOutput, noColor)
+	return err
 }
 
-// dumpLogs fetches a page of recent logs and prints them.
-func dumpLogs(client *apiclient.Client, level, service, since, env string, jsonOutput, noColor bool) error {
-	resp, err := client.LogTail(0, 100, level, service, "", env)
-	if err != nil {
-		return fmt.Errorf("fetching logs: %w", err)
-	}
+const (
+	// logPageSize is the server's maximum tail page size.
+	logPageSize = 200
+	// maxLogHistoryLines caps how many historical lines one command prints, so
+	// a wide --since window cannot page forever.
+	maxLogHistoryLines = 5000
+)
 
-	var sinceTime time.Time
-	if since != "" {
-		d, err := parseDuration(since)
+// logFilters carries everything needed to query the tail endpoint.
+type logFilters struct {
+	endpoint string
+	apiKey   string
+	level    string
+	service  string
+	env      string
+	since    string
+}
+
+// dumpLogs prints the logs in the requested window and returns the highest log
+// ID printed (0 if none), so a following stream can skip what was already shown.
+//
+// With --since it pages forward through the whole window server-side; the old
+// code fetched a fixed newest-100 page and filtered client-side, silently
+// dropping everything else in the window.
+func dumpLogs(f logFilters, jsonOutput, noColor bool) (int64, error) {
+	var (
+		lastID  int64
+		printed int
+	)
+
+	// after=0 makes the server page ascending from the start of the window;
+	// without a cursor it returns only the newest page.
+	cursor := int64(0)
+	for {
+		params := url.Values{}
+		params.Set("limit", strconv.Itoa(logPageSize))
+		params.Set("after", strconv.FormatInt(cursor, 10))
+		if f.level != "" {
+			params.Set("level", f.level)
+		}
+		if f.service != "" {
+			params.Set("service", f.service)
+		}
+		if f.env != "" {
+			params.Set("env", f.env)
+		}
+		if f.since != "" {
+			params.Set("since", f.since)
+		}
+
+		resp, err := fetchLogTail(f.endpoint, f.apiKey, params)
 		if err != nil {
-			return fmt.Errorf("invalid --since value: %w", err)
+			return lastID, fmt.Errorf("fetching logs: %w", err)
 		}
-		sinceTime = time.Now().Add(-d)
+
+		for _, entry := range resp.Logs {
+			printLogEntry(entry, jsonOutput, noColor)
+			printed++
+			if entry.ID > lastID {
+				lastID = entry.ID
+			}
+			if printed >= maxLogHistoryLines {
+				fmt.Fprintf(os.Stderr, "(truncated at %d lines — narrow --since or add filters)\n", maxLogHistoryLines)
+				return lastID, nil
+			}
+		}
+
+		// No since window means "the most recent page"; don't walk all history.
+		if f.since == "" || !resp.HasMore || resp.Cursor <= cursor {
+			if f.since == "" && resp.HasMore {
+				fmt.Fprintf(os.Stderr, "(showing the newest %d lines — use --since to widen the window)\n", logPageSize)
+			}
+			return lastID, nil
+		}
+		cursor = resp.Cursor
+	}
+}
+
+// fetchLogTail performs GET /api/cli/logs/tail with arbitrary query params.
+// It exists because apiclient.LogTail cannot express `since` or a zero `after`
+// cursor, both of which are needed to page a time window server-side.
+func fetchLogTail(endpoint, apiKey string, params url.Values) (*apiclient.LogTailResponse, error) {
+	u, err := url.Parse(endpoint + "/api/cli/logs/tail")
+	if err != nil {
+		return nil, fmt.Errorf("invalid endpoint %q: %w", endpoint, err)
+	}
+	u.RawQuery = params.Encode()
+
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
-	for _, entry := range resp.Logs {
-		if !sinceTime.IsZero() && entry.Timestamp.Before(sinceTime) {
-			continue
-		}
-		if jsonOutput {
-			data, _ := json.Marshal(entry)
-			fmt.Println(string(data))
-		} else {
-			fmt.Println(formatLogLine(entry, noColor))
-		}
+	httpClient := &http.Client{Timeout: logTailTimeout}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("connecting to %s: %w", endpoint, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		return nil, fmt.Errorf("server returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	return nil
+	var out apiclient.LogTailResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+	return &out, nil
+}
+
+const (
+	// logTailTimeout bounds a single tail page request.
+	logTailTimeout = 30 * time.Second
+	// maxErrorBodyBytes caps how much of an error response body is echoed.
+	maxErrorBodyBytes = 1024
+)
+
+// printLogEntry writes one entry in the selected output format.
+func printLogEntry(entry apiclient.LogEntry, jsonOutput, noColor bool) {
+	if jsonOutput {
+		data, err := json.Marshal(entry)
+		if err != nil {
+			return
+		}
+		fmt.Println(string(data))
+		return
+	}
+	fmt.Println(formatLogLine(entry, noColor))
 }
 
 // streamLogs connects to the SSE endpoint and streams logs in real time.
-func streamLogs(client *apiclient.Client, level, service, search, env string, jsonOutput, noColor bool) error {
-	url := client.LogStreamURL(level, service, search, env)
+// Entries with an ID at or below afterID were already printed as history and
+// are skipped.
+func streamLogs(client *apiclient.Client, level, service, search, env string, jsonOutput, noColor bool, afterID int64) error {
+	url, err := client.LogStreamURL(level, service, search, env)
+	if err != nil {
+		return err
+	}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return fmt.Errorf("creating SSE request: %w", err)
@@ -100,20 +239,30 @@ func streamLogs(client *apiclient.Client, level, service, search, env string, js
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
+	// One SSE "data:" line carries a whole marshaled entry, and ingest accepts
+	// bodies far larger than bufio's 64KB default token. Without this a single
+	// big stack trace killed the follow session with "token too long" — and
+	// killed it again on every reconnect.
+	scanner.Buffer(make([]byte, sseInitialBufBytes), maxSSELineBytes)
+
+	const dataPrefix = "data: "
 	for scanner.Scan() {
 		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
+		if !strings.HasPrefix(line, dataPrefix) {
 			continue
 		}
 
-		data := line[6:]
-		if jsonOutput {
-			fmt.Println(data)
-			continue
-		}
+		data := line[len(dataPrefix):]
 
 		var entry apiclient.LogEntry
 		if err := json.Unmarshal([]byte(data), &entry); err != nil {
+			continue
+		}
+		if afterID > 0 && entry.ID != 0 && entry.ID <= afterID {
+			continue // already printed as history
+		}
+		if jsonOutput {
+			fmt.Println(data)
 			continue
 		}
 		fmt.Println(formatLogLine(entry, noColor))
@@ -124,6 +273,14 @@ func streamLogs(client *apiclient.Client, level, service, search, env string, js
 	}
 	return nil
 }
+
+const (
+	// sseInitialBufBytes is the starting scan buffer; it grows on demand.
+	sseInitialBufBytes = 64 << 10
+	// maxSSELineBytes is the largest single SSE line accepted. It is above the
+	// server's 10MB ingest body cap so no ingestible entry can break the stream.
+	maxSSELineBytes = 16 << 20
+)
 
 // formatLogLine formats a log entry as a single line.
 func formatLogLine(entry apiclient.LogEntry, noColor bool) string {
@@ -169,6 +326,16 @@ func colorLevel(level string) string {
 
 func dim(s string) string {
 	return "\033[2m" + s + "\033[0m"
+}
+
+// validSince reports whether s is a --since value the server will accept:
+// a relative duration ("15m", "6h", "7d") or an RFC3339 timestamp.
+func validSince(s string) bool {
+	if _, err := parseDuration(s); err == nil {
+		return true
+	}
+	_, err := time.Parse(time.RFC3339, s)
+	return err == nil
 }
 
 func parseDuration(s string) (time.Duration, error) {

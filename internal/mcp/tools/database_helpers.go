@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -55,6 +56,44 @@ func enforceConnectorEnvScope(ctx context.Context, ds connector.DataSource) *Cal
 			"not authorized for the database connector's environment %q (token allows: %v)",
 			env, scope.Allowed,
 		))
+	}
+	return nil
+}
+
+// errParamsUnsupported is returned when a caller-supplied value has to be sent
+// as a bound parameter but the active connector cannot bind parameters. We fail
+// closed rather than falling back to string interpolation.
+var errParamsUnsupported = errors.New("the active database connector does not support parameterized queries")
+
+// executeReadQuery runs a read-only query, binding args as parameters
+// ($1, $2, ...) when any are supplied. Every caller-supplied value that ends up
+// in a query MUST travel through args — never through fmt.Sprintf into the SQL
+// text — so that a value like `x' UNION SELECT ...` is compared as a literal
+// string instead of being parsed as SQL.
+func executeReadQuery(ctx context.Context, qe connector.QueryExecutor, query string, args ...any) (*connector.QueryResult, error) {
+	if len(args) == 0 {
+		return qe.ExecuteReadQuery(ctx, query)
+	}
+	pq, ok := qe.(connector.ParameterizedQueryExecutor)
+	if !ok {
+		return nil, errParamsUnsupported
+	}
+	return pq.ExecuteReadQueryArgs(ctx, query, args...)
+}
+
+// maxCatalogNameLen is Postgres's NAMEDATALEN-1 limit: no schema, table or
+// index name can be longer, so a longer value can never match a real object.
+// Rejecting it early keeps oversized junk (typically an injection attempt) out
+// of the catalog queries entirely.
+const maxCatalogNameLen = 63
+
+// validateCatalogName rejects a caller-supplied catalog object name that cannot
+// possibly identify a real object. It is a fail-fast guard, not the injection
+// defence — bound parameters are. Returns nil when the name is acceptable.
+func validateCatalogName(kind, name string) *CallToolResult {
+	if len(name) > maxCatalogNameLen {
+		return NewToolResultError(fmt.Sprintf(
+			"%s name is too long (max %d characters)", kind, maxCatalogNameLen))
 	}
 	return nil
 }

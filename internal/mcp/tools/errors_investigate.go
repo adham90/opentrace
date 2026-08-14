@@ -13,6 +13,23 @@ import (
 // Action: investigate — deep investigate (from investigateErrorHandler)
 // ---------------------------------------------------------------------------
 
+const (
+	// investigateTraceWindow bounds the trace_id entry-point search. Traces are
+	// resolved by exact ID; the window only exists because the store insists on
+	// one, and defaulting it to now-1h made "investigate last night's incident"
+	// answer "no log entries found for trace_id=...".
+	investigateTraceWindow = 30 * 24 * time.Hour
+
+	// investigateTraceSpan is how far either side of the anchor the trace
+	// timeline reaches. A trace spans seconds to minutes; an hour each way is
+	// generous and, crucially, anchored on the anchor rather than on now.
+	investigateTraceSpan = time.Hour
+
+	// investigateContextEntries is how many surrounding log lines are collected
+	// on each side of the anchor.
+	investigateContextEntries = 5
+)
+
 func ErrorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.LogStore == nil {
 		return NewToolResultError("LogStore not configured"), nil
@@ -28,14 +45,21 @@ func ErrorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 			return NewToolResultError(fmt.Sprintf("log entry %d not found: %v", int64(logID), err)), nil
 		}
 	} else if traceID, ok := args["trace_id"].(string); ok && traceID != "" {
-		// Find the primary error entry in this trace.
+		// Find the primary error entry in this trace. The window is explicit:
+		// leaving Start nil hands the store its now-1h default and hides every
+		// trace older than an hour.
+		traceSearchStart := time.Now().UTC().Add(-investigateTraceWindow)
+		traceSearchEnd := time.Now().UTC()
 		traceEntries, searchErr := deps.LogStore.Search(ctx, store.LogSearchParams{
 			TraceID: traceID,
+			Start:   &traceSearchStart,
+			End:     &traceSearchEnd,
 			Limit:   50,
 			SortAsc: true,
 		})
 		if searchErr != nil || len(traceEntries) == 0 {
-			return NewToolResultError(fmt.Sprintf("no log entries found for trace_id=%s", traceID)), nil
+			return NewToolResultError(fmt.Sprintf(
+				"no log entries found for trace_id=%s in the last %s", traceID, investigateTraceWindow)), nil
 		}
 		// Pick the first error-level entry, or the last entry.
 		picked := &traceEntries[len(traceEntries)-1]
@@ -148,9 +172,15 @@ func ErrorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			// Anchored on the anchor's own timestamp — a now-relative default
+			// window returns nothing for anything older than an hour.
+			spanStart := anchor.Timestamp.Add(-investigateTraceSpan)
+			spanEnd := anchor.Timestamp.Add(investigateTraceSpan)
 			traceEntries, _ := deps.LogStore.Search(ctx, store.LogSearchParams{
 				TraceID:     anchor.TraceID,
 				Environment: anchor.Environment,
+				Start:       &spanStart,
+				End:         &spanEnd,
 				Limit:       30,
 				SortAsc:     true,
 			})
@@ -179,27 +209,48 @@ func ErrorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		// Both sides are windowed around the anchor. Previously "before" set
+		// only End, so the store's now-1h Start produced the inverted window
+		// [now-1h, anchor.ts] and returned nothing for any past incident.
+		beforeStart := anchor.Timestamp.Add(-contextWindow)
+		afterEnd := anchor.Timestamp.Add(contextWindow)
 		beforeEntries, _ := deps.LogStore.Search(ctx, store.LogSearchParams{
+			Start:       &beforeStart,
 			End:         &anchor.Timestamp,
 			Service:     anchor.Service,
 			Environment: anchor.Environment,
-			Limit:       5,
-			SortAsc:     false,
+			// +1: End is inclusive, so the anchor itself takes a slot and is
+			// dropped below.
+			Limit:   investigateContextEntries + 1,
+			SortAsc: false,
 		})
-		afterStart := anchor.Timestamp.Add(time.Millisecond)
+		// Start at the anchor itself, not anchor+1ms: entries sharing the
+		// anchor's millisecond are part of the story and were being skipped.
 		afterEntries, _ := deps.LogStore.Search(ctx, store.LogSearchParams{
-			Start:       &afterStart,
+			Start:       &anchor.Timestamp,
+			End:         &afterEnd,
 			Service:     anchor.Service,
 			Environment: anchor.Environment,
-			Limit:       5,
+			Limit:       investigateContextEntries + 1,
 			SortAsc:     true,
 		})
 
-		for i := len(beforeEntries) - 1; i >= 0; i-- {
-			e := beforeEntries[i]
+		// beforeEntries is newest-first; keep the closest N, then render
+		// oldest-first.
+		trimmed := make([]store.LogEntry, 0, investigateContextEntries)
+		for _, e := range beforeEntries {
 			if e.ID == anchor.ID {
 				continue
 			}
+			if len(trimmed) == investigateContextEntries {
+				break
+			}
+			trimmed = append(trimmed, e)
+		}
+		beforeEntries = trimmed
+
+		for i := len(beforeEntries) - 1; i >= 0; i-- {
+			e := beforeEntries[i]
 			entry := map[string]any{
 				"id":        e.ID,
 				"timestamp": e.Timestamp.Format(time.RFC3339Nano),
@@ -212,10 +263,15 @@ func ErrorsInvestigate(ctx context.Context, deps ErrorsDeps, args map[string]any
 			}
 			contextEntries = append(contextEntries, entry)
 		}
+		afterKept := 0
 		for _, e := range afterEntries {
 			if e.ID == anchor.ID {
 				continue
 			}
+			if afterKept == investigateContextEntries {
+				break
+			}
+			afterKept++
 			entry := map[string]any{
 				"id":        e.ID,
 				"timestamp": e.Timestamp.Format(time.RFC3339Nano),

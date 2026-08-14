@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
@@ -11,6 +12,19 @@ import (
 // ---------------------------------------------------------------------------
 // Action: detail — get error group details (from errorDetailHandler)
 // ---------------------------------------------------------------------------
+
+const (
+	// recentOccurrencesWindow is how far back from the group's last_seen_at the
+	// occurrence lookup reaches.
+	recentOccurrencesWindow = 24 * time.Hour
+
+	// recentOccurrencesLimit is how many occurrence log lines are returned.
+	recentOccurrencesLimit = 5
+
+	// lifecycleEventLimit is how many lifecycle events are returned. Events are
+	// read for one environment, so the budget is not shared across envs.
+	lifecycleEventLimit = 10
+)
 
 func ErrorsDetail(ctx context.Context, deps ErrorsDeps, args map[string]any) (*CallToolResult, error) {
 	if deps.ErrorGroupStore == nil {
@@ -44,8 +58,18 @@ func ErrorsDetail(ctx context.Context, deps ErrorsDeps, args map[string]any) (*C
 		return NewToolResultError("error group not found"), nil
 	}
 
-	// Fetch lifecycle events.
-	events, _ := deps.ErrorGroupStore.ListEvents(ctx, fingerprint, 10)
+	// Fetch lifecycle events for THIS group's environment. Events are written
+	// per (fingerprint, environment); reading them by fingerprint alone showed
+	// staging's resolve reasons as this production group's history.
+	events, err := deps.ErrorGroupStore.ListEvents(ctx, fingerprint, eg.Environment, lifecycleEventLimit)
+	if err != nil {
+		slog.Warn("error detail lifecycle events unavailable",
+			"event", "errors_detail_events_failed",
+			"fingerprint", fingerprint,
+			"environment", eg.Environment,
+			"error", err,
+		)
+	}
 
 	type eventSummary struct {
 		Action    string `json:"action"`
@@ -78,12 +102,22 @@ func ErrorsDetail(ctx context.Context, deps ErrorsDeps, args map[string]any) (*C
 		"events":           evSummaries,
 	}
 
-	// Fetch recent occurrences from logs.
+	// Fetch recent occurrences from logs. The window is derived from the group's
+	// own last_seen_at, not from now: with Start left nil the store applies a
+	// now-1h default, so any group that last fired more than an hour ago
+	// reported zero occurrences right next to a last_seen_at of yesterday.
 	if deps.LogStore != nil {
+		occStart := eg.LastSeenAt.Add(-recentOccurrencesWindow)
+		if eg.FirstSeenAt.After(occStart) {
+			occStart = eg.FirstSeenAt
+		}
+		occEnd := eg.LastSeenAt.Add(time.Minute)
 		recentLogs, _ := deps.LogStore.Search(ctx, store.LogSearchParams{
 			ErrorFingerprint: fingerprint,
 			Environment:      eg.Environment,
-			Limit:            5,
+			Start:            &occStart,
+			End:              &occEnd,
+			Limit:            recentOccurrencesLimit,
 		})
 		if len(recentLogs) > 0 {
 			type logEntry struct {

@@ -41,11 +41,9 @@ func (h *handler) handleErrorsTop(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	since := time.Now().Add(-1 * time.Hour)
-	if v := r.URL.Query().Get("since"); v != "" {
-		if t, err := server.ParseSinceParam(v); err == nil {
-			since = t
-		}
+	since, ok := parseSinceOrError(w, r)
+	if !ok {
+		return
 	}
 
 	service := r.URL.Query().Get("service")

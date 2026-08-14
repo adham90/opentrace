@@ -38,10 +38,16 @@ type Config struct {
 	// Empty string (default) disables the listener.
 	SocketPath string
 
-	// DefaultEnv is the environment used for legacy-compatibility fallbacks:
-	// ingest stamps it onto payloads that don't carry an "env" field, and
-	// migrations backfill historical rows with environment='' to this value.
-	// Set via OPENTRACE_DEFAULT_ENV. Defaults to "production".
+	// DefaultEnv is the environment ingest stamps onto payloads that don't
+	// carry an "env" field. Set via OPENTRACE_DEFAULT_ENV; defaults to
+	// "production".
+	//
+	// It does NOT influence the schema migration: the historical backfill in
+	// migrations/000001_init.up.sql is static SQL that rewrites
+	// environment='' rows to 'production' regardless of this setting. An
+	// operator running with OPENTRACE_DEFAULT_ENV set to anything else must
+	// rerun those UPDATEs by hand, or history and new rows land in different
+	// environments.
 	DefaultEnv string
 }
 
@@ -77,12 +83,92 @@ func LoadEnvFile(path string) {
 			continue
 		}
 		key = strings.TrimSpace(key)
-		val = strings.TrimSpace(val)
+		val = parseEnvValue(val)
 		// Don't override existing env vars
 		if os.Getenv(key) == "" {
 			os.Setenv(key, val)
 		}
 	}
+}
+
+// parseEnvValue normalizes the right-hand side of a .env assignment the way
+// conventional dotenv loaders do: surrounding quotes are removed rather than
+// stored verbatim (a quoted secret must not become a different secret), and an
+// unquoted value's trailing " # comment" is dropped. Inside double quotes the
+// usual \n / \t / \" / \\ escapes are expanded; single quotes are literal.
+func parseEnvValue(raw string) string {
+	val := strings.TrimSpace(raw)
+	if val == "" {
+		return ""
+	}
+
+	if q := val[0]; q == '"' || q == '\'' {
+		if end := closingQuote(val, rune(q)); end > 0 {
+			inner := val[1:end]
+			if q == '"' {
+				return expandEscapes(inner)
+			}
+			return inner
+		}
+		// Unterminated quote: treat the value as literal text.
+		return val
+	}
+
+	// Unquoted: an inline comment must be preceded by whitespace so that
+	// values legitimately containing '#' (e.g. a URL fragment) survive.
+	for i := 0; i < len(val); i++ {
+		if val[i] == '#' && i > 0 && (val[i-1] == ' ' || val[i-1] == '\t') {
+			return strings.TrimSpace(val[:i])
+		}
+	}
+	return val
+}
+
+// closingQuote returns the index of the quote that terminates a value opened
+// with q at index 0, or -1 if there is none. Backslash-escaped quotes inside a
+// double-quoted value do not terminate it.
+func closingQuote(val string, q rune) int {
+	for i := 1; i < len(val); i++ {
+		if q == '"' && val[i] == '\\' {
+			i++ // skip the escaped character
+			continue
+		}
+		if rune(val[i]) == q {
+			return i
+		}
+	}
+	return -1
+}
+
+// expandEscapes expands the escape sequences allowed inside a double-quoted
+// .env value. Unknown sequences keep their backslash.
+func expandEscapes(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 >= len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		i++
+		switch s[i] {
+		case 'n':
+			b.WriteByte('\n')
+		case 't':
+			b.WriteByte('\t')
+		case 'r':
+			b.WriteByte('\r')
+		case '"', '\\', '\'':
+			b.WriteByte(s[i])
+		default:
+			b.WriteByte('\\')
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
 }
 
 func Load() (*Config, error) {

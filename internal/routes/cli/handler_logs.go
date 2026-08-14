@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -37,7 +38,15 @@ func (h *handler) handleLogDetail(w http.ResponseWriter, r *http.Request) {
 
 	entry, err := h.deps.LogStore.GetByID(ctx, id)
 	if err != nil {
-		server.WriteError(w, http.StatusNotFound, "log not found")
+		// Only the sentinel means "no such log". A read failure reported as 404
+		// tells the operator the log was pruned and leaves no trace of the
+		// actual fault.
+		if errors.Is(err, store.ErrNotFound) {
+			server.WriteError(w, http.StatusNotFound, "log not found")
+			return
+		}
+		slog.Error("cli log detail: lookup failed", "id", id, "error", err)
+		server.WriteError(w, http.StatusInternalServerError, "log lookup failed")
 		return
 	}
 
@@ -94,7 +103,7 @@ func (h *handler) handleLogsTail(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("env"); v != "" {
 		params.Environment = v
 	}
-	if v := r.URL.Query().Get("search"); v != "" {
+	if v := searchTerm(r); v != "" {
 		params.Query = v
 	}
 	// A bad 'since' is rejected rather than ignored. Silently dropping it
@@ -162,7 +171,7 @@ func (h *handler) handleLogsStream(w http.ResponseWriter, r *http.Request) {
 	level := r.URL.Query().Get("level")
 	service := r.URL.Query().Get("service")
 	env := r.URL.Query().Get("env")
-	search := r.URL.Query().Get("search")
+	search := searchTerm(r)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -220,4 +229,16 @@ func (h *handler) handleLogsStream(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+// searchTerm reads the free-text filter, accepting "q" as an alias for
+// "search". /logs/search is served by the tail handler, and a caller reaching
+// for the conventional ?q= otherwise got every log back, unfiltered, presented
+// as search results — a wrong answer stated confidently, which is worse than
+// an error about an unknown parameter.
+func searchTerm(r *http.Request) string {
+	if v := r.URL.Query().Get("search"); v != "" {
+		return v
+	}
+	return r.URL.Query().Get("q")
 }

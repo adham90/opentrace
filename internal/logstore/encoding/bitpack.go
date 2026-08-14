@@ -57,6 +57,16 @@ func BitpackDecode(data []byte) ([]uint8, error) {
 	count := int(binary.LittleEndian.Uint32(data[1:5]))
 	packed := data[5:]
 
+	// The count comes straight off disk. Without a bound, a corrupt or crafted
+	// chunk claiming 0xFFFFFFFF values would allocate ~4GB here (and far more in
+	// the caller resolving indices through a dictionary) and OOM the process.
+	// The packed payload is self-describing: count values of bitsPerValue bits
+	// cannot occupy more than len(packed) bytes.
+	maxCount := len(packed) * 8 / bitsPerValue
+	if count < 0 || count > maxCount {
+		return nil, fmt.Errorf("bitpack: count %d exceeds %d values encodable in %d packed bytes at %d bits", count, maxCount, len(packed), bitsPerValue)
+	}
+
 	mask := uint8((1 << bitsPerValue) - 1)
 	result := make([]uint8, count)
 	bitPos := 0

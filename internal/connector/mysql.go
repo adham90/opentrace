@@ -62,7 +62,7 @@ func NewMySQLConnector(ctx context.Context, connStr string, maxRows, stmtTimeout
 		stmtTimeout: stmtTimeoutMS,
 		schemaCache: make(map[string]schemaCacheEntry),
 		cacheTTL:    5 * time.Minute,
-		cb:          NewCircuitBreaker(connStr, DefaultCircuitBreakerConfig()),
+		cb:          NewCircuitBreaker(ConnectorLabel(connStr), DefaultCircuitBreakerConfig()),
 	}, nil
 }
 
@@ -158,11 +158,14 @@ func (c *MySQLConnector) ExecuteReadQuery(ctx context.Context, query string) (*Q
 
 	limitedQuery := query
 	if !guardrail.HasLimitGeneric(query) {
-		limitedQuery = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(query, "; "), c.maxRows)
+		limitedQuery = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(query, "; \t\r\n"), c.maxRows)
 	}
 
 	// Add execution time limit hint
-	timedQuery := fmt.Sprintf("/*+ MAX_EXECUTION_TIME(%d) */ %s", c.stmtTimeout, limitedQuery)
+	timedQuery := withMaxExecutionTime(limitedQuery, c.stmtTimeout)
+
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(c.stmtTimeout)*time.Millisecond)
+	defer cancel()
 
 	rows, err := c.db.QueryContext(ctx, timedQuery)
 	if err != nil {
@@ -259,10 +262,13 @@ func (c *MySQLConnector) handleMySQLSearch(ctx context.Context, args map[string]
 
 	limitedQuery := query
 	if !guardrail.HasLimitGeneric(query) {
-		limitedQuery = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(query, "; "), c.maxRows)
+		limitedQuery = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(query, "; \t\r\n"), c.maxRows)
 	}
 
-	timedQuery := fmt.Sprintf("/*+ MAX_EXECUTION_TIME(%d) */ %s", c.stmtTimeout, limitedQuery)
+	timedQuery := withMaxExecutionTime(limitedQuery, c.stmtTimeout)
+
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(c.stmtTimeout)*time.Millisecond)
+	defer cancel()
 
 	rows, err := c.db.QueryContext(ctx, timedQuery)
 	if err != nil {
@@ -556,6 +562,47 @@ func (c *MySQLConnector) queryMySQLTableComment(ctx context.Context, table strin
 		return ""
 	}
 	return *comment
+}
+
+// selectKeyword is the only statement MySQL accepts a MAX_EXECUTION_TIME hint on.
+const selectKeyword = "SELECT"
+
+// withMaxExecutionTime attaches MySQL's MAX_EXECUTION_TIME optimizer hint to a
+// SELECT. MySQL only honours an optimizer hint when the /*+ ... */ block
+// immediately FOLLOWS the statement's first keyword — a hint placed before
+// SELECT is parsed as an ordinary comment and the timeout is silently dropped,
+// which is what this function fixes. Statements that are not a plain SELECT are
+// returned unchanged (they rely on the context deadline instead).
+func withMaxExecutionTime(query string, timeoutMS int) string {
+	if timeoutMS <= 0 {
+		return query
+	}
+	trimmed := strings.TrimLeft(query, " \t\r\n\f\v")
+	if len(trimmed) < len(selectKeyword) ||
+		!strings.EqualFold(trimmed[:len(selectKeyword)], selectKeyword) {
+		return query
+	}
+	rest := trimmed[len(selectKeyword):]
+	// Guard against an identifier that merely starts with "select".
+	if rest != "" && !isMySQLTokenBreak(rest[0]) {
+		return query
+	}
+	return fmt.Sprintf("%s /*+ MAX_EXECUTION_TIME(%d) */%s", trimmed[:len(selectKeyword)], timeoutMS, rest)
+}
+
+// isMySQLTokenBreak reports whether b ends an SQL identifier.
+func isMySQLTokenBreak(b byte) bool {
+	switch {
+	case b == '_':
+		return false
+	case b >= '0' && b <= '9':
+		return false
+	case b >= 'a' && b <= 'z':
+		return false
+	case b >= 'A' && b <= 'Z':
+		return false
+	}
+	return true
 }
 
 // mysqlNormalizeDSN converts a mysql:// URL to a go-sql-driver DSN if needed,

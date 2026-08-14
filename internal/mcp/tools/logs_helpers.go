@@ -120,12 +120,22 @@ func logsResolveBaseline(baseline string, curStart, curEnd time.Time) (time.Time
 	}
 }
 
+// logsCalcChange returns the percentage change from baseline to current plus a
+// direction label.
+//
+// A jump from zero has no finite percentage, but it still has a magnitude, and
+// callers rank "biggest movers" by the absolute value returned here. Reporting
+// a flat 100 for every new-from-zero series buried the classic new-incident
+// signature (0 → 5,000 errors) below routine drift (10 → 50 = +400%). Zero
+// baselines are therefore scored as growth from a baseline of one, so the
+// magnitude survives; the "new" label keeps the reader from reading it as an
+// ordinary percentage.
 func logsCalcChange(baseline, current int) (float64, string) {
 	if baseline == 0 {
 		if current == 0 {
 			return 0, "unchanged"
 		}
-		return 100, "new"
+		return float64(current) * 100, "new"
 	}
 	pct := float64(current-baseline) / float64(baseline) * 100
 	pct = round2(pct)

@@ -3,9 +3,11 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/adham90/opentrace/internal/testutil/mocks"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 func TestWatchesHandler_UnknownAction(t *testing.T) {
@@ -214,5 +216,64 @@ func TestHandleWatchAcknowledge_MissingAlertID(t *testing.T) {
 	}
 	if !result.IsError {
 		t.Error("expected IsError to be true when alert_id is missing")
+	}
+}
+
+// TestWatchAlerts_ServiceFilterIsReal covers the dead-code filter: both
+// branches of the old loop appended every alert, so the advertised `service`
+// argument had no effect.
+func TestWatchAlerts_ServiceFilterIsReal(t *testing.T) {
+	ws := newOvWatchStore()
+	ws.watches = []store.Watch{
+		{ID: "w-checkout", Service: "checkout", Environment: "production"},
+		{ID: "w-billing", Service: "billing", Environment: "production"},
+	}
+	ws.alerts = []store.WatchAlert{
+		{ID: "a1", WatchID: "w-checkout", Environment: "production", Status: "pending", Summary: "checkout latency"},
+		{ID: "a2", WatchID: "w-billing", Environment: "production", Status: "pending", Summary: "billing errors"},
+	}
+
+	deps := WatchesDeps{WatchStore: ws, LogStore: mocks.NewLogStore()}
+
+	result, err := HandleWatchAlerts(context.Background(), deps, map[string]any{"service": "checkout"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := extractText(t, result)
+
+	var data map[string]any
+	if err := json.Unmarshal([]byte(text), &data); err != nil {
+		t.Fatalf("expected valid JSON: %v", err)
+	}
+	if count, _ := data["count"].(float64); count != 1 {
+		t.Errorf("count = %v, want 1 (only checkout's alert)", data["count"])
+	}
+	if strings.Contains(text, "billing errors") {
+		t.Errorf("service filter did not exclude another service's alert:\n%s", text)
+	}
+	if !strings.Contains(text, "checkout latency") {
+		t.Errorf("service filter dropped the matching alert:\n%s", text)
+	}
+}
+
+// No service argument means no filtering — every pending alert comes back.
+func TestWatchAlerts_NoServiceReturnsAll(t *testing.T) {
+	ws := newOvWatchStore()
+	ws.alerts = []store.WatchAlert{
+		{ID: "a1", WatchID: "w-checkout", Status: "pending", Summary: "checkout latency"},
+		{ID: "a2", WatchID: "w-billing", Status: "pending", Summary: "billing errors"},
+	}
+	deps := WatchesDeps{WatchStore: ws, LogStore: mocks.NewLogStore()}
+
+	result, err := HandleWatchAlerts(context.Background(), deps, map[string]any{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var data map[string]any
+	if err := json.Unmarshal([]byte(extractText(t, result)), &data); err != nil {
+		t.Fatalf("expected valid JSON: %v", err)
+	}
+	if count, _ := data["count"].(float64); count != 2 {
+		t.Errorf("count = %v, want 2", data["count"])
 	}
 }

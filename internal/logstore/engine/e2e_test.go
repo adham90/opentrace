@@ -47,33 +47,33 @@ func TestE2E_FullLifecycle(t *testing.T) {
 
 	// Parse and ingest (simulating what FlatHandler does — parse JSON with string ts)
 	type sdkEntry struct {
-		Ts           string          `json:"ts"`
-		Level        string          `json:"level"`
-		Service      string          `json:"service"`
-		Env          string          `json:"env"`
-		Version      string          `json:"version"`
-		Message      string          `json:"message"`
-		EventType    string          `json:"event_type"`
-		TraceID      string          `json:"trace_id"`
-		SpanID       string          `json:"span_id"`
-		RequestID    string          `json:"request_id"`
-		UserID       string          `json:"user_id"`
-		TenantID     string          `json:"tenant_id"`
-		SessionID    string          `json:"session_id"`
-		Method       string          `json:"method"`
-		Path         string          `json:"path"`
-		Status       int             `json:"status"`
-		DurationMs   int             `json:"duration_ms"`
-		Handler      string          `json:"handler"`
-		DbMs         int             `json:"db_ms"`
-		DbCount      int             `json:"db_count"`
-		NPlusOne     *bool           `json:"n_plus_one"`
-		SlowQueries  int             `json:"slow_queries"`
-		DupQueries     int             `json:"dup_queries"`
-		ErrorClass string          `json:"error_class"`
-		SourceFile     string          `json:"source_file"`
-		SourceLine     int             `json:"source_line"`
-		Body           json.RawMessage `json:"body"`
+		Ts          string          `json:"ts"`
+		Level       string          `json:"level"`
+		Service     string          `json:"service"`
+		Env         string          `json:"env"`
+		Version     string          `json:"version"`
+		Message     string          `json:"message"`
+		EventType   string          `json:"event_type"`
+		TraceID     string          `json:"trace_id"`
+		SpanID      string          `json:"span_id"`
+		RequestID   string          `json:"request_id"`
+		UserID      string          `json:"user_id"`
+		TenantID    string          `json:"tenant_id"`
+		SessionID   string          `json:"session_id"`
+		Method      string          `json:"method"`
+		Path        string          `json:"path"`
+		Status      int             `json:"status"`
+		DurationMs  int             `json:"duration_ms"`
+		Handler     string          `json:"handler"`
+		DbMs        int             `json:"db_ms"`
+		DbCount     int             `json:"db_count"`
+		NPlusOne    *bool           `json:"n_plus_one"`
+		SlowQueries int             `json:"slow_queries"`
+		DupQueries  int             `json:"dup_queries"`
+		ErrorClass  string          `json:"error_class"`
+		SourceFile  string          `json:"source_file"`
+		SourceLine  int             `json:"source_line"`
+		Body        json.RawMessage `json:"body"`
 	}
 
 	var allEntries []chunk.Entry
@@ -325,7 +325,7 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	}
 
 	// DistinctValues
-	services, err := store.DistinctValues("service", start, end)
+	services, err := store.DistinctValues("service", start, end, "", "", "")
 	if err != nil {
 		t.Fatalf("DistinctValues: %v", err)
 	}

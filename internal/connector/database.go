@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/adham90/opentrace/internal/guardrail"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // schemaCacheEntry holds a cached schema query result with its fetch time.
@@ -62,7 +62,7 @@ func NewDatabaseConnector(ctx context.Context, connStr string, maxRows, stmtTime
 		maxRows:     maxRows,
 		schemaCache: make(map[string]schemaCacheEntry),
 		cacheTTL:    5 * time.Minute,
-		cb:          NewCircuitBreaker(connStr, DefaultCircuitBreakerConfig()),
+		cb:          NewCircuitBreaker(ConnectorLabel(connStr), DefaultCircuitBreakerConfig()),
 	}, nil
 }
 
@@ -147,6 +147,14 @@ func (c *DatabaseConnector) Close() error {
 
 // ExecuteReadQuery runs a read-only SQL query and returns structured results.
 func (c *DatabaseConnector) ExecuteReadQuery(ctx context.Context, query string) (*QueryResult, error) {
+	return c.ExecuteReadQueryArgs(ctx, query)
+}
+
+// ExecuteReadQueryArgs runs a read-only SQL query with bound parameters
+// ($1, $2, ...) and returns structured results. The parameters are sent
+// out-of-band by pgx, so no caller-supplied value can alter the statement.
+// Implements ParameterizedQueryExecutor.
+func (c *DatabaseConnector) ExecuteReadQueryArgs(ctx context.Context, query string, args ...any) (*QueryResult, error) {
 	if c.cb != nil {
 		if err := c.cb.Allow(); err != nil {
 			return nil, fmt.Errorf("connector: %w", err)
@@ -161,10 +169,10 @@ func (c *DatabaseConnector) ExecuteReadQuery(ctx context.Context, query string) 
 	// Add LIMIT if the query doesn't already contain one
 	limitedQuery := query
 	if !guardrail.HasLimitGeneric(query) {
-		limitedQuery = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(query, "; "), c.maxRows)
+		limitedQuery = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(query, "; \t\r\n"), c.maxRows)
 	}
 
-	rows, err := c.pool.Query(ctx, limitedQuery)
+	rows, err := c.pool.Query(ctx, limitedQuery, args...)
 	if err != nil {
 		if c.cb != nil {
 			c.cb.RecordFailure()
@@ -322,7 +330,7 @@ func (c *DatabaseConnector) handleDbSearch(ctx context.Context, args map[string]
 	// Add LIMIT if the query doesn't already contain one
 	limitedQuery := query
 	if !guardrail.HasLimitGeneric(query) {
-		limitedQuery = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(query, "; "), c.maxRows)
+		limitedQuery = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(query, "; \t\r\n"), c.maxRows)
 	}
 
 	rows, err := c.pool.Query(ctx, limitedQuery)

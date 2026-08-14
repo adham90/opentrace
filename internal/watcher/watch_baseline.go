@@ -2,21 +2,30 @@ package watcher
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
+)
+
+const (
+	// baselineErrorClassColumn is the log store's distinct-values column for
+	// exception classes. The store calls it "error_class".
+	baselineErrorClassColumn = "error_class"
+	// baselineSummaryLimit bounds the request summaries loaded per baseline.
+	baselineSummaryLimit = 1000
+	// defaultBaselineWindow is used when a watch declares no baseline window.
+	defaultBaselineWindow    = 1 * time.Hour
+	defaultBaselineWindowStr = "1h"
 )
 
 // CaptureBaseline takes a snapshot of current metrics for a watch.
 func CaptureBaseline(ctx context.Context, logStore store.LogStore, metrics *WatchMetrics, w *store.Watch) (*store.WatchBaseline, error) {
 	windowStr := w.BaselineWindow
 	if windowStr == "" {
-		windowStr = "1h"
+		windowStr = defaultBaselineWindowStr
 	}
-	window, err := time.ParseDuration(windowStr)
-	if err != nil {
-		window = 1 * time.Hour
-	}
+	window := parseDurationOr(windowStr, defaultBaselineWindow)
 
 	now := time.Now().UTC()
 	start := now.Add(-window)
@@ -26,45 +35,56 @@ func CaptureBaseline(ctx context.Context, logStore store.LogStore, metrics *Watc
 		WindowDuration: windowStr,
 	}
 
+	// Every baseline query is scoped to the watch's environment — the live
+	// measurements are, and a cross-env baseline makes relative conditions
+	// compare a production value against a blend of production and staging.
+	countParams := store.LogCountParams{
+		Since:       start,
+		Until:       now,
+		Service:     w.Service,
+		Environment: w.Environment,
+	}
+
 	// Error rate
-	counts, err := logStore.CountByLevel(ctx, store.LogCountParams{
-		Since:   start,
-		Until:   now,
-		Service: w.Service,
-	})
-	if err == nil {
+	counts, err := logStore.CountByLevel(ctx, countParams)
+	if err != nil {
+		slog.Warn("baseline: counting logs by level", "watch_id", w.ID, "error", err)
+	} else {
 		total := 0
-		errors := 0
+		errorCount := 0
 		for level, count := range counts {
 			total += count
-			if level == "error" || level == "fatal" {
-				errors += count
+			if isErrorLevel(level) {
+				errorCount += count
 			}
 		}
 		baseline.LogCount = total
-		baseline.ErrorCount = errors
+		baseline.ErrorCount = errorCount
 		if total > 0 {
-			baseline.ErrorRate = float64(errors) / float64(total)
+			baseline.ErrorRate = float64(errorCount) / float64(total)
 		}
 	}
 
-	// Exception classes
-	classes, err := logStore.DistinctValues(ctx, "exception_class", store.LogCountParams{
-		Since:   start,
-		Until:   now,
-		Service: w.Service,
-	})
-	if err == nil {
+	// Exception classes. The log store's column is "error_class" — querying
+	// "exception_class" always errored, leaving this nil so every error in
+	// alert evidence was later reported as brand new.
+	classes, err := logStore.DistinctValues(ctx, baselineErrorClassColumn, countParams)
+	if err != nil {
+		slog.Warn("baseline: listing error classes", "watch_id", w.ID, "error", err)
+	} else {
 		baseline.ExceptionClasses = classes
 	}
 
 	// Request summaries for response time and endpoint stats
 	summaries, err := logStore.SearchRequestSummaries(ctx, store.RequestSummarySearchParams{
-		Start: &start,
-		End:   &now,
-		Limit: 1000,
+		Start:       &start,
+		End:         &now,
+		Environment: w.Environment,
+		Limit:       baselineSummaryLimit,
 	})
-	if err == nil {
+	if err != nil {
+		slog.Warn("baseline: searching request summaries", "watch_id", w.ID, "error", err)
+	} else {
 		var filteredSummaries []store.RequestSummaryResult
 		for _, s := range summaries {
 			if w.Service == "" || s.Service == w.Service {

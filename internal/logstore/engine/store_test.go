@@ -289,7 +289,7 @@ func TestStoreDistinctValues(t *testing.T) {
 
 	start := now.Add(-time.Minute)
 	end := now.Add(time.Minute)
-	vals, err := s.DistinctValues("service", start, end)
+	vals, err := s.DistinctValues("service", start, end, "", "", "")
 	if err != nil {
 		t.Fatalf("DistinctValues: %v", err)
 	}

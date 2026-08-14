@@ -42,29 +42,29 @@ func GenerateErrorFingerprint(e *store.LogEntry) string {
 // extractSourceFileFromBacktrace pulls the first in-app file from the backtrace
 // metadata. Works with any language because it just takes the first entry and
 // strips the line/column suffix.
+//
+// Two shapes are supported: a `backtrace` array of frames (Ruby/Python) and a
+// `stack_trace` string (Node). The stack_trace branch used to sit behind an
+// early return on a missing backtrace, so it never ran and Node errors fell
+// back to message-only fingerprints — splitting one bug into many error groups.
 func extractSourceFileFromBacktrace(metadata map[string]any) string {
 	if metadata == nil {
 		return ""
 	}
 
-	bt, ok := metadata["backtrace"].([]any)
-	if !ok || len(bt) == 0 {
-		return ""
-	}
-
-	// Also check stack_trace (Node SDK uses this)
-	if len(bt) == 0 {
-		if st, ok := metadata["stack_trace"].(string); ok && st != "" {
-			return extractFileFromStackLine(st)
+	if bt, ok := metadata["backtrace"].([]any); ok && len(bt) > 0 {
+		if frame, ok := bt[0].(string); ok && frame != "" {
+			if f := extractFileFromFrame(frame); f != "" {
+				return f
+			}
 		}
 	}
 
-	frame, ok := bt[0].(string)
-	if !ok || frame == "" {
-		return ""
+	if st, ok := metadata["stack_trace"].(string); ok && st != "" {
+		return extractFileFromStackLine(st)
 	}
 
-	return extractFileFromFrame(frame)
+	return ""
 }
 
 // extractFileFromFrame extracts just the file path from a backtrace frame,

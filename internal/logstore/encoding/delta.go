@@ -45,7 +45,8 @@ func DeltaDecode(data []byte, count int) ([]int64, error) {
 
 	base := int64(binary.LittleEndian.Uint64(data[:8]))
 
-	raw, err := Decompress(data[8:])
+	// Deltas are varints: at most MaxVarintBytes per value.
+	raw, err := DecompressBounded(data[8:], DecodeCeiling(count, MaxVarintBytes))
 	if err != nil {
 		return nil, fmt.Errorf("decompress delta: %w", err)
 	}

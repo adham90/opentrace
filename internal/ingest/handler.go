@@ -61,39 +61,110 @@ func IsValidBatchID(id string) bool {
 	return batchIDPattern.MatchString(id)
 }
 
+// ingestLogEntry is the payload shape accepted by /api/logs (JSON or msgpack).
+// It carries the same field set as the flat /api/v2/logs payload — see toFlat,
+// which funnels both endpoints through one wire→model mapping. Numeric fields
+// use jsonInt so a fractional value (SDKs report sub-millisecond timings as
+// floats) does not fail decoding and reject the entire batch.
 type ingestLogEntry struct {
-	Ts               string                 `json:"ts" msgpack:"ts"`
-	Level            string                 `json:"level" msgpack:"level"`
-	Service          string                 `json:"service" msgpack:"service"`
-	Env              string                 `json:"env" msgpack:"env"`
-	Version          string                 `json:"version" msgpack:"version"`
-	Message          string                 `json:"message" msgpack:"message"`
-	EventType        string                 `json:"event_type" msgpack:"event_type"`
-	TraceID          string                 `json:"trace_id" msgpack:"trace_id"`
-	SpanID           string                 `json:"span_id" msgpack:"span_id"`
-	ParentSpanID     string                 `json:"parent_span_id" msgpack:"parent_span_id"`
-	RequestID        string                 `json:"request_id" msgpack:"request_id"`
-	UserID           string                 `json:"user_id" msgpack:"user_id"`
-	TenantID         string                 `json:"tenant_id" msgpack:"tenant_id"`
-	SessionID        string                 `json:"session_id" msgpack:"session_id"`
-	Method           string                 `json:"method" msgpack:"method"`
-	Path             string                 `json:"path" msgpack:"path"`
-	Controller       string                 `json:"controller" msgpack:"controller"`
-	Status           int                    `json:"status" msgpack:"status"`
-	DurationMs       int                    `json:"duration_ms" msgpack:"duration_ms"`
-	DbMs             int                    `json:"db_ms" msgpack:"db_ms"`
-	DbCount          int                    `json:"db_count" msgpack:"db_count"`
-	NPlusOne         *bool                  `json:"n_plus_one" msgpack:"n_plus_one"`
-	SlowQueries      int                    `json:"slow_queries" msgpack:"slow_queries"`
-	DupQueries       int                    `json:"dup_queries" msgpack:"dup_queries"`
-	ErrorClass       string                 `json:"error_class" msgpack:"error_class"`
-	ErrorMessage     string                 `json:"error_message" msgpack:"error_message"`
-	SourceFile       string                 `json:"source_file" msgpack:"source_file"`
-	SourceLine       int                    `json:"source_line" msgpack:"source_line"`
-	Body             json.RawMessage        `json:"body,omitempty" msgpack:"body,omitempty"`
+	Ts           string          `json:"ts" msgpack:"ts"`
+	Level        string          `json:"level" msgpack:"level"`
+	Service      string          `json:"service" msgpack:"service"`
+	Env          string          `json:"env" msgpack:"env"`
+	Version      string          `json:"version" msgpack:"version"`
+	Host         string          `json:"host" msgpack:"host"`
+	Kind         string          `json:"kind" msgpack:"kind"`
+	Message      string          `json:"message" msgpack:"message"`
+	EventType    string          `json:"event_type" msgpack:"event_type"`
+	TraceID      string          `json:"trace_id" msgpack:"trace_id"`
+	SpanID       string          `json:"span_id" msgpack:"span_id"`
+	ParentSpanID string          `json:"parent_span_id" msgpack:"parent_span_id"`
+	RequestID    string          `json:"request_id" msgpack:"request_id"`
+	UserID       string          `json:"user_id" msgpack:"user_id"`
+	TenantID     string          `json:"tenant_id" msgpack:"tenant_id"`
+	SessionID    string          `json:"session_id" msgpack:"session_id"`
+	Method       string          `json:"method" msgpack:"method"`
+	Path         string          `json:"path" msgpack:"path"`
+	Route        string          `json:"route" msgpack:"route"`
+	Controller   string          `json:"controller" msgpack:"controller"`
+	Status       jsonInt         `json:"status" msgpack:"status"`
+	DurationMs   jsonInt         `json:"duration_ms" msgpack:"duration_ms"`
+	DbMs         jsonInt         `json:"db_ms" msgpack:"db_ms"`
+	DbCount      jsonInt         `json:"db_count" msgpack:"db_count"`
+	CacheMs      jsonInt         `json:"cache_ms" msgpack:"cache_ms"`
+	CacheHits    jsonInt         `json:"cache_hits" msgpack:"cache_hits"`
+	CacheMisses  jsonInt         `json:"cache_misses" msgpack:"cache_misses"`
+	ExtMs        jsonInt         `json:"ext_ms" msgpack:"ext_ms"`
+	ExtCount     jsonInt         `json:"ext_count" msgpack:"ext_count"`
+	RenderMs     jsonInt         `json:"render_ms" msgpack:"render_ms"`
+	AllocCount   jsonInt         `json:"alloc_count" msgpack:"alloc_count"`
+	MemDeltaMb   jsonFloat       `json:"mem_delta_mb" msgpack:"mem_delta_mb"`
+	NPlusOne     *bool           `json:"n_plus_one" msgpack:"n_plus_one"`
+	SlowQueries  jsonInt         `json:"slow_queries" msgpack:"slow_queries"`
+	DupQueries   jsonInt         `json:"dup_queries" msgpack:"dup_queries"`
+	ErrorClass   string          `json:"error_class" msgpack:"error_class"`
+	ErrorMessage string          `json:"error_message" msgpack:"error_message"`
+	SourceFile   string          `json:"source_file" msgpack:"source_file"`
+	SourceLine   jsonInt         `json:"source_line" msgpack:"source_line"`
+	JobClass     string          `json:"job_class" msgpack:"job_class"`
+	JobQueue     string          `json:"job_queue" msgpack:"job_queue"`
+	JobID        string          `json:"job_id" msgpack:"job_id"`
+	QueueMs      jsonInt         `json:"queue_ms" msgpack:"queue_ms"`
+	Body         json.RawMessage `json:"body,omitempty" msgpack:"body,omitempty"`
 
 	// Resolved timestamp (not in JSON — computed from Ts)
 	timestamp time.Time
+}
+
+// toFlat projects the nested-endpoint payload onto the flat SDK shape so both
+// endpoints share flatToLogEntry. Field-for-field: the only naming difference
+// is `controller` here vs `handler` there.
+func (e *ingestLogEntry) toFlat() flatEntry {
+	return flatEntry{
+		Level:        e.Level,
+		Service:      e.Service,
+		Message:      e.Message,
+		Env:          e.Env,
+		Version:      e.Version,
+		Host:         e.Host,
+		Kind:         e.Kind,
+		EventType:    e.EventType,
+		TraceID:      e.TraceID,
+		SpanID:       e.SpanID,
+		ParentSpanID: e.ParentSpanID,
+		RequestID:    e.RequestID,
+		UserID:       e.UserID,
+		TenantID:     e.TenantID,
+		SessionID:    e.SessionID,
+		Method:       e.Method,
+		Path:         e.Path,
+		Route:        e.Route,
+		Handler:      e.Controller,
+		Status:       e.Status,
+		DurationMs:   e.DurationMs,
+		DbMs:         e.DbMs,
+		DbCount:      e.DbCount,
+		CacheMs:      e.CacheMs,
+		CacheHits:    e.CacheHits,
+		CacheMisses:  e.CacheMisses,
+		ExtMs:        e.ExtMs,
+		ExtCount:     e.ExtCount,
+		RenderMs:     e.RenderMs,
+		AllocCount:   e.AllocCount,
+		MemDeltaMb:   e.MemDeltaMb,
+		NPlusOne:     e.NPlusOne,
+		SlowQueries:  e.SlowQueries,
+		DupQueries:   e.DupQueries,
+		ErrorClass:   e.ErrorClass,
+		ErrorMessage: e.ErrorMessage,
+		SourceFile:   e.SourceFile,
+		SourceLine:   e.SourceLine,
+		JobClass:     e.JobClass,
+		JobQueue:     e.JobQueue,
+		JobID:        e.JobID,
+		QueueMs:      e.QueueMs,
+		Body:         e.Body,
+	}
 }
 
 // resolveTimestamp parses the "ts" field into a time.Time.
@@ -108,42 +179,6 @@ func (e *ingestLogEntry) resolveTimestamp() error {
 	}
 	e.timestamp = time.Now().UTC()
 	return nil
-}
-
-type ingestRequestSummary struct {
-	Controller          string  `json:"controller" msgpack:"controller"`
-	Action              string  `json:"action" msgpack:"action"`
-	Method              string  `json:"method" msgpack:"method"`
-	Path                string  `json:"path" msgpack:"path"`
-	Status              int     `json:"status" msgpack:"status"`
-	DurationMs          float64 `json:"duration_ms" msgpack:"duration_ms"`
-	DBTimeMs            float64 `json:"db_time_ms" msgpack:"db_time_ms"`
-	ViewTimeMs          float64 `json:"view_time_ms" msgpack:"view_time_ms"`
-	SQLCount            int     `json:"sql_count" msgpack:"sql_count"`
-	SQLTotalMs          float64 `json:"sql_total_ms" msgpack:"sql_total_ms"`
-	SQLSlowestMs        float64 `json:"sql_slowest_ms" msgpack:"sql_slowest_ms"`
-	SQLSlowestName      string  `json:"sql_slowest_name" msgpack:"sql_slowest_name"`
-	NPlusOne            bool    `json:"n_plus_one" msgpack:"n_plus_one"`
-	ViewCount           int     `json:"view_count" msgpack:"view_count"`
-	ViewTotalMs         float64 `json:"view_total_ms" msgpack:"view_total_ms"`
-	ViewSlowestMs       float64 `json:"view_slowest_ms" msgpack:"view_slowest_ms"`
-	ViewSlowestTemplate string  `json:"view_slowest_template" msgpack:"view_slowest_template"`
-	CacheReads          int     `json:"cache_reads" msgpack:"cache_reads"`
-	CacheHits           int     `json:"cache_hits" msgpack:"cache_hits"`
-	CacheWrites         int     `json:"cache_writes" msgpack:"cache_writes"`
-	CacheHitRatio       float64 `json:"cache_hit_ratio" msgpack:"cache_hit_ratio"`
-	HTTPExternalCount   int     `json:"http_external_count" msgpack:"http_external_count"`
-	HTTPExternalTotalMs float64 `json:"http_external_total_ms" msgpack:"http_external_total_ms"`
-	HTTPSlowestMs       float64 `json:"http_slowest_ms" msgpack:"http_slowest_ms"`
-	HTTPSlowestHost     string  `json:"http_slowest_host" msgpack:"http_slowest_host"`
-	MemoryBeforeMb      float64         `json:"memory_before_mb" msgpack:"memory_before_mb"`
-	MemoryAfterMb       float64         `json:"memory_after_mb" msgpack:"memory_after_mb"`
-	MemoryDeltaMb       float64         `json:"memory_delta_mb" msgpack:"memory_delta_mb"`
-	Timeline            json.RawMessage `json:"timeline,omitempty" msgpack:"timeline,omitempty"`
-	TimeBreakdown       json.RawMessage `json:"time_breakdown,omitempty" msgpack:"time_breakdown,omitempty"`
-	DuplicateQueries    int             `json:"duplicate_queries" msgpack:"duplicate_queries"`
-	WorstDuplicateCount int             `json:"worst_duplicate_count" msgpack:"worst_duplicate_count"`
-	TopDuplicates       json.RawMessage `json:"top_duplicates,omitempty" msgpack:"top_duplicates,omitempty"`
 }
 
 // HandleIngestLogs is the HTTP handler for POST /api/logs.
@@ -204,10 +239,6 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate required fields, resolve timestamps, normalize levels
-	validLevels := map[string]bool{
-		"debug": true, "info": true, "warn": true, "warning": true,
-		"error": true, "fatal": true,
-	}
 	for i := range entries {
 		e := &entries[i]
 		if err := e.resolveTimestamp(); err != nil {
@@ -226,8 +257,9 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		e.Level = strings.ToLower(e.Level)
-		if !validLevels[e.Level] {
-			server.WriteError(w, http.StatusBadRequest, fmt.Sprintf("entry %d: 'level' must be one of: debug, info, warn, error, fatal (got %q)", i, e.Level))
+		if !isValidLevel(e.Level) {
+			server.WriteError(w, http.StatusBadRequest,
+				fmt.Sprintf("entry %d: 'level' must be one of: %s (got %q)", i, validLevelList, e.Level))
 			return
 		}
 		e.Level = normalizeLevel(e.Level)
@@ -239,68 +271,11 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Both endpoints share one wire→model mapping (flatToLogEntry) so they can
+	// never disagree again about which fields survive ingestion.
 	logEntries := make([]store.LogEntry, len(entries))
-	for i, e := range entries {
-		// Build metadata from Body JSON blob if present
-		var metadata map[string]any
-		var metadataJSON string
-		if len(e.Body) > 0 {
-			metadata = make(map[string]any)
-			_ = json.Unmarshal(e.Body, &metadata)
-			metadataJSON = string(e.Body)
-		}
-
-		// Stamp missing env with the server-configured default so downstream
-		// env filters match. Empty env used to mean "legacy/unscoped"; the
-		// ingest layer is the one place we canonicalise it.
-		env := e.Env
-		if env == "" && h.Cfg != nil {
-			env = h.Cfg.DefaultEnv
-		}
-
-		entry := store.LogEntry{
-			Timestamp:      e.timestamp,
-			Level:          e.Level,
-			Service:        e.Service,
-			Environment:    env,
-			CommitHash:     e.Version,
-			TraceID:        e.TraceID,
-			SpanID:         e.SpanID,
-			ParentSpanID:   e.ParentSpanID,
-			RequestID:      e.RequestID,
-			Message:        e.Message,
-			EventType:      e.EventType,
-			ExceptionClass: e.ErrorClass,
-			SourceFile:     e.SourceFile,
-			SourceLine:     e.SourceLine,
-			Metadata:       metadata,
-			MetadataJSON:   metadataJSON,
-		}
-
-		// Server-side fingerprinting
-		if fp := GenerateErrorFingerprint(&entry); fp != "" {
-			entry.ErrorFingerprint = fp
-		}
-
-		// Build RequestSummary from flat fields if this is an http.request event
-		if e.Method != "" || e.Path != "" || e.Status > 0 || e.DurationMs > 0 {
-			nplusone := false
-			if e.NPlusOne != nil {
-				nplusone = *e.NPlusOne
-			}
-			entry.RequestSummary = &store.RequestSummary{
-				Controller: e.Controller,
-				Method:     e.Method,
-				Path:       e.Path,
-				Status:     e.Status,
-				DurationMs: float64(e.DurationMs),
-				DBTimeMs:   float64(e.DbMs),
-				SQLCount:   e.DbCount,
-				NPlusOne:   nplusone,
-			}
-		}
-
-		logEntries[i] = entry
+	for i := range entries {
+		logEntries[i] = h.flatToLogEntry(entries[i].toFlat(), entries[i].timestamp)
 	}
 
 	h.storeAndRespond(w, r, logEntries, batchID)
@@ -343,10 +318,14 @@ func (h *Handler) storeAndRespond(w http.ResponseWriter, r *http.Request, logEnt
 		}
 	}
 
-	// Use async ingest queue if available; otherwise fall back to synchronous insert
+	// Use the async ingest queue when configured, EXCEPT for batches that carry
+	// an X-Batch-ID: recording a batch permanently suppresses the SDK's retry of
+	// it, so the batch must not be recorded until the data is actually durable.
+	// Enqueue only buffers, so acking a buffered batch made a later flush failure
+	// unrecoverable — the retry would be answered with {"deduplicated": true}.
 	var count int
 	var err error
-	if h.Queue != nil {
+	if h.Queue != nil && batchID == "" {
 		count, err = h.Queue.Enqueue(r.Context(), logEntries)
 	} else {
 		count, err = h.LogStore.BatchInsert(r.Context(), logEntries)
@@ -450,6 +429,13 @@ func (h *Handler) ensureLogsConnector(ctx context.Context) {
 
 // processAfterInsert runs all post-ingestion side-effects in a single goroutine.
 // Uses context.Background() since the HTTP request context is already done.
+//
+// It is called with the SAME slice that was handed to LogStore.BatchInsert, so
+// entry IDs assigned by the store are visible here and flow into
+// ErrorGroupStore.Upsert (error_groups.last_log_id) and
+// ErrorImpactStore.TrackImpact (error_impacts.last_log_id). A store whose
+// BatchInsert does not write IDs back into the slice leaves both linkages
+// unset — see TestProcessAfterInsert_PropagatesAssignedLogIDs.
 func (h *Handler) processAfterInsert(entries []store.LogEntry) {
 	ctx := context.Background()
 

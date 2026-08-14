@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	srvpkg "github.com/adham90/opentrace/pkg/server"
 )
 
 // sseInitGate holds non-initialize POSTs to /mcp-sse?sessionid=... until
@@ -30,17 +32,33 @@ import (
 type sseInitGate struct {
 	mu       sync.Mutex
 	sessions map[string]*sseSessionState
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 type sseSessionState struct {
-	initDone chan struct{} // closed once initialize has been forwarded
+	initDone  chan struct{} // closed once initialize has been forwarded
+	initOnce  sync.Once     // guards closing initDone exactly once
 	lastTouch time.Time
+	// userID binds the session to the first authenticated user that used it.
+	// The SSE transport routes purely on the sessionid query param, so without
+	// this a leaked session id would let any other authenticated caller drive
+	// someone else's (possibly admin) session.
+	userID string
 }
 
 func newSSEInitGate() *sseInitGate {
-	g := &sseInitGate{sessions: make(map[string]*sseSessionState)}
+	g := &sseInitGate{
+		sessions: make(map[string]*sseSessionState),
+		done:     make(chan struct{}),
+	}
 	go g.sweepLoop()
 	return g
+}
+
+// Stop terminates the background sweep goroutine. Safe to call more than once.
+func (g *sseInitGate) Stop() {
+	g.stopOnce.Do(func() { close(g.done) })
 }
 
 // stateFor returns (or creates) the gate state for sessionID.
@@ -49,10 +67,7 @@ func (g *sseInitGate) stateFor(sessionID string) *sseSessionState {
 	defer g.mu.Unlock()
 	s, ok := g.sessions[sessionID]
 	if !ok {
-		s = &sseSessionState{
-			initDone:  make(chan struct{}),
-			lastTouch: time.Now(),
-		}
+		s = newSessionState()
 		g.sessions[sessionID] = s
 	} else {
 		s.lastTouch = time.Now()
@@ -60,15 +75,42 @@ func (g *sseInitGate) stateFor(sessionID string) *sseSessionState {
 	return s
 }
 
+func newSessionState() *sseSessionState {
+	return &sseSessionState{
+		initDone:  make(chan struct{}),
+		lastTouch: time.Now(),
+	}
+}
+
 // markInitialized closes the initDone channel (idempotent).
+// Clients re-send initialize after an SSE reconnect, so two POSTs for the same
+// sessionid can land concurrently; a select-then-close would race and panic
+// with "close of closed channel". sync.Once makes it atomic.
 func (g *sseInitGate) markInitialized(sessionID string) {
 	s := g.stateFor(sessionID)
-	select {
-	case <-s.initDone:
-		// already closed
-	default:
-		close(s.initDone)
+	s.initOnce.Do(func() { close(s.initDone) })
+}
+
+// bindUser ties sessionID to userID on first use and reports whether the
+// caller is allowed to use this session. An empty userID (transport without
+// an authenticated user) neither binds nor blocks.
+func (g *sseInitGate) bindUser(sessionID, userID string) bool {
+	if userID == "" {
+		return true
 	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	s, ok := g.sessions[sessionID]
+	if !ok {
+		s = newSessionState()
+		g.sessions[sessionID] = s
+	}
+	s.lastTouch = time.Now()
+	if s.userID == "" {
+		s.userID = userID
+		return true
+	}
+	return s.userID == userID
 }
 
 // waitForInit blocks until the session has seen an initialize POST, or the
@@ -86,19 +128,31 @@ func (g *sseInitGate) waitForInit(ctx context.Context, sessionID string, timeout
 // Sessions are short-lived; this keeps the map bounded without needing the
 // SDK to call us when sessions close.
 func (g *sseInitGate) sweepLoop() {
-	ticker := time.NewTicker(10 * time.Minute)
+	ticker := time.NewTicker(gateSweepInterval)
 	defer ticker.Stop()
-	for range ticker.C {
-		cutoff := time.Now().Add(-1 * time.Hour)
-		g.mu.Lock()
-		for id, s := range g.sessions {
-			if s.lastTouch.Before(cutoff) {
-				delete(g.sessions, id)
+	for {
+		select {
+		case <-g.done:
+			return
+		case <-ticker.C:
+			cutoff := time.Now().Add(-gateSessionTTL)
+			g.mu.Lock()
+			for id, s := range g.sessions {
+				if s.lastTouch.Before(cutoff) {
+					delete(g.sessions, id)
+				}
 			}
+			g.mu.Unlock()
 		}
-		g.mu.Unlock()
 	}
 }
+
+const (
+	// gateSweepInterval is how often idle session state is swept.
+	gateSweepInterval = 10 * time.Minute
+	// gateSessionTTL is how long untouched session state is retained.
+	gateSessionTTL = 1 * time.Hour
+)
 
 // maxGateBody caps how much of the POST body we buffer to extract `method`.
 // JSON-RPC initialize / tools/call requests are a few hundred bytes typically;
@@ -113,19 +167,89 @@ const initWaitTimeout = 2 * time.Second
 // peekMethod reads up to maxGateBody bytes of a JSON-RPC request body,
 // extracts the `method` field, and returns both the method and a new io.Reader
 // replayable as the request body for downstream handlers.
+//
+// Only the prefix is buffered — a large tools/call payload can be far bigger
+// than we need for the method probe — but the unread remainder is spliced back
+// onto the replay reader. Dropping it would hand the SDK a truncated document
+// and turn a valid request into an opaque parse error.
 func peekMethod(body io.Reader) (method string, replay io.Reader, err error) {
 	buf, err := io.ReadAll(io.LimitReader(body, maxGateBody))
 	if err != nil {
 		return "", nil, err
 	}
-	// JSON-RPC requests have a top-level `method` string. We don't need to fully
-	// parse — a minimal struct is enough. Malformed bodies are passed through so
-	// the SDK can return the right error.
-	var probe struct {
-		Method string `json:"method"`
+	replay = io.Reader(bytes.NewReader(buf))
+	if len(buf) == maxGateBody {
+		replay = io.MultiReader(bytes.NewReader(buf), body)
 	}
-	_ = json.Unmarshal(buf, &probe)
-	return probe.Method, bytes.NewReader(buf), nil
+	return probeMethod(buf), replay, nil
+}
+
+// probeMethod extracts the top-level JSON-RPC "method" from a possibly
+// truncated document. json.Unmarshal is not usable here: the buffer is only
+// the first maxGateBody bytes of a potentially much larger body, and
+// Unmarshal rejects the whole (truncated) document — which would classify
+// every large request as "unknown method" and make it wait out the init gate.
+// Scanning tokens stops as soon as "method" is seen, near the start in
+// practice. An unparseable body yields "" and is passed through so the SDK can
+// return the proper JSON-RPC error.
+func probeMethod(buf []byte) string {
+	dec := json.NewDecoder(bytes.NewReader(buf))
+	tok, err := dec.Token()
+	if err != nil {
+		return ""
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return ""
+	}
+	for {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return ""
+		}
+		key, ok := keyTok.(string)
+		if !ok {
+			return "" // closing brace or malformed input
+		}
+		if key == "method" {
+			val, err := dec.Token()
+			if err != nil {
+				return ""
+			}
+			s, _ := val.(string)
+			return s
+		}
+		if err := skipJSONValue(dec); err != nil {
+			return ""
+		}
+	}
+}
+
+// skipJSONValue consumes the next value from dec, descending through nested
+// objects and arrays.
+func skipJSONValue(dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	d, ok := tok.(json.Delim)
+	if !ok || (d != '{' && d != '[') {
+		return nil
+	}
+	depth := 1
+	for depth > 0 {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		if d, ok := tok.(json.Delim); ok {
+			if d == '{' || d == '[' {
+				depth++
+			} else {
+				depth--
+			}
+		}
+	}
+	return nil
 }
 
 // sseSerializeInit is the handler wrapper. It only gates POSTs to the SSE
@@ -139,6 +263,18 @@ func (g *sseInitGate) wrap(next http.Handler) http.Handler {
 		sessionID := r.URL.Query().Get("sessionid")
 		if sessionID == "" {
 			next.ServeHTTP(w, r)
+			return
+		}
+
+		// The SSE transport routes on the sessionid alone. Pin the session to
+		// the user who first used it so a leaked id cannot be replayed by a
+		// different (e.g. lower-privileged) authenticated caller.
+		var userID string
+		if u := srvpkg.UserFromContext(r.Context()); u != nil {
+			userID = u.ID
+		}
+		if !g.bindUser(sessionID, userID) {
+			http.Error(w, "session belongs to a different user", http.StatusForbidden)
 			return
 		}
 

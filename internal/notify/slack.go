@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/adham90/opentrace/internal/httpclient"
 )
 
 // SlackConfig holds the Slack incoming-webhook configuration.
@@ -22,6 +24,9 @@ type SlackConfig struct {
 	WebhookURL string `json:"webhook_url"`
 	Enabled    bool   `json:"enabled"`
 }
+
+// slackRequestTimeout bounds a single webhook delivery.
+const slackRequestTimeout = 10 * time.Second
 
 // SlackSender posts notifications to a Slack incoming webhook.
 type SlackSender struct {
@@ -35,7 +40,7 @@ type SlackSender struct {
 func NewSlackSender(configFn func() *SlackConfig) *SlackSender {
 	return &SlackSender{
 		config: configFn,
-		client: &http.Client{Timeout: 10 * time.Second},
+		client: httpclient.New(slackRequestTimeout),
 	}
 }
 

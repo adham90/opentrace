@@ -56,7 +56,7 @@ func (m *ErrorGroupStore) Count(_ context.Context, _ store.ErrorGroupStatus, _ s
 func (m *ErrorGroupStore) Resolve(_ context.Context, _, _, _ string) error { return nil }
 func (m *ErrorGroupStore) Ignore(_ context.Context, _, _, _ string) error  { return nil }
 func (m *ErrorGroupStore) Reopen(_ context.Context, _, _, _ string) error  { return nil }
-func (m *ErrorGroupStore) ListEvents(_ context.Context, _ string, _ int) ([]store.ErrorGroupEvent, error) {
+func (m *ErrorGroupStore) ListEvents(_ context.Context, _, _ string, _ int) ([]store.ErrorGroupEvent, error) {
 	return nil, nil
 }
 func (m *ErrorGroupStore) Prune(_ context.Context, _ time.Duration) (int64, error) { return 0, nil }
@@ -74,7 +74,7 @@ func NewErrorImpactStore() *ErrorImpactStore { return &ErrorImpactStore{} }
 func (m *ErrorImpactStore) TrackImpact(_ context.Context, _ string, _ string, _ string, _ map[string]any, _ int64, _ string) error {
 	return nil
 }
-func (m *ErrorImpactStore) GetImpact(_ context.Context, _ string) (*store.ErrorImpact, error) {
+func (m *ErrorImpactStore) GetImpact(_ context.Context, _ string, _ string) (*store.ErrorImpact, error) {
 	return nil, store.ErrNotFound
 }
 func (m *ErrorImpactStore) GetAffectedUsers(_ context.Context, _ string, _ int) ([]store.AffectedUser, error) {

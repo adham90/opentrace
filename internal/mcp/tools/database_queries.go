@@ -30,10 +30,13 @@ func HandleQueries(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 	limit := ArgInt(args, "limit", 20, 100)
 	filter := ArgString(args, "filter")
 
+	// The filter is caller-supplied free text: bind it as a parameter so it can
+	// only ever be an ILIKE pattern, never SQL.
 	whereClause := ""
+	var queryArgs []any
 	if filter != "" {
-		escaped := strings.ReplaceAll(filter, "'", "''")
-		whereClause = fmt.Sprintf("WHERE query ILIKE '%%%s%%'", escaped)
+		whereClause = "WHERE query ILIKE $1"
+		queryArgs = append(queryArgs, "%"+filter+"%")
 	}
 
 	query := fmt.Sprintf(`SELECT
@@ -50,7 +53,7 @@ FROM pg_stat_statements
 ORDER BY %s DESC
 LIMIT %d`, whereClause, orderBy, limit)
 
-	result, err := qe.ExecuteReadQuery(ctx, query)
+	result, err := executeReadQuery(ctx, qe, query, queryArgs...)
 	if err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "pg_stat_statements") && strings.Contains(errMsg, "does not exist") {
@@ -70,14 +73,14 @@ LIMIT %d`, whereClause, orderBy, limit)
 	}
 
 	type queryStatsRow struct {
-		QueryID        any     `json:"query_id"`
-		QueryPreview   string  `json:"query_preview"`
-		Calls          any     `json:"calls"`
-		TotalExecTime  any     `json:"total_exec_time_ms"`
-		MeanExecTime   any     `json:"mean_exec_time_ms"`
-		Rows           any     `json:"rows"`
-		SharedBlksHit  any     `json:"shared_blks_hit"`
-		SharedBlksRead any     `json:"shared_blks_read"`
+		QueryID        any    `json:"query_id"`
+		QueryPreview   string `json:"query_preview"`
+		Calls          any    `json:"calls"`
+		TotalExecTime  any    `json:"total_exec_time_ms"`
+		MeanExecTime   any    `json:"mean_exec_time_ms"`
+		Rows           any    `json:"rows"`
+		SharedBlksHit  any    `json:"shared_blks_hit"`
+		SharedBlksRead any    `json:"shared_blks_read"`
 	}
 
 	rows := make([]queryStatsRow, 0, len(result.Rows))
@@ -146,11 +149,18 @@ func HandleExplain(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 		return errResult, nil
 	}
 
-	analyze := ArgBool(args, "analyze")
-
-	buffers := true
-	if v, ok := args["buffers"].(bool); ok {
-		buffers = v
+	// EXPLAIN ANALYZE actually *executes* the statement, which is exactly what
+	// the read-only guardrail (and the connector's read-only transaction) exist
+	// to prevent — guardrail.ValidateReadOnlyGeneric rejects it unconditionally.
+	// Rather than emit a statement that is guaranteed to be refused, or silently
+	// downgrade to an estimated plan the caller did not ask for, we reject the
+	// option up front with an actionable message.
+	if ArgBool(args, "analyze") {
+		return NewToolResultError(
+			"analyze=true is not supported: EXPLAIN ANALYZE executes the statement, " +
+				"which the read-only guardrail forbids. Re-run without analyze for the " +
+				"estimated plan, or run EXPLAIN ANALYZE yourself against a non-production replica.",
+		), nil
 	}
 
 	outputFormat := ArgStringDefault(args, "format", "text")
@@ -158,23 +168,10 @@ func HandleExplain(ctx context.Context, deps DatabaseDeps, args map[string]any) 
 		outputFormat = "text"
 	}
 
-	// Build the EXPLAIN command.
-	var explainPrefix string
-	if analyze {
-		opts := []string{"ANALYZE true"}
-		if buffers {
-			opts = append(opts, "BUFFERS true")
-		}
-		if outputFormat == "json" {
-			opts = append(opts, "FORMAT JSON")
-		}
-		explainPrefix = fmt.Sprintf("EXPLAIN (%s) ", strings.Join(opts, ", "))
-	} else {
-		if outputFormat == "json" {
-			explainPrefix = "EXPLAIN (FORMAT JSON) "
-		} else {
-			explainPrefix = "EXPLAIN "
-		}
+	// Build the EXPLAIN command (plan only — never ANALYZE).
+	explainPrefix := "EXPLAIN "
+	if outputFormat == "json" {
+		explainPrefix = "EXPLAIN (FORMAT JSON) "
 	}
 
 	explainQuery := explainPrefix + query

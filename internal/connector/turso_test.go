@@ -944,3 +944,18 @@ func TestTursoSearch_CircuitBreakerBlocks(t *testing.T) {
 		t.Fatal("expected circuit breaker error")
 	}
 }
+
+// TestNewTursoConnector_BlocksLinkLocalHost proves the connector dials through
+// the SSRF-guarded shared transport. The database URL is user-supplied, so a
+// link-local target (cloud instance metadata) must be refused.
+func TestNewTursoConnector_BlocksLinkLocalHost(t *testing.T) {
+	t.Setenv("OPENTRACE_ALLOW_LINK_LOCAL", "false")
+
+	_, err := NewTursoConnector(context.Background(), "http://169.254.169.254", "", 10)
+	if err == nil {
+		t.Fatal("link-local Turso host was dialled: the connector bypasses the guarded transport")
+	}
+	if !strings.Contains(err.Error(), "blocked") {
+		t.Fatalf("error = %v, want the SSRF guard's \"blocked\" message", err)
+	}
+}

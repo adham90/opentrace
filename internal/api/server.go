@@ -17,11 +17,11 @@ import (
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/ingest"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/adham90/opentrace/pkg/server"
-	"github.com/adham90/opentrace/pkg/store"
 	"github.com/adham90/opentrace/internal/version"
 	"github.com/adham90/opentrace/internal/watcher"
+	"github.com/adham90/opentrace/pkg/server"
+	"github.com/adham90/opentrace/pkg/store"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
@@ -29,6 +29,8 @@ const (
 	maxRequestBodyBytes = 10 << 20
 	// auditChannelBuffer is the capacity of the async audit-log channel.
 	auditChannelBuffer = 256
+	// auditWriteTimeout bounds a single audit-log store write.
+	auditWriteTimeout = 5 * time.Second
 )
 
 // ReliabilityProvider returns recent reliability data for health checks.
@@ -39,38 +41,40 @@ type ReliabilityProvider interface {
 
 // Server holds the HTTP server and its dependencies.
 type Server struct {
-	Router        chi.Router
-	db            *sql.DB
-	dsStore       store.DataSourceStore
-	logStore      store.LogStore
-	serverStore   store.ServerStore
-	metricStore   store.MetricStore
-	userStore     store.UserStore
-	settingsStore store.SettingsStore
-	registry      *connector.Registry
-	cfg           *config.Config
-	mcpActivityStore store.MCPActivityStore
-	auditStore       store.AuditStore
-	watchStream      *watcher.WatchStreamEvaluator
-	watchStore       store.WatchStore
-	watchMetrics     *watcher.WatchMetrics
-	errorGroupStore    store.ErrorGroupStore
-	healthCheckStore   store.HealthCheckStore
-	agentNoteStore     store.AgentNoteStore
-	trendStore         store.TrendStore
-	analyticsStore     store.AnalyticsStore
-	errorImpactStore   store.ErrorImpactStore
-	traceStore         store.TraceStore
-	codeEntityStore          store.CodeEntityStore
-	reliabilityProvider      ReliabilityProvider
-	sseServer         *mcp.SSEHandler
-	sseAPILimiter     *RateLimiter
-	streamableServer  *mcp.StreamableHTTPHandler
-	loginLimiter   *RateLimiter
-	apiLimiter     *RateLimiter
+	Router              chi.Router
+	db                  *sql.DB
+	dsStore             store.DataSourceStore
+	logStore            store.LogStore
+	serverStore         store.ServerStore
+	metricStore         store.MetricStore
+	userStore           store.UserStore
+	settingsStore       store.SettingsStore
+	registry            *connector.Registry
+	cfg                 *config.Config
+	mcpActivityStore    store.MCPActivityStore
+	auditStore          store.AuditStore
+	watchStream         *watcher.WatchStreamEvaluator
+	watchStore          store.WatchStore
+	watchMetrics        *watcher.WatchMetrics
+	errorGroupStore     store.ErrorGroupStore
+	healthCheckStore    store.HealthCheckStore
+	agentNoteStore      store.AgentNoteStore
+	trendStore          store.TrendStore
+	analyticsStore      store.AnalyticsStore
+	errorImpactStore    store.ErrorImpactStore
+	traceStore          store.TraceStore
+	codeEntityStore     store.CodeEntityStore
+	reliabilityProvider ReliabilityProvider
+	sseServer           *mcp.SSEHandler
+	sseAPILimiter       *RateLimiter
+	streamableServer    *mcp.StreamableHTTPHandler
+	loginLimiter        *RateLimiter
+	apiLimiter          *RateLimiter
 	// Handler is the top-level http.Handler (wraps Router with SSE mux)
-	Handler        http.Handler
-	metricsConnMu  sync.Mutex
+	Handler http.Handler
+	// sseGate is the per-session initialize gate for the SSE transport.
+	// Held on the Server so Shutdown can stop its sweep goroutine.
+	sseGate *sseInitGate
 
 	// Domain modules (isolated packages mounted on the API router)
 	sharedDeps *server.Deps
@@ -98,9 +102,9 @@ type auditEntry struct {
 
 // ServerDeps holds all dependencies for the web server.
 type ServerDeps struct {
-	Ctx     context.Context // app lifecycle context; nil defaults to Background
-	DB      *sql.DB
-	Stores  store.Stores
+	Ctx    context.Context // app lifecycle context; nil defaults to Background
+	DB     *sql.DB
+	Stores store.Stores
 
 	Registry             *connector.Registry
 	Cfg                  *config.Config
@@ -127,32 +131,32 @@ func NewServer(dsStore store.DataSourceStore, logStore store.LogStore, registry 
 // NewServerWithDeps creates a new Server using the ServerDeps struct.
 func NewServerWithDeps(deps ServerDeps) *Server {
 	srv := &Server{
-		db:                        deps.DB,
-		dsStore:                   deps.Stores.DSStore,
-		logStore:                  deps.Stores.LogStore,
-		serverStore:               deps.Stores.ServerStore,
-		metricStore:               deps.Stores.MetricStore,
-		userStore:                 deps.Stores.UserStore,
-		settingsStore:             deps.Stores.SettingsStore,
-		registry:                  deps.Registry,
-		cfg:                       deps.Cfg,
-		mcpActivityStore:          deps.Stores.MCPActivityStore,
-		auditStore:                deps.Stores.AuditStore,
-		watchStream:               deps.WatchStreamEvaluator,
-		watchStore:                deps.Stores.WatchStore,
-		watchMetrics:              deps.WatchMetrics,
-		errorGroupStore:           deps.Stores.ErrorGroupStore,
-		healthCheckStore:          deps.Stores.HealthCheckStore,
-		agentNoteStore:            deps.Stores.AgentNoteStore,
-		trendStore:                deps.Stores.TrendStore,
-		analyticsStore:            deps.Stores.AnalyticsStore,
-		errorImpactStore:          deps.Stores.ErrorImpactStore,
-		traceStore:                deps.Stores.TraceStore,
-		codeEntityStore:           deps.Stores.CodeEntityStore,
-		reliabilityProvider:       deps.ReliabilityProvider,
-		sharedDeps:                deps.SharedDeps,
-		modules:                   deps.Modules,
-		auditCh:                   make(chan auditEntry, auditChannelBuffer),
+		db:                  deps.DB,
+		dsStore:             deps.Stores.DSStore,
+		logStore:            deps.Stores.LogStore,
+		serverStore:         deps.Stores.ServerStore,
+		metricStore:         deps.Stores.MetricStore,
+		userStore:           deps.Stores.UserStore,
+		settingsStore:       deps.Stores.SettingsStore,
+		registry:            deps.Registry,
+		cfg:                 deps.Cfg,
+		mcpActivityStore:    deps.Stores.MCPActivityStore,
+		auditStore:          deps.Stores.AuditStore,
+		watchStream:         deps.WatchStreamEvaluator,
+		watchStore:          deps.Stores.WatchStore,
+		watchMetrics:        deps.WatchMetrics,
+		errorGroupStore:     deps.Stores.ErrorGroupStore,
+		healthCheckStore:    deps.Stores.HealthCheckStore,
+		agentNoteStore:      deps.Stores.AgentNoteStore,
+		trendStore:          deps.Stores.TrendStore,
+		analyticsStore:      deps.Stores.AnalyticsStore,
+		errorImpactStore:    deps.Stores.ErrorImpactStore,
+		traceStore:          deps.Stores.TraceStore,
+		codeEntityStore:     deps.Stores.CodeEntityStore,
+		reliabilityProvider: deps.ReliabilityProvider,
+		sharedDeps:          deps.SharedDeps,
+		modules:             deps.Modules,
+		auditCh:             make(chan auditEntry, auditChannelBuffer),
 	}
 
 	// Set audit context — used as parent for per-write timeouts
@@ -199,8 +203,8 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Use(middleware.RequestID)
 	router.Use(PrometheusMiddleware)
 	router.Use(wrapCompressSkipMCP(middleware.Compress(5))) // gzip compression, bypassed for /mcp/
-	router.Use(MaxBodySize(maxRequestBodyBytes)) // 10 MB global body limit
-	router.Use(srv.ProxyAuth)          // trusted proxy headers (cloud managed mode)
+	router.Use(MaxBodySize(maxRequestBodyBytes))            // 10 MB global body limit
+	router.Use(srv.ProxyAuth)                               // trusted proxy headers (cloud managed mode)
 
 	router.Get("/healthz", srv.handleHealthCheck)
 	router.Get("/readyz", srv.handleReadiness)
@@ -213,7 +217,14 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		router.Route("/mcp", func(r chi.Router) {
 			r.Use(apiLimiter.Middleware)
 			r.Use(srv.MCPTokenAuth)
-			r.Handle("/*", streamableServer)
+			// Bind the session to the authenticated user so the SDK rejects a
+			// request that presents someone else's Mcp-Session-Id.
+			r.Use(mcpTokenInfoBridge)
+			// The streamable transport keeps a hanging GET open for
+			// server->client messages and can stream a POST response for
+			// minutes; the global WriteTimeout would tear both down. Same
+			// reason prepareSSE exists for the legacy /mcp-sse path.
+			r.Handle("/*", prepareSSE(streamableServer))
 		})
 
 		// SSE transport — stored on srv, mounted via top-level mux
@@ -286,6 +297,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	if srv.sseServer != nil {
 		mux := http.NewServeMux()
 		gate := newSSEInitGate()
+		srv.sseGate = gate
 		// Chain: rate-limit -> token auth -> init-order gate -> SSE setup -> SDK handler
 		sseHandler := gate.wrap(prepareSSE(srv.sseServer))
 		sseHandler = srv.MCPTokenAuth(sseHandler)
@@ -316,6 +328,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	if s.apiLimiter != nil {
 		s.apiLimiter.Stop()
+	}
+	if s.sseGate != nil {
+		s.sseGate.Stop()
 	}
 
 	// Flush and stop the ingest queue before closing other resources
@@ -360,17 +375,24 @@ func parseCORSOriginsString(s string) []string {
 	return result
 }
 
-func (s *Server) getEffectiveAPIKey(ctx context.Context) string {
+// getEffectiveAPIKey resolves the ingestion API key: the env-configured key
+// wins, otherwise the DB-stored key. An empty key with a nil error means auth
+// is genuinely disabled (no key configured anywhere). A non-nil error means we
+// could not find out — callers MUST fail closed rather than treat it as
+// "disabled": the store returns ("", nil) for "no row" and a real error only
+// for real failures, so an error here is never a configuration statement.
+func (s *Server) getEffectiveAPIKey(ctx context.Context) (string, error) {
 	if s.cfg != nil && s.cfg.APIKey != "" {
-		return s.cfg.APIKey
+		return s.cfg.APIKey, nil
 	}
 	if s.settingsStore != nil {
 		key, err := s.settingsStore.GetAPIKey(ctx)
-		if err == nil && key != "" {
-			return key
+		if err != nil {
+			return "", err
 		}
+		return key, nil
 	}
-	return ""
+	return "", nil
 }
 
 func (s *Server) audit(r *http.Request, action, targetType, targetID, details string) {
@@ -398,8 +420,14 @@ func (s *Server) audit(r *http.Request, action, targetType, targetID, details st
 
 func (s *Server) auditWorker() {
 	defer s.auditWg.Done()
+	// Writes are detached from the app lifecycle context: main cancels it
+	// before Shutdown closes auditCh, so deriving from it directly would make
+	// every queued entry fail with "context canceled" — the drain exists
+	// precisely to persist those. Values (if any) still propagate; only the
+	// cancellation does not. Each write stays bounded by its own timeout.
+	base := context.WithoutCancel(s.auditCtx)
 	for entry := range s.auditCh {
-		ctx, cancel := context.WithTimeout(s.auditCtx, 5*time.Second)
+		ctx, cancel := context.WithTimeout(base, auditWriteTimeout)
 		if err := s.auditStore.Log(ctx, store.LogAuditParams{
 			UserID:     entry.userID,
 			UserEmail:  entry.userEmail,
@@ -448,4 +476,3 @@ func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
 }
 
 // Version check and banner handlers removed — headless API-only server.
-

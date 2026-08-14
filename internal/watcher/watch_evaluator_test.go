@@ -122,9 +122,13 @@ func TestWatchEvaluator_LogCount(t *testing.T) {
 	metrics := NewWatchMetrics(logStore)
 	evaluator := NewWatchEvaluator(metrics, watchStore)
 
+	// The measurement window is the check interval (it is no longer silently
+	// widened to baseline_window), and insertTestLogs spreads entries one per
+	// second, so the interval must cover them all for this to count 50.
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
 		ConditionsJSON: condJSONWithService("log_count", "gt", 30, "api"),
 		Service:        "api",
+		CheckInterval:  "5m",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)

@@ -15,6 +15,11 @@ type SetupDeps struct {
 	UserStore     store.UserStore
 	SettingsStore store.SettingsStore
 	DSStore       store.DataSourceStore
+
+	// IsAdmin gates the ingest API key in the setup guide. The key
+	// authenticates ingest and CLI-read requests, so handing it to a
+	// read-only member escalates them to ingest-capable.
+	IsAdmin bool
 }
 
 // SetupHandler returns a handler for the setup tool.
@@ -289,4 +294,3 @@ func HandleSetupVerify(ctx context.Context, d SetupDeps) (*CallToolResult, error
 
 	return JSONResult(result)
 }
-

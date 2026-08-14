@@ -74,11 +74,11 @@ func investigateErrorsHandler(_ context.Context, request *mcp.GetPromptRequest) 
 
 2. **List Error Groups**: Call opentrace(tool="errors", action="list", params={"service": "%s", "status": "unresolved", "limit": 10}) to see the most recent error groups.
 
-3. **Investigate Top Error**: For the top error group by occurrence count, call opentrace(tool="errors", action="get", params={"fingerprint": "<fingerprint>"}) to get full details including stack traces and affected endpoints.
+3. **Investigate Top Error**: For the top error group by occurrence count, call opentrace(tool="errors", action="detail", params={"fingerprint": "<fingerprint>"}) to get full details including stack traces and affected endpoints.
 
-4. **Search Related Logs**: Call opentrace(tool="logs", action="search", params={"service": "%s", "level": "error", "timeframe": "%s", "limit": 20}) to find related error logs and surrounding context.
+4. **Search Related Logs**: Call opentrace(tool="logs", action="search", params={"service": "%s", "level": "error", "since": "%s", "limit": 20}) to find related error logs and surrounding context.
 
-5. **Check Deploys**: Call opentrace(tool="deploys", action="list", params={"service": "%s", "limit": 5}) to see if any recent deployments correlate with the error spike.
+5. **Check Recent Changes**: Call opentrace(tool="overview", action="changes", params={"service": "%s"}) to see whether a recent deploy or config change correlates with the error spike.
 
 6. **Summarize Findings**: Provide a summary with:
    - Root cause analysis (or best hypothesis)
@@ -101,15 +101,15 @@ func investigateErrorsHandler(_ context.Context, request *mcp.GetPromptRequest) 
 func databaseHealthCheckHandler(_ context.Context, _ *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 	prompt := `Perform a comprehensive database health assessment. Follow these steps:
 
-1. **Query Statistics**: Call opentrace(tool="database", action="query_stats") to review overall query performance metrics including total queries, average duration, and error rates.
+1. **Query Statistics**: Call opentrace(tool="database", action="queries", params={"order_by": "calls"}) to review the most frequently executed queries and their aggregate cost.
 
-2. **Analyze Slow Queries**: Call opentrace(tool="database", action="slow_queries", params={"limit": 10}) to identify the slowest queries and their impact on performance.
+2. **Analyze Slow Queries**: Call opentrace(tool="database", action="queries", params={"order_by": "mean_exec_time", "limit": 10}) to identify the slowest queries and their impact on performance.
 
 3. **Review Locks**: Call opentrace(tool="database", action="locks") to check for any active lock contention that could be causing bottlenecks.
 
 4. **Check Connections**: Call opentrace(tool="database", action="connections") to review connection pool usage and identify potential connection exhaustion.
 
-5. **Assess Indexes**: Call opentrace(tool="database", action="index_usage") to identify missing or unused indexes that could improve query performance.
+5. **Assess Indexes**: Call opentrace(tool="database", action="indexes") to identify missing or unused indexes that could improve query performance.
 
 6. **Provide Recommendations**: Summarize your findings with:
    - Overall database health score (healthy/degraded/critical)
@@ -143,7 +143,7 @@ func deployValidationHandler(_ context.Context, request *mcp.GetPromptRequest) (
 
 	prompt := fmt.Sprintf(`Validate the deployment of service "%s"%s. Follow these steps:
 
-1. **Check Deploy History**: Call opentrace(tool="deploys", action="list", params={"service": "%s", "limit": 5}) to find the latest deployment and compare with the previous one.
+1. **Check Recent Changes**: Call opentrace(tool="overview", action="changes", params={"service": "%s"}) to find the latest deployment/config change and compare with the previous one.
 
 2. **Compare Error Rates**: Call opentrace(tool="errors", action="list", params={"service": "%s", "status": "unresolved", "limit": 20}) and compare the error count and new fingerprints against the pre-deploy baseline.
 
@@ -151,7 +151,7 @@ func deployValidationHandler(_ context.Context, request *mcp.GetPromptRequest) (
 
 4. **Check Endpoint Latencies**: Call opentrace(tool="logs", action="search", params={"service": "%s", "level": "info", "limit": 50}) and review request durations for any latency increases post-deploy.
 
-5. **Health Check Status**: Call opentrace(tool="healthchecks", action="status") to verify all health check endpoints for this service are passing.
+5. **Health Check Status**: Call opentrace(tool="healthchecks", action="uptime") to verify all health check endpoints for this service are passing.
 
 6. **Provide Go/No-Go Decision**: Summarize with:
    - Deploy status: GO (safe) or NO-GO (rollback recommended)
@@ -186,13 +186,13 @@ func triageHandler(_ context.Context, request *mcp.GetPromptRequest) (*mcp.GetPr
 2. **Triage Alerts**: Call opentrace(tool="overview", action="triage") to get a prioritized list of current issues ranked by severity and impact.
 
 3. **Investigate Top Issue**: For the highest-priority issue from triage, drill down using the appropriate tool:
-   - For errors: opentrace(tool="errors", action="get", params={"fingerprint": "<fingerprint>"})
-   - For health checks: opentrace(tool="healthchecks", action="status")
-   - For performance: opentrace(tool="database", action="slow_queries")
+   - For errors: opentrace(tool="errors", action="detail", params={"fingerprint": "<fingerprint>"})
+   - For health checks: opentrace(tool="healthchecks", action="uptime")
+   - For performance: opentrace(tool="database", action="queries", params={"order_by": "mean_exec_time"})
 
 4. **Search Logs for Context**: Call opentrace(tool="logs", action="search", params={"level": "error", "limit": 20}) to find recent error logs that provide additional context for the identified issues.
 
-5. **Check Watches**: Call opentrace(tool="watches", action="list") to review any triggered watch rules and their alert history.
+5. **Check Watches**: Call opentrace(tool="watches", action="status") to review configured watch rules, then opentrace(tool="watches", action="alerts") for their alert history.
 
 6. **Provide Summary**: Deliver a triage report with:
    - Current system health (healthy/degraded/critical)

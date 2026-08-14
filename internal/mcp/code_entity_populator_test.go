@@ -90,7 +90,7 @@ func (m *mockErrorGroupStore) Count(context.Context, store.ErrorGroupStatus, str
 func (m *mockErrorGroupStore) Resolve(context.Context, string, string, string) error { return nil }
 func (m *mockErrorGroupStore) Ignore(context.Context, string, string, string) error  { return nil }
 func (m *mockErrorGroupStore) Reopen(context.Context, string, string, string) error  { return nil }
-func (m *mockErrorGroupStore) ListEvents(context.Context, string, int) ([]store.ErrorGroupEvent, error) {
+func (m *mockErrorGroupStore) ListEvents(context.Context, string, string, int) ([]store.ErrorGroupEvent, error) {
 	return nil, nil
 }
 func (m *mockErrorGroupStore) Prune(context.Context, time.Duration) (int64, error) {

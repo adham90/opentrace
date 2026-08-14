@@ -18,9 +18,8 @@ import (
 // window usage for coding agents: instead of 14+ tool schemas, the agent
 // sees just 1.
 type Gateway struct {
-	handlers  map[string]ToolHandlerFunc
-	entries   []GatewayEntry
-	mcpServer *mcp.Server // set after registration, for elicitation
+	handlers map[string]ToolHandlerFunc
+	entries  []GatewayEntry
 }
 
 // GatewayEntry describes a tool registered in the gateway (for discover).
@@ -51,9 +50,13 @@ func (g *Gateway) Register(name string, handler ToolHandlerFunc, entry GatewayEn
 }
 
 // Tool returns the single MCP tool definition for the gateway.
+//
+// The annotations describe what the gateway can actually reach: clients use
+// destructiveHint to decide whether a call needs confirmation, so it must be
+// true whenever any registered tool exposes a destructive action.
 func (g *Gateway) Tool() *mcp.Tool {
-	readOnly := false
-	destructive := false
+	readOnly := g.allReadOnly()
+	destructive := g.anyDestructive()
 	openWorld := true
 	return &mcp.Tool{
 		Name: "opentrace",
@@ -76,6 +79,27 @@ func (g *Gateway) Tool() *mcp.Tool {
 			OpenWorldHint:   &openWorld,
 		},
 	}
+}
+
+// anyDestructive reports whether any registered tool exposes a destructive
+// action. A gateway with nothing registered is not destructive.
+func (g *Gateway) anyDestructive() bool {
+	for _, e := range g.entries {
+		if e.Destructive {
+			return true
+		}
+	}
+	return false
+}
+
+// allReadOnly reports whether every registered tool is read-only.
+func (g *Gateway) allReadOnly() bool {
+	for _, e := range g.entries {
+		if !e.ReadOnly {
+			return false
+		}
+	}
+	return true
 }
 
 // Handler returns the MCP handler for the gateway tool.
@@ -114,6 +138,9 @@ func (g *Gateway) Handler() ToolHandlerFunc {
 		}
 
 		innerReq := MakeCallToolRequest(toolName, params)
+		// Carry the caller's session through to the inner handler so activity
+		// logging can attribute the call to a real session, not a placeholder.
+		innerReq.Session = request.Session
 
 		result, err := handler(ctx, innerReq)
 		if err != nil {
@@ -258,37 +285,6 @@ func (g *Gateway) handleDiscover(args map[string]any) (*mcp.CallToolResult, erro
 		return NewToolResultError(fmt.Sprintf("failed to marshal catalog: %v", err)), nil
 	}
 	return NewToolResultText(string(data)), nil
-}
-
-// SetServer stores the Server reference for elicitation support (Item 14).
-// Called after the gateway tool is registered on the server.
-func (g *Gateway) SetServer(s *mcp.Server) {
-	g.mcpServer = s
-}
-
-// Elicit requests structured user input via the MCP Elicitation primitive.
-// Returns nil, nil if elicitation is not supported by the client or no sessions exist.
-func (g *Gateway) Elicit(ctx context.Context, message string, schema any) (map[string]any, error) {
-	if g.mcpServer == nil {
-		return nil, nil
-	}
-
-	// Elicitation is per-session in the new SDK. Attempt elicitation on the first active session.
-	for ss := range g.mcpServer.Sessions() {
-		result, err := ss.Elicit(ctx, &mcp.ElicitParams{
-			Message:         message,
-			RequestedSchema: schema,
-		})
-		if err != nil {
-			return nil, nil // elicitation not supported — fall back to error
-		}
-		if result == nil || result.Action != "accept" {
-			return nil, nil
-		}
-		return result.Content, nil
-	}
-
-	return nil, nil
 }
 
 // handleDescribe returns full parameter documentation for a specific tool.

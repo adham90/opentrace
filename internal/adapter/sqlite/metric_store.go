@@ -32,21 +32,6 @@ func (s *metricStore) BatchInsert(ctx context.Context, serverID uuid.UUID, ts ti
 	now := time.Now().UTC()
 	tsUTC := ts.UTC()
 
-	metrics := make([]store.MetricPoint, len(samples))
-	for i, sample := range samples {
-		metrics[i] = store.MetricPoint{
-			ServerID:    serverID,
-			Timestamp:   tsUTC,
-			MetricName:  sample.Name,
-			MetricValue: sample.Value,
-			Unit:        sample.Unit,
-			Labels:      sample.Labels,
-		}
-		// CreatedAt is not in MetricPoint model as bun field but is in the table.
-		// We'll use raw SQL for created_at.
-		_ = now
-	}
-
 	// Use a transaction with prepared statements for best performance with SQLite.
 	if err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		stmt, err := tx.PrepareContext(ctx,
@@ -57,8 +42,8 @@ func (s *metricStore) BatchInsert(ctx context.Context, serverID uuid.UUID, ts ti
 		}
 		defer stmt.Close()
 
-		tsStr := tsUTC.Format(time.RFC3339)
-		nowStr := now.Format(time.RFC3339)
+		tsStr := rfc3339(tsUTC)
+		nowStr := rfc3339(now)
 
 		for _, sample := range samples {
 			labelsJSON := "{}"

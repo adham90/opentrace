@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/adham90/opentrace/internal/testutil/mocks"
@@ -199,5 +200,68 @@ func TestHandleDeleteUser_ValidParams(t *testing.T) {
 	_, getErr := userStore.GetByID(context.Background(), user.ID)
 	if getErr != store.ErrNotFound {
 		t.Errorf("expected ErrNotFound after delete, got: %v", getErr)
+	}
+}
+
+// TestHandleUpdateRetention_PreservesMetricRetention covers the lost update:
+// SetRetention persists the whole struct, so building a fresh one wiped a
+// separately configured metric_retention_days back to 0 ("follow the global
+// window").
+func TestHandleUpdateRetention_PreservesMetricRetention(t *testing.T) {
+	settings := mocks.NewSettingsStore()
+	settings.Retention = &store.RetentionSettings{RetentionDays: 30, MetricRetentionDays: 90}
+	d := AdminDeps{SettingsStore: settings}
+
+	result, err := HandleUpdateRetention(context.Background(), d, map[string]any{"retention_days": float64(14)})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %s", extractText(t, result))
+	}
+
+	got, err := settings.GetRetention(context.Background())
+	if err != nil {
+		t.Fatalf("reading back settings: %v", err)
+	}
+	if got.RetentionDays != 14 {
+		t.Errorf("retention_days = %d, want 14", got.RetentionDays)
+	}
+	if got.MetricRetentionDays != 90 {
+		t.Errorf("metric_retention_days = %d, want 90 (it must not be clobbered)", got.MetricRetentionDays)
+	}
+}
+
+// The confirmation text must describe what the setting actually prunes. Watch
+// runs and watch alerts are governed by the separate retention_policy blob.
+func TestHandleUpdateRetention_MessageDoesNotClaimWatchPruning(t *testing.T) {
+	settings := mocks.NewSettingsStore()
+	d := AdminDeps{SettingsStore: settings}
+
+	result, err := HandleUpdateRetention(context.Background(), d, map[string]any{"retention_days": float64(7)})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := extractText(t, result)
+	if !strings.Contains(text, "retention_policy") {
+		t.Errorf("expected the message to point at retention_policy for watch data:\n%s", text)
+	}
+	for _, want := range []string{"Logs", "audit", "error groups"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("expected %q in the confirmation message:\n%s", want, text)
+		}
+	}
+}
+
+func TestHandleUpdateRetention_RejectsOutOfRange(t *testing.T) {
+	d := AdminDeps{SettingsStore: mocks.NewSettingsStore()}
+	for _, days := range []float64{0, 366} {
+		result, err := HandleUpdateRetention(context.Background(), d, map[string]any{"retention_days": days})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !result.IsError {
+			t.Errorf("retention_days=%v should have been rejected", days)
+		}
 	}
 }

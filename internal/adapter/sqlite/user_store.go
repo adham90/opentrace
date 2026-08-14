@@ -183,17 +183,12 @@ func (s *userStore) List(ctx context.Context) ([]store.User, error) {
 }
 
 func (s *userStore) Update(ctx context.Context, id string, params store.UpdateUserParams) (*store.User, error) {
-	// If demoting from admin, check last-admin constraint.
-	if params.Role != nil && *params.Role == store.RoleMember {
-		if err := s.checkLastAdmin(ctx, id); err != nil {
-			return nil, err
-		}
-	}
-	if params.IsActive != nil && !*params.IsActive {
-		if err := s.checkLastAdmin(ctx, id); err != nil {
-			return nil, err
-		}
-	}
+	// Demoting or deactivating an admin must not remove the last one. The
+	// check and the write run in one transaction: as two separate statements
+	// they interleave, and two concurrent demotes of the final two admins both
+	// see "another admin exists" and both apply, leaving zero.
+	demotesAdmin := (params.Role != nil && *params.Role == store.RoleMember) ||
+		(params.IsActive != nil && !*params.IsActive)
 
 	// Build dynamic UPDATE
 	var sets []string
@@ -226,13 +221,24 @@ func (s *userStore) Update(ctx context.Context, id string, params store.UpdateUs
 	args = append(args, id)
 	query := fmt.Sprintf("UPDATE users SET %s WHERE id = ?", strings.Join(sets, ", "))
 
-	res, err := s.db.NewRaw(query, args...).Exec(ctx)
+	err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if demotesAdmin {
+			if err := checkLastAdminTx(ctx, tx, id); err != nil {
+				return err
+			}
+		}
+		res, err := tx.NewRaw(query, args...).Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("updating user: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return store.ErrNotFound
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("updating user: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return nil, store.ErrNotFound
+		return nil, err
 	}
 	return s.GetByID(ctx, id)
 }
@@ -269,20 +275,24 @@ func (s *userStore) UpdateMCPToken(ctx context.Context, id string, token string)
 	return nil
 }
 
+// Delete removes a user. The last-admin check and the DELETE share one
+// transaction so concurrent deletes cannot both pass the check and between
+// them remove every admin.
 func (s *userStore) Delete(ctx context.Context, id string) error {
-	if err := s.checkLastAdmin(ctx, id); err != nil {
-		return err
-	}
-
-	res, err := s.db.NewRaw(`DELETE FROM users WHERE id = ?`, id).Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("deleting user: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return store.ErrNotFound
-	}
-	return nil
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if err := checkLastAdminTx(ctx, tx, id); err != nil {
+			return err
+		}
+		res, err := tx.NewRaw(`DELETE FROM users WHERE id = ?`, id).Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("deleting user: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return store.ErrNotFound
+		}
+		return nil
+	})
 }
 
 func (s *userStore) Count(ctx context.Context) (int, error) {
@@ -294,17 +304,26 @@ func (s *userStore) Count(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-// checkLastAdmin returns ErrLastAdmin if the given user is the only active admin.
-func (s *userStore) checkLastAdmin(ctx context.Context, userID string) error {
-	user, err := s.GetByID(ctx, userID)
-	if err != nil {
-		return err
+// checkLastAdminTx returns ErrLastAdmin if the given user is the only active
+// admin. It runs inside the caller's transaction so the check and the write it
+// guards are atomic.
+func checkLastAdminTx(ctx context.Context, tx bun.Tx, userID string) error {
+	var role string
+	var isActive int64
+	err := tx.NewRaw(`SELECT role, is_active FROM users WHERE id = ?`, userID).
+		Scan(ctx, &role, &isActive)
+	if err == sql.ErrNoRows {
+		return store.ErrNotFound
 	}
-	if user.Role != store.RoleAdmin {
+	if err != nil {
+		return fmt.Errorf("checking admin count: %w", err)
+	}
+	if store.UserRole(role) != store.RoleAdmin || isActive != 1 {
 		return nil
 	}
+
 	var count int
-	err = s.db.NewRaw(`
+	err = tx.NewRaw(`
 		SELECT COUNT(*) FROM users
 		WHERE role = 'admin' AND is_active = 1 AND id != ?`, userID,
 	).Scan(ctx, &count)

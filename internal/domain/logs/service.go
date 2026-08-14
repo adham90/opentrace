@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"time"
 
 	"github.com/adham90/opentrace/internal/domain"
 	"github.com/adham90/opentrace/pkg/store"
@@ -108,12 +107,12 @@ func (s *Service) CountByService(ctx context.Context, params store.LogCountParam
 
 // TraceResult holds a distributed trace reconstructed from log entries.
 type TraceResult struct {
-	TraceID        string           `json:"trace_id"`
-	Entries        []store.LogEntry `json:"entries"`
-	TotalEntries   int              `json:"total_entries"`
-	TotalDurationMs int64           `json:"total_duration_ms"`
-	Services       []string         `json:"services_touched"`
-	HasErrors      bool             `json:"has_errors"`
+	TraceID         string           `json:"trace_id"`
+	Entries         []store.LogEntry `json:"entries"`
+	TotalEntries    int              `json:"total_entries"`
+	TotalDurationMs int64            `json:"total_duration_ms"`
+	Services        []string         `json:"services_touched"`
+	HasErrors       bool             `json:"has_errors"`
 }
 
 // Trace reconstructs a distributed trace from log entries sharing a trace ID.
@@ -192,56 +191,4 @@ func (s *Service) Histogram(ctx context.Context, params store.LogHistogramParams
 		return nil, fmt.Errorf("log histogram: %w", domain.ErrNotConfigured)
 	}
 	return s.repo.Histogram(ctx, params)
-}
-
-// PerformanceResult holds request performance analysis.
-type PerformanceResult struct {
-	TotalRequests    int                        `json:"total_requests"`
-	AvgDurationMs    int64                      `json:"avg_duration_ms"`
-	AvgSQLCount      int64                      `json:"avg_sql_count"`
-	SlowestEndpoint  string                     `json:"slowest_endpoint"`
-	SlowestDuration  int64                      `json:"slowest_duration_ms"`
-	TopEndpoints     []store.RequestSummaryResult `json:"top_endpoints"`
-	Warnings         []string                   `json:"warnings,omitempty"`
-	Period           TimeWindow                 `json:"period"`
-}
-
-// TimeWindow represents a start/end time range.
-type TimeWindow struct {
-	Start time.Time `json:"start"`
-	End   time.Time `json:"end"`
-}
-
-// Performance analyzes request performance for a time window.
-func (s *Service) Performance(ctx context.Context, start, end time.Time, service string) (*PerformanceResult, error) {
-	if s.repo == nil {
-		return nil, fmt.Errorf("log performance: %w", domain.ErrNotConfigured)
-	}
-
-	params := store.RequestSummarySearchParams{
-		Start: &start,
-		End:   &end,
-		Limit: 100,
-	}
-	if service != "" {
-		// RequestSummarySearchParams doesn't have a Service field — use Controller as proxy.
-		// This is a limitation of the current store interface.
-	}
-
-	summaries, err := s.repo.SearchRequestSummaries(ctx, params)
-	if err != nil {
-		return nil, fmt.Errorf("searching summaries: %w", err)
-	}
-
-	result := &PerformanceResult{
-		TotalRequests: len(summaries),
-		Period:        TimeWindow{Start: start, End: end},
-		TopEndpoints:  summaries,
-	}
-
-	if len(summaries) > 10 {
-		result.TopEndpoints = summaries[:10]
-	}
-
-	return result, nil
 }

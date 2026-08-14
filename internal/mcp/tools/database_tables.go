@@ -16,6 +16,9 @@ func HandleTables(ctx context.Context, deps DatabaseDeps, args map[string]any) (
 	}
 
 	tableName := ArgString(args, "table_name")
+	if errResult := validateCatalogName("table_name", tableName); errResult != nil {
+		return errResult, nil
+	}
 
 	query := `SELECT
   s.schemaname,
@@ -37,13 +40,17 @@ FROM pg_stat_user_tables s
 LEFT JOIN pg_statio_user_tables io
   ON s.relid = io.relid`
 
+	// The table name is caller-supplied: bind it as a parameter rather than
+	// interpolating it into the statement.
+	var queryArgs []any
 	if tableName != "" {
-		query += fmt.Sprintf("\nWHERE s.relname = '%s'", sanitizeIdentifier(tableName))
+		query += "\nWHERE s.relname = $1"
+		queryArgs = append(queryArgs, tableName)
 	}
 
 	query += "\nORDER BY s.n_live_tup DESC\nLIMIT 50"
 
-	result, err := qe.ExecuteReadQuery(ctx, query)
+	result, err := executeReadQuery(ctx, qe, query, queryArgs...)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to query table stats: %v", err)), nil
 	}

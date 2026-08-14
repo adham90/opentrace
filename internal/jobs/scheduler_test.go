@@ -92,3 +92,39 @@ func TestSchedulerSkipsDuplicates(t *testing.T) {
 		t.Errorf("pending = %d, want 1 (should not create duplicates)", stats[StatusPending])
 	}
 }
+
+// TestSchedulerFiresInitialRun proves a schedule enqueues immediately at
+// startup rather than waiting a full interval. Without the initial run a job on
+// a 6h schedule never fires on a process that restarts more often than that.
+func TestSchedulerFiresInitialRun(t *testing.T) {
+	db := setupTestDB(t)
+	q := NewQueue(db)
+	ctx := context.Background()
+
+	s := NewScheduler(q)
+	s.Add(Schedule{
+		Name:     "long-interval",
+		JobType:  "retention.jobs",
+		Interval: time.Hour, // far longer than the test
+	})
+
+	s.Start(ctx)
+	defer s.Stop()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		stats, err := q.Stats(ctx)
+		if err != nil {
+			t.Fatalf("Stats: %v", err)
+		}
+		if stats[StatusPending] > 0 {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("schedule with a 1h interval never enqueued an initial run")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}

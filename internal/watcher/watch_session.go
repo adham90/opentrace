@@ -4,10 +4,13 @@ import (
 	"context"
 	"log/slog"
 	"math"
-	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
 )
+
+// autoResolveDrift is how close to baseline a triggered watch's metric must
+// return before the watch auto-resolves (10%).
+const autoResolveDrift = 0.10
 
 // WatchSessionManager handles auto-resolve and cleanup of watches.
 type WatchSessionManager struct {
@@ -29,25 +32,22 @@ func (m *WatchSessionManager) CheckAutoResolve(ctx context.Context, w *store.Wat
 	if w.Status != store.WatchStatusTriggered {
 		return nil
 	}
-	if w.BaselineJSON == nil {
-		return nil
-	}
 
-	window, err := time.ParseDuration(w.BaselineWindow)
-	if err != nil {
-		window = 1 * time.Hour
-	}
+	window := parseDurationOr(w.BaselineWindow, defaultBaselineWindow)
 
 	// Extract the primary metric from the conditions tree for baseline comparison.
 	metric := store.ConditionsMetric(w.ConditionsJSON)
 	if metric == "" {
 		// Compound condition: re-evaluate the full tree. If it no longer breaches,
-		// auto-resolve.
+		// auto-resolve. This path does not need a baseline — every leaf evaluator
+		// tolerates a nil one — so the nil-baseline guard below must not shortcut
+		// it, or compound watches could never leave the triggered state.
 		cond, err := ParseCondition(w.ConditionsJSON)
 		if err != nil {
 			return err
 		}
-		result, err := EvaluateCondition(ctx, cond, m.metrics, w.BaselineJSON, w.Environment, window)
+		result, err := EvaluateCondition(ctx, cond, m.metrics, w.BaselineJSON,
+			w.Environment, parseDurationOr(w.CheckInterval, defaultCheckInterval))
 		if err != nil {
 			return err
 		}
@@ -56,6 +56,11 @@ func (m *WatchSessionManager) CheckAutoResolve(ctx context.Context, w *store.Wat
 				"watch_id", w.ID)
 			return m.watchStore.UpdateStatus(ctx, w.ID, store.WatchStatusResolved)
 		}
+		return nil
+	}
+
+	// Single-metric auto-resolve is a drift-from-baseline check, so it needs one.
+	if w.BaselineJSON == nil {
 		return nil
 	}
 
@@ -70,9 +75,9 @@ func (m *WatchSessionManager) CheckAutoResolve(ctx context.Context, w *store.Wat
 		return nil
 	}
 
-	// If current value is within 10% of baseline, auto-resolve
+	// If current value is back within autoResolveDrift of baseline, auto-resolve.
 	drift := math.Abs(value-baselineValue) / math.Abs(baselineValue)
-	if drift <= 0.10 {
+	if drift <= autoResolveDrift {
 		slog.Info("auto-resolving watch", "watch_id", w.ID,
 			"metric", metric, "value", value, "baseline", baselineValue, "drift_pct", drift*100)
 		return m.watchStore.UpdateStatus(ctx, w.ID, store.WatchStatusResolved)
@@ -91,4 +96,3 @@ func (m *WatchSessionManager) Cleanup(ctx context.Context) {
 		slog.Info("expired watches", "count", n)
 	}
 }
-

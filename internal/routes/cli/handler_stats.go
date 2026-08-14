@@ -21,11 +21,9 @@ func (h *handler) handleIngestionStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	since := time.Now().Add(-1 * time.Hour)
-	if v := r.URL.Query().Get("since"); v != "" {
-		if t, err := server.ParseSinceParam(v); err == nil {
-			since = t
-		}
+	since, ok := parseSinceOrError(w, r)
+	if !ok {
+		return
 	}
 
 	interval := time.Minute

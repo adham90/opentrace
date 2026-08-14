@@ -93,7 +93,9 @@ func FriendlyError(err error) string {
 		return ""
 	}
 
-	msg := err.Error()
+	// Driver errors frequently echo the DSN back (including its password), and
+	// this message is shown to users and written to logs.
+	msg := RedactSecrets(err.Error())
 	lower := strings.ToLower(msg)
 
 	for _, ep := range errorPatterns {

@@ -10,6 +10,10 @@ import (
 	"github.com/adham90/opentrace/pkg/store"
 )
 
+// activeSessionWindow is how recently a session must have been active to count
+// as an active session in Stats.
+const activeSessionWindow = 5 * time.Minute
+
 type mcpActivityStore struct {
 	db *bun.DB
 }
@@ -40,19 +44,23 @@ func (s *mcpActivityStore) Log(ctx context.Context, params store.LogMCPActivityP
 		durationMs = *params.DurationMs
 	}
 
+	// created_at is written explicitly rather than left to the column default:
+	// Stats and Prune compare it lexicographically against RFC3339 cutoffs, so
+	// the value has to be RFC3339 UTC and not whatever SQLite's clock renders.
 	_, err := s.db.NewRaw(`
 		INSERT INTO mcp_activity (
 		    session_id, user_id, tool_name, arguments, result_preview,
 		    is_error, duration_ms, event_type, environment,
 		    investigation_session_id, step_index,
-		    was_suggested, suggestion_rank, followed_by
+		    was_suggested, suggestion_rank, followed_by, created_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		params.SessionID, params.UserID, params.ToolName,
 		params.Arguments, params.ResultPreview,
 		isError, durationMs, eventType, params.Environment,
 		params.InvestigationSessionID, params.StepIndex,
 		wasSuggested, params.SuggestionRank, "",
+		rfc3339(time.Now().UTC()),
 	).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("logging mcp activity: %w", err)
@@ -74,8 +82,8 @@ func (s *mcpActivityStore) Log(ctx context.Context, params store.LogMCPActivityP
 func (s *mcpActivityStore) Stats(ctx context.Context) (*store.MCPActivityStats, error) {
 	stats := &store.MCPActivityStats{}
 
-	oneHourAgo := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
-	fiveMinAgo := time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339)
+	oneHourAgo := rfc3339(time.Now().UTC().Add(-1 * time.Hour))
+	fiveMinAgo := rfc3339(time.Now().UTC().Add(-activeSessionWindow))
 
 	// Active sessions: sessions with activity in the last 5 minutes
 	var activeSessions int
@@ -117,9 +125,8 @@ func (s *mcpActivityStore) Stats(ctx context.Context) (*store.MCPActivityStats, 
 		return nil, fmt.Errorf("querying last activity: %w", err)
 	}
 	if lastAtRaw != nil {
-		if s, ok := lastAtRaw.(string); ok && s != "" {
-			t, _ := time.Parse(time.RFC3339, s)
-			if !t.IsZero() {
+		if raw, ok := lastAtRaw.(string); ok && raw != "" {
+			if t := parseTime(raw); !t.IsZero() {
 				stats.LastActivity = &t
 			}
 		}
@@ -167,7 +174,7 @@ func (s *mcpActivityStore) ListByInvestigationSession(ctx context.Context, sessi
 }
 
 func (s *mcpActivityStore) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
-	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
+	cutoff := rfc3339(time.Now().UTC().Add(-olderThan))
 	var totalDeleted int64
 	for {
 		res, err := s.db.NewRaw(

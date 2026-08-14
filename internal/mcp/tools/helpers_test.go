@@ -438,9 +438,9 @@ func TestLogsResolveBaseline(t *testing.T) {
 			wantEnd:   curEnd.Add(-168 * time.Hour),
 		},
 		{
-			name:    "unknown returns error",
+			name:     "unknown returns error",
 			baseline: "unknown",
-			wantErr: true,
+			wantErr:  true,
 		},
 	}
 
@@ -475,7 +475,11 @@ func TestLogsCalcChange(t *testing.T) {
 		wantCategory string
 	}{
 		{"both zero", 0, 0, 0, "unchanged"},
-		{"zero baseline with current", 0, 5, 100, "new"},
+		// A jump from zero is scored as growth from a baseline of one so that
+		// "biggest movers" ranking keeps its magnitude; the old flat 100 sorted
+		// a brand-new 0→5000 incident below routine 10→50 drift.
+		{"zero baseline with current", 0, 5, 500, "new"},
+		{"zero baseline with large current outranks drift", 0, 5000, 500000, "new"},
 		{"increase", 10, 15, 50, "increase"},
 		{"decrease", 10, 5, -50, "decrease"},
 		{"unchanged", 10, 10, 0, "unchanged"},

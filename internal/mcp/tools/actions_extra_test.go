@@ -154,7 +154,6 @@ func TestLogsTrace_WithIncludeContext(t *testing.T) {
 	}
 }
 
-
 // ===========================================================================
 // LogsCompare — additional action-branch tests
 // ===========================================================================
@@ -394,6 +393,7 @@ func TestLogsPerformance_CustomLimit(t *testing.T) {
 
 func TestHandleConnectorTest_NilDSStore(t *testing.T) {
 	d := ConnectorsDeps{
+		IsAdmin: true, // write action: admin-gated
 		DSStore: nil,
 	}
 
@@ -413,6 +413,7 @@ func TestHandleConnectorTest_NilDSStore(t *testing.T) {
 
 func TestHandleConnectorTest_MissingID(t *testing.T) {
 	d := ConnectorsDeps{
+		IsAdmin: true, // write action: admin-gated
 		DSStore: mocks.NewDataSourceStore(),
 	}
 
@@ -432,6 +433,7 @@ func TestHandleConnectorTest_MissingID(t *testing.T) {
 
 func TestHandleConnectorTest_InvalidUUID(t *testing.T) {
 	d := ConnectorsDeps{
+		IsAdmin: true, // write action: admin-gated
 		DSStore: mocks.NewDataSourceStore(),
 	}
 
@@ -451,6 +453,7 @@ func TestHandleConnectorTest_InvalidUUID(t *testing.T) {
 
 func TestHandleConnectorTest_NotFound(t *testing.T) {
 	d := ConnectorsDeps{
+		IsAdmin: true, // write action: admin-gated
 		DSStore: mocks.NewDataSourceStore(),
 	}
 
@@ -474,6 +477,7 @@ func TestHandleConnectorTest_NotFound(t *testing.T) {
 
 func TestHandleConnectorUpdate_NilDSStore(t *testing.T) {
 	d := ConnectorsDeps{
+		IsAdmin: true, // write action: admin-gated
 		DSStore: nil,
 	}
 
@@ -493,6 +497,7 @@ func TestHandleConnectorUpdate_NilDSStore(t *testing.T) {
 
 func TestHandleConnectorUpdate_MissingID(t *testing.T) {
 	d := ConnectorsDeps{
+		IsAdmin: true, // write action: admin-gated
 		DSStore: mocks.NewDataSourceStore(),
 	}
 
@@ -512,6 +517,7 @@ func TestHandleConnectorUpdate_MissingID(t *testing.T) {
 
 func TestHandleConnectorUpdate_InvalidUUID(t *testing.T) {
 	d := ConnectorsDeps{
+		IsAdmin: true, // write action: admin-gated
 		DSStore: mocks.NewDataSourceStore(),
 	}
 
@@ -527,6 +533,7 @@ func TestHandleConnectorUpdate_InvalidUUID(t *testing.T) {
 
 func TestHandleConnectorUpdate_NotFound(t *testing.T) {
 	d := ConnectorsDeps{
+		IsAdmin: true, // write action: admin-gated
 		DSStore: mocks.NewDataSourceStore(),
 	}
 
@@ -558,6 +565,7 @@ func TestHandleConnectorUpdate_HappyPath(t *testing.T) {
 	}
 
 	d := ConnectorsDeps{
+		IsAdmin:  true, // write action: admin-gated
 		DSStore:  dsStore,
 		Registry: connector.NewRegistry(),
 	}
@@ -594,6 +602,7 @@ func TestHandleConnectorUpdate_ConnectionStringChanged(t *testing.T) {
 	}
 
 	d := ConnectorsDeps{
+		IsAdmin:  true, // write action: admin-gated
 		DSStore:  dsStore,
 		Registry: connector.NewRegistry(),
 	}

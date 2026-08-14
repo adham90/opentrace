@@ -10,13 +10,13 @@ import (
 	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/connector"
 	"github.com/adham90/opentrace/internal/mcp/envscope"
-	"github.com/adham90/opentrace/pkg/store"
 	"github.com/adham90/opentrace/internal/watcher"
+	"github.com/adham90/opentrace/pkg/store"
 )
 
 // mcpInstructions is sent to the client during the MCP initialize handshake.
 // It tells the agent how to use OpenTrace tools effectively.
-const mcpInstructions = `OpenTrace is a self-hosted observability engine. You have tools for logs, errors, database introspection, alerts, code intelligence, deploys, analytics, and more.
+const mcpInstructions = `OpenTrace is a self-hosted observability engine. You have tools for logs, errors, database introspection, alerts, code intelligence, deep capture, analytics, and more.
 
 ## Where to start
 
@@ -41,7 +41,10 @@ const mcpInstructions = `OpenTrace is a self-hosted observability engine. You ha
 - connectors: list, get, create, test, update, delete
 - servers: list, query, health
 - setup: status, detect, guide, verify
-- admin: update_retention, users, audit (admin only)
+- deep_capture: request_capture, sql_captures, http_captures, email_captures, audit_trail, search_audit, search_sql, file_captures, get_pii_config, get_retention (update_pii_config, update_retention are admin only)
+- admin: update_retention, users, update_role, toggle_active, delete_user, audit (admin only)
+
+Tools and actions are registered per token role — call opentrace(tool="discover") to see exactly what this token can use.
 
 ## Follow suggested_tools
 
@@ -105,22 +108,32 @@ func NewConfiguredServer(deps Deps, isAdmin bool, serverOpts *mcp.ServerOptions)
 		name = "opentrace"
 	}
 
-	// Initialize activity logger on deps if not already set.
+	// Initialize the activity logger on deps if the caller did not supply one.
+	//
+	// deps is a value, so this assignment is invisible to the caller: a logger
+	// created here can only be shut down by its own lifecycle ctx, which
+	// closeOnDone wires up. Callers that need deterministic shutdown (Serve)
+	// construct the logger themselves and pass it in.
 	if deps.ActivityLogger == nil && deps.MCPActivityStore != nil {
 		alCtx := deps.Ctx
 		if alCtx == nil {
 			alCtx = context.Background()
 		}
-		deps.ActivityLogger = NewActivityLogger(alCtx, deps.MCPActivityStore, 256, 2)
+		al := NewActivityLogger(alCtx, deps.MCPActivityStore, activityLogBuffer, activityLogWorkers)
+		al.closeOnDone(alCtx)
+		deps.ActivityLogger = al
 	}
 
 	if serverOpts == nil {
 		serverOpts = &mcp.ServerOptions{}
 	}
 	serverOpts.Instructions = mcpInstructions
+	// Subscribe stays false: no SubscribeHandler is installed, and the SDK
+	// honours an explicit Capabilities struct as-is, so advertising it would
+	// promise a resources/subscribe that always fails with method-not-found.
 	serverOpts.Capabilities = &mcp.ServerCapabilities{
 		Tools:     &mcp.ToolCapabilities{ListChanged: false},
-		Resources: &mcp.ResourceCapabilities{ListChanged: false, Subscribe: true},
+		Resources: &mcp.ResourceCapabilities{ListChanged: false, Subscribe: false},
 	}
 	// Send periodic JSON-RPC pings on every session. Two reasons:
 	//   1. Keeps the underlying TCP/SSE stream warm so intermediaries
@@ -148,9 +161,6 @@ func NewConfiguredServer(deps Deps, isAdmin bool, serverOpts *mcp.ServerOptions)
 	// Wrap the gateway handler with metrics (tool name = "opentrace").
 	gatewayHandler = wrapWithMetrics("opentrace", gatewayHandler)
 	s.AddTool(gatewayTool, gatewayHandler)
-
-	// Wire elicitation support (Item 14).
-	gw.SetServer(s)
 
 	// Register MCP resources
 	addResources(s, deps)
@@ -215,6 +225,17 @@ func Serve(deps Deps) error {
 		return s.Run(context.Background(), &mcp.StdioTransport{})
 	}
 
+	// Create the activity logger here rather than letting NewConfiguredServer
+	// do it: it takes deps by value, so a logger it creates would be invisible
+	// to this function and could never be drained on exit.
+	if deps.ActivityLogger == nil && deps.MCPActivityStore != nil {
+		alCtx := deps.Ctx
+		if alCtx == nil {
+			alCtx = context.Background()
+		}
+		deps.ActivityLogger = NewActivityLogger(alCtx, deps.MCPActivityStore, activityLogBuffer, activityLogWorkers)
+	}
+
 	s := NewConfiguredServer(deps, isAdmin, nil)
 
 	// Build the run context with the user's env scope attached so tool
@@ -235,4 +256,3 @@ func Serve(deps Deps) error {
 
 	return err
 }
-

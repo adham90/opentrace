@@ -38,8 +38,11 @@ type ErrorGroup struct {
 	IgnoredAt       *time.Time       `bun:"ignored_at" json:"ignored_at,omitempty"`
 	// SeenInEnvs is stored as a JSON array of env names in the seen_in_envs
 	// TEXT column; the sqlite store encodes/decodes on read/write.
-	SeenInEnvs []string          `bun:"-" json:"seen_in_envs,omitempty"`
-	Events     []ErrorGroupEvent `bun:"rel:has-many,join:fingerprint=fingerprint" json:"events,omitempty"`
+	SeenInEnvs []string `bun:"-" json:"seen_in_envs,omitempty"`
+	// Events joins on the full composite key: error_group_events rows are
+	// keyed (fingerprint, environment) too, and joining on fingerprint alone
+	// would attach another environment's resolve/ignore events to this group.
+	Events []ErrorGroupEvent `bun:"rel:has-many,join:fingerprint=fingerprint,join:environment=environment" json:"events,omitempty"`
 
 	// Phase 3: Impact tracking
 	UniqueUsers   int            `bun:"unique_users" json:"unique_users"`

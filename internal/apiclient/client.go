@@ -125,8 +125,15 @@ func (c *Client) IngestionStats(since, bucket, service string) (*IngestionStatsR
 
 // LogStreamURL returns the full URL for the SSE log stream endpoint.
 // env scopes to a single environment; pass "" to stream every env.
-func (c *Client) LogStreamURL(level, service, search, env string) string {
-	u, _ := url.Parse(c.baseURL + "/api/cli/logs/stream")
+//
+// The endpoint comes from user-editable config (.opentrace.yml,
+// OPENTRACE_ENDPOINT, --endpoint), so it can be malformed; an unparseable
+// endpoint is reported as an error rather than dereferenced as a nil *url.URL.
+func (c *Client) LogStreamURL(level, service, search, env string) (string, error) {
+	u, err := url.Parse(c.baseURL + "/api/cli/logs/stream")
+	if err != nil {
+		return "", fmt.Errorf("invalid endpoint %q: %w", c.baseURL, err)
+	}
 	params := url.Values{}
 	if level != "" {
 		params.Set("level", level)
@@ -143,7 +150,7 @@ func (c *Client) LogStreamURL(level, service, search, env string) string {
 	if len(params) > 0 {
 		u.RawQuery = params.Encode()
 	}
-	return u.String()
+	return u.String(), nil
 }
 
 // APIKey returns the configured API key for SSE auth headers.

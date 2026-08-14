@@ -17,8 +17,21 @@ const recentResultsWindow = 5
 // maxBackoffMultiplier caps the backoff at 4x the configured interval.
 const maxBackoffMultiplier = 4
 
+// maxBackoffShift is the largest left-shift applied when computing the backoff
+// multiplier; it keeps 1<<shift from overflowing for long-failing checks.
+const maxBackoffShift = 2
+
 // backoffThreshold is the number of consecutive failures before backoff kicks in.
 const backoffThreshold = 3
+
+// listPageSize is the page size used when enumerating health checks. The store
+// caps an unspecified limit at 100, so the scheduler must paginate explicitly or
+// checks beyond the first page would never be probed.
+const listPageSize = 100
+
+// maxScheduledChecks bounds the number of checks a single tick will enumerate,
+// so a pathological table cannot make the poll loop run forever.
+const maxScheduledChecks = 10000
 
 // backoffState tracks exponential backoff for a failing health check.
 type backoffState struct {
@@ -184,8 +197,29 @@ func (s *Scheduler) run(ctx context.Context) {
 	}
 }
 
+// listAllChecks pages through the store so checks beyond the store's default
+// page limit are still scheduled.
+func (s *Scheduler) listAllChecks(ctx context.Context) ([]store.HealthCheck, error) {
+	var all []store.HealthCheck
+	for offset := 0; offset < maxScheduledChecks; offset += listPageSize {
+		page, err := s.store.List(ctx, store.ListHealthCheckParams{
+			Limit:  listPageSize,
+			Offset: offset,
+		})
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		if len(page) < listPageSize {
+			return all, nil
+		}
+	}
+	slog.Warn("healthcheck scheduler: check list truncated", "max", maxScheduledChecks)
+	return all, nil
+}
+
 func (s *Scheduler) tick(ctx context.Context) {
-	checks, err := s.store.List(ctx, store.ListHealthCheckParams{})
+	checks, err := s.listAllChecks(ctx)
 	if err != nil {
 		slog.Warn("healthcheck scheduler: failed to list checks", "error", err)
 		return
@@ -200,16 +234,20 @@ func (s *Scheduler) tick(ctx context.Context) {
 			continue
 		}
 
-		s.mu.Lock()
-		s.lastRun[hc.ID] = now
-		s.mu.Unlock()
-
 		// Run check in a goroutine with bounded concurrency. Tracked in the
 		// WaitGroup so Stop() waits for in-flight probes to finish before the DB
 		// closes (they call RecordResult). Adds happen on this run-loop goroutine
 		// before its own wg.Done, so there is no Add-after-Wait race.
+		//
+		// lastRun is stamped only once the semaphore slot is actually acquired.
+		// Stamping it before the select would make a skipped probe lose its whole
+		// interval instead of being retried on the next poll tick.
 		select {
 		case s.sem <- struct{}{}:
+			s.mu.Lock()
+			s.lastRun[hc.ID] = now
+			s.mu.Unlock()
+
 			s.wg.Add(1)
 			go func(hc store.HealthCheck) {
 				defer s.wg.Done()
@@ -217,7 +255,7 @@ func (s *Scheduler) tick(ctx context.Context) {
 				safe.Run("healthcheck.runCheck", func() { s.runCheck(ctx, hc) })
 			}(hc)
 		default:
-			slog.Debug("healthcheck: concurrency limit reached, skipping",
+			slog.Debug("healthcheck: concurrency limit reached, deferring to next poll",
 				"healthcheck_id", hc.ID, "name", hc.Name)
 		}
 	}
@@ -232,22 +270,20 @@ func (s *Scheduler) isDue(hc store.HealthCheck, now time.Time) bool {
 		return true // never run
 	}
 
-	interval := time.Duration(hc.IntervalSecs) * time.Second
+	return now.Sub(last) >= s.EffectiveInterval(hc)
+}
 
-	// Apply exponential backoff for checks that have consecutive failures.
+// consecutiveFailures returns the current failure count for a check. The count
+// lives behind backoffMu and is mutated by probe goroutines, so it must never be
+// read off the *backoffState pointer outside the lock.
+func (s *Scheduler) consecutiveFailures(checkID string) int {
 	s.backoffMu.Lock()
-	bs, hasBackoff := s.backoff[hc.ID]
-	s.backoffMu.Unlock()
-	if hasBackoff && bs.consecutiveFailures >= backoffThreshold {
-		// Double the interval for every failure past the threshold, up to 4x.
-		multiplier := 1 << (bs.consecutiveFailures - backoffThreshold + 1) // 2, 4, 8, ...
-		if multiplier > maxBackoffMultiplier {
-			multiplier = maxBackoffMultiplier
-		}
-		interval = time.Duration(multiplier) * interval
+	defer s.backoffMu.Unlock()
+	bs, ok := s.backoff[checkID]
+	if !ok {
+		return 0
 	}
-
-	return now.Sub(last) >= interval
+	return bs.consecutiveFailures
 }
 
 // EffectiveInterval returns the current interval for a check, accounting for backoff.
@@ -255,12 +291,16 @@ func (s *Scheduler) isDue(hc store.HealthCheck, now time.Time) bool {
 func (s *Scheduler) EffectiveInterval(hc store.HealthCheck) time.Duration {
 	interval := time.Duration(hc.IntervalSecs) * time.Second
 
-	s.backoffMu.Lock()
-	bs, hasBackoff := s.backoff[hc.ID]
-	s.backoffMu.Unlock()
-
-	if hasBackoff && bs.consecutiveFailures >= backoffThreshold {
-		multiplier := 1 << (bs.consecutiveFailures - backoffThreshold + 1)
+	failures := s.consecutiveFailures(hc.ID)
+	if failures >= backoffThreshold {
+		// Double the interval for every failure past the threshold, up to
+		// maxBackoffMultiplier. The shift is clamped before it is applied so a
+		// long-failing check cannot overflow the multiplier.
+		shift := failures - backoffThreshold + 1 // 1, 2, 3, ...
+		if shift > maxBackoffShift {
+			shift = maxBackoffShift
+		}
+		multiplier := 1 << shift // 2, 4
 		if multiplier > maxBackoffMultiplier {
 			multiplier = maxBackoffMultiplier
 		}

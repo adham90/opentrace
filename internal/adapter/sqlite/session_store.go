@@ -30,7 +30,15 @@ func (s *sessionStore) Create(ctx context.Context, userID string, token string, 
 		ExpiresAt: expiresAt.UTC(),
 		CreatedAt: now,
 	}
-	_, err := s.db.NewInsert().Model(sess).Exec(ctx)
+	// expires_at and created_at are written as RFC3339 strings: GetByToken and
+	// DeleteExpired compare expires_at lexicographically against an RFC3339
+	// "now", and bun's own time rendering sorts below that for the same
+	// instant, which would make every session expiring today look expired.
+	_, err := s.db.NewRaw(`
+		INSERT INTO sessions (id, user_id, token, expires_at, created_at)
+		VALUES (?, ?, ?, ?, ?)`,
+		sess.ID, sess.UserID, sess.Token, rfc3339(sess.ExpiresAt), rfc3339(sess.CreatedAt),
+	).Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("creating session: %w", err)
 	}
@@ -38,7 +46,7 @@ func (s *sessionStore) Create(ctx context.Context, userID string, token string, 
 }
 
 func (s *sessionStore) GetByToken(ctx context.Context, token string) (*store.Session, error) {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := rfc3339(time.Now().UTC())
 	var sess store.Session
 	err := s.db.NewSelect().Model(&sess).
 		Where("token = ?", token).
@@ -64,7 +72,7 @@ func (s *sessionStore) Delete(ctx context.Context, id string) error {
 }
 
 func (s *sessionStore) DeleteExpired(ctx context.Context) (int, error) {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := rfc3339(time.Now().UTC())
 	res, err := s.db.NewDelete().Model((*store.Session)(nil)).
 		Where("expires_at <= ?", now).
 		Exec(ctx)

@@ -10,10 +10,28 @@ import (
 	"github.com/adham90/opentrace/pkg/store"
 )
 
+// flushMaxAttempts is how many times a chunk is retried before the queue gives
+// up on it. Flush failures are dominated by transient contention (SQLITE_BUSY,
+// a compacting engine), so a couple of quick retries recovers most of them.
+const flushMaxAttempts = 3
+
+// flushRetryBackoff is the pause between flush attempts. Kept short: the flush
+// loop is the only writer and a long sleep would stall every later batch.
+const flushRetryBackoff = 50 * time.Millisecond
+
+// flushTimeout bounds a single BatchInsert attempt.
+const flushTimeout = 30 * time.Second
+
 // Queue buffers incoming log entries and flushes them in batches to reduce
 // write contention on SQLite (which allows only a single writer at a time).
 // Entries are flushed when: the buffer reaches maxBatchSize, the flush interval
 // fires, or Flush()/Stop() is called explicitly.
+//
+// NOTE: nothing in cmd/ constructs a Queue — api.ServerDeps.IngestQueue is
+// never populated, so Handler.Queue is nil in the real server and every request
+// takes the synchronous insert path. This type is opt-in infrastructure kept
+// for embedders that wire it explicitly; treat its behaviour as untested in
+// production before enabling it.
 type Queue struct {
 	logStore      store.LogStore
 	maxQueueSize  int
@@ -29,6 +47,7 @@ type Queue struct {
 	// Metrics (accessed atomically)
 	flushCount    atomic.Int64
 	overflowCount atomic.Int64
+	dropCount     atomic.Int64
 }
 
 // QueueConfig holds configuration for the Queue.
@@ -67,9 +86,19 @@ func NewQueue(logStore store.LogStore, cfg QueueConfig) *Queue {
 }
 
 // Enqueue adds entries to the buffer. It returns immediately (non-blocking for
-// the HTTP handler). If the queue is full, it falls back to synchronous insert
-// so no data is lost.
+// the HTTP handler). If the batch does not fit, the queue is flushed to make
+// room and, if it still does not fit, the WHOLE batch is inserted synchronously.
+//
+// A batch is never split across the buffer and a synchronous insert: the split
+// version left the buffered prefix persisted while returning the sync insert's
+// error, so the caller reported a failure the client then retried, duplicating
+// the prefix. All-or-nothing keeps the returned error an accurate statement
+// about the entire batch.
 func (q *Queue) Enqueue(ctx context.Context, entries []store.LogEntry) (int, error) {
+	if len(entries) == 0 {
+		return 0, nil
+	}
+
 	q.mu.Lock()
 
 	if q.stopped {
@@ -78,50 +107,50 @@ func (q *Queue) Enqueue(ctx context.Context, entries []store.LogEntry) (int, err
 		return q.logStore.BatchInsert(ctx, entries)
 	}
 
-	spaceAvailable := q.maxQueueSize - len(q.buffer)
-
-	if spaceAvailable >= len(entries) {
-		// All entries fit in the queue
-		q.buffer = append(q.buffer, entries...)
-		depth := len(q.buffer)
-		shouldFlush := depth >= q.maxBatchSize
+	if enqueued, depth, ok := q.tryBuffer(entries); ok {
 		q.mu.Unlock()
-
-		slog.Debug("ingest_queue: enqueued entries", "count", len(entries), "queue_depth", depth)
-
-		if shouldFlush {
+		slog.Debug("ingest_queue: enqueued entries", "count", enqueued, "queue_depth", depth)
+		if depth >= q.maxBatchSize {
 			q.Flush()
 		}
-		return len(entries), nil
-	}
-
-	// Queue is full or partially full - enqueue what we can, sync-insert the rest
-	q.overflowCount.Add(1)
-
-	var enqueued []store.LogEntry
-	var overflow []store.LogEntry
-
-	if spaceAvailable > 0 {
-		enqueued = entries[:spaceAvailable]
-		overflow = entries[spaceAvailable:]
-		q.buffer = append(q.buffer, enqueued...)
-	} else {
-		overflow = entries
+		return enqueued, nil
 	}
 	q.mu.Unlock()
 
-	slog.Warn("ingest_queue: queue full, falling back to synchronous insert",
-		"enqueued", len(enqueued),
-		"overflow", len(overflow),
+	q.overflowCount.Add(1)
+	slog.Warn("ingest_queue: queue full, flushing before retry",
+		"batch_size", len(entries),
 		"overflow_total", q.overflowCount.Load(),
 	)
 
-	// Flush the queue to make room
+	// Flush the queue to make room, then retry the whole batch.
 	q.Flush()
 
-	// Synchronous fallback for overflow entries
-	count, err := q.logStore.BatchInsert(ctx, overflow)
-	return len(enqueued) + count, err
+	q.mu.Lock()
+	if !q.stopped {
+		if enqueued, depth, ok := q.tryBuffer(entries); ok {
+			q.mu.Unlock()
+			if depth >= q.maxBatchSize {
+				q.Flush()
+			}
+			return enqueued, nil
+		}
+	}
+	q.mu.Unlock()
+
+	// Batch is larger than the whole queue: insert it synchronously, intact.
+	slog.Warn("ingest_queue: batch exceeds queue capacity, inserting synchronously",
+		"batch_size", len(entries), "max_queue_size", q.maxQueueSize)
+	return q.logStore.BatchInsert(ctx, entries)
+}
+
+// tryBuffer appends entries to the buffer if they all fit. Caller holds q.mu.
+func (q *Queue) tryBuffer(entries []store.LogEntry) (enqueued, depth int, ok bool) {
+	if q.maxQueueSize-len(q.buffer) < len(entries) {
+		return 0, len(q.buffer), false
+	}
+	q.buffer = append(q.buffer, entries...)
+	return len(entries), len(q.buffer), true
 }
 
 // Flush drains the buffer and writes all buffered entries to the store.
@@ -141,7 +170,10 @@ func (q *Queue) Flush() {
 }
 
 // flushBatch writes a batch of entries to the store. It splits into chunks of
-// maxBatchSize if needed.
+// maxBatchSize if needed. A chunk that fails every attempt is put back on the
+// buffer so a later flush retries it, and is only dropped when the buffer has
+// no room left — previously a single failed insert silently discarded up to
+// maxBatchSize entries that the handler had already acknowledged.
 func (q *Queue) flushBatch(entries []store.LogEntry) {
 	for len(entries) > 0 {
 		end := q.maxBatchSize
@@ -151,25 +183,67 @@ func (q *Queue) flushBatch(entries []store.LogEntry) {
 		chunk := entries[:end]
 		entries = entries[end:]
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		count, err := q.logStore.BatchInsert(ctx, chunk)
+		if err := q.insertWithRetry(chunk); err != nil {
+			q.requeueOrDrop(chunk, err)
+		}
+	}
+}
+
+// insertWithRetry attempts a single chunk insert up to flushMaxAttempts times.
+func (q *Queue) insertWithRetry(chunk []store.LogEntry) error {
+	var err error
+	for attempt := 1; attempt <= flushMaxAttempts; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), flushTimeout)
+		var count int
+		count, err = q.logStore.BatchInsert(ctx, chunk)
 		cancel()
 
 		q.flushCount.Add(1)
 
-		if err != nil {
-			slog.Error("ingest_queue: flush failed",
-				"error", err,
-				"batch_size", len(chunk),
-				"flush_count", q.flushCount.Load(),
-			)
-		} else {
+		if err == nil {
 			slog.Debug("ingest_queue: flushed batch",
 				"count", count,
 				"flush_count", q.flushCount.Load(),
 			)
+			return nil
+		}
+
+		slog.Warn("ingest_queue: flush attempt failed",
+			"error", err,
+			"attempt", attempt,
+			"max_attempts", flushMaxAttempts,
+			"batch_size", len(chunk),
+		)
+		if attempt < flushMaxAttempts {
+			time.Sleep(flushRetryBackoff)
 		}
 	}
+	return err
+}
+
+// requeueOrDrop puts a chunk that could not be written back on the buffer for a
+// later flush, dropping it only when the buffer is full or the queue is closed.
+func (q *Queue) requeueOrDrop(chunk []store.LogEntry, cause error) {
+	q.mu.Lock()
+	requeued := !q.stopped && q.maxQueueSize-len(q.buffer) >= len(chunk)
+	if requeued {
+		// Prepend: these entries are older than anything currently buffered.
+		q.buffer = append(chunk[:len(chunk):len(chunk)], q.buffer...)
+	}
+	q.mu.Unlock()
+
+	if requeued {
+		slog.Warn("ingest_queue: flush failed, re-queued for retry",
+			"error", cause, "batch_size", len(chunk))
+		return
+	}
+
+	q.dropCount.Add(int64(len(chunk)))
+	slog.Error("ingest_queue: flush failed and buffer is full, dropping entries",
+		"error", cause,
+		"dropped", len(chunk),
+		"dropped_total", q.dropCount.Load(),
+	)
 }
 
 // flushLoop runs in the background and triggers flushes on a timer.
@@ -208,6 +282,7 @@ func (q *Queue) Stop() {
 	slog.Info("ingest_queue: stopped",
 		"flush_count", q.flushCount.Load(),
 		"overflow_count", q.overflowCount.Load(),
+		"drop_count", q.dropCount.Load(),
 	)
 }
 
@@ -227,4 +302,10 @@ func (q *Queue) FlushCount() int64 {
 // and entries were inserted synchronously.
 func (q *Queue) OverflowCount() int64 {
 	return q.overflowCount.Load()
+}
+
+// DropCount returns the number of entries permanently lost because every flush
+// attempt failed and the buffer had no room to hold them for another try.
+func (q *Queue) DropCount() int64 {
+	return q.dropCount.Load()
 }

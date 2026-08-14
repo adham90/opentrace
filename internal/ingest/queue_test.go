@@ -75,7 +75,7 @@ func (m *queueMockLogStore) SearchRequestSummaries(context.Context, store.Reques
 func (m *queueMockLogStore) AggregateRequestSummaries(context.Context, store.RequestSummaryAggregateParams) (*store.RequestSummaryAggregates, error) {
 	return &store.RequestSummaryAggregates{}, nil
 }
-func (m *queueMockLogStore) RecordBatch(context.Context, string, int) error        { return nil }
+func (m *queueMockLogStore) RecordBatch(context.Context, string, int) error { return nil }
 func (m *queueMockLogStore) GetBatch(context.Context, string) (*store.BatchRecord, error) {
 	return nil, store.ErrNotFound
 }
@@ -205,7 +205,7 @@ func TestEnqueue_OverflowFallsBackToSync(t *testing.T) {
 	}
 	ms := &queueMockLogStore{}
 	q := NewQueue(ms, QueueConfig{
-		MaxQueueSize:  5,  // tiny queue
+		MaxQueueSize:  5, // tiny queue
 		MaxBatchSize:  5,
 		FlushInterval: 10 * time.Second,
 	})
@@ -508,7 +508,7 @@ func TestTimerFlush(t *testing.T) {
 	ms := &queueMockLogStore{}
 	q := NewQueue(ms, QueueConfig{
 		MaxQueueSize:  100,
-		MaxBatchSize:  100,           // large batch size (won't trigger from enqueue)
+		MaxBatchSize:  100,                   // large batch size (won't trigger from enqueue)
 		FlushInterval: 50 * time.Millisecond, // short interval to test timer
 	})
 	defer q.Stop()

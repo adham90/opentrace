@@ -83,7 +83,7 @@ func TestDictRoundTrip(t *testing.T) {
 	values := []string{"api", "worker", "api", "scheduler", "api", "worker", "api"}
 	d := DictEncode(values)
 	data := DictMarshal(d)
-	d2, err := DictUnmarshal(data, len(values))
+	d2, err := DictUnmarshal(data, len(values), LenExtended)
 	if err != nil {
 		t.Fatalf("DictUnmarshal: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestDictWithEmptyStrings(t *testing.T) {
 	values := []string{"api", "", "worker", "", "", "api"}
 	d := DictEncode(values)
 	data := DictMarshal(d)
-	d2, err := DictUnmarshal(data, len(values))
+	d2, err := DictUnmarshal(data, len(values), LenExtended)
 	if err != nil {
 		t.Fatalf("DictUnmarshal: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestDictAllSame(t *testing.T) {
 		t.Errorf("expected 2 dict entries, got %d", len(d.Dict))
 	}
 	data := DictMarshal(d)
-	d2, err := DictUnmarshal(data, len(values))
+	d2, err := DictUnmarshal(data, len(values), LenExtended)
 	if err != nil {
 		t.Fatalf("DictUnmarshal: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestDictSingleValue(t *testing.T) {
 	values := []string{"hello"}
 	d := DictEncode(values)
 	data := DictMarshal(d)
-	d2, err := DictUnmarshal(data, 1)
+	d2, err := DictUnmarshal(data, 1, LenExtended)
 	if err != nil {
 		t.Fatalf("DictUnmarshal: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestDictSingleValue(t *testing.T) {
 func TestSparseStringsRoundTrip(t *testing.T) {
 	values := []string{"trace-abc", "", "", "trace-def", "", "trace-ghi", "", "", "", ""}
 	encoded := SparseStrings(values)
-	decoded, err := UnsparseStrings(encoded, len(values))
+	decoded, err := UnsparseStrings(encoded, len(values), LenExtended)
 	if err != nil {
 		t.Fatalf("UnsparseStrings: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestSparseStringsRoundTrip(t *testing.T) {
 func TestSparseStringsAllNull(t *testing.T) {
 	values := make([]string, 100)
 	encoded := SparseStrings(values)
-	decoded, err := UnsparseStrings(encoded, len(values))
+	decoded, err := UnsparseStrings(encoded, len(values), LenExtended)
 	if err != nil {
 		t.Fatalf("UnsparseStrings: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestSparseStringsAllNull(t *testing.T) {
 func TestSparseStringsAllPresent(t *testing.T) {
 	values := []string{"a", "b", "c", "d", "e"}
 	encoded := SparseStrings(values)
-	decoded, err := UnsparseStrings(encoded, len(values))
+	decoded, err := UnsparseStrings(encoded, len(values), LenExtended)
 	if err != nil {
 		t.Fatalf("UnsparseStrings: %v", err)
 	}
@@ -325,7 +325,7 @@ func TestZstdBlockStringsRoundTrip(t *testing.T) {
 		"Connection timeout to redis:6379",
 	}
 	encoded := ZstdBlockEncodeStrings(values)
-	decoded, err := ZstdBlockDecodeStrings(encoded, len(values))
+	decoded, err := ZstdBlockDecodeStrings(encoded, len(values), LenExtended)
 	if err != nil {
 		t.Fatalf("ZstdBlockDecodeStrings: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestZstdBlockStringsLarge(t *testing.T) {
 		values[i] = "Request completed: GET /api/users/123 200 45ms"
 	}
 	encoded := ZstdBlockEncodeStrings(values)
-	decoded, err := ZstdBlockDecodeStrings(encoded, len(values))
+	decoded, err := ZstdBlockDecodeStrings(encoded, len(values), LenExtended)
 	if err != nil {
 		t.Fatalf("ZstdBlockDecodeStrings: %v", err)
 	}
@@ -358,16 +358,6 @@ func TestZstdBlockInt64RoundTrip(t *testing.T) {
 }
 
 // --- Varint encoding tests ---
-
-func TestVarintSliceRoundTrip(t *testing.T) {
-	values := []int64{0, 1, -1, 127, -128, 1000, -1000, math.MaxInt64, math.MinInt64}
-	encoded := EncodeVarintSlice(values)
-	decoded, err := DecodeVarintSlice(encoded, len(values))
-	if err != nil {
-		t.Fatalf("DecodeVarintSlice: %v", err)
-	}
-	assertInt64Slice(t, "varint slice", values, decoded)
-}
 
 func TestZigZag(t *testing.T) {
 	tests := []int64{0, 1, -1, 2, -2, 100, -100, math.MaxInt64, math.MinInt64}

@@ -7,26 +7,70 @@ import (
 	"github.com/uptrace/bun"
 )
 
+// MemDeltaScale is the fixed-point factor for LogEntry.MemDeltaMb: the column
+// holds hundredths of a megabyte, so 1.70 MB is stored as 170. It lives here,
+// beside the field, because it is a storage contract every writer shares.
+const MemDeltaScale = 100
+
 // LogEntry represents an ingested log line.
 type LogEntry struct {
-	bun.BaseModel  `bun:"table:logs" json:"-"`
-	ID             int64           `bun:"id,pk,autoincrement" json:"id"`
-	Timestamp      time.Time       `bun:"timestamp" json:"timestamp"`
-	Level          string          `bun:"level" json:"level"`
-	Service        string          `bun:"service" json:"service,omitempty"`
-	Environment    string          `bun:"environment" json:"environment,omitempty"`
-	CommitHash     string          `bun:"commit_hash" json:"commit_hash,omitempty"`
-	TraceID        string          `bun:"trace_id" json:"trace_id,omitempty"`
-	SpanID         string          `bun:"span_id" json:"span_id,omitempty"`
-	ParentSpanID   string          `bun:"parent_span_id" json:"parent_span_id,omitempty"`
-	RequestID      string          `bun:"request_id" json:"request_id,omitempty"`
-	UserID         string          `bun:"user_id" json:"user_id,omitempty"`
-	Message        string          `bun:"message" json:"message"`
-	EventType      string          `bun:"event_type" json:"event_type,omitempty"`
-	ExceptionClass string          `bun:"exception_class" json:"exception_class,omitempty"`
-	ErrorFingerprint string        `bun:"error_fingerprint" json:"error_fingerprint,omitempty"`
-	SourceFile     string          `bun:"source_file" json:"source_file,omitempty"`
-	SourceLine     int             `bun:"source_line" json:"source_line,omitempty"`
+	bun.BaseModel    `bun:"table:logs" json:"-"`
+	ID               int64     `bun:"id,pk,autoincrement" json:"id"`
+	Timestamp        time.Time `bun:"timestamp" json:"timestamp"`
+	Level            string    `bun:"level" json:"level"`
+	Service          string    `bun:"service" json:"service,omitempty"`
+	Environment      string    `bun:"environment" json:"environment,omitempty"`
+	CommitHash       string    `bun:"commit_hash" json:"commit_hash,omitempty"`
+	TraceID          string    `bun:"trace_id" json:"trace_id,omitempty"`
+	SpanID           string    `bun:"span_id" json:"span_id,omitempty"`
+	ParentSpanID     string    `bun:"parent_span_id" json:"parent_span_id,omitempty"`
+	RequestID        string    `bun:"request_id" json:"request_id,omitempty"`
+	UserID           string    `bun:"user_id" json:"user_id,omitempty"`
+	Message          string    `bun:"message" json:"message"`
+	EventType        string    `bun:"event_type" json:"event_type,omitempty"`
+	ExceptionClass   string    `bun:"exception_class" json:"exception_class,omitempty"`
+	ErrorFingerprint string    `bun:"error_fingerprint" json:"error_fingerprint,omitempty"`
+	SourceFile       string    `bun:"source_file" json:"source_file,omitempty"`
+	SourceLine       int       `bun:"source_line" json:"source_line,omitempty"`
+
+	// Flat-SDK fields. The columnar log store (internal/logstore/chunk) has a
+	// column for each of these and the flat ingest handler parses them off the
+	// wire; without them on the canonical entry the values were dropped between
+	// the two. Names/types/JSON tags mirror chunk.Entry and the SDK wire format.
+	Host        string `bun:"host" json:"host,omitempty"`
+	Kind        string `bun:"kind" json:"kind,omitempty"` // log, request, job, event
+	TenantID    string `bun:"tenant_id" json:"tenant_id,omitempty"`
+	SessionID   string `bun:"session_id" json:"session_id,omitempty"`
+	Route       string `bun:"route" json:"route,omitempty"`
+	CacheMs     int    `bun:"cache_ms" json:"cache_ms,omitempty"`
+	CacheHits   int    `bun:"cache_hits" json:"cache_hits,omitempty"`
+	CacheMisses int    `bun:"cache_misses" json:"cache_misses,omitempty"`
+	ExtMs       int    `bun:"ext_ms" json:"ext_ms,omitempty"`
+	ExtCount    int    `bun:"ext_count" json:"ext_count,omitempty"`
+	RenderMs    int    `bun:"render_ms" json:"render_ms,omitempty"`
+	AllocCount  int    `bun:"alloc_count" json:"alloc_count,omitempty"`
+	// MemDeltaMb is stored as value * MemDeltaScale (e.g. 170 = 1.70 MB),
+	// matching the chunk column encoding. Every writer must apply the scale;
+	// one path storing raw MB reads back 100x too small.
+	MemDeltaMb   int    `bun:"mem_delta_mb" json:"mem_delta_mb,omitempty"`
+	SlowQueries  int    `bun:"slow_queries" json:"slow_queries,omitempty"`
+	ErrorMessage string `bun:"error_message" json:"error_message,omitempty"`
+	JobClass     string `bun:"job_class" json:"job_class,omitempty"`
+	JobQueue     string `bun:"job_queue" json:"job_queue,omitempty"`
+	JobID        string `bun:"job_id" json:"job_id,omitempty"`
+	QueueMs      int    `bun:"queue_ms" json:"queue_ms,omitempty"`
+
+	// Timing and query counts for rows that are NOT http requests — background
+	// jobs and events. Request rows carry these on RequestSummary instead, and
+	// the adapter prefers that when both are present. Without these, a
+	// `job.perform` row reporting duration_ms/db_ms/db_count had them dropped
+	// on the way to storage: job latency is exactly what those payloads exist
+	// to report.
+	DurationMs float64 `bun:"duration_ms" json:"duration_ms,omitempty"`
+	DbMs       float64 `bun:"db_ms" json:"db_ms,omitempty"`
+	DbCount    int     `bun:"db_count" json:"db_count,omitempty"`
+	Status     int     `bun:"status" json:"status,omitempty"`
+
 	Metadata       map[string]any  `bun:"metadata" json:"metadata,omitempty"`
 	MetadataJSON   string          `bun:"-" json:"-"` // pre-marshaled metadata; avoids double marshal on hot path
 	DeepCapture    json.RawMessage `bun:"-" json:"-"` // carrier field: raw deep capture document for in-tx processing

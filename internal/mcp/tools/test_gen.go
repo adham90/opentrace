@@ -79,7 +79,9 @@ func HandleTestGenContext(ctx context.Context, d TestGenDeps, args map[string]an
 
 	// User impact
 	if d.ErrorImpactStore != nil {
-		impact, err := d.ErrorImpactStore.GetImpact(ctx, fingerprint)
+		// Scope the impact to the group being described, so the numbers match
+		// the environment the rest of this result is about.
+		impact, err := d.ErrorImpactStore.GetImpact(ctx, fingerprint, eg.Environment)
 		if err == nil && impact != nil {
 			result["impact"] = map[string]any{
 				"unique_users":  impact.UniqueUsers,

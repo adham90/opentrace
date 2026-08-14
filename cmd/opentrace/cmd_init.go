@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/adham90/opentrace/internal/cryptoutil"
-	"github.com/adham90/opentrace/internal/config"
 	dbstore "github.com/adham90/opentrace/internal/adapter/sqlite"
+	"github.com/adham90/opentrace/internal/config"
+	"github.com/adham90/opentrace/internal/cryptoutil"
 	"github.com/adham90/opentrace/internal/version"
 )
 
@@ -26,9 +26,16 @@ func runInit() error {
 
 	dataDir := cfg.DataDir
 
-	// Allow override from args: opentrace init /custom/path
+	// Allow override from args: opentrace init /custom/path.
+	// `opentrace serve` reads its data dir only from OPENTRACE_DATA_DIR (or the
+	// default), so a database provisioned somewhere else would never be opened:
+	// serve would create a second DB with a different API key and the key
+	// printed below would 401. Tell the operator exactly how to make serve use
+	// this directory.
+	overridden := false
 	if len(os.Args) > 2 {
 		dataDir = os.Args[2]
+		overridden = dataDir != cfg.DataDir
 	}
 
 	// Ensure data directory exists
@@ -83,10 +90,19 @@ func runInit() error {
 	fmt.Println("Save this key — you'll need it when setting up your app's SDK.")
 	fmt.Println()
 	fmt.Println("Start the server:")
-	fmt.Println("  opentrace serve")
+	if overridden {
+		fmt.Printf("  OPENTRACE_DATA_DIR=%s opentrace serve\n", dataDir)
+		fmt.Println()
+		fmt.Printf("  NOTE: %q applies to `init` only. Without OPENTRACE_DATA_DIR,\n", dataDir)
+		fmt.Printf("        `opentrace serve` uses %s and generates a different API key.\n", cfg.DataDir)
+	} else {
+		fmt.Println("  opentrace serve")
+	}
 	fmt.Println()
 	fmt.Println("Then connect from your project directory:")
-	fmt.Println("  curl -s https://YOUR_SERVER_IP:8080/connect | bash")
+	// Plain HTTP: the server listens with ListenAndServe and has no TLS.
+	// (Use https:// only if you put a TLS-terminating proxy in front.)
+	fmt.Println("  curl -s http://YOUR_SERVER_IP:8080/connect | bash")
 	fmt.Println("  (first connection creates your admin account)")
 	fmt.Println("  (no client install needed — just curl)")
 

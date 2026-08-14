@@ -219,27 +219,98 @@ func HandleWatchDelete(ctx context.Context, d WatchesDeps, args map[string]any) 
 	return NewToolResultText(fmt.Sprintf(`{"status":"stopped","watch_id":"%s"}`, watchID)), nil
 }
 
+// maxAlertList caps how many pending alerts a single alerts call reads.
+const maxAlertList = 20
+
+// maxWatchLookupForAlerts caps the watch lookup used to map alerts back to a
+// service. watch_alerts carries no service column, so the only way to answer
+// "alerts for service X" is through the parent watch.
+const maxWatchLookupForAlerts = 200
+
+// watchIDsForService returns the IDs of the watches belonging to a service
+// (optionally within one environment). Used to resolve the service of an alert,
+// which only stores its watch_id.
+func watchIDsForService(ctx context.Context, ws store.WatchStore, service, env string) (map[string]struct{}, error) {
+	watches, err := ws.List(ctx, store.ListWatchParams{
+		Service:     service,
+		Environment: env,
+		Limit:       maxWatchLookupForAlerts,
+	})
+	if err != nil {
+		return nil, err
+	}
+	ids := make(map[string]struct{}, len(watches))
+	for _, w := range watches {
+		ids[w.ID] = struct{}{}
+	}
+	return ids, nil
+}
+
+// filterAlerts narrows alerts to an environment and/or a service. The service
+// filter goes through watchIDsForService because alerts have no service of
+// their own; if that lookup fails the error is returned rather than silently
+// handing back every alert as though it were filtered.
+func filterAlerts(ctx context.Context, ws store.WatchStore, alerts []store.WatchAlert, service, env string) ([]store.WatchAlert, error) {
+	var serviceWatchIDs map[string]struct{}
+	if service != "" {
+		ids, err := watchIDsForService(ctx, ws, service, env)
+		if err != nil {
+			return nil, fmt.Errorf("resolving watches for service %q: %w", service, err)
+		}
+		serviceWatchIDs = ids
+	}
+
+	filtered := make([]store.WatchAlert, 0, len(alerts))
+	for _, a := range alerts {
+		if env != "" && a.Environment != env {
+			continue
+		}
+		if serviceWatchIDs != nil {
+			if _, ok := serviceWatchIDs[a.WatchID]; !ok {
+				continue
+			}
+		}
+		filtered = append(filtered, a)
+	}
+	return filtered, nil
+}
+
+// HandleWatchAlerts lists pending alerts. The advertised service filter is
+// applied for real here: both branches of the old loop appended every alert, so
+// an agent triaging one service was handed every other service's alerts too.
 func HandleWatchAlerts(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {
+	env, err := ResolveEnv(ctx, args)
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
 	service := ArgString(args, "service")
-	alerts, err := d.WatchStore.ListAlerts(ctx, "", "pending", 20)
+
+	alerts, err := d.WatchStore.ListAlerts(ctx, "", "pending", maxAlertList)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to list alerts: %v", err)), nil
 	}
 
-	var filtered []store.WatchAlert
-	for _, a := range alerts {
-		if service == "" {
-			filtered = append(filtered, a)
-		} else {
-			// include all when no service filter
-			filtered = append(filtered, a)
-		}
+	filtered, err := filterAlerts(ctx, d.WatchStore, alerts, service, env)
+	if err != nil {
+		return NewToolResultError(fmt.Sprintf("failed to filter alerts: %v", err)), nil
 	}
 
-	return JSONResult(map[string]any{
-		"count":  len(filtered),
-		"alerts": filtered,
-	})
+	resp := map[string]any{
+		"count":       len(filtered),
+		"alerts":      filtered,
+		"environment": envLabel(env),
+	}
+	if service != "" {
+		resp["service"] = service
+	}
+	// The filter runs over the most recent maxAlertList alerts, so a noisy
+	// unrelated service can push this service's alerts out of the page. Say so
+	// rather than presenting a truncated scan as the complete answer.
+	if len(alerts) >= maxAlertList && (service != "" || env != "") {
+		resp["coverage_note"] = fmt.Sprintf(
+			"filtered from the %d most recent pending alerts across all services — older matching alerts may not appear", maxAlertList)
+	}
+	return JSONResult(resp)
 }
 
 func HandleWatchDismiss(ctx context.Context, d WatchesDeps, args map[string]any) (*CallToolResult, error) {

@@ -302,7 +302,9 @@ func TestHandleSetupDetect(t *testing.T) {
 func TestHandleSetupGuide(t *testing.T) {
 	settingsStore := mocks.NewSettingsStore()
 	settingsStore.APIKey = "test-api-key-123"
-	d := SetupDeps{SettingsStore: settingsStore}
+	// Admin: the guide inlines the real ingest key so it is copy-pasteable.
+	// Members get a placeholder instead — see setup_guide_secret_test.go.
+	d := SetupDeps{SettingsStore: settingsStore, IsAdmin: true}
 
 	t.Run("rails guide", func(t *testing.T) {
 		args := map[string]any{"framework": "rails"}
@@ -422,4 +424,3 @@ func TestHandleSetupDBGuide(t *testing.T) {
 		}
 	})
 }
-

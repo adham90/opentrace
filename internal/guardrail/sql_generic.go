@@ -8,43 +8,27 @@ import (
 // ValidateReadOnlyGeneric performs a keyword-based check that the query is a
 // read-only statement. Works for any SQL dialect (PostgreSQL, MySQL, SQLite, Turso).
 func ValidateReadOnlyGeneric(query string) error {
-	cleaned := strings.TrimSpace(query)
-	if cleaned == "" {
+	if strings.TrimSpace(query) == "" {
 		return fmt.Errorf("empty query")
 	}
 
-	// Remove trailing semicolons and whitespace
-	cleaned = strings.TrimRight(cleaned, "; \t\n\r")
-
-	// Basic multi-statement check: reject if semicolon is followed by non-whitespace
-	if idx := strings.Index(cleaned, ";"); idx >= 0 && idx < len(cleaned)-1 {
-		rest := strings.TrimSpace(cleaned[idx+1:])
-		if rest != "" {
-			return fmt.Errorf("multiple statements are not allowed")
-		}
+	// Canonicalise first: strip comments, mask string literals, unquote
+	// identifiers and collapse whitespace. Everything below matches against
+	// this form, so comments can no longer hide or split a keyword.
+	normalized, err := normalizeSQL(query)
+	if err != nil {
+		return err
 	}
 
-	// Strip leading SQL comments
-	for {
-		if strings.HasPrefix(cleaned, "--") {
-			if nl := strings.Index(cleaned, "\n"); nl >= 0 {
-				cleaned = strings.TrimSpace(cleaned[nl+1:])
-				continue
-			}
-			return fmt.Errorf("query is only a comment")
-		}
-		if strings.HasPrefix(cleaned, "/*") {
-			if end := strings.Index(cleaned, "*/"); end >= 0 {
-				cleaned = strings.TrimSpace(cleaned[end+2:])
-				continue
-			}
-			return fmt.Errorf("unterminated comment")
-		}
-		break
-	}
-
+	cleaned := strings.TrimRight(normalized, "; ")
 	if cleaned == "" {
-		return fmt.Errorf("empty query")
+		return fmt.Errorf("query contains no statement")
+	}
+
+	// Multi-statement check: after normalization any remaining semicolon is a
+	// real statement separator (semicolons in literals/comments are gone).
+	if strings.Contains(cleaned, ";") {
+		return fmt.Errorf("multiple statements are not allowed")
 	}
 
 	upper := strings.ToUpper(cleaned)
@@ -52,13 +36,11 @@ func ValidateReadOnlyGeneric(query string) error {
 	switch {
 	case strings.HasPrefix(upper, "SELECT"), strings.HasPrefix(upper, "WITH"):
 		// Plain SELECT or a CTE (WITH ...). A read-only transaction does NOT
-		// block side-effecting functions, so keyword matching alone is unsafe.
-		if fn, bad := callsSideEffectingFunction(upper); bad {
-			return fmt.Errorf("query rejected: calls side-effecting function %s()", fn)
-		}
-		return nil
+		// block side-effecting functions, and a CTE may front a DELETE, so
+		// checking only the leading keyword is unsafe.
+		return checkNoWriteAnywhere(upper)
 	case strings.HasPrefix(upper, "EXPLAIN"):
-		if strings.Contains(upper, "ANALYZE") {
+		if containsWord(upper, "ANALYZE") {
 			return fmt.Errorf("EXPLAIN ANALYZE is not allowed (it executes the query)")
 		}
 		// Validate the inner statement: strip EXPLAIN keyword and optional
@@ -70,10 +52,7 @@ func ValidateReadOnlyGeneric(query string) error {
 		if !isReadOnlyKeyword(inner) {
 			return fmt.Errorf("only SELECT statements are allowed inside EXPLAIN")
 		}
-		if fn, bad := callsSideEffectingFunction(inner); bad {
-			return fmt.Errorf("query rejected: calls side-effecting function %s()", fn)
-		}
-		return nil
+		return checkNoWriteAnywhere(inner)
 	case strings.HasPrefix(upper, "SHOW"):
 		return nil
 	case strings.HasPrefix(upper, "DESCRIBE"), strings.HasPrefix(upper, "DESC "):
@@ -83,6 +62,47 @@ func ValidateReadOnlyGeneric(query string) error {
 	default:
 		return fmt.Errorf("only SELECT statements are allowed")
 	}
+}
+
+// writeKeywords are statement keywords that never occur in a genuinely
+// read-only statement. They are matched ANYWHERE in the statement, not just at
+// the start, because a leading CTE can front a write: SQLite/libSQL and MySQL 8
+// both accept "WITH x AS (SELECT 1) DELETE FROM t", and the Turso connector has
+// no transaction-level read-only enforcement to fall back on.
+var writeKeywords = []string{
+	"DELETE", "UPDATE", "DROP", "ALTER", "CREATE", "MERGE", "UPSERT",
+	"GRANT", "REVOKE", "ATTACH", "DETACH", "VACUUM", "REINDEX", "ANALYZE",
+	"CALL", "EXEC", "EXECUTE", "PREPARE", "DEALLOCATE", "LOCK", "UNLOCK",
+	"COPY", "RENAME", "LOAD", "IMPORT", "RESET", "CLUSTER", "REFRESH",
+	// MySQL "SELECT ... INTO OUTFILE '/path'" writes to the server filesystem;
+	// a read-only session does not stop it. INTO also covers PostgreSQL's
+	// table-creating "SELECT ... INTO new_table".
+	"INTO", "OUTFILE", "DUMPFILE",
+}
+
+// functionLikeWriteKeywords are write keywords that MySQL also exposes as
+// scalar functions (INSERT(), REPLACE(), TRUNCATE()). They are only rejected
+// when they are NOT used as a call.
+var functionLikeWriteKeywords = []string{"INSERT", "REPLACE", "TRUNCATE"}
+
+// checkNoWriteAnywhere rejects an (uppercased, normalized) read statement that
+// smuggles a write: a data-modifying keyword anywhere in the text, a filesystem
+// write via INTO OUTFILE/DUMPFILE, or a side-effecting function call.
+func checkNoWriteAnywhere(upper string) error {
+	for _, kw := range writeKeywords {
+		if containsWord(upper, kw) {
+			return fmt.Errorf("query rejected: %s is not allowed in a read-only query", kw)
+		}
+	}
+	for _, kw := range functionLikeWriteKeywords {
+		if containsWordNotCall(upper, kw) {
+			return fmt.Errorf("query rejected: %s is not allowed in a read-only query", kw)
+		}
+	}
+	if fn, bad := callsSideEffectingFunction(upper); bad {
+		return fmt.Errorf("query rejected: calls side-effecting function %s()", fn)
+	}
+	return nil
 }
 
 // stripExplainPrefix removes "EXPLAIN" and any optional parenthesized options
@@ -211,6 +231,19 @@ var deniedExactFuncs = []string{
 	"PG_SWITCH_XLOG", // pre-v10 name
 	"SETVAL",
 	"NEXTVAL",
+	"SET_CONFIG",
+	"PG_PROMOTE",
+	"PG_STAT_FILE",
+	"PG_STOP_BACKUP",
+	"PG_START_BACKUP",
+	// MySQL: reads a server-side file with the FILE privilege.
+	"LOAD_FILE",
+	// SQLite / libSQL: filesystem and extension loading.
+	"READFILE",
+	"WRITEFILE",
+	"EDIT",
+	"LOAD_EXTENSION",
+	"FTS3_TOKENIZER",
 }
 
 // deniedFuncPrefixes reject whole families of side-effecting / filesystem /
@@ -224,6 +257,12 @@ var deniedFuncPrefixes = []string{
 	"PG_LS_",
 	"LO_",
 	"DBLINK",
+	"PG_ADVISORY_",
+	"PG_CREATE_",
+	"PG_DROP_",
+	"PG_LOGICAL_",
+	"PG_REPLICATION_",
+	"PG_WAL",
 }
 
 // callsSideEffectingFunction returns the first denied function invoked by the
@@ -296,6 +335,13 @@ func isSpaceByte(b byte) bool {
 // HasLimitGeneric checks whether a query contains a LIMIT clause using simple
 // keyword matching. Works for MySQL, SQLite, and other SQL dialects.
 func HasLimitGeneric(query string) bool {
-	upper := strings.ToUpper(query)
-	return strings.Contains(upper, " LIMIT ")
+	normalized, err := normalizeSQL(query)
+	if err != nil {
+		// Malformed input (unterminated literal/comment); ValidateReadOnlyGeneric
+		// rejects it, so the answer here only needs to be safe, not exact.
+		return false
+	}
+	// Word-bounded match on the normalized text: a LIMIT on its own line is
+	// found, while "LIKE '%limit%'" (masked to '') is not.
+	return containsWord(strings.ToUpper(normalized), "LIMIT")
 }

@@ -16,9 +16,11 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
+	dbstore "github.com/adham90/opentrace/internal/adapter/sqlite"
 	"github.com/adham90/opentrace/internal/api"
 	"github.com/adham90/opentrace/internal/backup"
 	"github.com/adham90/opentrace/internal/config"
@@ -27,80 +29,112 @@ import (
 	"github.com/adham90/opentrace/internal/healthcheck"
 	"github.com/adham90/opentrace/internal/ingest"
 	"github.com/adham90/opentrace/internal/jobs"
-	mcpserver "github.com/adham90/opentrace/internal/mcp"
-	dbstore "github.com/adham90/opentrace/internal/adapter/sqlite"
 	logadapter "github.com/adham90/opentrace/internal/logstore/adapter"
 	"github.com/adham90/opentrace/internal/logstore/engine"
 	logsingest "github.com/adham90/opentrace/internal/logstore/ingest"
+	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/notify"
 	"github.com/adham90/opentrace/internal/safe"
-	"github.com/adham90/opentrace/pkg/server"
-	"github.com/adham90/opentrace/pkg/store"
 	"github.com/adham90/opentrace/internal/version"
 	"github.com/adham90/opentrace/internal/watcher"
+	"github.com/adham90/opentrace/pkg/server"
+	"github.com/adham90/opentrace/pkg/store"
+)
+
+const (
+	// exitFailure is the status for a command that ran and failed.
+	exitFailure = 1
+	// exitUsage is the status for a wrong command line (unknown subcommand),
+	// kept distinct so scripts can tell a typo from a genuine failure.
+	exitUsage = 2
 )
 
 func main() {
-	var err error
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "init":
-			err = runInit()
-		case "serve":
-			err = run()
-		case "mcp":
-			err = runMCP()
-		case "seed":
-			err = runSeed()
-		case "backup":
-			err = runBackup()
-		case "restore":
-			err = runRestore()
-		case "status":
-			err = runStatus()
-		case "logs":
-			err = runLogs()
-		case "version":
-			fmt.Println("opentrace " + version.Full())
-			return
-		case "help", "--help", "-h":
-			fmt.Println("Usage: opentrace [command]")
-			fmt.Println()
-			fmt.Println("Server commands:")
-			fmt.Println("  (none)    Start the server")
-			fmt.Println("  init      Initialize database (first-time setup)")
-			fmt.Println("  serve     Start the server (same as no command)")
-			fmt.Println("  mcp       Start the MCP stdio server")
-			fmt.Println("  seed      Initialize sample data")
-			fmt.Println("  backup    Create a database backup")
-			fmt.Println("  restore   Restore database from a backup")
-			fmt.Println()
-			fmt.Println("CLI commands (connect to a running server):")
-			fmt.Println("  status    Show server health and summary stats")
-			fmt.Println("  logs      Stream live log tail")
-			fmt.Println()
-			fmt.Println("  version   Print version information")
-			fmt.Println()
-			fmt.Println("Backup options:")
-			fmt.Println("  opentrace backup [-o <path>] [-f]")
-			fmt.Println("    -o, --output   Output file (default: opentrace-backup-TIMESTAMP.db)")
-			fmt.Println("    -f, --force    Overwrite destination if it exists")
-			fmt.Println()
-			fmt.Println("Restore options:")
-			fmt.Println("  opentrace restore --from <backup-file>")
-			fmt.Println("    -f, --from     Backup file to restore from (required)")
-			return
-		default:
-			err = run()
-		}
-	} else {
-		err = run()
-	}
-
+	err, code := dispatch(os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
 	}
+	if code != 0 {
+		os.Exit(code)
+	}
+}
+
+// dispatch routes a subcommand to its handler. It returns the error to report
+// (if any) and the process exit status, so an unknown command can exit with a
+// usage status instead of silently booting a server.
+func dispatch(args []string) (error, int) {
+	if len(args) == 0 {
+		return withFailure(run())
+	}
+
+	switch args[0] {
+	case "init":
+		return withFailure(runInit())
+	case "serve":
+		return withFailure(run())
+	case "mcp":
+		return withFailure(runMCP())
+	case "seed":
+		return withFailure(runSeed())
+	case "backup":
+		return withFailure(runBackup())
+	case "restore":
+		return withFailure(runRestore())
+	case "status":
+		return withFailure(runStatus())
+	case "logs":
+		return withFailure(runLogs())
+	case "version", "--version", "-v":
+		fmt.Println("opentrace " + version.Full())
+		return nil, 0
+	case "help", "--help", "-h":
+		printUsage(os.Stdout)
+		return nil, 0
+	default:
+		// Never fall through to run(): starting the server has side effects
+		// (creates the data dir, migrates the DB, may provision an API key,
+		// binds the listen port), so a typo like `opentrace statsu` used to
+		// boot a second server instead of reporting the mistake.
+		printUsage(os.Stderr)
+		return fmt.Errorf("unknown command %q (run `opentrace help`)", args[0]), exitUsage
+	}
+}
+
+// withFailure maps a command result to an exit status.
+func withFailure(err error) (error, int) {
+	if err != nil {
+		return err, exitFailure
+	}
+	return nil, 0
+}
+
+// printUsage writes the command-line help to w.
+func printUsage(w io.Writer) {
+	fmt.Fprintln(w, "Usage: opentrace [command]")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Server commands:")
+	fmt.Fprintln(w, "  (none)    Start the server")
+	fmt.Fprintln(w, "  init      Initialize database (first-time setup)")
+	fmt.Fprintln(w, "  serve     Start the server (same as no command)")
+	fmt.Fprintln(w, "  mcp       Start the MCP stdio server")
+	fmt.Fprintln(w, "  seed      Initialize sample data")
+	fmt.Fprintln(w, "  backup    Create a database backup")
+	fmt.Fprintln(w, "  restore   Restore database from a backup")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "CLI commands (connect to a running server):")
+	fmt.Fprintln(w, "  status    Show server health and summary stats")
+	fmt.Fprintln(w, "  logs      Stream live log tail")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  version   Print version information")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Backup options:")
+	fmt.Fprintln(w, "  opentrace backup [-o <path>] [-f]")
+	fmt.Fprintln(w, "    -o, --output   Output file (default: opentrace-backup-TIMESTAMP.db)")
+	fmt.Fprintln(w, "    -f, --force    Overwrite destination if it exists")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Restore options:")
+	fmt.Fprintln(w, "  opentrace restore --from <backup-file>")
+	fmt.Fprintln(w, "    -f, --from     Backup file to restore from (required)")
 }
 
 // initApp performs shared initialization: config, SQLite database,
@@ -162,6 +196,33 @@ func initApp(ctx context.Context) (*server.Deps, *engine.Store, error) {
 	}, logEngine, nil
 }
 
+// teardownApp shuts an initApp-built process down in dependency order:
+// connectors stop writing, the active WAL is sealed (so this hour's logs become
+// a searchable segment instead of an orphaned active.wal), then the engine and
+// the SQLite handle are closed.
+//
+// sealWAL must be true only for a process that owns the log store as a writer —
+// `serve` and `seed`. A short-lived reader like `opentrace mcp` shares the data
+// dir with a possibly-running server, and sealing there renamed the live
+// server's active.wal out from under it on every MCP session exit, silently
+// dropping everything ingested afterwards.
+func teardownApp(deps *server.Deps, logEngine *engine.Store, sealWAL bool) {
+	if deps != nil && deps.Registry != nil {
+		deps.Registry.CloseAll()
+	}
+	if logEngine != nil {
+		if sealWAL {
+			if err := logEngine.SealCurrentHour(); err != nil {
+				slog.Error("final log seal failed", "error", err)
+			}
+		}
+		logEngine.Close()
+	}
+	if deps != nil && deps.DB != nil {
+		deps.DB.Close()
+	}
+}
+
 // runMCP starts the MCP stdio server. All log output goes to stderr to keep
 // stdout clean for the JSON-RPC stream.
 func runMCP() error {
@@ -172,11 +233,8 @@ func runMCP() error {
 	if err != nil {
 		return err
 	}
-	defer deps.DB.Close()
-	defer deps.Registry.CloseAll()
-	if logEngine != nil {
-		defer logEngine.Close()
-	}
+	// A reader, not the store's owner: never seal here.
+	defer teardownApp(deps, logEngine, false)
 
 	watchMetrics := watcher.NewWatchMetrics(deps.LogStore)
 
@@ -200,58 +258,63 @@ func runMCP() error {
 	})
 }
 
-
-
 // ensureAPIKey guarantees `serve` does not silently accept unauthenticated
 // ingest/CLI requests. A key from OPENTRACE_API_KEY or the settings DB (e.g.
 // provisioned by `opentrace init`) is left as-is. If none exists, one is
 // generated, persisted, and printed — unless the operator explicitly opts out
 // via OPENTRACE_DISABLE_AUTH=true, in which case we run open but warn loudly.
-func ensureAPIKey(ctx context.Context, deps *server.Deps) {
+func ensureAPIKey(ctx context.Context, deps *server.Deps) error {
 	if deps.Cfg != nil && deps.Cfg.APIKey != "" {
-		return // supplied via OPENTRACE_API_KEY
+		return nil // supplied via OPENTRACE_API_KEY
 	}
 	if deps.SettingsStore != nil {
-		if key, err := deps.SettingsStore.GetAPIKey(ctx); err == nil && key != "" {
-			return // already provisioned
+		key, err := deps.SettingsStore.GetAPIKey(ctx)
+		if err != nil {
+			// A read failure is NOT "no key". Falling through here would
+			// generate and persist a fresh key, silently locking out every
+			// already-provisioned SDK and CLI. Fail closed: refuse to start
+			// rather than rotate a key we could not read.
+			return fmt.Errorf("reading configured API key: %w", err)
+		}
+		if key != "" {
+			return nil // already provisioned
 		}
 	}
 	if os.Getenv("OPENTRACE_DISABLE_AUTH") == "true" {
 		slog.Warn("AUTH DISABLED: ingest and CLI-read endpoints accept unauthenticated requests (OPENTRACE_DISABLE_AUTH=true). Do not expose this instance to untrusted networks.")
-		return
+		return nil
 	}
 	if deps.SettingsStore == nil {
 		slog.Error("no API key configured and no settings store to provision one; set OPENTRACE_API_KEY or OPENTRACE_DISABLE_AUTH=true")
-		return
+		return nil
 	}
 	key, err := cryptoutil.GenerateAPIKey()
 	if err != nil {
-		slog.Error("failed to auto-generate API key", "error", err)
-		return
+		return fmt.Errorf("generating API key: %w", err)
 	}
 	if err := deps.SettingsStore.SetAPIKey(ctx, key); err != nil {
-		slog.Error("failed to persist auto-generated API key", "error", err)
-		return
+		return fmt.Errorf("persisting auto-generated API key: %w", err)
 	}
 	slog.Warn("no API key was configured — generated one automatically; configure your SDKs with it", "api_key", key)
+	return nil
 }
 
 // run starts the full OpenTrace server. The initialization sequence is:
 //
 //  1. initApp          — load .env + config, create data dir, open SQLite,
-//                        run migrations, health-check the DB, build stores,
-//                        create connector registry, reconnect saved connectors.
+//     run migrations, health-check the DB, build stores,
+//     create connector registry, reconnect saved connectors.
 //  2. Watch subsystem  — WatchMetrics, WatchEvaluator, WatchEvidenceBuilder,
-//                        WatchStreamEvaluator (reactive on log ingestion).
+//     WatchStreamEvaluator (reactive on log ingestion).
 //  3. MCP tool catalog — build once for the /tools introspection page.
 //  4. Health checks    — scheduler created early so the HTTP server can read
-//                        reliability data.
+//     reliability data.
 //  5. Job queue        — persistent, restart-safe background processing
-//                        (worker + scheduler with recurring cleanup/aggregation).
+//     (worker + scheduler with recurring cleanup/aggregation).
 //  6. HTTP server      — api.NewServerWithDeps wires routes + modules,
-//                        then http.Server starts in a goroutine.
+//     then http.Server starts in a goroutine.
 //  7. Signal handler   — blocks on SIGINT/SIGTERM, then shuts down all
-//                        background components and the HTTP server gracefully.
+//     background components and the HTTP server gracefully.
 func run() error {
 	slog.Info("starting", "version", version.Full())
 
@@ -262,38 +325,17 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer deps.DB.Close()
-	if logEngine != nil {
-		defer logEngine.Close()
-	}
+	// Teardown order (connectors → seal WAL → close engine → close DB) lives in
+	// teardownApp; it runs after gracefulShutdown has drained HTTP and stopped
+	// the background workers, so nothing is still writing when the WAL is sealed.
+	defer teardownApp(deps, logEngine, true)
 
 	// Never silently run with ingest/CLI endpoints wide open.
-	ensureAPIKey(ctx, deps)
+	if err := ensureAPIKey(ctx, deps); err != nil {
+		return err
+	}
 
-	// Start hourly log seal goroutine (panic-isolated; ctx-aware so shutdown is
-	// not blocked by the initial wait and it never seals a closing engine).
-	safe.Go("hourly-seal", func() {
-		now := time.Now().UTC()
-		nextHour := now.Truncate(time.Hour).Add(time.Hour)
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(time.Until(nextHour)):
-		}
-
-		ticker := time.NewTicker(time.Hour)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := logEngine.SealCurrentHour(); err != nil {
-					slog.Error("hourly seal failed", "error", err)
-				}
-			}
-		}
-	})
+	startHourlySeal(ctx, logEngine)
 
 	// Agent-first watch components
 	watchMetrics := watcher.NewWatchMetrics(deps.LogStore)
@@ -373,11 +415,54 @@ func run() error {
 	// Start health check scheduler (created above for injection into web server)
 	hcSched.Start(ctx)
 
-	// --- Job Queue: persistent, restart-safe background processing ---
+	jobWorker, jobScheduler := startJobQueue(ctx, deps, jobQueue)
+
+	fatal := make(chan error, 1)
+	startHTTPServer(ctx, httpServer, deps, fatal)
+
+	// Start Unix socket listener for local log ingestion (skip HTTP overhead)
+	var unixSrv *unixIngestServer
+	if deps.Cfg.SocketPath != "" {
+		var err error
+		unixSrv, err = startUnixSocketListener(deps.Cfg.SocketPath, srv.IngestHandler())
+		if err != nil {
+			slog.Error("failed to start unix socket listener", "path", deps.Cfg.SocketPath, "error", err)
+		}
+	}
+
+	// A failed listen must still shut down cleanly: the deferred teardown seals
+	// the active WAL, and skipping it loses this hour's logs.
+	var listenErr error
+	select {
+	case <-done:
+		slog.Info("shutting down")
+	case listenErr = <-fatal:
+		slog.Error("listen failed; shutting down", "error", listenErr)
+	}
+
+	gracefulShutdown(shutdownParams{
+		CancelCtx:  cancelCtx,
+		HTTPServer: httpServer,
+		APIServer:  srv,
+		UnixServer: unixSrv,
+		// watchStream is drained here too: it dispatches alert notifications
+		// off the ingest path, and an alert that fired but was never delivered
+		// is the worst outcome for an alerting system. Workers stop after the
+		// HTTP and unix drains, so the final batch's evaluation still lands.
+		Workers: []backgroundStopper{watchSched, watchStream, hcSched, jobWorker, jobScheduler},
+	})
+
+	// Non-nil only when the listener failed, so the process still exits
+	// non-zero after shutting down cleanly.
+	return listenErr
+}
+
+// startJobQueue registers the background job handlers and recurring schedules,
+// reclaims jobs orphaned by a previous crash, and starts the worker and
+// scheduler. Returns both so shutdown can stop them.
+func startJobQueue(ctx context.Context, deps *server.Deps, jobQueue *jobs.Queue) (*jobs.Worker, *jobs.Scheduler) {
 	jobWorker := jobs.NewWorker(jobQueue)
 	jobScheduler := jobs.NewScheduler(jobQueue)
-
-	// Register job handlers
 	registerBackgroundJobs(jobWorker, deps)
 
 	// Job-queue retention: prune old completed/dead jobs and VACUUM to reclaim
@@ -411,6 +496,11 @@ func run() error {
 	jobWorker.Start(ctx)
 	jobScheduler.Start(ctx)
 
+	return jobWorker, jobScheduler
+}
+
+// startHTTPServer prints the connect banner and serves in the background.
+func startHTTPServer(ctx context.Context, httpServer *http.Server, deps *server.Deps, fatal chan<- error) {
 	go func() {
 		slog.Info("listening", "addr", deps.Cfg.ListenAddr)
 
@@ -436,57 +526,114 @@ func run() error {
 		fmt.Println()
 
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("listen error", "error", err)
-			os.Exit(1)
+			// Report instead of os.Exit: exiting here skipped run()'s deferred
+			// teardown, so the active WAL was never sealed and the SQLite handle
+			// never closed. Hand the error back and let the normal shutdown path
+			// run.
+			select {
+			case fatal <- err:
+			default:
+			}
 		}
 	}()
+}
 
-	// Start Unix socket listener for local log ingestion (skip HTTP overhead)
-	var unixListener net.Listener
-	if deps.Cfg.SocketPath != "" {
-		var err error
-		unixListener, err = startUnixSocketListener(deps.Cfg.SocketPath, srv.IngestHandler())
-		if err != nil {
-			slog.Error("failed to start unix socket listener", "path", deps.Cfg.SocketPath, "error", err)
-		}
+// shutdownTimeout bounds the whole graceful drain: in-flight HTTP requests,
+// in-flight Unix-socket ingests, and the final WAL seal.
+const shutdownTimeout = 10 * time.Second
+
+// backgroundStopper is any long-running component stopped during shutdown.
+type backgroundStopper interface{ Stop() }
+
+// shutdownParams collects everything gracefulShutdown must tear down.
+type shutdownParams struct {
+	CancelCtx  context.CancelFunc
+	HTTPServer *http.Server
+	APIServer  *api.Server
+	UnixServer *unixIngestServer
+	Workers    []backgroundStopper
+}
+
+// gracefulShutdown tears the server down in dependency order:
+//
+//  1. stop accepting new work (Unix listener),
+//  2. drain in-flight HTTP handlers, then flush the API server's queues
+//     (srv.Shutdown flushes the async ingest queue into the log engine),
+//  3. drain in-flight Unix-socket ingests,
+//  4. stop background workers.
+//
+// run()'s deferred teardownApp then closes the connectors, seals the active WAL
+// and closes the engine. Connector teardown used to run FIRST, killing pgx/mysql
+// pools underneath the in-flight /mcp requests that the HTTP drain exists to
+// protect; it now happens after every handler has finished.
+func gracefulShutdown(p shutdownParams) {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
+	// Stop accepting new Unix-socket connections; in-flight ones are drained below.
+	if p.UnixServer != nil {
+		p.UnixServer.CloseListener()
 	}
 
-	<-done
-	slog.Info("shutting down")
-
-	cancelCtx()
-
-	// Close Unix socket listener first so no new connections arrive
-	if unixListener != nil {
-		unixListener.Close()
-		os.Remove(deps.Cfg.SocketPath)
-		slog.Info("unix socket listener stopped")
-	}
-
-	watchSched.Stop()
-	hcSched.Stop()
-	jobWorker.Stop()
-	jobScheduler.Stop()
-	slog.Info("background jobs stopped")
-
-	deps.Registry.CloseAll()
-
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer shutdownCancel()
+	p.CancelCtx()
 
 	// Drain the HTTP server FIRST so all in-flight handlers finish before we
 	// tear down app-level channels. srv.Shutdown() closes the audit channel;
 	// doing that while a mutating request is still running would panic on a
 	// send-to-closed-channel (even with the select/default) and lose the audit.
-	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+	if err := p.HTTPServer.Shutdown(shutdownCtx); err != nil {
 		slog.Error("HTTP shutdown error", "error", err)
 	}
-
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.Error("SSE shutdown error", "error", err)
+	if p.APIServer != nil {
+		if err := p.APIServer.Shutdown(shutdownCtx); err != nil {
+			slog.Error("SSE shutdown error", "error", err)
+		}
 	}
 
-	return nil
+	if p.UnixServer != nil {
+		p.UnixServer.WaitInFlight(shutdownCtx)
+		slog.Info("unix socket listener stopped")
+	}
+
+	for _, w := range p.Workers {
+		if w != nil {
+			w.Stop()
+		}
+	}
+	slog.Info("background jobs stopped")
+}
+
+// startHourlySeal runs the process's sealing authority: it seals the active WAL
+// at every hour boundary, starting with the FIRST one after startup. The
+// previous version armed a 1-hour ticker only after the initial wait fired
+// without sealing, so the first seal landed 1-2 hours in and a server restarted
+// more often than that never sealed at all.
+func startHourlySeal(ctx context.Context, logEngine *engine.Store) {
+	if logEngine == nil {
+		return
+	}
+	safe.Go("hourly-seal", func() {
+		timer := time.NewTimer(time.Until(nextHourBoundary(time.Now().UTC())))
+		defer timer.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+				if err := logEngine.SealCurrentHour(); err != nil {
+					slog.Error("hourly seal failed", "error", err)
+				}
+				// Recompute from the clock each time so the schedule cannot
+				// drift off the hour boundary.
+				timer.Reset(time.Until(nextHourBoundary(time.Now().UTC())))
+			}
+		}
+	})
+}
+
+// nextHourBoundary returns the first wall-clock hour boundary strictly after t.
+func nextHourBoundary(t time.Time) time.Time {
+	return t.Truncate(time.Hour).Add(time.Hour)
 }
 
 // jobRetentionWindow is how long completed/dead jobs are kept before the
@@ -706,14 +853,81 @@ func reconnectConnectors(ctx context.Context, dsStore store.DataSourceStore, log
 	}
 }
 
-// maxUnixPayloadBytes is the maximum payload size accepted over the Unix socket (10 MB).
-const maxUnixPayloadBytes = 10 << 20
+const (
+	// maxUnixPayloadBytes is the maximum payload size accepted over the Unix socket (10 MB).
+	maxUnixPayloadBytes = 10 << 20
+	// unixWriteTimeout bounds writing the 4-byte status reply.
+	unixWriteTimeout = 5 * time.Second
+	// maxUnixConns caps concurrent in-flight socket ingests. Beyond it clients
+	// get 503 immediately instead of the process accumulating goroutines.
+	maxUnixConns = 128
+)
+
+// unixReadTimeout bounds how long a client may take to deliver its length
+// prefix and payload. Without it a stalled client pinned a goroutine, an fd and
+// an up-to-10MB buffer until process exit. A variable so tests can shorten it.
+var unixReadTimeout = 30 * time.Second
+
+// unixIngestServer owns the Unix-socket ingest listener and tracks in-flight
+// connections so shutdown can drain them before the log engine is sealed and
+// closed underneath a handler that already accepted a payload.
+type unixIngestServer struct {
+	listener net.Listener
+	path     string
+	wg       sync.WaitGroup
+	sem      chan struct{}
+
+	closeOnce sync.Once
+}
+
+// CloseListener stops accepting new connections and removes the socket file.
+// In-flight connections keep running until WaitInFlight returns.
+func (s *unixIngestServer) CloseListener() {
+	if s == nil {
+		return
+	}
+	s.closeOnce.Do(func() {
+		s.listener.Close()
+		os.Remove(s.path)
+	})
+}
+
+// WaitInFlight blocks until every accepted connection has finished or ctx is
+// done.
+func (s *unixIngestServer) WaitInFlight(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		slog.Warn("unix socket: in-flight connections did not drain before timeout")
+	}
+}
+
+// Close closes the listener and waits (bounded) for in-flight connections.
+// Used by tests and any caller that just wants a full stop.
+func (s *unixIngestServer) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.CloseListener()
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	s.WaitInFlight(ctx)
+	return nil
+}
 
 // startUnixSocketListener creates a Unix domain socket at socketPath and
 // spawns a goroutine that accepts connections. Each connection uses a simple
 // length-prefixed binary protocol (4-byte big-endian length + payload).
-// Returns the listener so the caller can close it during shutdown.
-func startUnixSocketListener(socketPath string, handler *ingest.Handler) (net.Listener, error) {
+// Returns the server so the caller can drain and close it during shutdown.
+func startUnixSocketListener(socketPath string, handler *ingest.Handler) (*unixIngestServer, error) {
 	// Remove stale socket file from a previous run
 	os.Remove(socketPath)
 
@@ -740,6 +954,12 @@ func startUnixSocketListener(socketPath string, handler *ingest.Handler) (net.Li
 
 	slog.Info("unix socket listener started", "path", socketPath)
 
+	s := &unixIngestServer{
+		listener: listener,
+		path:     socketPath,
+		sem:      make(chan struct{}, maxUnixConns),
+	}
+
 	go func() {
 		for {
 			conn, err := listener.Accept()
@@ -747,11 +967,26 @@ func startUnixSocketListener(socketPath string, handler *ingest.Handler) (net.Li
 				// Accept returns an error when the listener is closed during shutdown
 				return
 			}
-			go handleUnixConnection(conn, handler)
+			select {
+			case s.sem <- struct{}{}:
+			default:
+				// At capacity: answer immediately instead of queueing goroutines.
+				writeUnixStatus(conn, http.StatusServiceUnavailable)
+				conn.Close()
+				continue
+			}
+			s.wg.Add(1)
+			go func() {
+				defer func() {
+					<-s.sem
+					s.wg.Done()
+				}()
+				handleUnixConnection(conn, handler)
+			}()
 		}
 	}()
 
-	return listener, nil
+	return s, nil
 }
 
 // handleUnixConnection processes a single connection on the Unix socket.
@@ -765,6 +1000,10 @@ func startUnixSocketListener(socketPath string, handler *ingest.Handler) (net.Li
 // existing HandleIngestLogs handler via a synthetic httptest request.
 func handleUnixConnection(conn net.Conn, handler *ingest.Handler) {
 	defer conn.Close()
+
+	// A client that connects and then stalls must not pin this goroutine (and
+	// its payload buffer) forever.
+	conn.SetReadDeadline(time.Now().Add(unixReadTimeout))
 
 	// Read 4-byte length prefix
 	lenBuf := make([]byte, 4)
@@ -788,14 +1027,14 @@ func handleUnixConnection(conn net.Conn, handler *ingest.Handler) {
 
 	// Decompress gzip if the payload starts with the gzip magic bytes
 	if len(payload) > 2 && payload[0] == 0x1f && payload[1] == 0x8b {
-		reader, err := gzip.NewReader(bytes.NewReader(payload))
-		if err == nil {
-			decompressed, err := io.ReadAll(io.LimitReader(reader, int64(maxUnixPayloadBytes)+1))
-			reader.Close()
-			if err == nil && len(decompressed) <= maxUnixPayloadBytes {
-				payload = decompressed
-			}
+		decompressed, status := decompressUnixPayload(payload)
+		if status != http.StatusOK {
+			// Previously an over-limit or corrupt gzip fell through with the
+			// still-compressed bytes, which the JSON handler reported as 400.
+			writeUnixStatus(conn, status)
+			return
 		}
+		payload = decompressed
 	}
 
 	// Build a synthetic HTTP request and route through the existing handler
@@ -808,9 +1047,31 @@ func handleUnixConnection(conn net.Conn, handler *ingest.Handler) {
 	writeUnixStatus(conn, rec.Code)
 }
 
+// decompressUnixPayload gunzips a socket payload. It returns the decompressed
+// bytes and http.StatusOK on success, or the status to report to the client:
+// 413 when the decompressed size exceeds the limit, 400 when the stream is
+// corrupt.
+func decompressUnixPayload(payload []byte) ([]byte, int) {
+	reader, err := gzip.NewReader(bytes.NewReader(payload))
+	if err != nil {
+		return nil, http.StatusBadRequest
+	}
+	defer reader.Close()
+
+	decompressed, err := io.ReadAll(io.LimitReader(reader, int64(maxUnixPayloadBytes)+1))
+	if err != nil {
+		return nil, http.StatusBadRequest
+	}
+	if len(decompressed) > maxUnixPayloadBytes {
+		return nil, http.StatusRequestEntityTooLarge
+	}
+	return decompressed, http.StatusOK
+}
+
 // writeUnixStatus writes a 4-byte big-endian status code to the connection.
 func writeUnixStatus(conn net.Conn, code int) {
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(code))
+	conn.SetWriteDeadline(time.Now().Add(unixWriteTimeout))
 	conn.Write(buf[:])
 }

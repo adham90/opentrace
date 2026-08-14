@@ -56,7 +56,11 @@ func (rb *RingBuffer) Push(entries []chunk.Entry) {
 func (rb *RingBuffer) Snapshot() []chunk.Entry {
 	rb.mu.RLock()
 	defer rb.mu.RUnlock()
+	return rb.snapshotLocked()
+}
 
+// snapshotLocked builds the snapshot; caller holds rb.mu (read or write).
+func (rb *RingBuffer) snapshotLocked() []chunk.Entry {
 	if rb.count == 0 {
 		return nil
 	}
@@ -72,6 +76,21 @@ func (rb *RingBuffer) Snapshot() []chunk.Entry {
 		result[i] = rb.entries[(start+i)%ringSize]
 	}
 	return result
+}
+
+// SnapshotAndSubscribe atomically takes a snapshot and registers a subscriber,
+// so a batch pushed between the two can't land in neither (which silently and
+// permanently dropped it from a tail stream). Push takes rb.mu before subMu, so
+// holding both here means every batch is either already in the snapshot or
+// still to be delivered on the channel. Entries may therefore appear in both;
+// consumers dedupe by entry ID.
+func (rb *RingBuffer) SnapshotAndSubscribe() ([]chunk.Entry, <-chan []chunk.Entry, func()) {
+	rb.mu.RLock()
+	defer rb.mu.RUnlock()
+
+	snapshot := rb.snapshotLocked()
+	ch, unsubscribe := rb.Subscribe()
+	return snapshot, ch, unsubscribe
 }
 
 // Subscribe returns a channel that receives new entry batches, and an unsubscribe function.

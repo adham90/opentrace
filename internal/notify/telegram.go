@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/adham90/opentrace/internal/httpclient"
 )
 
 // TelegramConfig holds the Telegram bot configuration.
@@ -21,6 +23,9 @@ type TelegramConfig struct {
 	ChatID   string `json:"chat_id"`
 	Enabled  bool   `json:"enabled"`
 }
+
+// telegramRequestTimeout bounds a single Bot API call.
+const telegramRequestTimeout = 10 * time.Second
 
 // TelegramSender sends notifications to a Telegram chat.
 type TelegramSender struct {
@@ -34,7 +39,7 @@ type TelegramSender struct {
 func NewTelegramSender(configFn func() *TelegramConfig) *TelegramSender {
 	return &TelegramSender{
 		config: configFn,
-		client: &http.Client{Timeout: 10 * time.Second},
+		client: httpclient.New(telegramRequestTimeout),
 	}
 }
 
@@ -104,4 +109,3 @@ func redactToken(err error, token string) error {
 	}
 	return errors.New(strings.ReplaceAll(msg, token, "<redacted>"))
 }
-

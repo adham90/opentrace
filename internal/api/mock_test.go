@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
+	"github.com/google/uuid"
 )
 
 // withAdmin injects an admin user into the request context so auth middleware passes.
@@ -510,6 +510,7 @@ type mockSettingsStore struct {
 	statementTimeout int
 	mcpName          string
 	samplingRules    []store.SamplingRule
+	apiKeyErr        error // if set, GetAPIKey returns this error
 }
 
 func newMockSettingsStore() *mockSettingsStore {
@@ -535,6 +536,9 @@ func (m *mockSettingsStore) SetRetention(ctx context.Context, settings store.Ret
 func (m *mockSettingsStore) GetAPIKey(ctx context.Context) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.apiKeyErr != nil {
+		return "", m.apiKeyErr
+	}
 	return m.apiKey, nil
 }
 
@@ -769,7 +773,3 @@ func (m *mockCodeEntityStore) BatchRecomputeRisk(_ context.Context) error { retu
 func (m *mockCodeEntityStore) Prune(_ context.Context, _ time.Duration) (int64, error) {
 	return 0, nil
 }
-
-
-
-

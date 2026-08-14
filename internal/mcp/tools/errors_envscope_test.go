@@ -98,7 +98,7 @@ func (s *envErrorGroupStore) Reopen(_ context.Context, fingerprint, environment,
 	return s.recordWrite(fingerprint, environment)
 }
 
-func (s *envErrorGroupStore) ListEvents(context.Context, string, int) ([]store.ErrorGroupEvent, error) {
+func (s *envErrorGroupStore) ListEvents(context.Context, string, string, int) ([]store.ErrorGroupEvent, error) {
 	return nil, nil
 }
 

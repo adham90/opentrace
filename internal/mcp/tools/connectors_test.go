@@ -76,6 +76,7 @@ func TestHandleConnectorGet_MissingID(t *testing.T) {
 
 func TestHandleConnectorCreate_MissingType(t *testing.T) {
 	d := ConnectorsDeps{
+		IsAdmin: true, // write action: admin-gated
 		DSStore: mocks.NewDataSourceStore(),
 	}
 
@@ -102,6 +103,7 @@ func TestHandleConnectorCreate_MissingType(t *testing.T) {
 
 func TestHandleConnectorDelete_MissingID(t *testing.T) {
 	d := ConnectorsDeps{
+		IsAdmin: true, // write action: admin-gated
 		DSStore: mocks.NewDataSourceStore(),
 	}
 

@@ -311,9 +311,13 @@ func TestCheckAutoResolve_LogCountMetric(t *testing.T) {
 	evaluator := NewWatchEvaluator(metrics, watchStore)
 	mgr := NewWatchSessionManager(watchStore, metrics)
 
+	// The evaluator measures over the check interval, so it must cover the
+	// 50 seconds of inserted logs. Auto-resolve still measures over the
+	// baseline window.
 	w, err := watchStore.Create(ctx, store.CreateWatchParams{
 		ConditionsJSON: condJSONWithService("log_count", "gt", 30, "api"),
 		Service:        "api",
+		CheckInterval:  "5m",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)

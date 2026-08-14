@@ -83,3 +83,21 @@ func TestHTMLToMrkdwn(t *testing.T) {
 		}
 	}
 }
+
+// TestSlackSender_BlocksLinkLocalWebhook proves the sender goes through the
+// SSRF-guarded shared transport rather than a bare http.Client. The webhook URL
+// is user-supplied, so a link-local target must not be dialled.
+func TestSlackSender_BlocksLinkLocalWebhook(t *testing.T) {
+	t.Setenv("OPENTRACE_ALLOW_LINK_LOCAL", "false")
+
+	sender := NewSlackSender(func() *SlackConfig {
+		return &SlackConfig{WebhookURL: "http://169.254.169.254/latest/meta-data/", Enabled: true}
+	})
+	err := sender.Send(context.Background(), "hi")
+	if err == nil {
+		t.Fatal("link-local webhook was dialled: the sender bypasses the guarded transport")
+	}
+	if !strings.Contains(err.Error(), "blocked") {
+		t.Fatalf("error = %v, want the SSRF guard's \"blocked\" message", err)
+	}
+}

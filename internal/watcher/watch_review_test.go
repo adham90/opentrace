@@ -97,6 +97,7 @@ func TestWatchStreamEvaluator_NotifiesOnAlert(t *testing.T) {
 
 	stream := NewWatchStreamEvaluator(ctx, watchStore, evaluator, nil, []WatchAlertNotifier{notifier})
 	stream.evaluateMatching(map[string]bool{"web": true})
+	stream.notify.wait()
 
 	if notifier.getCalls() != 1 {
 		t.Errorf("stream notifier calls = %d, want 1", notifier.getCalls())

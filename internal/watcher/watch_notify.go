@@ -12,6 +12,7 @@ import (
 
 	"github.com/adham90/opentrace/internal/httpclient"
 	"github.com/adham90/opentrace/internal/retry"
+	"github.com/adham90/opentrace/internal/safe"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
@@ -129,20 +130,98 @@ func (n *WatchLogNotifier) NotifyWatchAlert(_ context.Context, alert *store.Watc
 	return nil
 }
 
-// NotifyAllWatchAlert sends a watch alert to all notifiers concurrently.
-// Errors are logged but do not block.
+const (
+	// notifyTimeout bounds a single notifier's delivery attempt.
+	notifyTimeout = 30 * time.Second
+	// maxInFlightNotifyBatches bounds how many alert dispatches may be in
+	// flight at once, so a wedged webhook cannot spawn goroutines without end.
+	maxInFlightNotifyBatches = 32
+)
+
+// NotifyAllWatchAlert sends a watch alert to all notifiers concurrently and
+// waits for them. Errors are logged. Callers on a latency-sensitive path
+// (the scheduler tick, the ingest-driven stream evaluator) must use a
+// notifyDispatcher instead — a single unreachable webhook burns notifyTimeout
+// here, which would stall every remaining due watch.
 func NotifyAllWatchAlert(ctx context.Context, notifiers []WatchAlertNotifier, alert *store.WatchAlert, watch *store.Watch) {
 	var wg sync.WaitGroup
 	for _, n := range notifiers {
 		wg.Add(1)
 		go func(n WatchAlertNotifier) {
 			defer wg.Done()
-			nctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			nctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), notifyTimeout)
 			defer cancel()
 			if err := n.NotifyWatchAlert(nctx, alert, watch); err != nil {
-				slog.Warn("watch notification error", "error", err)
+				slog.Warn("watch notification error", "alert_id", alert.ID, "error", err)
 			}
 		}(n)
 	}
 	wg.Wait()
+}
+
+// notifyDispatcher delivers watch alerts off the caller's goroutine so a slow
+// or unreachable notifier never delays watch evaluation.
+type notifyDispatcher struct {
+	sem chan struct{}
+	wg  sync.WaitGroup
+}
+
+func newNotifyDispatcher() *notifyDispatcher {
+	return &notifyDispatcher{sem: make(chan struct{}, maxInFlightNotifyBatches)}
+}
+
+// dispatch hands the alert to the notifiers in the background and returns
+// immediately. It drops (and logs) the delivery if too many dispatches are
+// already in flight.
+func (d *notifyDispatcher) dispatch(ctx context.Context, notifiers []WatchAlertNotifier, alert *store.WatchAlert, watch *store.Watch) {
+	if len(notifiers) == 0 {
+		return
+	}
+	// The caller's context dies with the tick; notifications outlive it.
+	nctx := context.WithoutCancel(ctx)
+	select {
+	case d.sem <- struct{}{}:
+	default:
+		slog.Warn("watch notification dropped: dispatcher saturated",
+			"alert_id", alert.ID, "watch_id", watch.ID)
+		return
+	}
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		defer func() { <-d.sem }()
+		safe.Run("watcher.notify", func() {
+			NotifyAllWatchAlert(nctx, notifiers, alert, watch)
+		})
+	}()
+}
+
+// wait blocks until all in-flight dispatches finish (shutdown and tests).
+func (d *notifyDispatcher) wait() {
+	d.wg.Wait()
+}
+
+// waitFor blocks until all in-flight dispatches finish or timeout elapses.
+// It reports whether the drain completed. Shutdown paths use this so a wedged
+// notifier cannot hold the process open past its shutdown budget, while a
+// healthy delivery still gets a chance to land.
+func (d *notifyDispatcher) waitFor(timeout time.Duration) bool {
+	return waitGroupFor(&d.wg, timeout)
+}
+
+// waitGroupFor waits on wg for at most timeout, reporting whether it finished.
+func waitGroupFor(wg *sync.WaitGroup, timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	}
 }

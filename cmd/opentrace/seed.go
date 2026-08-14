@@ -6,12 +6,124 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/pkg/store"
 )
+
+// seedRequestCount is how many HTTP-request log entries the seed generates for
+// the analytics/endpoint-stats views.
+const seedRequestCount = 500
+
+// seedResetEnv opts into wiping the log store before seeding.
+const seedResetEnv = "OPENTRACE_SEED_RESET"
+
+// clearSeededLogStore deletes the segmented log store so `opentrace seed` is
+// actually idempotent. It must run before the engine is opened.
+//
+// This deletes EVERY log in the store, not just previously seeded ones — the
+// store keeps no record of what a seed wrote — so against a real data dir it is
+// unrecoverable data loss. It therefore requires an explicit opt-in; without
+// it, seeding proceeds and appends, and the caller is told why.
+func clearSeededLogStore() error {
+	config.LoadEnvFile(".env")
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	logDir := filepath.Join(cfg.DataDir, "logs")
+
+	if os.Getenv(seedResetEnv) != "true" {
+		if entries, err := os.ReadDir(logDir); err == nil && len(entries) > 0 {
+			slog.Warn("keeping the existing log store: seeding will append, so log counts will not be idempotent",
+				"dir", logDir,
+				"hint", "set "+seedResetEnv+"=true to delete every log in this data dir first")
+		}
+		return nil
+	}
+
+	slog.Warn("deleting every log in the store before seeding", "dir", logDir, "opt_in", seedResetEnv)
+	if err := os.RemoveAll(logDir); err != nil {
+		return fmt.Errorf("clearing log store %q: %w", logDir, err)
+	}
+	return nil
+}
+
+// buildRequestLogEntries generates HTTP-request log entries spread over the last
+// 24 hours. Each carries a RequestSummary, which the log-store adapter flattens
+// into the columnar request columns the analytics endpoints read.
+func buildRequestLogEntries(now time.Time, count int) []store.LogEntry {
+	controllers := []struct {
+		controller string
+		action     string
+		method     string
+		path       string
+		service    string
+	}{
+		{"OrdersController", "index", "GET", "/api/v1/orders", "order-service"},
+		{"OrdersController", "create", "POST", "/api/v1/orders", "order-service"},
+		{"OrdersController", "show", "GET", "/api/v1/orders/:id", "order-service"},
+		{"PaymentsController", "charge", "POST", "/api/v1/payments/charge", "payment-api"},
+		{"PaymentsController", "refund", "POST", "/api/v1/payments/refund", "payment-api"},
+		{"UsersController", "login", "POST", "/api/v1/auth/login", "user-service"},
+		{"UsersController", "profile", "GET", "/api/v1/users/me", "user-service"},
+		{"NotificationsController", "send", "POST", "/api/v1/notifications", "notification-service"},
+		{"HealthController", "check", "GET", "/health", "gateway"},
+		{"ReportsController", "summary", "GET", "/api/v1/reports/summary", "gateway"},
+	}
+
+	entries := make([]store.LogEntry, 0, count)
+	for i := 0; i < count; i++ {
+		c := controllers[i%len(controllers)]
+		duration := 20 + rand.Float64()*300 // 20-320ms
+		sqlCount := rand.Intn(8)
+		status := 200
+		switch {
+		case rand.Float32() < 0.05:
+			status = 500
+		case rand.Float32() < 0.08:
+			status = 404
+		case rand.Float32() < 0.03:
+			status = 422
+		}
+		level := "INFO"
+		if status >= 500 {
+			level = "ERROR"
+		}
+		ts := now.Add(-time.Duration(rand.Intn(86400)) * time.Second)
+
+		entries = append(entries, store.LogEntry{
+			Timestamp:   ts,
+			Level:       level,
+			Service:     c.service,
+			Environment: "production",
+			Kind:        "request",
+			Message:     fmt.Sprintf("%s %s → %d (%.0fms)", c.method, c.path, status, duration),
+			RequestID:   fmt.Sprintf("req-%s", uuid.New().String()[:8]),
+			RequestSummary: &store.RequestSummary{
+				Controller: c.controller,
+				Action:     c.action,
+				Method:     c.method,
+				Path:       c.path,
+				Status:     status,
+				DurationMs: duration,
+				SQLCount:   sqlCount,
+				SQLTotalMs: float64(sqlCount) * 5.5,
+				DBTimeMs:   float64(sqlCount) * 5.5,
+				CacheReads: sqlCount * 2,
+				CacheHits:  sqlCount,
+				ViewTimeMs: duration * 0.2,
+				NPlusOne:   sqlCount >= 6,
+			},
+		})
+	}
+	return entries
+}
 
 // condJSON is a helper to build a threshold condition JSON for seeding.
 func condJSON(metric, op string, value float64, service, endpoint string) json.RawMessage {
@@ -33,24 +145,35 @@ func condJSON(metric, op string, value float64, service, endpoint string) json.R
 
 func runSeed() error {
 	ctx := context.Background()
+
+	// Real idempotency: the segmented log store must be cleared too. Only the
+	// SQLite tables used to be wiped, so every re-run appended another ~5,000
+	// duplicate log lines while error groups were rebuilt from the newest batch
+	// only — log counts and group counts then disagreed permanently.
+	if err := clearSeededLogStore(); err != nil {
+		return err
+	}
+
 	deps, logEngine, err := initApp(ctx)
 	if err != nil {
 		return err
 	}
-	defer deps.DB.Close()
-	if logEngine != nil {
-		defer logEngine.Close()
-	}
+	// Seals the WAL before closing, so seeded logs are a searchable segment
+	// even if the server is first started in a later hour.
+	defer teardownApp(deps, logEngine, true)
 
 	slog.Info("seeding database (idempotent — clears old seed data)")
 
-	// Clear old seed data for idempotency.
-	// Only clear SQLite tables (logs are in segmented store, not SQLite)
+	// Clear old seed data for idempotency. The segmented log store was already
+	// cleared above; these are the SQLite-side tables the seed writes.
 	tables := []string{"watch_alerts", "watch_runs", "watches",
 		"error_group_events", "error_groups", "data_sources",
-		"servers"}
+		"metrics", "servers"}
 	for _, t := range tables {
-		deps.DB.ExecContext(ctx, "DELETE FROM "+t)
+		// Table names are from this fixed literal list, never user input.
+		if _, err := deps.DB.ExecContext(ctx, "DELETE FROM "+t); err != nil {
+			return fmt.Errorf("clearing table %s: %w", t, err)
+		}
 	}
 	slog.Info("cleared old seed data")
 
@@ -269,69 +392,24 @@ func runSeed() error {
 		logEntries = append(logEntries, entry)
 	}
 
+	// --- Request logs (drive the analytics / endpoint-stats views) ---
+	//
+	// These used to be INSERTed into a SQLite `request_summaries` table that
+	// does not exist (log storage lives in the segmented log store), with the
+	// error swallowed, so the block silently seeded nothing. Request data now
+	// goes through the real path: a log entry carrying a RequestSummary, which
+	// the log-store adapter maps onto the columnar request fields and tags
+	// event_type=http.request.
+	requestEntries := buildRequestLogEntries(now, seedRequestCount)
+	logEntries = append(logEntries, requestEntries...)
+	reqCount := len(requestEntries)
+
 	logStore := deps.LogStore
 	n, err := logStore.BatchInsert(ctx, logEntries)
 	if err != nil {
 		return fmt.Errorf("inserting logs: %w", err)
 	}
-	slog.Info("seeded logs", "count", n)
-
-	// --- Request Summaries (for analytics) ---
-	controllers := []struct {
-		controller string
-		action     string
-		method     string
-		path       string
-		service    string
-	}{
-		{"OrdersController", "index", "GET", "/api/v1/orders", "order-service"},
-		{"OrdersController", "create", "POST", "/api/v1/orders", "order-service"},
-		{"OrdersController", "show", "GET", "/api/v1/orders/:id", "order-service"},
-		{"PaymentsController", "charge", "POST", "/api/v1/payments/charge", "payment-api"},
-		{"PaymentsController", "refund", "POST", "/api/v1/payments/refund", "payment-api"},
-		{"UsersController", "login", "POST", "/api/v1/auth/login", "user-service"},
-		{"UsersController", "profile", "GET", "/api/v1/users/me", "user-service"},
-		{"NotificationsController", "send", "POST", "/api/v1/notifications", "notification-service"},
-		{"HealthController", "check", "GET", "/health", "gateway"},
-		{"ReportsController", "summary", "GET", "/api/v1/reports/summary", "gateway"},
-	}
-
-	// Pick INFO log IDs to link request_summaries to.
-	var infoLogIDs []int64
-	rows, err := deps.DB.QueryContext(ctx, "SELECT id FROM logs WHERE level = 'INFO' ORDER BY RANDOM() LIMIT 500")
-	if err == nil {
-		for rows.Next() {
-			var id int64
-			if rows.Scan(&id) == nil {
-				infoLogIDs = append(infoLogIDs, id)
-			}
-		}
-		rows.Close()
-	}
-
-	reqCount := 0
-	for i, logID := range infoLogIDs {
-		c := controllers[i%len(controllers)]
-		duration := 20 + rand.Float64()*300 // 20-320ms
-		sqlCount := rand.Intn(8)
-		status := 200
-		if rand.Float32() < 0.05 {
-			status = 500
-		} else if rand.Float32() < 0.08 {
-			status = 404
-		} else if rand.Float32() < 0.03 {
-			status = 422
-		}
-		_, err := deps.DB.ExecContext(ctx,
-			`INSERT INTO request_summaries (log_id, controller, action, method, path, status, duration_ms, sql_count, sql_total_ms)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			logID, c.controller, c.action, c.method, c.path, status, duration, sqlCount, float64(sqlCount)*5.5,
-		)
-		if err == nil {
-			reqCount++
-		}
-	}
-	slog.Info("seeded request summaries", "count", reqCount)
+	slog.Info("seeded logs", "count", n, "request_logs", reqCount)
 
 	// --- Error Groups (from error log entries) ---
 	errorGroupStore := deps.ErrorGroupStore
@@ -438,7 +516,7 @@ func runSeed() error {
 		"logs", len(logEntries),
 		"servers", len(serverIDs),
 		"watches", len(watchIDs),
-		"request_summaries", reqCount,
+		"request_logs", reqCount,
 	)
 	return nil
 }
