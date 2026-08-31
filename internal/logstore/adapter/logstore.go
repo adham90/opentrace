@@ -90,6 +90,8 @@ func (a *LogStore) Search(ctx context.Context, params store.LogSearchParams) ([]
 		Env:              params.Environment,
 		TraceID:          params.TraceID,
 		RequestID:        params.RequestID,
+		UserID:           params.UserID,
+		TenantID:         params.TenantID,
 		EventType:        params.EventType,
 		ErrorClass:       params.ExceptionClass,
 		ErrorFingerprint: params.ErrorFingerprint,

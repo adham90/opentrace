@@ -210,10 +210,13 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, isAdmin bool, b *CatalogBuild
 			HealthCheckStore: deps.HealthCheckStore,
 			SettingsStore:    deps.SettingsStore,
 			AgentNoteStore:   deps.AgentNoteStore,
+			DeployStore:      deps.DeployStore,
+			UserStore:        deps.UserStore,
+			OnCallStatus:     deps.OnCallStatus,
 		})),
 		GatewayEntry{
-			Description: "System overview, triage, diagnosis, incident timeline, and agent memory",
-			Actions:     []string{"status", "triage", "diagnose", "timeline", "investigate", "changes", "settings", "notes", "delete_note"},
+			Description: "System overview, catch-up since your last visit, triage, diagnosis, incident timeline, and agent memory",
+			Actions:     []string{"status", "triage", "catchup", "diagnose", "timeline", "investigate", "changes", "settings", "notes", "delete_note"},
 			Category:    "Overview",
 			Access:      "read",
 			ReadOnly:    true,
@@ -221,6 +224,29 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, isAdmin bool, b *CatalogBuild
 			Params:      map[string]string{"service": "Scope to service", "timeframe": "Window: 30m/2h/24h/7d"},
 		})
 	b.Add("overview", "System overview, triage, diagnosis, incident timeline, service investigation, and changes", "Overview", "read", "")
+
+	// --- users (support view: what one customer actually hit) ---
+	usersHandler, usersEntry := applyRole("users", isAdmin,
+		wrapHandler(deps, "users", tools.UsersHandler(tools.UsersDeps{
+			LogStore:         deps.LogStore,
+			ErrorImpactStore: deps.ErrorImpactStore,
+			ErrorGroupStore:  deps.ErrorGroupStore,
+		})),
+		GatewayEntry{
+			Description: "Per-user and per-tenant view: what one customer hit, which errors, and who an error affects",
+			Actions:     []string{"timeline", "errors", "impact"},
+			Category:    "Users",
+			Access:      "read",
+			ReadOnly:    true,
+			Idempotent:  true,
+			Params: map[string]string{
+				"user_id":   "The user to look up",
+				"tenant_id": "The tenant/account to look up (timeline only)",
+				"since":     "Window: 30m/2h/24h/7d, or last_deploy",
+			},
+		})
+	gw.Register("users", usersHandler, usersEntry)
+	b.Add("users", "Per-user and per-tenant activity, errors, and error impact", "Users", "read", "")
 
 	// --- watches ---
 	if deps.WatchStore != nil {

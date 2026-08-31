@@ -34,6 +34,14 @@ const WildcardEnv = "*"
 //   - []string{"*"}            — legacy wildcard (deprecation fallback on writes)
 type EnvScope struct {
 	Allowed []string
+
+	// UserID identifies the authenticated caller. It rides along here rather
+	// than in its own ctx value because both transports already build the scope
+	// from the same *store.User at the same call site, and per-caller state
+	// (overview.catchup's cursor) needs an identity wherever the scope reaches.
+	// Empty when no user was loaded — callers must treat that as "no identity"
+	// rather than as a valid key.
+	UserID string
 }
 
 // FromUser builds an EnvScope from a user's AllowedEnvironments. A nil
@@ -43,7 +51,7 @@ func FromUser(u *store.User) EnvScope {
 		return EnvScope{}
 	}
 	envs := append([]string(nil), u.AllowedEnvironments...)
-	return EnvScope{Allowed: envs}
+	return EnvScope{Allowed: envs, UserID: u.ID}
 }
 
 // AllowsAll reports whether the scope permits every environment. True when

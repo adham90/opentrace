@@ -335,3 +335,11 @@ func TestOptionalSinceParam(t *testing.T) {
 		t.Errorf("timeframe=2h resolved to %v ago", d)
 	}
 }
+
+// Issue-tracker linkage: these doubles do not exercise it, so the methods exist
+// only to satisfy store.ErrorGroupStore.
+func (m *envErrorGroupStore) IssueURL(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
+func (m *envErrorGroupStore) SetIssueURL(context.Context, string, string, string) error { return nil }

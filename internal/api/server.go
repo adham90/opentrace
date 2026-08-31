@@ -56,6 +56,7 @@ type Server struct {
 	watchStream         *watcher.WatchStreamEvaluator
 	watchStore          store.WatchStore
 	watchMetrics        *watcher.WatchMetrics
+	oncallStatus        func() (time.Time, string, int)
 	errorGroupStore     store.ErrorGroupStore
 	healthCheckStore    store.HealthCheckStore
 	agentNoteStore      store.AgentNoteStore
@@ -64,6 +65,7 @@ type Server struct {
 	errorImpactStore    store.ErrorImpactStore
 	traceStore          store.TraceStore
 	codeEntityStore     store.CodeEntityStore
+	deployStore         store.DeployStore
 	reliabilityProvider ReliabilityProvider
 	sseServer           *mcp.SSEHandler
 	sseAPILimiter       *RateLimiter
@@ -114,6 +116,10 @@ type ServerDeps struct {
 	ReliabilityProvider  ReliabilityProvider
 	SharedDeps           *server.Deps
 	Modules              []server.Module
+
+	// OnCallStatus reports the on-call agent's health to overview.status.
+	// Nil when the agent is not configured.
+	OnCallStatus func() (lastSuccess time.Time, lastError string, runsToday int)
 }
 
 // NewServer creates a new Server with the given dependencies and sets up routes.
@@ -145,6 +151,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		watchStream:         deps.WatchStreamEvaluator,
 		watchStore:          deps.Stores.WatchStore,
 		watchMetrics:        deps.WatchMetrics,
+		oncallStatus:        deps.OnCallStatus,
 		errorGroupStore:     deps.Stores.ErrorGroupStore,
 		healthCheckStore:    deps.Stores.HealthCheckStore,
 		agentNoteStore:      deps.Stores.AgentNoteStore,
@@ -153,6 +160,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		errorImpactStore:    deps.Stores.ErrorImpactStore,
 		traceStore:          deps.Stores.TraceStore,
 		codeEntityStore:     deps.Stores.CodeEntityStore,
+		deployStore:         deps.Stores.DeployStore,
 		reliabilityProvider: deps.ReliabilityProvider,
 		sharedDeps:          deps.SharedDeps,
 		modules:             deps.Modules,
@@ -177,6 +185,7 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		ErrorImpactStore: deps.Stores.ErrorImpactStore,
 		CodeEntityStore:  deps.Stores.CodeEntityStore,
 		TraceStore:       deps.Stores.TraceStore,
+		DeployStore:      deps.Stores.DeployStore,
 		DSStore:          deps.Stores.DSStore,
 		Registry:         deps.Registry,
 		Cfg:              deps.Cfg,
@@ -205,6 +214,11 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	router.Use(wrapCompressSkipMCP(middleware.Compress(5))) // gzip compression, bypassed for /mcp/
 	router.Use(MaxBodySize(maxRequestBodyBytes))            // 10 MB global body limit
 	router.Use(srv.ProxyAuth)                               // trusted proxy headers (cloud managed mode)
+
+	// The ingest wire contract, public and unauthenticated: it is what a client
+	// author (usually a coding agent) reads before there is a key to read it
+	// with, and it discloses nothing but the format.
+	router.Get("/spec", ingest.HandleSpec)
 
 	router.Get("/healthz", srv.handleHealthCheck)
 	router.Get("/readyz", srv.handleReadiness)

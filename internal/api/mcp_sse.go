@@ -155,8 +155,12 @@ func (s *Server) mcpDeps() mcpserver.Deps {
 			TrendStore:       s.trendStore,
 			AnalyticsStore:   s.analyticsStore,
 			ErrorImpactStore: s.errorImpactStore,
+			TraceStore:       s.traceStore,
+			CodeEntityStore:  s.codeEntityStore,
+			DeployStore:      s.deployStore,
 		},
 		WatchMetrics: s.watchMetrics,
+		OnCallStatus: s.oncallStatus,
 	}
 }
 

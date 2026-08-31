@@ -369,3 +369,49 @@ func (r *userRow) toStore() *store.User {
 	}
 	return u
 }
+
+// CatchupCursor returns when the user last drained their catch-up queue.
+// A NULL column (never caught up) yields the zero time, not an error — a new
+// user has no cursor and that is a normal state, not a failure.
+func (s *userStore) CatchupCursor(ctx context.Context, id string) (time.Time, error) {
+	var raw sql.NullString
+	err := s.db.NewRaw(`SELECT last_catchup_at FROM users WHERE id = ?`, id).Scan(ctx, &raw)
+	if err == sql.ErrNoRows {
+		return time.Time{}, store.ErrNotFound
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("reading catchup cursor: %w", err)
+	}
+	if !raw.Valid || raw.String == "" {
+		return time.Time{}, nil
+	}
+	return parseTime(raw.String), nil
+}
+
+// SetCatchupCursor advances the user's catch-up cursor.
+//
+// The cursor only ever moves forward: a concurrent second call with an older
+// timestamp (two agents draining at once) must not rewind the window and
+// resurface events the first call already reported.
+func (s *userStore) SetCatchupCursor(ctx context.Context, id string, at time.Time) error {
+	res, err := s.db.NewRaw(`
+		UPDATE users SET last_catchup_at = ?
+		WHERE id = ? AND (last_catchup_at IS NULL OR last_catchup_at < ?)`,
+		at.UTC().Format(time.RFC3339), id, at.UTC().Format(time.RFC3339),
+	).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("setting catchup cursor: %w", err)
+	}
+	// Zero rows means either the user is gone or the stored cursor is already
+	// newer. Only the first is an error, so check existence rather than guess.
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		var exists int
+		if err := s.db.NewRaw(`SELECT COUNT(*) FROM users WHERE id = ?`, id).Scan(ctx, &exists); err != nil {
+			return fmt.Errorf("verifying user for catchup cursor: %w", err)
+		}
+		if exists == 0 {
+			return store.ErrNotFound
+		}
+	}
+	return nil
+}

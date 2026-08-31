@@ -13,6 +13,11 @@ import (
 // ---------------------------------------------------------------------------
 
 // StatusReport is the typed response for the overview status action.
+// onCallStaleAfter is how long without a successful run before the agent is
+// reported as stale. Generous: a quiet week with no alerts is normal, and
+// crying wolf about a healthy agent is how the field gets ignored.
+const onCallStaleAfter = 14 * 24 * time.Hour
+
 type StatusReport struct {
 	Logs         *LogStats        `json:"logs,omitempty"`
 	ErrorGroups  *ErrorGroupStats `json:"error_groups,omitempty"`
@@ -20,6 +25,21 @@ type StatusReport struct {
 	HealthChecks *HealthStats     `json:"healthchecks,omitempty"`
 	Connectors   *ConnectorStats  `json:"connectors,omitempty"`
 	Servers      *ServerStats     `json:"servers,omitempty"`
+	OnCall       *OnCallStats     `json:"oncall,omitempty"`
+}
+
+// OnCallStats reports whether the on-call agent is still working.
+//
+// The subscription token behind the agent CLI expires eventually, and when it
+// does triage stops with no error anyone sees — the same silence the dead man's
+// switch exists to break, one layer up. Surfacing the last success is how that
+// gets noticed before the next incident rather than during it.
+type OnCallStats struct {
+	Enabled     bool   `json:"enabled"`
+	LastSuccess string `json:"last_success,omitempty"`
+	LastError   string `json:"last_error,omitempty"`
+	RunsToday   int    `json:"runs_today"`
+	Stale       bool   `json:"stale,omitempty"`
 }
 
 type LogStats struct {
@@ -158,6 +178,17 @@ func HandleOverviewStatus(ctx context.Context, d OverviewDeps, args map[string]a
 		}
 	}
 
+	// On-call agent health
+	if d.OnCallStatus != nil {
+		lastOK, lastErr, runs := d.OnCallStatus()
+		oc := &OnCallStats{Enabled: true, LastError: lastErr, RunsToday: runs}
+		if !lastOK.IsZero() {
+			oc.LastSuccess = lastOK.Format(time.RFC3339)
+			oc.Stale = time.Since(lastOK) > onCallStaleAfter
+		}
+		report.OnCall = oc
+	}
+
 	// Suggested next tools based on findings.
 	var suggestions []ToolSuggestion
 	if report.ErrorGroups != nil && report.ErrorGroups.Unresolved > 0 {
@@ -165,6 +196,9 @@ func HandleOverviewStatus(ctx context.Context, d OverviewDeps, args map[string]a
 	}
 	if report.Logs != nil && report.Logs.ErrorsLastHour > 0 {
 		suggestions = append(suggestions, Suggest("logs", "Investigate errors in last hour", map[string]any{"action": "summary"}))
+	}
+	if report.OnCall != nil && (report.OnCall.Stale || report.OnCall.LastError != "") {
+		suggestions = append(suggestions, Suggest("overview", "On-call agent may be broken — check its credentials", map[string]any{"action": "settings"}))
 	}
 	if report.HealthChecks != nil && report.HealthChecks.Down > 0 {
 		suggestions = append(suggestions, Suggest("healthchecks", fmt.Sprintf("%d endpoints down", report.HealthChecks.Down), map[string]any{"action": "uptime"}))

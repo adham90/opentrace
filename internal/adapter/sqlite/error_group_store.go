@@ -497,3 +497,70 @@ func truncate(s string, maxLen int) string {
 	}
 	return s[:maxLen]
 }
+
+// IssueURL returns the tracker issue filed for this group. An unfiled group
+// yields "" rather than an error — not filed is a normal state.
+func (s *errorGroupStore) IssueURL(ctx context.Context, fingerprint, environment string) (string, error) {
+	query := `SELECT COALESCE(issue_url, '') FROM error_groups WHERE fingerprint = ?`
+	args := []any{fingerprint}
+	if environment != "" {
+		query += ` AND environment = ?`
+		args = append(args, environment)
+	}
+	// Without an env the same fingerprint has a row per env; any filed issue
+	// answers "is this already tracked", so take the first non-empty one.
+	query += ` ORDER BY CASE WHEN issue_url IS NULL OR issue_url = '' THEN 1 ELSE 0 END LIMIT 1`
+
+	var url string
+	err := s.db.NewRaw(query, args...).Scan(ctx, &url)
+	if err == sql.ErrNoRows {
+		return "", store.ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading issue url: %w", err)
+	}
+	return url, nil
+}
+
+// SetIssueURL records the issue filed for this group.
+//
+// The WHERE clause only claims groups that have no issue yet, so two
+// concurrent filers cannot overwrite each other and produce a row pointing at
+// the second issue while the first is orphaned. A row that already has one is
+// reported as success: the caller's job was "make sure this is tracked", and it
+// is.
+func (s *errorGroupStore) SetIssueURL(ctx context.Context, fingerprint, environment, url string) error {
+	if url == "" {
+		return fmt.Errorf("issue url is required")
+	}
+	query := `UPDATE error_groups SET issue_url = ?
+	          WHERE fingerprint = ? AND (issue_url IS NULL OR issue_url = '')`
+	args := []any{url, fingerprint}
+	if environment != "" {
+		query += ` AND environment = ?`
+		args = append(args, environment)
+	}
+
+	res, err := s.db.NewRaw(query, args...).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("setting issue url: %w", err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		// Either the group is gone or it is already filed. Only the first is an
+		// error, so check rather than guess.
+		var exists int
+		countQuery := `SELECT COUNT(*) FROM error_groups WHERE fingerprint = ?`
+		countArgs := []any{fingerprint}
+		if environment != "" {
+			countQuery += ` AND environment = ?`
+			countArgs = append(countArgs, environment)
+		}
+		if err := s.db.NewRaw(countQuery, countArgs...).Scan(ctx, &exists); err != nil {
+			return fmt.Errorf("verifying error group for issue url: %w", err)
+		}
+		if exists == 0 {
+			return store.ErrNotFound
+		}
+	}
+	return nil
+}

@@ -158,6 +158,10 @@ func activityEnvironment(ctx context.Context) string {
 
 // wrapHandler applies activity logging and metrics to a handler.
 func wrapHandler(deps Deps, toolName string, handler ToolHandlerFunc) ToolHandlerFunc {
+	// Innermost: the handler must see an already-resolved window, and the
+	// metrics/activity wrappers should time the real work rather than the
+	// deploy lookup.
+	handler = wrapWithDeployWindow(deps, handler)
 	handler = wrapWithMetrics(toolName, handler)
 	if deps.MCPActivityStore != nil {
 		handler = wrapWithActivityLog(deps, toolName, handler)

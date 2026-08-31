@@ -23,6 +23,8 @@ const mcpInstructions = `OpenTrace is a self-hosted observability engine. You ha
 - Investigating issues → overview(action: "diagnose")
 - System health → overview(action: "status")
 - What needs attention → overview(action: "triage")
+- A specific customer reports a problem → users(action: "timeline", user_id: "...")
+- What happened since you last looked → overview(action: "catchup")
 - Search logs → logs(action: "search", query: "...")
 - Check errors → errors(action: "list")
 - Before modifying a file → code(action: "annotate_file", path: "the/file.rb")
@@ -30,7 +32,8 @@ const mcpInstructions = `OpenTrace is a self-hosted observability engine. You ha
 
 ## Tools
 
-- overview: status, triage, diagnose, timeline, investigate, changes, settings, notes, delete_note
+- overview: status, triage, catchup, diagnose, timeline, investigate, changes, settings, notes, delete_note
+- users: timeline, errors, impact
 - logs: search, context, attributes, stats, summary, performance, trace, compare
 - errors: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, reopen, new
 - database: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions
@@ -91,6 +94,10 @@ type Deps struct {
 
 	// WatchMetrics is not a store — it's a runtime metrics collector.
 	WatchMetrics *watcher.WatchMetrics
+
+	// OnCallStatus reports the on-call agent's health for overview.status.
+	// Nil when the agent is not configured.
+	OnCallStatus func() (lastSuccess time.Time, lastError string, runsToday int)
 
 	// Runtime services — created during Serve()/NewConfiguredServer(), not by callers.
 	// Exported so tests can inject them directly.

@@ -22,4 +22,5 @@ type Stores struct {
 	ErrorImpactStore ErrorImpactStore
 	TraceStore       TraceStore
 	CodeEntityStore  CodeEntityStore
+	DeployStore      DeployStore
 }
