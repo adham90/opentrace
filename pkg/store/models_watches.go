@@ -279,6 +279,11 @@ type WatchEvidenceError struct {
 	Message        string `json:"message"`
 	Count          int    `json:"count"`
 	IsNew          bool   `json:"is_new"`
+	// Fingerprint links the evidence back to its error_groups row. Without it
+	// a consumer holding an alert can name the exception but cannot find the
+	// group — which is the difference between "an error happened" and "this
+	// known error, already tracked, is what happened".
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
 // WatchEndpointDelta shows how an endpoint changed vs baseline.

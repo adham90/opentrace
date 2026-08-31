@@ -315,3 +315,11 @@ func TestHealthchecksSummary_UsesUTCWindow(t *testing.T) {
 		t.Errorf("since = %s, want a Z-suffixed UTC timestamp", formatted)
 	}
 }
+
+// Issue-tracker linkage: these doubles do not exercise it, so the methods exist
+// only to satisfy store.ErrorGroupStore.
+func (m *envErrorGroupStore) IssueURL(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
+func (m *envErrorGroupStore) SetIssueURL(context.Context, string, string, string) error { return nil }

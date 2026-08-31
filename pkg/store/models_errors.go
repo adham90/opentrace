@@ -36,6 +36,10 @@ type ErrorGroup struct {
 	ReopenedCount   int              `bun:"reopened_count" json:"reopened_count"`
 	ResolvedAt      *time.Time       `bun:"resolved_at" json:"resolved_at,omitempty"`
 	IgnoredAt       *time.Time       `bun:"ignored_at" json:"ignored_at,omitempty"`
+	// IssueURL is the tracker issue filed for this group, empty when none.
+	// One issue per (fingerprint, environment), forever: recurrences comment
+	// on the existing issue rather than opening another.
+	IssueURL string `bun:"issue_url" json:"issue_url,omitempty"`
 	// SeenInEnvs is stored as a JSON array of env names in the seen_in_envs
 	// TEXT column; the sqlite store encodes/decodes on read/write.
 	SeenInEnvs []string `bun:"-" json:"seen_in_envs,omitempty"`

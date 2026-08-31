@@ -120,13 +120,19 @@ type RequestSummary struct {
 
 // LogSearchParams defines filters for log search.
 type LogSearchParams struct {
-	Query            string            `json:"query,omitempty"`
-	Service          string            `json:"service,omitempty"`
-	Level            string            `json:"level,omitempty"`
-	Environment      string            `json:"environment,omitempty"`
-	CommitHash       string            `json:"commit_hash,omitempty"`
-	TraceID          string            `json:"trace_id,omitempty"`
-	RequestID        string            `json:"request_id,omitempty"`
+	Query       string `json:"query,omitempty"`
+	Service     string `json:"service,omitempty"`
+	Level       string `json:"level,omitempty"`
+	Environment string `json:"environment,omitempty"`
+	CommitHash  string `json:"commit_hash,omitempty"`
+	TraceID     string `json:"trace_id,omitempty"`
+	RequestID   string `json:"request_id,omitempty"`
+	// UserID and TenantID answer "what did this customer actually hit", which
+	// is the question support work starts from. Both are stored columns; the
+	// engine has always filtered on them, they were just never reachable from
+	// here.
+	UserID           string            `json:"user_id,omitempty"`
+	TenantID         string            `json:"tenant_id,omitempty"`
 	EventType        string            `json:"event_type,omitempty"`
 	ExceptionClass   string            `json:"exception_class,omitempty"`
 	ErrorFingerprint string            `json:"error_fingerprint,omitempty"`

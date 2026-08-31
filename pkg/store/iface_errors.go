@@ -27,6 +27,14 @@ type ErrorGroupStore interface {
 	// otherwise they see another environment's resolve/ignore history.
 	ListEvents(ctx context.Context, fingerprint, environment string, limit int) ([]ErrorGroupEvent, error)
 	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
+
+	// IssueURL returns the tracker issue filed for this group, or "" if none.
+	IssueURL(ctx context.Context, fingerprint, environment string) (string, error)
+
+	// SetIssueURL records the issue filed for this group. Called only after the
+	// tracker confirms creation: claiming the slot first and then failing marks
+	// the fingerprint as filed forever, and it silently never files again.
+	SetIssueURL(ctx context.Context, fingerprint, environment, url string) error
 }
 
 // ErrorImpactStore tracks which users are affected by each error and computes impact scores.

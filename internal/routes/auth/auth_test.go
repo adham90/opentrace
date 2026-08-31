@@ -21,10 +21,10 @@ import (
 // ─────────────────────────────────────────────────────────────────────────────
 
 type mockUserStore struct {
-	mu       sync.Mutex
-	users    map[string]*store.User
-	countErr error
-	getErr   error
+	mu        sync.Mutex
+	users     map[string]*store.User
+	countErr  error
+	getErr    error
 	createErr error
 	updateErr error
 }
@@ -164,8 +164,8 @@ func (m *mockUserStore) Delete(ctx context.Context, id string) error {
 }
 
 type mockAuditStore struct {
-	mu    sync.Mutex
-	logs  []store.AuditEntry
+	mu     sync.Mutex
+	logs   []store.AuditEntry
 	logErr error
 }
 
@@ -696,4 +696,14 @@ func TestHandleConnect_EmailTrimming(t *testing.T) {
 	if !ok {
 		t.Error("expected email to be trimmed and stored")
 	}
+}
+
+// Catch-up cursor: these doubles do not exercise it, so the methods exist only
+// to satisfy store.UserStore.
+func (m *mockUserStore) CatchupCursor(context.Context, string) (time.Time, error) {
+	return time.Time{}, nil
+}
+
+func (m *mockUserStore) SetCatchupCursor(context.Context, string, time.Time) error {
+	return nil
 }

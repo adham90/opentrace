@@ -17,6 +17,16 @@ type UserStore interface {
 	UpdateMCPToken(ctx context.Context, id string, token string) error
 	Delete(ctx context.Context, id string) error
 	Count(ctx context.Context) (int, error)
+
+	// CatchupCursor returns when this user last drained their catch-up queue.
+	// A zero time means never — callers apply their own default window rather
+	// than replaying all of history.
+	CatchupCursor(ctx context.Context, id string) (time.Time, error)
+
+	// SetCatchupCursor advances the user's catch-up cursor. Called only after a
+	// catchup response is successfully assembled: advancing on entry would let a
+	// failed call silently swallow a night's events.
+	SetCatchupCursor(ctx context.Context, id string, at time.Time) error
 }
 
 // SessionStore manages browser sessions.

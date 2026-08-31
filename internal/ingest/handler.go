@@ -44,6 +44,7 @@ type Handler struct {
 	ErrorImpactStore store.ErrorImpactStore
 	CodeEntityStore  store.CodeEntityStore
 	TraceStore       store.TraceStore
+	DeployStore      store.DeployStore
 	DSStore          store.DataSourceStore
 	Registry         *connector.Registry
 	Cfg              *config.Config
@@ -462,6 +463,31 @@ func (h *Handler) processAfterInsert(entries []store.LogEntry) {
 		for _, e := range entries {
 			if e.Level == "error" || e.Level == "fatal" {
 				mcpserver.PopulateFromErrorLog(ctx, h.CodeEntityStore, e)
+			}
+		}
+	}
+
+	// Record deploy markers. The SDK stamps every log with the commit it is
+	// running, so a hash we have not seen before for a (service, env) is the
+	// deploy — nothing to configure and no webhook to miss.
+	//
+	// ponytail: deduped within the batch only; the store's INSERT OR IGNORE
+	//   absorbs repeats across batches. Add a process-level LRU if the write
+	//   volume ever shows up in a profile.
+	if h.DeployStore != nil {
+		seen := make(map[store.Deploy]struct{})
+		for _, e := range entries {
+			if e.CommitHash == "" {
+				continue
+			}
+			key := store.Deploy{CommitHash: e.CommitHash, Service: e.Service, Environment: e.Environment}
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			key.FirstSeenAt = e.Timestamp
+			if err := h.DeployStore.Record(ctx, key); err != nil {
+				slog.Warn("recording deploy marker failed", "error", err, "commit", e.CommitHash)
 			}
 		}
 	}

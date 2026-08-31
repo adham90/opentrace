@@ -67,6 +67,7 @@ var categoryDescriptions = map[string]string{
 	"Errors":                 "Track and manage application errors grouped by fingerprint",
 	"Uptime":                 "Monitor HTTP endpoint availability, response times, and uptime percentage",
 	"Overview":               "High-level system health summaries, investigation, and agent memory",
+	"Users":                  "Per-user and per-tenant activity, the errors one customer hit, and who an error affects",
 	"Watches":                "Alerting rules, triggered alerts, and alert investigation",
 	"Analytics":              "Web analytics and traffic trends",
 	"Code Intelligence":      "Code risk scoring, annotations, test generation, and dependency analysis",

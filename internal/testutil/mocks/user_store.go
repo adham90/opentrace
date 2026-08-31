@@ -18,12 +18,16 @@ var _ store.SessionStore = (*SessionStore)(nil)
 type UserStore struct {
 	mu    sync.Mutex
 	Users map[string]*store.User
+	// Catchup holds per-user catch-up cursors, kept out of store.User so the
+	// model stays what the users table actually selects.
+	Catchup map[string]time.Time
 }
 
 // NewUserStore returns an initialised UserStore mock.
 func NewUserStore() *UserStore {
 	return &UserStore{
-		Users: make(map[string]*store.User),
+		Users:   make(map[string]*store.User),
+		Catchup: make(map[string]time.Time),
 	}
 }
 
@@ -222,5 +226,32 @@ func (m *SessionStore) DeleteAllForUser(_ context.Context, userID string) error 
 			delete(m.Sessions, id)
 		}
 	}
+	return nil
+}
+
+func (m *UserStore) CatchupCursor(_ context.Context, id string) (time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.Users[id]; !ok {
+		return time.Time{}, store.ErrNotFound
+	}
+	return m.Catchup[id], nil
+}
+
+func (m *UserStore) SetCatchupCursor(_ context.Context, id string, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.Users[id]; !ok {
+		return store.ErrNotFound
+	}
+	if m.Catchup == nil {
+		m.Catchup = make(map[string]time.Time)
+	}
+	// Forward-only, matching the SQL store: a concurrent drain must not rewind
+	// the window and resurface already-reported events.
+	if existing, ok := m.Catchup[id]; ok && !at.After(existing) {
+		return nil
+	}
+	m.Catchup[id] = at
 	return nil
 }

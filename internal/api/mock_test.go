@@ -773,3 +773,13 @@ func (m *mockCodeEntityStore) BatchRecomputeRisk(_ context.Context) error { retu
 func (m *mockCodeEntityStore) Prune(_ context.Context, _ time.Duration) (int64, error) {
 	return 0, nil
 }
+
+// Catch-up cursor: these doubles do not exercise it, so the methods exist only
+// to satisfy store.UserStore.
+func (m *mockUserStore) CatchupCursor(context.Context, string) (time.Time, error) {
+	return time.Time{}, nil
+}
+
+func (m *mockUserStore) SetCatchupCursor(context.Context, string, time.Time) error {
+	return nil
+}

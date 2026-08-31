@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -653,4 +654,14 @@ func TestAccessControl_EmptyToken(t *testing.T) {
 	if !isAdmin {
 		t.Error("expected isAdmin=true when MCPToken is empty (backward compat)")
 	}
+}
+
+// Catch-up cursor: these doubles do not exercise it, so the methods exist only
+// to satisfy store.UserStore.
+func (m *mockUserStore) CatchupCursor(context.Context, string) (time.Time, error) {
+	return time.Time{}, nil
+}
+
+func (m *mockUserStore) SetCatchupCursor(context.Context, string, time.Time) error {
+	return nil
 }

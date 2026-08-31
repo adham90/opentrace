@@ -2,6 +2,7 @@ package mocks
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -89,4 +90,41 @@ func (m *ErrorImpactStore) TopByImpact(_ context.Context, _ store.ImpactQueryPar
 }
 func (m *ErrorImpactStore) FindCommonTraits(_ context.Context, _ string) (map[string]any, error) {
 	return nil, nil
+}
+
+// IssueURL mirrors the real store: an unfiled group yields "", a missing one
+// yields ErrNotFound. Tests for issue dedupe depend on that distinction.
+func (m *ErrorGroupStore) IssueURL(_ context.Context, fingerprint, environment string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	g, ok := m.Groups[fingerprint]
+	if !ok {
+		return "", store.ErrNotFound
+	}
+	if environment != "" && g.Environment != environment {
+		return "", store.ErrNotFound
+	}
+	return g.IssueURL, nil
+}
+
+// SetIssueURL claims the group only when it has no issue yet, matching the
+// real store's conditional UPDATE — a second filer must not overwrite the
+// first and orphan its issue.
+func (m *ErrorGroupStore) SetIssueURL(_ context.Context, fingerprint, environment, url string) error {
+	if url == "" {
+		return errors.New("issue url is required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	g, ok := m.Groups[fingerprint]
+	if !ok {
+		return store.ErrNotFound
+	}
+	if environment != "" && g.Environment != environment {
+		return store.ErrNotFound
+	}
+	if g.IssueURL == "" {
+		g.IssueURL = url
+	}
+	return nil
 }

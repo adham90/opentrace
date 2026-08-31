@@ -653,3 +653,11 @@ func TestStoreAndRespond_NoBatchIDUsesQueue(t *testing.T) {
 		t.Errorf("queue depth = %d, want 1", q.QueueDepth())
 	}
 }
+
+// Issue-tracker linkage: these doubles do not exercise it, so the methods exist
+// only to satisfy store.ErrorGroupStore.
+func (m *mockErrorGroupStore) IssueURL(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
+func (m *mockErrorGroupStore) SetIssueURL(context.Context, string, string, string) error { return nil }

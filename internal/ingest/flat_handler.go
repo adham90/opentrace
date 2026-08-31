@@ -119,52 +119,58 @@ func (n *jsonFloat) DecodeMsgpack(dec *msgpack.Decoder) error {
 	return nil
 }
 
-// flatEntry is the JSON structure sent by the new SDK (45 fields).
+// flatEntry is the JSON structure sent by the SDKs and by any hand-written or
+// agent-generated client (45 fields).
+//
+// The `doc` tags are the single source of truth for GET /spec (see spec.go), so
+// the published contract cannot drift from the struct that parses it. Every
+// field must carry a doc tag, and every string field must be listed in either
+// fieldCaps or uncappedStrings — spec_test.go fails otherwise.
 type flatEntry struct {
-	Ts           string          `json:"ts"`
-	Level        string          `json:"level"`
-	Service      string          `json:"service"`
-	Message      string          `json:"message"`
-	Env          string          `json:"env,omitempty"`
-	Version      string          `json:"version,omitempty"`
-	Host         string          `json:"host,omitempty"`
-	Kind         string          `json:"kind,omitempty"`
-	EventType    string          `json:"event_type,omitempty"`
-	TraceID      string          `json:"trace_id,omitempty"`
-	SpanID       string          `json:"span_id,omitempty"`
-	ParentSpanID string          `json:"parent_span_id,omitempty"`
-	RequestID    string          `json:"request_id,omitempty"`
-	UserID       string          `json:"user_id,omitempty"`
-	TenantID     string          `json:"tenant_id,omitempty"`
-	SessionID    string          `json:"session_id,omitempty"`
-	Method       string          `json:"method,omitempty"`
-	Path         string          `json:"path,omitempty"`
-	Route        string          `json:"route,omitempty"`
-	Handler      string          `json:"handler,omitempty"`
-	Status       jsonInt         `json:"status,omitempty"`
-	DurationMs   jsonInt         `json:"duration_ms,omitempty"`
-	DbMs         jsonInt         `json:"db_ms,omitempty"`
-	DbCount      jsonInt         `json:"db_count,omitempty"`
-	CacheMs      jsonInt         `json:"cache_ms,omitempty"`
-	CacheHits    jsonInt         `json:"cache_hits,omitempty"`
-	CacheMisses  jsonInt         `json:"cache_misses,omitempty"`
-	ExtMs        jsonInt         `json:"ext_ms,omitempty"`
-	ExtCount     jsonInt         `json:"ext_count,omitempty"`
-	RenderMs     jsonInt         `json:"render_ms,omitempty"`
-	AllocCount   jsonInt         `json:"alloc_count,omitempty"`
-	MemDeltaMb   jsonFloat       `json:"mem_delta_mb,omitempty"`
-	NPlusOne     *bool           `json:"n_plus_one,omitempty"`
-	SlowQueries  jsonInt         `json:"slow_queries,omitempty"`
-	DupQueries   jsonInt         `json:"dup_queries,omitempty"`
-	ErrorClass   string          `json:"error_class,omitempty"`
-	ErrorMessage string          `json:"error_message,omitempty"`
-	SourceFile   string          `json:"source_file,omitempty"`
-	SourceLine   jsonInt         `json:"source_line,omitempty"`
-	JobClass     string          `json:"job_class,omitempty"`
-	JobQueue     string          `json:"job_queue,omitempty"`
-	JobID        string          `json:"job_id,omitempty"`
-	QueueMs      jsonInt         `json:"queue_ms,omitempty"`
-	Body         json.RawMessage `json:"body,omitempty"`
+	Ts           string          `json:"ts" doc:"Event time, RFC3339 with optional fractional seconds (2026-04-04T10:15:30.123Z). Defaults to server receive time when omitted — send it, or queued entries are stamped with their flush time instead of when they happened."`
+	Level        string          `json:"level" doc:"Severity. One of: debug, info, warn, error, fatal. 'warning' is accepted on the wire and stored as 'warn'."`
+	Service      string          `json:"service" doc:"Logical application name, e.g. 'checkout-api'. Constant for the life of the process; it is the primary grouping key in every query."`
+	Message      string          `json:"message" doc:"Human-readable line. Keep varying values (ids, counts, durations) out of it and in body — this string is what error fingerprinting hashes, so interpolated values split one error into thousands of groups."`
+	Env          string          `json:"env,omitempty" doc:"Deployment environment: production, staging, development. Falls back to the server's configured default when omitted."`
+	Version      string          `json:"version,omitempty" doc:"Build identifier, git commit SHA preferred. Deploy-impact and regression analysis join on this."`
+	Host         string          `json:"host,omitempty" doc:"Machine, container or pod that produced the entry."`
+	Kind         string          `json:"kind,omitempty" doc:"Row discriminator: log, request, job or event. Inferred from the fields present when omitted (see the notes under 'Kind' below), and several fields are only stored on the matching kind."`
+	EventType    string          `json:"event_type,omitempty" doc:"Dotted event name: http.request, job.perform, mail.deliver. Free-form — use a stable vocabulary per service so it stays aggregatable."`
+	TraceID      string          `json:"trace_id,omitempty" doc:"Distributed trace id shared by every entry in one trace. Any stable string; 16-byte hex if you have no existing convention."`
+	SpanID       string          `json:"span_id,omitempty" doc:"Id of the unit of work this entry belongs to."`
+	ParentSpanID string          `json:"parent_span_id,omitempty" doc:"span_id of the enclosing unit of work. Lets the server rebuild the trace tree."`
+	RequestID    string          `json:"request_id,omitempty" doc:"Per-request correlation id (typically the X-Request-Id header). Ties in-request log lines to the request row that produced them."`
+	UserID       string          `json:"user_id,omitempty" doc:"End-user identifier. Drives the 'users affected' count on error groups. Send an opaque id, not an email address."`
+	TenantID     string          `json:"tenant_id,omitempty" doc:"Tenant, organisation or account id for multi-tenant apps."`
+	SessionID    string          `json:"session_id,omitempty" doc:"Session identifier, for grouping one user's activity over time."`
+	Method       string          `json:"method,omitempty" doc:"HTTP method, uppercase: GET, POST. Stored on kind=request rows only."`
+	Path         string          `json:"path,omitempty" doc:"Concrete request path with real values (/users/12345). Stored on kind=request rows only; sensitive segments are scrubbed server-side."`
+	Route        string          `json:"route,omitempty" doc:"Route pattern with placeholders (/users/:id). Endpoint latency and error rates aggregate on this, not on path — without it every distinct URL looks like its own endpoint."`
+	Handler      string          `json:"handler,omitempty" doc:"Code that handled the request: controller#action, function or module name. Stored on kind=request rows only."`
+	Status       jsonInt         `json:"status,omitempty" doc:"HTTP response status code."`
+	DurationMs   jsonInt         `json:"duration_ms,omitempty" doc:"Total wall time in milliseconds. Fractional values are accepted and rounded to the nearest millisecond."`
+	DbMs         jsonInt         `json:"db_ms,omitempty" doc:"Milliseconds spent executing database queries."`
+	DbCount      jsonInt         `json:"db_count,omitempty" doc:"Number of database queries executed."`
+	CacheMs      jsonInt         `json:"cache_ms,omitempty" doc:"Milliseconds spent in cache reads and writes."`
+	CacheHits    jsonInt         `json:"cache_hits,omitempty" doc:"Number of cache hits."`
+	CacheMisses  jsonInt         `json:"cache_misses,omitempty" doc:"Number of cache misses."`
+	ExtMs        jsonInt         `json:"ext_ms,omitempty" doc:"Milliseconds spent in outbound HTTP and third-party API calls."`
+	ExtCount     jsonInt         `json:"ext_count,omitempty" doc:"Number of outbound HTTP and third-party API calls."`
+	RenderMs     jsonInt         `json:"render_ms,omitempty" doc:"Milliseconds spent rendering views or templates."`
+	AllocCount   jsonInt         `json:"alloc_count,omitempty" doc:"Objects allocated while handling this unit of work, if your runtime can report it. Omit rather than guess."`
+	MemDeltaMb   jsonFloat       `json:"mem_delta_mb,omitempty" doc:"Process memory growth in MB over this unit of work. Fractional; stored to two decimal places."`
+	NPlusOne     *bool           `json:"n_plus_one,omitempty" doc:"true when a repeated-query (N+1) pattern was detected. Stored on kind=request rows only."`
+	SlowQueries  jsonInt         `json:"slow_queries,omitempty" doc:"Number of queries that exceeded your slow-query threshold."`
+	DupQueries   jsonInt         `json:"dup_queries,omitempty" doc:"Number of identical queries executed more than once. Stored on kind=request rows only."`
+	ErrorClass   string          `json:"error_class,omitempty" doc:"Exception class name: ActiveRecord::RecordNotFound, TypeError. Part of the error fingerprint, so keep it stable — never append a message to it."`
+	ErrorMessage string          `json:"error_message,omitempty" doc:"Exception message."`
+	SourceFile   string          `json:"source_file,omitempty" doc:"Path of the file where the error was raised, relative to the repository root where possible — the agent uses it to open the code."`
+	SourceLine   jsonInt         `json:"source_line,omitempty" doc:"Line number where the error was raised."`
+	JobClass     string          `json:"job_class,omitempty" doc:"Background job class or handler name."`
+	JobQueue     string          `json:"job_queue,omitempty" doc:"Name of the queue the job ran on."`
+	JobID        string          `json:"job_id,omitempty" doc:"Unique id of this job execution."`
+	QueueMs      jsonInt         `json:"queue_ms,omitempty" doc:"Milliseconds the job spent waiting in the queue before it started running."`
+	Body         json.RawMessage `json:"body,omitempty" doc:"Free-form JSON object for everything the columns do not cover. Stored whole and searchable. Well-known keys the MCP tools read: backtrace (string), exception_causes, handled (boolean), source_context (source lines around source_line), params, queries."`
 }
 
 // HandleFlatIngest is the HTTP handler for POST /api/v2/logs. It accepts the
@@ -179,13 +185,17 @@ func (h *Handler) HandleFlatIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse as array or single object
-	var raw []json.RawMessage
-	trimmed := strings.TrimSpace(string(body))
-	if len(trimmed) > 0 && trimmed[0] == '{' {
-		raw = []json.RawMessage{json.RawMessage(trimmed)}
-	} else if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
-		server.WriteError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %v", err))
+	// Dry run: report what this payload would become and store nothing. Checked
+	// after the body is read so validate mode sees exactly the same bytes the
+	// real path would. See validate.go.
+	if isValidateRequest(r) {
+		h.handleValidate(w, body)
+		return
+	}
+
+	raw, err := splitEntries(body)
+	if err != nil {
+		server.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -261,7 +271,7 @@ func (h *Handler) flatToLogEntry(fe flatEntry, ts time.Time) store.LogEntry {
 		Environment:  truncateField(env, maxIdentFieldBytes),
 		CommitHash:   truncateField(fe.Version, maxIdentFieldBytes),
 		Host:         truncateField(fe.Host, maxIdentFieldBytes),
-		Kind:         deriveKind(fe),
+		Kind:         truncateField(deriveKind(fe), maxIdentFieldBytes),
 		TraceID:      truncateField(fe.TraceID, maxIdentFieldBytes),
 		SpanID:       truncateField(fe.SpanID, maxIdentFieldBytes),
 		ParentSpanID: truncateField(fe.ParentSpanID, maxIdentFieldBytes),

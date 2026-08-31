@@ -69,6 +69,7 @@ func (b *WatchEvidenceBuilder) Build(ctx context.Context, w *store.Watch, result
 					ExceptionClass: cls,
 					Message:        truncate(entry.Message, evidenceMessageMaxLen),
 					Count:          1,
+					Fingerprint:    entry.ErrorFingerprint,
 				}
 			}
 		}

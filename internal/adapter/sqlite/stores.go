@@ -28,5 +28,6 @@ func NewStores(db *bun.DB, logStore store.LogStore) store.Stores {
 		ErrorImpactStore: NewErrorImpactStore(db),
 		TraceStore:       NewTraceStore(db),
 		CodeEntityStore:  NewCodeEntityStore(db),
+		DeployStore:      NewDeployStore(db),
 	}
 }

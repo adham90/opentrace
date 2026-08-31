@@ -160,8 +160,9 @@ func TestUpgradeFromLegacyInstall(t *testing.T) {
 		t.Fatalf("upgrade migration failed: %v", err)
 	}
 
-	if v := scalar[int](t, db, `SELECT MAX(version) FROM schema_version`); v != 2 {
-		t.Errorf("schema_version = %d, want 2", v)
+	if want := latestMigrationVersion(t); scalar[int](t, db, `SELECT MAX(version) FROM schema_version`) != want {
+		t.Errorf("schema_version = %d, want %d",
+			scalar[int](t, db, `SELECT MAX(version) FROM schema_version`), want)
 	}
 
 	// (a) every ConnectorType is now insertable.
@@ -310,11 +311,12 @@ func TestUpgradeIsIdempotent(t *testing.T) {
 					t.Fatalf("migration run %d failed: %v", i, err)
 				}
 			}
-			if v := scalar[int](t, db, `SELECT MAX(version) FROM schema_version`); v != 2 {
-				t.Errorf("schema_version = %d, want 2", v)
+			want := latestMigrationVersion(t)
+			if v := scalar[int](t, db, `SELECT MAX(version) FROM schema_version`); v != want {
+				t.Errorf("schema_version = %d, want %d", v, want)
 			}
-			if n := scalar[int](t, db, `SELECT COUNT(*) FROM schema_version`); n != 2 {
-				t.Errorf("schema_version rows = %d, want 2 (no duplicate applications)", n)
+			if n := scalar[int](t, db, `SELECT COUNT(*) FROM schema_version`); n != want {
+				t.Errorf("schema_version rows = %d, want %d (no duplicate applications)", n, want)
 			}
 			if _, err := db.DB.Exec(`INSERT INTO data_sources (id, type) VALUES ('idem', 'redis')`); err != nil {
 				t.Errorf("type='redis' rejected after repeated migrations: %v", err)
@@ -417,4 +419,32 @@ func snapshot(t *testing.T, db *bun.DB) map[string]string {
 	out["servers/s-fresh"] = scalar[string](t, db, `SELECT last_seen_at FROM servers WHERE id='s-fresh'`)
 	out["app_config/count"] = fmt.Sprint(scalar[int](t, db, `SELECT COUNT(*) FROM app_config`))
 	return out
+}
+
+// latestMigrationVersion reads the highest version from the embedded migration
+// files. Derived rather than hardcoded: every new migration used to break these
+// assertions, which trains people to bump a number instead of reading the test.
+func latestMigrationVersion(t *testing.T) int {
+	t.Helper()
+	entries, err := fs.ReadDir(migrations.FS, ".")
+	if err != nil {
+		t.Fatalf("reading embedded migrations: %v", err)
+	}
+	highest := 0
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".up.sql") {
+			continue
+		}
+		var v int
+		if _, err := fmt.Sscanf(e.Name(), "%06d_", &v); err != nil {
+			continue
+		}
+		if v > highest {
+			highest = v
+		}
+	}
+	if highest == 0 {
+		t.Fatal("found no embedded .up.sql migrations")
+	}
+	return highest
 }

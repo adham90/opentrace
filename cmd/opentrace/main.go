@@ -34,6 +34,7 @@ import (
 	logsingest "github.com/adham90/opentrace/internal/logstore/ingest"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/notify"
+	"github.com/adham90/opentrace/internal/oncall"
 	"github.com/adham90/opentrace/internal/safe"
 	"github.com/adham90/opentrace/internal/version"
 	"github.com/adham90/opentrace/internal/watcher"
@@ -362,6 +363,18 @@ func run() error {
 	watchNotifiers := buildWatchNotifiers(telegramSender, slackSender)
 	healthNotifiers := buildHealthNotifiers(telegramSender, slackSender)
 
+	// The on-call agent runs last in the notifier list: the chat and webhook
+	// channels have already delivered the raw alert by then, so a slow or
+	// failing agent delays a diagnosis, never the alert itself.
+	onCall, err := buildOnCallRunner([]messageSender{telegramSender, slackSender}, deps.ErrorGroupStore)
+	if err != nil {
+		return err
+	}
+	if onCall != nil {
+		watchNotifiers = append(watchNotifiers, &oncall.WatchNotifier{Runner: onCall})
+		healthNotifiers = append(healthNotifiers, &oncall.HealthCheckNotifier{Runner: onCall})
+	}
+
 	// Agent-first watch evaluator + stream (reactive on log ingestion)
 	watchEvaluator := watcher.NewWatchEvaluator(watchMetrics, deps.WatchStore)
 	watchEvidenceBuilder := watcher.NewWatchEvidenceBuilder(deps.LogStore, watchMetrics)
@@ -375,6 +388,13 @@ func run() error {
 	deps.Queue = jobQueue
 
 	// Create server
+	// Nil means "not configured", which overview.status reports as absent
+	// rather than as a broken agent.
+	var onCallStatus func() (time.Time, string, int)
+	if onCall != nil {
+		onCallStatus = onCall.Status
+	}
+
 	srv := api.NewServerWithDeps(api.ServerDeps{
 		Ctx:                  ctx,
 		DB:                   deps.DB,
@@ -383,6 +403,7 @@ func run() error {
 		Cfg:                  deps.Cfg,
 		WatchStreamEvaluator: watchStream,
 		WatchMetrics:         watchMetrics,
+		OnCallStatus:         onCallStatus,
 		ReliabilityProvider:  hcSched,
 		SharedDeps:           deps,
 		Modules:              modules,
@@ -481,6 +502,15 @@ func startJobQueue(ctx context.Context, deps *server.Deps, jobQueue *jobs.Queue)
 	jobScheduler.Add(jobs.Schedule{Name: "data-retention", JobType: "retention:prune", Interval: 1 * time.Hour})
 	jobScheduler.Add(jobs.Schedule{Name: "jobs-retention", JobType: "retention:jobs", Interval: 6 * time.Hour})
 	jobScheduler.Add(jobs.Schedule{Name: "aggregation", JobType: "aggregate:all", Interval: 5 * time.Minute})
+
+	// Dead man's switch. Only registered when configured, so an unset URL costs
+	// nothing rather than enqueueing a job that always fails.
+	if url := os.Getenv(heartbeatURLEnv); url != "" {
+		jobWorker.Register("heartbeat:ping", func(ctx context.Context, _ json.RawMessage) error {
+			return jobs.PingHeartbeat(ctx, url)
+		})
+		jobScheduler.Add(jobs.Schedule{Name: "heartbeat", JobType: "heartbeat:ping", Interval: jobs.HeartbeatInterval})
+	}
 
 	// Reclaim jobs left 'running' by a previous crash before the worker starts.
 	// ClaimNext has no lease, so a crash mid-job wedges that row 'running'
@@ -643,6 +673,12 @@ const jobRetentionWindow = 7 * 24 * time.Hour
 // alertWebhookEnv names the environment variable holding an optional webhook URL
 // that receives both watch-rule and health-check alerts. Unset = no webhook.
 const alertWebhookEnv = "OPENTRACE_ALERT_WEBHOOK_URL"
+
+// heartbeatURLEnv names an optional external URL pinged once a minute to prove
+// this process is alive. Without it, an OpenTrace that has died is
+// indistinguishable from an OpenTrace with nothing to report — we watch the
+// app's heartbeat, and nothing watches ours. Unset = no ping.
+const heartbeatURLEnv = "OPENTRACE_HEARTBEAT_URL"
 
 // buildTelegramSender returns a Telegram sender whose config is read lazily from
 // the settings store on every send, so enabling/disabling Telegram at runtime
