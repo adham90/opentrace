@@ -156,15 +156,18 @@ func excludableField(e *chunk.Entry, field string) string {
 }
 
 // forEachWALEntry calls fn for every entry in every given WAL file. fn returns
-// false to stop the scan early. The entries come from the store's WAL cache and
-// are shared with other in-flight scans, so fn must not modify them.
+// false to stop the scan early. Entries are either shared with other in-flight
+// scans (cached) or reused across records (streamed), so fn must neither modify
+// nor retain them.
 func forEachWALEntry(c *walCache, paths []string, fn func(e *chunk.Entry) bool) {
+	stopped := false
 	for _, path := range paths {
-		entries := c.entries(path)
-		for i := range entries {
-			if !fn(&entries[i]) {
-				return
-			}
+		c.forEach(path, func(e *chunk.Entry) bool {
+			stopped = !fn(e)
+			return !stopped
+		})
+		if stopped {
+			return
 		}
 	}
 }

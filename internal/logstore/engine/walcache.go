@@ -57,22 +57,44 @@ type walCacheFile struct {
 	offset  int64 // bytes of f already parsed into entries
 	entries []chunk.Entry
 	bytes   int64
-	// tooBig marks a file past walCacheMaxEntries: it is parsed per query and
-	// nothing is retained.
-	tooBig bool
 }
 
 func newWALCache() *walCache {
 	return &walCache{files: make(map[string]*walCacheFile)}
 }
 
-// entries returns the parsed contents of the WAL at path. The returned slice is
-// shared with the cache and with concurrent callers: it must be treated as
-// read-only. A missing or unreadable file yields nil, matching the previous
-// behaviour of skipping it.
-func (c *walCache) entries(path string) []chunk.Entry {
+// forEach calls fn for every entry in the WAL at path, stopping early if fn
+// returns false. A missing or unreadable file yields nothing, matching the
+// previous behaviour of skipping it.
+//
+// A WAL that fits the cache is walked from the cached slice. One that does not
+// is streamed a record at a time rather than materialized: the budget bounds
+// what may be *retained*, and reading a 90MB live hour into a slice just to
+// pick 50 rows off it blew that bound on every query — the same "entry count is
+// not a memory budget" mistake this cache exists to avoid, one level up. The
+// callback shape is what makes the streaming version free: every caller already
+// consumes entries one at a time and copies what it keeps.
+//
+// Cached entries are shared with concurrent scans and streamed ones are
+// overwritten by the next record, so in both cases fn must not retain the
+// pointer it is handed.
+func (c *walCache) forEach(path string, fn func(e *chunk.Entry) bool) {
+	if entries, ok := c.cached(path); ok {
+		for i := range entries {
+			if !fn(&entries[i]) {
+				return
+			}
+		}
+		return
+	}
+	streamWALFile(path, fn)
+}
+
+// cached returns the cached parse of path, or ok=false when the file is not
+// cacheable within the budget and should be streamed instead.
+func (c *walCache) cached(path string) ([]chunk.Entry, bool) {
 	if c == nil || WALCacheMaxEntries <= 0 || WALCacheBytes <= 0 {
-		return readWALFile(path)
+		return nil, false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -85,20 +107,31 @@ func (c *walCache) entries(path string) []chunk.Entry {
 	if cf == nil {
 		f, err := os.Open(path)
 		if err != nil {
-			return nil
+			return nil, false
 		}
 		cf = &walCacheFile{f: f}
 		c.files[path] = cf
 		c.evictDeletedLocked(path)
 	}
-	if cf.tooBig {
-		return readWALFile(path)
+
+	// Decide against the budget *before* parsing, not after. Checking only the
+	// parsed result meant a 90MB hour was still read into one slice on every
+	// query and then thrown away for being too big — the allocation the budget
+	// exists to prevent, paid in full, with no cache to show for it.
+	//
+	// On-disk bytes under-count the parsed size (bodies decompress), so this is
+	// a floor: anything it admits is still re-checked below.
+	if size, err := cf.f.Stat(); err == nil {
+		if pending := size.Size() - cf.offset; c.used+pending > WALCacheBytes {
+			c.removeLocked(path)
+			return nil, false
+		}
 	}
 
 	// Parse only what was appended since the last read.
 	if _, err := cf.f.Seek(cf.offset, io.SeekStart); err != nil {
 		c.removeLocked(path)
-		return readWALFile(path)
+		return nil, false
 	}
 	added, consumed, err := wal.ReadEntriesFrom(bufio.NewReaderSize(cf.f, walReadBufferBytes))
 	if err != nil {
@@ -111,14 +144,38 @@ func (c *walCache) entries(path string) []chunk.Entry {
 	cf.bytes += addedBytes
 	c.used += addedBytes
 
-	if WALCacheMaxEntries <= 0 || WALCacheBytes <= 0 ||
-		len(cf.entries) > WALCacheMaxEntries || c.used > WALCacheBytes {
-		out := cf.entries
-		cf.tooBig = true
+	if len(cf.entries) > WALCacheMaxEntries || c.used > WALCacheBytes {
+		// Past the budget: drop what was accumulated and let the caller stream.
+		// Returning the oversized slice here is what made the budget advisory.
 		c.removeLocked(path)
-		return out
+		return nil, false
 	}
-	return cf.entries
+	return cf.entries, true
+}
+
+// streamWALFile walks a WAL a record at a time, reusing one entry. Scanner
+// copies every string and body into the destination (see its doc), so the reuse
+// is safe as long as the callback does not retain the pointer.
+func streamWALFile(path string, fn func(e *chunk.Entry) bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	sc := wal.NewScanner(bufio.NewReaderSize(f, walReadBufferBytes))
+	var e chunk.Entry
+	n := 0
+	for sc.Next(&e) {
+		n++
+		if !fn(&e) {
+			return
+		}
+	}
+	if err := sc.Err(); err != nil {
+		slog.Warn("query: WAL had a torn tail; using parsed entries",
+			"error", err, "wal", filepath.Base(path), "parsed", n)
+	}
 }
 
 // forget drops the cached parse of path, releasing its entries and handle. The
@@ -229,21 +286,4 @@ func entryMemoryBytes(e *chunk.Entry) int64 {
 		total += int64(len(value))
 	}
 	return total
-}
-
-// readWALFile parses a WAL file without caching — the fallback for files that
-// are too large to retain, and for callers with no cache.
-func readWALFile(path string) []chunk.Entry {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-
-	entries, err := wal.ReadEntries(bufio.NewReaderSize(f, walReadBufferBytes))
-	if err != nil {
-		slog.Warn("query: WAL had a torn tail; using parsed entries",
-			"error", err, "wal", filepath.Base(path), "parsed", len(entries))
-	}
-	return entries
 }
