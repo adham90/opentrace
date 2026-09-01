@@ -63,14 +63,28 @@ func (c *chunkRow) sparseInt(name string, dst *int) {
 	}
 }
 
+// sparseBool copies the value rather than storing the column's pointer: the
+// decoded column is shared across queries through the column cache, so handing
+// its pointer out in an Entry would let a caller mutating the field rewrite the
+// chunk's value for everyone else.
 func (c *chunkRow) sparseBool(name string, dst **bool) {
-	if v, ok := chunkValue(c, name, c.c.sparseBool); ok {
-		*dst = v
+	v, ok := chunkValue(c, name, c.c.sparseBool)
+	if !ok || v == nil {
+		return
 	}
+	b := *v
+	*dst = &b
 }
 
+// sparseBytes copies the row's blob out of the decoded column. The column is
+// shared across queries through the column cache, and this value is handed to
+// callers as chunk.Entry.Body — aliasing it would let a caller's write corrupt
+// the chunk for every later reader. The copy is per returned row, not per
+// scanned row, so it costs the page and not the scan.
 func (c *chunkRow) sparseBytes(name string, dst *[]byte) {
-	if v, ok := chunkValue(c, name, c.c.sparseBytes); ok && v != nil {
-		*dst = v
+	v, ok := chunkValue(c, name, c.c.sparseBytes)
+	if !ok || v == nil {
+		return
 	}
+	*dst = append([]byte(nil), v...)
 }

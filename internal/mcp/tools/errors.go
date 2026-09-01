@@ -12,6 +12,11 @@ type ErrorsDeps struct {
 	ErrorGroupStore  store.ErrorGroupStore
 	LogStore         store.LogStore
 	ErrorImpactStore store.ErrorImpactStore
+
+	// CriticalPaths are the money-path patterns from config. Errors matching
+	// one rank above everything else in the impact ranking, whatever their
+	// user count says.
+	CriticalPaths []string
 }
 
 // ErrorsCatalogInfo returns the category, description, and access level for catalog registration.

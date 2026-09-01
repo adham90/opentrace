@@ -60,8 +60,6 @@ type Server struct {
 	errorGroupStore     store.ErrorGroupStore
 	healthCheckStore    store.HealthCheckStore
 	agentNoteStore      store.AgentNoteStore
-	trendStore          store.TrendStore
-	analyticsStore      store.AnalyticsStore
 	errorImpactStore    store.ErrorImpactStore
 	traceStore          store.TraceStore
 	codeEntityStore     store.CodeEntityStore
@@ -72,6 +70,7 @@ type Server struct {
 	streamableServer    *mcp.StreamableHTTPHandler
 	loginLimiter        *RateLimiter
 	apiLimiter          *RateLimiter
+	ingestLimiter       *RateLimiter
 	// Handler is the top-level http.Handler (wraps Router with SSE mux)
 	Handler http.Handler
 	// sseGate is the per-session initialize gate for the SSE transport.
@@ -113,6 +112,7 @@ type ServerDeps struct {
 	WatchStreamEvaluator *watcher.WatchStreamEvaluator
 	WatchMetrics         *watcher.WatchMetrics
 	IngestQueue          *ingest.Queue
+	AutoWatcher          *watcher.AutoWatcher
 	ReliabilityProvider  ReliabilityProvider
 	SharedDeps           *server.Deps
 	Modules              []server.Module
@@ -155,8 +155,6 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		errorGroupStore:     deps.Stores.ErrorGroupStore,
 		healthCheckStore:    deps.Stores.HealthCheckStore,
 		agentNoteStore:      deps.Stores.AgentNoteStore,
-		trendStore:          deps.Stores.TrendStore,
-		analyticsStore:      deps.Stores.AnalyticsStore,
 		errorImpactStore:    deps.Stores.ErrorImpactStore,
 		traceStore:          deps.Stores.TraceStore,
 		codeEntityStore:     deps.Stores.CodeEntityStore,
@@ -191,11 +189,15 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		Cfg:              deps.Cfg,
 		Queue:            deps.IngestQueue,
 	}
+	cfg := deps.Cfg
+	performance := cfg.EffectivePerformance()
+	srv.ingestHandler.StartPostProcessor(performance.PostprocessWorkers, performance.PostprocessQueue)
 	if deps.WatchStreamEvaluator != nil {
 		srv.ingestHandler.WatchStream = deps.WatchStreamEvaluator
 	}
-
-	cfg := deps.Cfg
+	if deps.AutoWatcher != nil {
+		srv.ingestHandler.AutoWatch = deps.AutoWatcher
+	}
 
 	var trustedProxies []string
 	if cfg != nil {
@@ -203,11 +205,14 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	}
 	srv.loginLimiter = NewRateLimiter(10, 1*time.Minute, trustedProxies)
 	srv.apiLimiter = NewRateLimiter(120, 1*time.Minute, trustedProxies)
+	srv.ingestLimiter = NewRateLimiter(performance.IngestRatePerMinute, time.Minute, trustedProxies)
 	loginLimiter := srv.loginLimiter
 	apiLimiter := srv.apiLimiter
+	ingestLimiter := srv.ingestLimiter
+	inFlightIngest := InFlightBodyLimit(int64(performance.IngestInFlightMB)<<20, maxRequestBodyBytes)
 
 	router := chi.NewRouter()
-	router.Use(middleware.Logger)
+	router.Use(conditionalRequestLogger(performance.AccessLog))
 	router.Use(middleware.Recoverer)
 	router.Use(middleware.RequestID)
 	router.Use(PrometheusMiddleware)
@@ -280,9 +285,9 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 		r.Use(srv.DynamicCORSMiddleware)
 
 		// Log ingestion with dynamic API key auth + rate limiting
-		r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/logs", srv.ingestHandler.HandleIngestLogs)
+		r.With(ingestLimiter.Middleware, srv.DynamicAPIKeyAuth, inFlightIngest).Post("/logs", srv.ingestHandler.HandleIngestLogs)
 		// Flat SDK format (Node/JS SDKs). Shares the same pipeline as /api/logs.
-		r.With(apiLimiter.Middleware, srv.DynamicAPIKeyAuth).Post("/v2/logs", srv.ingestHandler.HandleFlatIngest)
+		r.With(ingestLimiter.Middleware, srv.DynamicAPIKeyAuth, inFlightIngest).Post("/v2/logs", srv.ingestHandler.HandleFlatIngest)
 
 		// Expose the API router and middleware so domain modules can
 		// register webhook routes with API key auth (see servers module).
@@ -329,6 +334,24 @@ func NewServerWithDeps(deps ServerDeps) *Server {
 	return srv
 }
 
+// conditionalRequestLogger keeps structured access visibility when explicitly
+// enabled, but never synchronously logs the two high-volume ingest routes.
+func conditionalRequestLogger(enabled bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		if !enabled {
+			return next
+		}
+		logged := middleware.Logger(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/logs" || r.URL.Path == "/api/v2/logs" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			logged.ServeHTTP(w, r)
+		})
+	}
+}
+
 // IngestHandler returns the log ingestion handler so it can be reused by
 // non-HTTP transports (e.g. Unix socket listener).
 func (s *Server) IngestHandler() *ingest.Handler {
@@ -343,6 +366,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.apiLimiter != nil {
 		s.apiLimiter.Stop()
 	}
+	if s.ingestLimiter != nil {
+		s.ingestLimiter.Stop()
+	}
 	if s.sseGate != nil {
 		s.sseGate.Stop()
 	}
@@ -350,6 +376,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	// Flush and stop the ingest queue before closing other resources
 	if s.ingestHandler != nil && s.ingestHandler.Queue != nil {
 		s.ingestHandler.Queue.Stop()
+	}
+	if s.ingestHandler != nil {
+		if err := s.ingestHandler.StopPostProcessor(ctx); err != nil {
+			return err
+		}
 	}
 
 	// Drain audit log channel

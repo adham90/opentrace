@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,7 +17,6 @@ import (
 	"github.com/adham90/opentrace/internal/connector"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/metrics"
-	"github.com/adham90/opentrace/internal/safe"
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
 	"github.com/vmihailenco/msgpack/v5"
@@ -36,6 +34,13 @@ type WatchStreamEvaluator interface {
 	OnLogsReceived(entries []store.LogEntry)
 }
 
+// AutoWatcher arms default and post-deploy watches for a (service,
+// environment, commit) as it is first seen. Minimal interface for the same
+// reason as WatchStreamEvaluator: ingest does not import watcher.
+type AutoWatcher interface {
+	Observe(ctx context.Context, service, environment, commit string)
+}
+
 // Handler holds the dependencies for the log ingestion HTTP handler.
 type Handler struct {
 	LogStore         store.LogStore
@@ -49,9 +54,17 @@ type Handler struct {
 	Registry         *connector.Registry
 	Cfg              *config.Config
 	WatchStream      WatchStreamEvaluator
+	AutoWatch        AutoWatcher
 	Queue            *Queue
 
 	logsConnMu sync.Mutex
+
+	samplingMu      sync.Mutex
+	samplingCached  *compiledSamplingRules
+	samplingExpires time.Time
+
+	postMu        sync.RWMutex
+	postProcessor *postProcessor
 }
 
 // BatchIDPattern matches a UUID in 8-4-4-4-12 hex format.
@@ -199,10 +212,8 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		server.WriteError(w, http.StatusBadRequest, "failed to read request body")
+	batchID, done := h.checkBatchDup(w, r)
+	if done {
 		return
 	}
 
@@ -212,6 +223,11 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.Contains(contentType, "application/msgpack"):
 		// MessagePack decoding
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			server.WriteError(w, http.StatusBadRequest, "failed to read request body")
+			return
+		}
 		if err := msgpack.Unmarshal(body, &entries); err != nil {
 			// Try single object
 			var single ingestLogEntry
@@ -221,21 +237,18 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 			}
 			entries = []ingestLogEntry{single}
 		}
+		if len(entries) > maxIngestBatchEntries {
+			server.WriteError(w, http.StatusBadRequest, fmt.Sprintf("batch exceeds the maximum of %d entries", maxIngestBatchEntries))
+			return
+		}
 	default:
-		// JSON decoding (existing behavior, default for all other content types)
-		trimmed := bytes.TrimSpace(body)
-		if len(trimmed) > 0 && trimmed[0] == '{' {
-			var single ingestLogEntry
-			if err := json.Unmarshal(trimmed, &single); err != nil {
-				server.WriteError(w, http.StatusBadRequest, server.FormatJSONError(err, "object"))
-				return
-			}
-			entries = []ingestLogEntry{single}
-		} else {
-			if err := json.Unmarshal(trimmed, &entries); err != nil {
-				server.WriteError(w, http.StatusBadRequest, server.FormatJSONError(err, "array"))
-				return
-			}
+		// Stream directly into typed entries instead of retaining the full body
+		// and then allocating a second RawMessage per element.
+		var err error
+		entries, err = decodeJSONOneOrMany[ingestLogEntry](r.Body)
+		if err != nil {
+			server.WriteError(w, http.StatusBadRequest, server.FormatJSONError(err, "object or array"))
+			return
 		}
 	}
 
@@ -264,12 +277,6 @@ func (h *Handler) HandleIngestLogs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		e.Level = normalizeLevel(e.Level)
-	}
-
-	// Check for duplicate batch
-	batchID, done := h.checkBatchDup(w, r)
-	if done {
-		return
 	}
 
 	// Both endpoints share one wire→model mapping (flatToLogEntry) so they can
@@ -313,10 +320,7 @@ func (h *Handler) checkBatchDup(w http.ResponseWriter, r *http.Request) (batchID
 func (h *Handler) storeAndRespond(w http.ResponseWriter, r *http.Request, logEntries []store.LogEntry, batchID string) {
 	originalCount := len(logEntries)
 	if h.SettingsStore != nil {
-		rules, _ := h.SettingsStore.GetSamplingRules(r.Context())
-		if len(rules) > 0 {
-			logEntries = ApplySamplingRules(logEntries, rules)
-		}
+		logEntries = h.cachedSamplingRules(r.Context()).apply(logEntries)
 	}
 
 	// Use the async ingest queue when configured, EXCEPT for batches that carry
@@ -347,11 +351,10 @@ func (h *Handler) storeAndRespond(w http.ResponseWriter, r *http.Request, logEnt
 	if count > 0 {
 		h.ensureLogsConnector(r.Context())
 
-		// All post-insert side-effects run async to keep the HTTP response fast.
-		// They use context.Background() since r.Context() is canceled after response.
-		// Panic-isolated: these parse attacker-controlled log bodies/stacks, and a
-		// panic here must not crash the server.
-		safe.Go("ingest.processAfterInsert", func() { h.processAfterInsert(logEntries) })
+		// The server wires a bounded worker pool. A saturated pool runs this job
+		// inline, applying backpressure instead of spawning an unbounded goroutine
+		// and retaining every batch in memory.
+		h.enqueuePostprocess(logEntries)
 	}
 
 	status := http.StatusCreated
@@ -363,6 +366,34 @@ func (h *Handler) storeAndRespond(w http.ResponseWriter, r *http.Request, logEnt
 		resp["sampled"] = true
 	}
 	server.WriteJSON(w, status, resp)
+}
+
+const (
+	samplingCacheTTL      = 5 * time.Second
+	samplingErrorCacheTTL = time.Second
+)
+
+func (h *Handler) cachedSamplingRules(ctx context.Context) *compiledSamplingRules {
+	h.samplingMu.Lock()
+	defer h.samplingMu.Unlock()
+
+	now := time.Now()
+	if h.samplingCached != nil && now.Before(h.samplingExpires) {
+		return h.samplingCached
+	}
+	rules, err := h.SettingsStore.GetSamplingRules(ctx)
+	if err != nil {
+		// Keep the last known rules on a transient DB error and briefly suppress a
+		// retry storm. With no prior value, an empty compiled set means keep all.
+		if h.samplingCached == nil {
+			h.samplingCached = compileSamplingRules(nil)
+		}
+		h.samplingExpires = now.Add(samplingErrorCacheTTL)
+		return h.samplingCached
+	}
+	h.samplingCached = compileSamplingRules(rules)
+	h.samplingExpires = now.Add(samplingCacheTTL)
+	return h.samplingCached
 }
 
 // ensureLogsConnector auto-creates and registers a logs connector if one
@@ -438,7 +469,8 @@ func (h *Handler) ensureLogsConnector(ctx context.Context) {
 // BatchInsert does not write IDs back into the slice leaves both linkages
 // unset — see TestProcessAfterInsert_PropagatesAssignedLogIDs.
 func (h *Handler) processAfterInsert(entries []store.LogEntry) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Evaluate watch rules reactively.
 	if h.WatchStream != nil {
@@ -447,13 +479,32 @@ func (h *Handler) processAfterInsert(entries []store.LogEntry) {
 
 	// Upsert error groups and track user impact.
 	if h.ErrorGroupStore != nil {
-		for _, e := range entries {
-			if e.ErrorFingerprint == "" {
-				continue
+		if batch, ok := h.ErrorGroupStore.(interface {
+			UpsertBatch(context.Context, []store.LogEntry) error
+		}); ok {
+			if err := batch.UpsertBatch(ctx, entries); err != nil {
+				slog.Warn("batching error group updates failed", "error", err, "entries", len(entries))
 			}
-			_ = h.ErrorGroupStore.Upsert(ctx, e)
-			if h.ErrorImpactStore != nil && e.UserID != "" {
-				_ = h.ErrorImpactStore.TrackImpact(ctx, e.ErrorFingerprint, e.Environment, e.UserID, e.Metadata, e.ID, e.Service)
+		} else {
+			for _, e := range entries {
+				if e.ErrorFingerprint != "" {
+					_ = h.ErrorGroupStore.Upsert(ctx, e)
+				}
+			}
+		}
+		if h.ErrorImpactStore != nil {
+			if batch, ok := h.ErrorImpactStore.(interface {
+				TrackImpactBatch(context.Context, []store.LogEntry) error
+			}); ok {
+				if err := batch.TrackImpactBatch(ctx, entries); err != nil {
+					slog.Warn("batching error impact updates failed", "error", err, "entries", len(entries))
+				}
+			} else {
+				for _, e := range entries {
+					if e.ErrorFingerprint != "" && e.UserID != "" {
+						_ = h.ErrorImpactStore.TrackImpact(ctx, e.ErrorFingerprint, e.Environment, e.UserID, e.Metadata, e.ID, e.Service)
+					}
+				}
 			}
 		}
 	}
@@ -474,29 +525,57 @@ func (h *Handler) processAfterInsert(entries []store.LogEntry) {
 	// ponytail: deduped within the batch only; the store's INSERT OR IGNORE
 	//   absorbs repeats across batches. Add a process-level LRU if the write
 	//   volume ever shows up in a profile.
-	if h.DeployStore != nil {
+	//
+	// The same pass arms the automatic watches: a service reporting for the
+	// first time and a commit deploying for the first time are both visible
+	// here, and both are moments where monitoring should exist without anyone
+	// remembering to ask for it.
+	if h.DeployStore != nil || h.AutoWatch != nil {
 		seen := make(map[store.Deploy]struct{})
+		deploys := make([]store.Deploy, 0)
 		for _, e := range entries {
-			if e.CommitHash == "" {
-				continue
-			}
 			key := store.Deploy{CommitHash: e.CommitHash, Service: e.Service, Environment: e.Environment}
 			if _, dup := seen[key]; dup {
 				continue
 			}
 			seen[key] = struct{}{}
+			if h.AutoWatch != nil {
+				h.AutoWatch.Observe(ctx, e.Service, e.Environment, e.CommitHash)
+			}
+			if h.DeployStore == nil || e.CommitHash == "" {
+				continue
+			}
 			key.FirstSeenAt = e.Timestamp
-			if err := h.DeployStore.Record(ctx, key); err != nil {
-				slog.Warn("recording deploy marker failed", "error", err, "commit", e.CommitHash)
+			deploys = append(deploys, key)
+		}
+		if batch, ok := h.DeployStore.(interface {
+			RecordBatch(context.Context, []store.Deploy) error
+		}); ok {
+			if err := batch.RecordBatch(ctx, deploys); err != nil {
+				slog.Warn("recording deploy markers failed", "error", err, "deploys", len(deploys))
+			}
+		} else if h.DeployStore != nil {
+			for _, deploy := range deploys {
+				if err := h.DeployStore.Record(ctx, deploy); err != nil {
+					slog.Warn("recording deploy marker failed", "error", err, "commit", deploy.CommitHash)
+				}
 			}
 		}
 	}
 
 	// Update distributed trace reassembly status.
 	if h.TraceStore != nil {
-		for _, e := range entries {
-			if e.TraceID != "" {
-				_ = h.TraceStore.UpsertTraceStatus(ctx, e.TraceID, e)
+		if batch, ok := h.TraceStore.(interface {
+			UpsertTraceStatusBatch(context.Context, []store.LogEntry) error
+		}); ok {
+			if err := batch.UpsertTraceStatusBatch(ctx, entries); err != nil {
+				slog.Warn("batching trace status updates failed", "error", err, "entries", len(entries))
+			}
+		} else {
+			for _, e := range entries {
+				if e.TraceID != "" {
+					_ = h.TraceStore.UpsertTraceStatus(ctx, e.TraceID, e)
+				}
 			}
 		}
 	}

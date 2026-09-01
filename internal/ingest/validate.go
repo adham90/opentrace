@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -69,15 +70,15 @@ func isValidateRequest(r *http.Request) bool {
 // two shapes both ingest paths have always taken. Shared by the real handler
 // and validate mode so a payload can never parse differently between them.
 func splitEntries(body []byte) ([]json.RawMessage, error) {
-	trimmed := strings.TrimSpace(string(body))
-	if trimmed == "" {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
 		return nil, fmt.Errorf("empty request body: send one entry object or an array of them")
 	}
 	if trimmed[0] == '{' {
 		return []json.RawMessage{json.RawMessage(trimmed)}, nil
 	}
 	var raw []json.RawMessage
-	if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
+	if err := json.Unmarshal(trimmed, &raw); err != nil {
 		return nil, fmt.Errorf("invalid JSON: %v", err)
 	}
 	return raw, nil

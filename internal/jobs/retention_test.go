@@ -26,17 +26,6 @@ func setupRetentionTestDB(t *testing.T) *sql.DB {
 			value TEXT NOT NULL DEFAULT '{}'
 		);
 
-		CREATE TABLE metric_buckets (
-			id               INTEGER PRIMARY KEY AUTOINCREMENT,
-			bucket_start     TEXT NOT NULL,
-			bucket_interval  TEXT NOT NULL,
-			service          TEXT NOT NULL DEFAULT '',
-			endpoint         TEXT NOT NULL DEFAULT '',
-			environment      TEXT NOT NULL DEFAULT '',
-			request_count    INTEGER NOT NULL DEFAULT 0,
-			created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-		);
-
 		CREATE TABLE error_groups (
 			fingerprint   TEXT NOT NULL,
 			environment   TEXT NOT NULL DEFAULT '',
@@ -44,15 +33,6 @@ func setupRetentionTestDB(t *testing.T) *sql.DB {
 			first_seen_at TEXT NOT NULL,
 			last_seen_at  TEXT NOT NULL,
 			PRIMARY KEY (fingerprint, environment)
-		);
-
-		CREATE TABLE deploy_markers (
-			id            INTEGER PRIMARY KEY AUTOINCREMENT,
-			service       TEXT NOT NULL,
-			environment   TEXT NOT NULL DEFAULT '',
-			commit_hash   TEXT NOT NULL,
-			first_seen_at TEXT NOT NULL,
-			request_count INTEGER NOT NULL DEFAULT 1
 		);
 
 		CREATE TABLE watch_runs (
@@ -85,54 +65,31 @@ func countRows(t *testing.T, db *sql.DB, table string) int {
 	return n
 }
 
-func TestCleanupRetentionTables_MetricBuckets(t *testing.T) {
-	db := setupRetentionTestDB(t)
-	ctx := context.Background()
-
-	old := time.Now().UTC().Add(-200 * 24 * time.Hour).Format(time.RFC3339)
-	recent := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
-
-	for _, ts := range []string{old, recent} {
-		if _, err := db.Exec(
-			"INSERT INTO metric_buckets (bucket_start, bucket_interval, created_at) VALUES (?, '1h', ?)",
-			ts, ts); err != nil {
-			t.Fatalf("insert bucket: %v", err)
-		}
-	}
-
-	// Default config: metric_buckets = 180d
-	if _, err := cleanupRetentionTables(ctx, db); err != nil {
-		t.Fatalf("cleanupRetentionTables: %v", err)
-	}
-
-	if got := countRows(t, db, "metric_buckets"); got != 1 {
-		t.Errorf("metric_buckets: want 1 remaining, got %d", got)
-	}
-}
-
+// "never" must skip the table entirely, not fall through to a zero cutoff
+// that deletes everything.
 func TestCleanupRetentionTables_NeverConfig(t *testing.T) {
 	db := setupRetentionTestDB(t)
 	ctx := context.Background()
 
 	if _, err := db.Exec(
-		`INSERT INTO app_config (key, value) VALUES ('retention_policy', '{"metric_buckets":"never"}')`,
+		`INSERT INTO app_config (key, value) VALUES ('retention_policy', '{"error_groups":"never"}')`,
 	); err != nil {
 		t.Fatalf("insert config: %v", err)
 	}
 
 	old := time.Now().UTC().Add(-999 * 24 * time.Hour).Format(time.RFC3339)
 	if _, err := db.Exec(
-		"INSERT INTO metric_buckets (bucket_start, bucket_interval, created_at) VALUES (?, '1h', ?)",
+		"INSERT INTO error_groups (fingerprint, first_seen_at, last_seen_at) VALUES ('a', ?, ?)",
 		old, old); err != nil {
-		t.Fatalf("insert bucket: %v", err)
+		t.Fatalf("insert error group: %v", err)
 	}
 
 	if _, err := cleanupRetentionTables(ctx, db); err != nil {
 		t.Fatalf("cleanupRetentionTables: %v", err)
 	}
 
-	if got := countRows(t, db, "metric_buckets"); got != 1 {
-		t.Errorf("metric_buckets: want 1 (never deleted), got %d", got)
+	if got := countRows(t, db, "error_groups"); got != 1 {
+		t.Errorf("error_groups: want 1 (never deleted), got %d", got)
 	}
 }
 
@@ -161,14 +118,14 @@ func TestCleanupRetentionTables_MissingTable(t *testing.T) {
 }
 
 // TestCleanupRetentionTables_ConfiguredTTLsEnforced proves the error_groups,
-// deploy_markers, watch_runs and watch_alerts TTLs accepted by the admin tool
+// watch_runs and watch_alerts TTLs accepted by the admin tool
 // are actually applied — previously they were parsed and silently dropped.
 func TestCleanupRetentionTables_ConfiguredTTLsEnforced(t *testing.T) {
 	db := setupRetentionTestDB(t)
 	ctx := context.Background()
 
 	if _, err := db.Exec(`INSERT INTO app_config (key, value) VALUES ('retention_policy',
-		'{"error_groups":"30d","deploy_markers":"30d","watch_runs":"7d","watch_alerts":"7d"}')`,
+		'{"error_groups":"30d","watch_runs":"7d","watch_alerts":"7d"}')`,
 	); err != nil {
 		t.Fatalf("insert config: %v", err)
 	}
@@ -182,8 +139,6 @@ func TestCleanupRetentionTables_ConfiguredTTLsEnforced(t *testing.T) {
 	}{
 		{"INSERT INTO error_groups (fingerprint, first_seen_at, last_seen_at) VALUES ('a', ?, ?)", []any{old, old}},
 		{"INSERT INTO error_groups (fingerprint, first_seen_at, last_seen_at) VALUES ('b', ?, ?)", []any{recent, recent}},
-		{"INSERT INTO deploy_markers (service, commit_hash, first_seen_at) VALUES ('api', 'c1', ?)", []any{old}},
-		{"INSERT INTO deploy_markers (service, commit_hash, first_seen_at) VALUES ('api', 'c2', ?)", []any{recent}},
 		{"INSERT INTO watch_runs (id, watch_id, started_at) VALUES ('r1', 'w', ?)", []any{old}},
 		{"INSERT INTO watch_runs (id, watch_id, started_at) VALUES ('r2', 'w', ?)", []any{recent}},
 		{"INSERT INTO watch_alerts (id, watch_id, created_at) VALUES ('a1', 'w', ?)", []any{old}},
@@ -199,11 +154,11 @@ func TestCleanupRetentionTables_ConfiguredTTLsEnforced(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cleanupRetentionTables: %v", err)
 	}
-	if deleted != 4 {
-		t.Errorf("deleted = %d, want 4", deleted)
+	if deleted != 3 {
+		t.Errorf("deleted = %d, want 3", deleted)
 	}
 
-	for _, table := range []string{"error_groups", "deploy_markers", "watch_runs", "watch_alerts"} {
+	for _, table := range []string{"error_groups", "watch_runs", "watch_alerts"} {
 		if got := countRows(t, db, table); got != 1 {
 			t.Errorf("%s: want 1 remaining, got %d", table, got)
 		}

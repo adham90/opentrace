@@ -3,15 +3,11 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/adham90/opentrace/internal/logstore/chunk"
 	"github.com/adham90/opentrace/internal/logstore/index"
-	"github.com/adham90/opentrace/internal/logstore/wal"
 )
 
 // queryView returns the two halves of the searchable world for a time range,
@@ -45,23 +41,8 @@ func (s *Store) walPathsLocked() []string {
 	return paths
 }
 
-// readWALEntries reads one WAL file, tolerating a torn trailing record: the
-// fully-parsed prefix is returned and the tear is logged. Discarding the whole
-// file on a torn tail would hide an entire hour of live logs.
-func readWALEntries(path string) []chunk.Entry {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-
-	entries, err := wal.ReadEntries(f)
-	if err != nil {
-		slog.Warn("query: WAL had a torn tail; using parsed entries",
-			"error", err, "wal", filepath.Base(path), "parsed", len(entries))
-	}
-	return entries
-}
+// walReadBufferBytes is the read-ahead used when parsing a WAL file.
+const walReadBufferBytes = 256 << 10
 
 // isRequestEntry reports whether an entry describes an HTTP request. The label
 // can arrive as kind="request" (current SDKs), event_type="http.request" (the
@@ -175,10 +156,11 @@ func excludableField(e *chunk.Entry, field string) string {
 }
 
 // forEachWALEntry calls fn for every entry in every given WAL file. fn returns
-// false to stop the scan early.
-func forEachWALEntry(paths []string, fn func(e *chunk.Entry) bool) {
+// false to stop the scan early. The entries come from the store's WAL cache and
+// are shared with other in-flight scans, so fn must not modify them.
+func forEachWALEntry(c *walCache, paths []string, fn func(e *chunk.Entry) bool) {
 	for _, path := range paths {
-		entries := readWALEntries(path)
+		entries := c.entries(path)
 		for i := range entries {
 			if !fn(&entries[i]) {
 				return

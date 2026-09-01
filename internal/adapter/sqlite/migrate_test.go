@@ -8,7 +8,7 @@ func TestSQLiteMigrations(t *testing.T) {
 	db := setupTestDB(t)
 
 	// Verify key tables exist (logs table removed — now in segmented store)
-	tables := []string{"data_sources", "app_config", "users", "error_groups", "watches", "metric_buckets"}
+	tables := []string{"data_sources", "app_config", "users", "error_groups", "watches", "deploys"}
 	for _, table := range tables {
 		var name string
 		err := db.QueryRow(

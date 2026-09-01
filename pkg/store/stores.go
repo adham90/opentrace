@@ -17,8 +17,6 @@ type Stores struct {
 	ErrorGroupStore  ErrorGroupStore
 	HealthCheckStore HealthCheckStore
 	AgentNoteStore   AgentNoteStore
-	TrendStore       TrendStore
-	AnalyticsStore   AnalyticsStore
 	ErrorImpactStore ErrorImpactStore
 	TraceStore       TraceStore
 	CodeEntityStore  CodeEntityStore

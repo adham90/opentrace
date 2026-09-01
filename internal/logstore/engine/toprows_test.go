@@ -19,6 +19,15 @@ func TestNeedsPostReadFilter(t *testing.T) {
 			TraceID: "t1", RequestID: "r1", EventType: "http",
 			ErrorClass: "Boom", ErrorFingerprint: "abc",
 		}},
+		// These are decided by applyScalarColumnFilters, so the shortcut is
+		// safe. TestScalarFiltersMatchAcrossSeal is what proves they agree with
+		// matchesParams; this only records that they are column-decided.
+		{"scalar column filters", SearchParams{
+			Method: "GET", Path: "/api", Handler: "OrdersController",
+			TenantID: "t", SourceFile: "a.go", CommitHash: "abc",
+			MinDurationMs: 100, PositiveDurationOnly: true, MinSQLCount: 2,
+			NPlusOneOnly: true, RequestsOnly: true, SinceID: 5,
+		}},
 	}
 	for _, tc := range safe {
 		if needsPostReadFilter(tc.p) {
@@ -26,18 +35,14 @@ func TestNeedsPostReadFilter(t *testing.T) {
 		}
 	}
 
+	// Only the body-dependent filters are left: they cannot be decided before
+	// the row is materialized.
 	unsafe := []struct {
 		name string
 		p    SearchParams
 	}{
-		{"method", SearchParams{Method: "GET"}},
-		{"path", SearchParams{Path: "/api"}},
-		{"tenant", SearchParams{TenantID: "t"}},
-		{"source file", SearchParams{SourceFile: "a.go"}},
-		{"commit", SearchParams{CommitHash: "abc"}},
-		{"min duration", SearchParams{MinDurationMs: 100}},
-		{"n+1 only", SearchParams{NPlusOneOnly: true}},
-		{"cursor", SearchParams{SinceID: 5}},
+		{"metadata", SearchParams{MetadataFilter: map[string]string{"region": "eu"}}},
+		{"exclude", SearchParams{Exclude: map[string]string{"path": "/health"}}},
 	}
 	for _, tc := range unsafe {
 		if !needsPostReadFilter(tc.p) {

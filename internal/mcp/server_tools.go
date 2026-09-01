@@ -168,6 +168,7 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, isAdmin bool, b *CatalogBuild
 				ErrorGroupStore:  deps.ErrorGroupStore,
 				LogStore:         deps.LogStore,
 				ErrorImpactStore: deps.ErrorImpactStore,
+				CriticalPaths:    criticalPaths(deps),
 			})),
 			GatewayEntry{
 				Description: "Error management: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, reopen, new",
@@ -213,6 +214,7 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, isAdmin bool, b *CatalogBuild
 			DeployStore:      deps.DeployStore,
 			UserStore:        deps.UserStore,
 			OnCallStatus:     deps.OnCallStatus,
+			CriticalPaths:    criticalPaths(deps),
 		})),
 		GatewayEntry{
 			Description: "System overview, catch-up since your last visit, triage, diagnosis, incident timeline, and agent memory",
@@ -268,52 +270,36 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, isAdmin bool, b *CatalogBuild
 		b.Add("watches", "Watch management: status, create, delete, alerts, dismiss, acknowledge, investigate", "Watches", "read", "")
 	}
 
-	// --- analytics ---
-	if deps.AnalyticsStore != nil || deps.TrendStore != nil {
-		gw.Register("analytics",
-			wrapHandler(deps, "analytics", tools.AnalyticsHandler(tools.AnalyticsDeps{
-				AnalyticsStore: deps.AnalyticsStore,
-				TrendStore:     deps.TrendStore,
+	// The `analytics` tool was removed: its traffic / endpoints / heatmap /
+	// trends / movers actions all read endpoint_stats, metric_buckets and
+	// traffic_heatmap, which nothing has written since log storage moved to the
+	// segmented store. Request performance comes from logs(action:"performance"),
+	// measured from the logs themselves.
+
+	// --- code (risk scoring over the entities extracted from error backtraces) ---
+	//
+	// Eight actions were removed here. annotate_file / annotate_function and
+	// deps_service / deps_blast / deps_risk read the analytics store, which no
+	// longer has a writer. gen_context / gen_suggest re-served
+	// errors(action:"list") with an English sentence attached. hotspots ran the
+	// same TopByRisk query as fragile under different field names.
+	if deps.CodeEntityStore != nil || deps.ErrorGroupStore != nil {
+		gw.Register("code",
+			wrapHandler(deps, "code", tools.CodeIntelHandler(tools.CodeIntelDeps{
+				CodeEntityStore: deps.CodeEntityStore,
+				ErrorGroupStore: deps.ErrorGroupStore,
+				AgentNoteStore:  deps.AgentNoteStore,
 			})),
 			GatewayEntry{
-				Description: "Web analytics and trends: traffic, endpoints, heatmap, trends, movers",
-				Actions:     []string{"traffic", "endpoints", "heatmap", "trends", "movers"},
-				Category:    "Analytics",
+				Description: "Code risk intelligence: risk (score a set of files), fragile (top risky entities)",
+				Actions:     []string{"risk", "fragile"},
+				Category:    "Code Intelligence",
 				Access:      "read",
 				ReadOnly:    true,
 				Idempotent:  true,
-				Params:      map[string]string{"service": "Filter by service", "time_range": "15m/1h/6h/24h/7d", "limit": "Max results"},
+				Params:      map[string]string{"service": "Filter by service", "files": "Array of file paths (risk)", "limit": "Max results (fragile)"},
 			})
-		b.Add("analytics", "Web analytics and trends: traffic, endpoints, heatmap, trends, movers", "Analytics", "read", "")
-	}
-
-	// --- code (unified: code_intel + annotations + test_gen + dependencies) ---
-	if deps.CodeEntityStore != nil ||
-		deps.AnalyticsStore != nil || deps.ErrorGroupStore != nil {
-		gw.Register("code",
-			wrapHandler(deps, "code", tools.CodeHandler(tools.CodeDeps{
-				CodeEntityStore:  deps.CodeEntityStore,
-				ErrorGroupStore:  deps.ErrorGroupStore,
-				ErrorImpactStore: deps.ErrorImpactStore,
-				AgentNoteStore:   deps.AgentNoteStore,
-				AnalyticsStore:   deps.AnalyticsStore,
-				LogStore:         deps.LogStore,
-			})),
-			GatewayEntry{
-				Description: "Code intelligence, annotations, test generation, and dependency analysis",
-				Actions: []string{
-					"risk", "fragile",
-					"annotate_file", "annotate_function", "hotspots",
-					"gen_context", "gen_suggest",
-					"deps_service", "deps_blast", "deps_risk",
-				},
-				Category:   "Code Intelligence",
-				Access:     "read",
-				ReadOnly:   true,
-				Idempotent: true,
-				Params:     map[string]string{"service": "Filter by service", "fingerprint": "Error fingerprint", "path": "Source file path", "files": "Array of file paths (risk)"},
-			})
-		b.Add("code", "Code intelligence, annotations, test generation, and dependency analysis", "Code Intelligence", "read", "")
+		b.Add("code", "Code risk intelligence: risk, fragile", "Code Intelligence", "read", "")
 	}
 
 	// --- servers (unified: list_servers + query_metrics + server_health) ---
@@ -378,11 +364,11 @@ func registerReadOnlyTools(gw *Gateway, deps Deps, isAdmin bool, b *CatalogBuild
 					"record_type":     "Record type (audit_trail)",
 					"record_id":       "Record ID (audit_trail)",
 					"actor_id":        "Actor ID (search_audit)",
-					"action":          "Action filter (search_audit)",
+					"audit_action":    "Audit action filter (search_audit)",
 					"fingerprint":     "SQL fingerprint (search_sql)",
 					"table_name":      "Table name (search_sql)",
 					"min_duration_ms": "Minimum SQL duration in ms (search_sql)",
-					"last":            "Time window: 1h, 24h, 7d (email_captures, search_audit, search_sql)",
+					"last":            "Time window: 1h, 24h, 7d — bounds every cross-log search (email_captures, audit_trail, search_audit, search_sql)",
 					"limit":           "Max results (search_sql, default 50)",
 					"config":          "JSON config object (update_pii_config, update_retention)",
 				},
@@ -431,4 +417,13 @@ func registerWriteTools(gw *Gateway, deps Deps, b *CatalogBuilder) {
 			Params:      map[string]string{"user_id": "User ID", "role": "admin/member", "entity_type": "query/endpoint/service/healthcheck/error", "summary": "Investigation summary (session_summary)"},
 		})
 	b.Add("admin", "Admin operations: settings, users, audit, notes, retention, activity, session_summary", "Admin", "admin", "")
+}
+
+// criticalPaths returns the configured money-path patterns, or nil when there
+// is no config (tests construct Deps without one).
+func criticalPaths(deps Deps) []string {
+	if deps.Config == nil {
+		return nil
+	}
+	return deps.Config.CriticalPaths
 }

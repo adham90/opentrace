@@ -125,7 +125,7 @@ func TestChunkColumnsDecodeOnce(t *testing.T) {
 		return cols.r.ReadZstdInt64(name)
 	}
 	for range rows {
-		if _, err := memoColumn(cols, cols.ints, "ts", counting); err != nil {
+		if _, err := memoColumn(cols, cols.ints, "ts", counting, sizeOfInt64s); err != nil {
 			t.Fatalf("memoColumn: %v", err)
 		}
 	}

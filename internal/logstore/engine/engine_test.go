@@ -128,6 +128,34 @@ func TestRingBufferSubscribe(t *testing.T) {
 	unsub()
 }
 
+func TestRingBufferProjectsBodiesAndBoundsSubscriberBatch(t *testing.T) {
+	ring := NewRingBuffer()
+	ch, unsub := ring.Subscribe()
+	defer unsub()
+
+	entries := make([]chunk.Entry, ringSize+10)
+	for i := range entries {
+		entries[i] = chunk.Entry{ID: int64(i + 1), Message: "tail", Body: []byte(`{"large":"body"}`)}
+	}
+	ring.Push(entries)
+
+	received := <-ch
+	if len(received) != ringSize {
+		t.Fatalf("subscriber batch = %d entries, want %d", len(received), ringSize)
+	}
+	if received[0].ID != 11 || received[len(received)-1].ID != int64(len(entries)) {
+		t.Fatalf("subscriber received wrong suffix: first=%d last=%d", received[0].ID, received[len(received)-1].ID)
+	}
+	for i := range received {
+		if len(received[i].Body) != 0 {
+			t.Fatalf("subscriber entry %d retained body", i)
+		}
+	}
+	if snap := ring.Snapshot(); len(snap) != ringSize || len(snap[0].Body) != 0 {
+		t.Fatalf("snapshot was not projected/bounded: len=%d", len(snap))
+	}
+}
+
 func TestRingBufferMultipleSubscribers(t *testing.T) {
 	ring := NewRingBuffer()
 	ch1, unsub1 := ring.Subscribe()

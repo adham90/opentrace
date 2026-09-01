@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -15,14 +16,28 @@ import (
 
 // SegmentMeta holds pre-computed statistics for a sealed segment.
 type SegmentMeta struct {
-	Segment    string              `json:"segment"`
-	Chunks     []ChunkMeta         `json:"chunks"`
-	EntryCount int                 `json:"entry_count"`
-	IDRange    [2]int64            `json:"id_range"`
-	TimeRange  [2]string           `json:"time_range"`
-	Counts     MetaCounts          `json:"counts"`
-	Histogram  map[string]HBucket  `json:"histogram"`
-	Dicts      map[string][]string `json:"dictionaries"`
+	FormatVersion int                 `json:"format_version,omitempty"`
+	ChunkEntries  int                 `json:"chunk_entries,omitempty"`
+	Segment       string              `json:"segment"`
+	Chunks        []ChunkMeta         `json:"chunks"`
+	EntryCount    int                 `json:"entry_count"`
+	IDRange       [2]int64            `json:"id_range"`
+	TimeRange     [2]string           `json:"time_range"`
+	Counts        MetaCounts          `json:"counts"`
+	Histogram     map[string]HBucket  `json:"histogram"`
+	Dicts         map[string][]string `json:"dictionaries"`
+}
+
+// SealChunkEntries is the physical row-group size for newly sealed segments.
+// It may be smaller than the logical ID chunk size; GetByID resolves through
+// meta.json ID ranges, so existing 50k chunks and new small row groups coexist.
+var SealChunkEntries = chunkSize
+
+func effectiveSealChunkEntries() int {
+	if SealChunkEntries < 1 || SealChunkEntries > chunkSize {
+		return chunkSize
+	}
+	return SealChunkEntries
 }
 
 // ChunkMeta holds info about a single chunk within a segment.
@@ -68,25 +83,52 @@ func Seal(walPath string, segmentHour int64) (*SegmentMeta, error) {
 		return nil, fmt.Errorf("refusing to reseal %s: segment already sealed", segName)
 	}
 
-	// Read all entries from the WAL
+	// Stream the WAL a chunk at a time rather than loading the hour.
+	//
+	// Seal used to read every record into one slice before writing the first
+	// chunk, so its peak memory was set by how busy the hour had been — a
+	// 600-byte entry plus its body for every log line, all live at once, every
+	// hour. Reading exactly one chunk's worth, writing it, and reusing the same
+	// slice bounds that to the chunk size no matter how much arrived.
 	f, err := os.Open(walPath)
 	if err != nil {
 		return nil, fmt.Errorf("open WAL: %w", err)
 	}
 
-	entries, err := wal.ReadEntries(f)
+	acc := newMetaAccumulator(segName)
+	sc := wal.NewScanner(bufio.NewReaderSize(f, walReadBufferBytes))
+	physicalChunkSize := effectiveSealChunkEntries()
+	batch := make([]chunk.Entry, 0, physicalChunkSize)
+	total := 0
+	for {
+		// Never let a physical row group cross a logical ID-chunk boundary.
+		// Within that boundary IDs are contiguous, so meta.IDRange can map an ID
+		// to its physical row without changing the composite ID format.
+		limit := min(physicalChunkSize, chunkSize-(total%chunkSize))
+		batch = sc.NextBatch(batch[:0], limit)
+		if len(batch) == 0 {
+			break
+		}
+		acc.add(batch)
+		if err := writeChunk(segDir, len(acc.meta.Chunks), batch, acc.meta); err != nil {
+			f.Close()
+			return nil, err
+		}
+		total += len(batch)
+	}
+	err = sc.Err()
 	f.Close()
 	if err != nil {
-		// ReadEntries returns everything it parsed before the bad record.
-		// Aborting here used to discard that prefix permanently: the WAL had
-		// already been rotated out of the query path, the re-seal failed
-		// identically at every startup, and a whole hour of valid entries
-		// became unsearchable because of one torn record. Seal what parsed.
+		// The scan yields everything parsed before the bad record. Aborting here
+		// used to discard that prefix permanently: the WAL had already been
+		// rotated out of the query path, the re-seal failed identically at every
+		// startup, and a whole hour of valid entries became unsearchable because
+		// of one torn record. Seal what parsed.
 		slog.Warn("seal: WAL truncated at a bad record; sealing the valid prefix",
-			"error", err, "segment", segName, "entries", len(entries))
+			"error", err, "segment", segName, "entries", total)
 	}
 
-	if len(entries) == 0 {
+	if total == 0 {
 		if err != nil {
 			// Nothing parseable at all. Deleting would destroy evidence and
 			// leaving it in place would make every startup retry the same
@@ -104,12 +146,9 @@ func Seal(walPath string, segmentHour int64) (*SegmentMeta, error) {
 		return nil, nil
 	}
 
-	slog.Info("seal: starting", "segment", segName, "entries", len(entries))
+	slog.Info("seal: starting", "segment", segName, "entries", total)
 
-	meta := buildSegmentMeta(entries, segName)
-	if err := writeChunks(segDir, entries, meta); err != nil {
-		return nil, err
-	}
+	meta := acc.finish()
 
 	// Write meta.json (durably). Chunks and index were already fsynced by their
 	// writers.
@@ -144,119 +183,154 @@ func Seal(walPath string, segmentHour int64) (*SegmentMeta, error) {
 
 	slog.Info("seal: complete",
 		"segment", segName,
-		"entries", len(entries),
+		"entries", total,
 		"chunks", len(meta.Chunks),
 	)
 
 	return meta, nil
 }
 
-// buildSegmentMeta runs the stats pass: per-level/service counts, the per-minute
-// histogram and the column dictionaries.
-func buildSegmentMeta(entries []chunk.Entry, segName string) *SegmentMeta {
-	meta := &SegmentMeta{
-		Segment:    segName,
-		EntryCount: len(entries),
-		IDRange:    [2]int64{entries[0].ID, entries[len(entries)-1].ID},
-		Counts: MetaCounts{
-			ByLevel:        make(map[string]int),
-			ByService:      make(map[string]int),
-			ByServiceError: make(map[string]int),
+// metaAccumulator builds a segment's meta.json incrementally, so the stats pass
+// can run over one chunk at a time instead of over a slice holding the whole
+// hour. Everything it tracks is either a running total or a first/last value,
+// which is what makes streaming possible at all.
+type metaAccumulator struct {
+	meta     *SegmentMeta
+	dictSets map[string]map[string]bool
+	first    *chunk.Entry
+	last     chunk.Entry
+	seen     int
+}
+
+func newMetaAccumulator(segName string) *metaAccumulator {
+	return &metaAccumulator{
+		meta: &SegmentMeta{
+			FormatVersion: 2,
+			ChunkEntries:  effectiveSealChunkEntries(),
+			Segment:       segName,
+			Counts: MetaCounts{
+				ByLevel:        make(map[string]int),
+				ByService:      make(map[string]int),
+				ByServiceError: make(map[string]int),
+			},
+			Histogram: make(map[string]HBucket),
+			Dicts:     make(map[string][]string),
 		},
-		Histogram: make(map[string]HBucket),
-		Dicts:     make(map[string][]string),
+		dictSets: map[string]map[string]bool{
+			"service":    {},
+			"level":      {},
+			"env":        {},
+			"event_type": {},
+		},
 	}
+}
 
-	// Time range from received_at (monotonic)
-	meta.TimeRange = [2]string{
-		time.UnixMilli(entries[0].ReceivedAt).UTC().Format(time.RFC3339),
-		time.UnixMilli(entries[len(entries)-1].ReceivedAt).UTC().Format(time.RFC3339),
+// add folds one batch of entries into the running totals. The batch's backing
+// array is reused by the caller for the next batch, so anything retained here
+// is copied.
+func (a *metaAccumulator) add(entries []chunk.Entry) {
+	if len(entries) == 0 {
+		return
 	}
+	if a.first == nil {
+		first := entries[0]
+		a.first = &first
+	}
+	a.last = entries[len(entries)-1]
+	a.seen += len(entries)
 
-	dictSets := map[string]map[string]bool{
-		"service":    {},
-		"level":      {},
-		"env":        {},
-		"event_type": {},
-	}
+	// Consecutive entries almost always share a minute (received_at is assigned
+	// at append time), so the key is formatted once per minute, not once per row.
+	var lastMinute int64 = -1
+	var minuteKey string
 
 	for i := range entries {
 		e := &entries[i]
 
-		meta.Counts.ByLevel[e.Level]++
+		a.meta.Counts.ByLevel[e.Level]++
 		if e.Service != "" {
-			meta.Counts.ByService[e.Service]++
+			a.meta.Counts.ByService[e.Service]++
 			if isErrorLevel(e.Level) {
-				meta.Counts.ByServiceError[e.Service]++
+				a.meta.Counts.ByServiceError[e.Service]++
 			}
 		}
 
-		minuteKey := time.UnixMilli(e.ReceivedAt).UTC().Format("2006-01-02T15:04")
-		bucket := meta.Histogram[minuteKey]
+		if minute := e.ReceivedAt / 60000; minute != lastMinute {
+			lastMinute = minute
+			minuteKey = time.UnixMilli(minute * 60000).UTC().Format("2006-01-02T15:04")
+		}
+		bucket := a.meta.Histogram[minuteKey]
 		bucket.Total++
 		if isErrorLevel(e.Level) {
 			bucket.Errors++
 		}
-		meta.Histogram[minuteKey] = bucket
+		a.meta.Histogram[minuteKey] = bucket
 
-		dictSets["level"][e.Level] = true
+		a.dictSets["level"][e.Level] = true
 		if e.Service != "" {
-			dictSets["service"][e.Service] = true
+			a.dictSets["service"][e.Service] = true
 		}
 		if e.Env != "" {
-			dictSets["env"][e.Env] = true
+			a.dictSets["env"][e.Env] = true
 		}
 		if e.EventType != "" {
-			dictSets["event_type"][e.EventType] = true
+			a.dictSets["event_type"][e.EventType] = true
 		}
 	}
+}
 
-	for name, set := range dictSets {
+// finish resolves the fields that need the whole segment: the entry count, the
+// ID and time ranges, and the column dictionaries.
+func (a *metaAccumulator) finish() *SegmentMeta {
+	a.meta.EntryCount = a.seen
+	if a.first != nil {
+		a.meta.IDRange = [2]int64{a.first.ID, a.last.ID}
+		a.meta.TimeRange = [2]string{
+			time.UnixMilli(a.first.ReceivedAt).UTC().Format(time.RFC3339),
+			time.UnixMilli(a.last.ReceivedAt).UTC().Format(time.RFC3339),
+		}
+	}
+	for name, set := range a.dictSets {
 		vals := make([]string, 0, len(set))
 		for v := range set {
 			vals = append(vals, v)
 		}
-		meta.Dicts[name] = vals
+		a.meta.Dicts[name] = vals
 	}
-	return meta
+	return a.meta
 }
 
-// writeChunks runs the write pass: columnar chunks plus their inverted indexes,
-// recording each chunk in meta.
-func writeChunks(segDir string, entries []chunk.Entry, meta *SegmentMeta) error {
-	chunkEntries := splitChunks(entries, chunkSize)
-	meta.Chunks = make([]ChunkMeta, len(chunkEntries))
+// writeChunk runs the write pass for one chunk: the columnar file plus its
+// inverted index, recorded in meta.
+func writeChunk(segDir string, ci int, entries []chunk.Entry, meta *SegmentMeta) error {
+	chunkPath := filepath.Join(segDir, fmt.Sprintf("chunk_%03d.col", ci))
+	idxPath := filepath.Join(segDir, fmt.Sprintf("chunk_%03d.idx", ci))
 
-	for ci, ce := range chunkEntries {
-		chunkPath := filepath.Join(segDir, fmt.Sprintf("chunk_%03d.col", ci))
-		idxPath := filepath.Join(segDir, fmt.Sprintf("chunk_%03d.idx", ci))
-
-		w, err := chunk.NewWriter(chunkPath, ce)
-		if err != nil {
-			return fmt.Errorf("create chunk %d: %w", ci, err)
-		}
-		if err := w.WriteAllColumns(); err != nil {
-			w.Close()
-			return fmt.Errorf("write chunk %d columns: %w", ci, err)
-		}
-		if err := w.Close(); err != nil {
-			return fmt.Errorf("close chunk %d: %w", ci, err)
-		}
-
-		idxBuilder := index.NewBuilder()
-		for ri, e := range ce {
-			idxBuilder.Add(uint32(ri), e.Message)
-		}
-		if err := idxBuilder.Write(idxPath, len(ce)); err != nil {
-			return fmt.Errorf("write index %d: %w", ci, err)
-		}
-
-		meta.Chunks[ci] = ChunkMeta{
-			Index:      ci,
-			EntryCount: len(ce),
-			IDRange:    [2]int64{ce[0].ID, ce[len(ce)-1].ID},
-		}
+	w, err := chunk.NewWriter(chunkPath, entries)
+	if err != nil {
+		return fmt.Errorf("create chunk %d: %w", ci, err)
 	}
+	if err := w.WriteAllColumns(); err != nil {
+		w.Close()
+		return fmt.Errorf("write chunk %d columns: %w", ci, err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("close chunk %d: %w", ci, err)
+	}
+
+	idxBuilder := index.NewBuilder()
+	for ri := range entries {
+		idxBuilder.Add(uint32(ri), entries[ri].Message)
+	}
+	if err := idxBuilder.Write(idxPath, len(entries)); err != nil {
+		return fmt.Errorf("write index %d: %w", ci, err)
+	}
+
+	meta.Chunks = append(meta.Chunks, ChunkMeta{
+		Index:      ci,
+		EntryCount: len(entries),
+		IDRange:    [2]int64{entries[0].ID, entries[len(entries)-1].ID},
+	})
 	return nil
 }
 
@@ -290,22 +364,6 @@ func syncDir(dir string) error {
 		return err
 	}
 	return d.Close()
-}
-
-// splitChunks divides entries into chunks of at most maxSize.
-func splitChunks(entries []chunk.Entry, maxSize int) [][]chunk.Entry {
-	if len(entries) == 0 {
-		return nil
-	}
-	var chunks [][]chunk.Entry
-	for i := 0; i < len(entries); i += maxSize {
-		end := i + maxSize
-		if end > len(entries) {
-			end = len(entries)
-		}
-		chunks = append(chunks, entries[i:end])
-	}
-	return chunks
 }
 
 // IsSealComplete checks if a segment directory has a .seal_complete marker.

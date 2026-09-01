@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"container/heap"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,6 +39,19 @@ type Store struct {
 	// not been registered as a segment yet. Queries scan these files, so a long
 	// or failed seal no longer blanks out the hour it is sealing.
 	pendingSeals map[int64]string
+
+	// walCache holds the parsed unsealed WALs so repeated queries in the same
+	// live hour don't re-parse them from disk.
+	walCache *walCache
+
+	// columns caches decoded columns of sealed chunks across queries.
+	columns *columnCache
+	indexes *index.Cache
+
+	// querySem bounds whole-query working sets across requests. Per-query
+	// segment concurrency alone still allowed N HTTP requests to each allocate
+	// that many decoders and row buffers at once.
+	querySem chan struct{}
 }
 
 // NewStore creates and initializes the segmented log store.
@@ -57,18 +71,26 @@ func NewStore(dataDir string, samplingRules []ingest.SamplingRule, piiConfig ing
 
 	pipeline := ingest.NewPipeline(samplingRules, piiConfig)
 
-	return &Store{
+	s := &Store{
 		dataDir:      dataDir,
 		writer:       writer,
 		segments:     segments,
 		ring:         ring,
 		pipeline:     pipeline,
 		pendingSeals: make(map[int64]string),
-	}, nil
+		walCache:     newWALCache(),
+		columns:      newColumnCache(ColumnCacheBytes),
+		indexes:      index.NewCache(IndexCacheBytes),
+	}
+	if MaxConcurrentQueries > 0 {
+		s.querySem = make(chan struct{}, MaxConcurrentQueries)
+	}
+	return s, nil
 }
 
 // Close shuts down the store gracefully.
 func (s *Store) Close() error {
+	s.walCache.close()
 	return s.writer.Close()
 }
 
@@ -137,6 +159,9 @@ func (s *Store) sealPending(hour int64, path string) error {
 	}
 	delete(s.pendingSeals, hour)
 	s.pendingMu.Unlock()
+	// The rotated WAL is now a segment; nothing will query it by path again, so
+	// release its cached parse instead of pinning a whole hour of entries.
+	s.walCache.forget(path)
 	return nil
 }
 
@@ -204,16 +229,29 @@ type SearchParams struct {
 	Limit   int
 	Offset  int
 	SortAsc bool // true = oldest first
+	// OmitBody skips the opaque body column when the caller only needs indexed
+	// summary fields. Body-dependent filters override it for correctness.
+	OmitBody bool
 }
 
 // SearchResult holds search results.
 type SearchResult struct {
 	Entries []chunk.Entry
-	Total   int // total matching (may be > len(Entries) if limited)
+	// Total is the number of matching rows (may be > len(Entries) if limited).
+	// When a body-dependent filter (MetadataFilter / Exclude) is in play the
+	// scan stops as soon as it has a full page, so Total is a lower bound
+	// rather than an exact count — an exact one would mean materializing every
+	// matching row of every hour in range, which is what that bound exists to
+	// prevent.
+	Total int
 }
 
 // Search finds log entries matching the given parameters.
 func (s *Store) Search(params SearchParams) (*SearchResult, error) {
+	if s.querySem != nil {
+		s.querySem <- struct{}{}
+		defer func() { <-s.querySem }()
+	}
 	if params.Limit <= 0 {
 		params.Limit = 50
 	}
@@ -248,7 +286,7 @@ func (s *Store) Search(params SearchParams) (*SearchResult, error) {
 	if len(segs) > 0 {
 		results := make([][]chunk.Entry, len(segs))
 		counts := make([]int, len(segs))
-		sem := make(chan struct{}, searchConcurrency)
+		sem := make(chan struct{}, SearchConcurrency)
 		var wg sync.WaitGroup
 		for i, seg := range segs {
 			wg.Add(1)
@@ -279,8 +317,8 @@ func (s *Store) Search(params SearchParams) (*SearchResult, error) {
 	}
 
 	// Query unsealed WALs (live hour + any seal in progress).
-	activeMatches := searchWALs(walPaths, params)
-	total += len(activeMatches)
+	activeMatches, activeTotal := searchWALsTop(s.walCache, walPaths, params, perSegLimit)
+	total += activeTotal
 	allMatches = append(allMatches, activeMatches...)
 
 	// Sort by timestamp with a stable ID tiebreak so pagination is deterministic.
@@ -299,21 +337,31 @@ func (s *Store) Search(params SearchParams) (*SearchResult, error) {
 	return &SearchResult{Entries: allMatches, Total: total}, nil
 }
 
-// searchConcurrency bounds how many sealed segments are scanned in parallel.
-const searchConcurrency = 8
+// SearchConcurrency bounds how many sealed segments one query scans in
+// parallel. MaxConcurrentQueries bounds the number of such working sets.
+// Configure both before opening a Store.
+var (
+	SearchConcurrency          = 8
+	MaxConcurrentQueries       = 8
+	IndexCacheBytes      int64 = 16 << 20
+)
 
 // sortEntriesByTs sorts by timestamp (asc/desc per asc), breaking ties by ID so
 // results are deterministic across pages (equal-timestamp rows don't reorder).
 func sortEntriesByTs(entries []chunk.Entry, asc bool) {
 	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].Ts != entries[j].Ts {
-			if asc {
-				return entries[i].Ts < entries[j].Ts
-			}
-			return entries[i].Ts > entries[j].Ts
-		}
-		return entries[i].ID < entries[j].ID
+		return entryComesBefore(&entries[i], &entries[j], asc)
 	})
+}
+
+func entryComesBefore(a, b *chunk.Entry, asc bool) bool {
+	if a.Ts != b.Ts {
+		if asc {
+			return a.Ts < b.Ts
+		}
+		return a.Ts > b.Ts
+	}
+	return a.ID < b.ID
 }
 
 // capEntriesByTs returns at most max entries — the most relevant by timestamp
@@ -334,14 +382,18 @@ var ErrEntryNotFound = errors.New("log entry not found")
 
 // GetByID retrieves a single entry by composite ID.
 func (s *Store) GetByID(id int64) (*chunk.Entry, error) {
-	hour, chunkNum, row := DecodeID(id)
+	hour, _, _ := DecodeID(id)
 
 	seg := s.segments.FindSegmentByID(id)
 	if seg == nil {
 		// Not in a sealed segment: try the unsealed WALs.
-		return findInWALs(s.walPaths(), id)
+		return findInWALs(s.walCache, s.walPaths(), id)
 	}
 
+	chunkNum, row, ok := locatePhysicalChunk(seg.Meta, id)
+	if !ok {
+		return nil, fmt.Errorf("%w: entry ID %d", ErrEntryNotFound, id)
+	}
 	chunkPath := filepath.Join(seg.DirPath, fmt.Sprintf("chunk_%03d.col", chunkNum))
 	r, err := chunkpkg.OpenReader(chunkPath)
 	if err != nil {
@@ -357,7 +409,20 @@ func (s *Store) GetByID(id int64) (*chunk.Entry, error) {
 		return nil, fmt.Errorf("%w: entry ID %d (row %d of %d)", ErrEntryNotFound, id, row, r.EntryCount)
 	}
 
-	return readEntryFromChunk(newChunkColumns(r), row)
+	return readEntryFromChunk(newCachedChunkColumns(r, s.columns, chunkPath), row)
+}
+
+func locatePhysicalChunk(meta *SegmentMeta, id int64) (chunkIndex, row int, ok bool) {
+	if meta == nil {
+		return 0, 0, false
+	}
+	for _, cm := range meta.Chunks {
+		if id < cm.IDRange[0] || id > cm.IDRange[1] {
+			continue
+		}
+		return cm.Index, int(id - cm.IDRange[0]), true
+	}
+	return 0, 0, false
 }
 
 // GetBody retrieves just the body blob for an entry.
@@ -411,18 +476,26 @@ func (s *Store) CountByLevel(start, end time.Time, service, environment string) 
 			}
 			continue
 		}
-		entries, err := s.searchSegment(seg, SearchParams{Start: &start, End: &end, Service: service, Env: environment})
+		params := SearchParams{Start: &start, End: &end, Service: service, Env: environment}
+		err := s.scanSegment(seg, params, func(cols *chunkColumns, rows []int) error {
+			levels, err := cols.dictBitpack("level")
+			if err != nil {
+				return err
+			}
+			for _, row := range rows {
+				if row < len(levels) {
+					counts[levels[row]]++
+				}
+			}
+			return nil
+		})
 		if err != nil {
 			slog.Warn("count: segment scan error", "segment", seg.DirName, "error", err)
-			continue
-		}
-		for i := range entries {
-			counts[entries[i].Level]++
 		}
 	}
 
 	// Unsealed counts (service + env filters applied).
-	walCounts := countWALsByLevel(walPaths, start, end, service, environment)
+	walCounts := countWALsByLevel(s.walCache, walPaths, start, end, service, environment)
 	for level, count := range walCounts {
 		counts[level] += count
 	}
@@ -466,21 +539,35 @@ func (s *Store) CountByServiceDetailed(start, end time.Time, environment string)
 			}
 			continue
 		}
-		entries, err := s.searchSegment(seg, SearchParams{Start: &start, End: &end, Env: environment})
+		params := SearchParams{Start: &start, End: &end, Env: environment}
+		err := s.scanSegment(seg, params, func(cols *chunkColumns, rows []int) error {
+			services, err := cols.dictZstd("service")
+			if err != nil {
+				return err
+			}
+			levels, err := cols.dictBitpack("level")
+			if err != nil {
+				return err
+			}
+			for _, row := range rows {
+				errs := 0
+				if row < len(levels) && isErrorLevel(levels[row]) {
+					errs = 1
+				}
+				svc := ""
+				if row < len(services) {
+					svc = services[row]
+				}
+				add(svc, 1, errs)
+			}
+			return nil
+		})
 		if err != nil {
 			slog.Warn("count: segment scan error", "segment", seg.DirName, "error", err)
-			continue
-		}
-		for i := range entries {
-			errs := 0
-			if isErrorLevel(entries[i].Level) {
-				errs = 1
-			}
-			add(entries[i].Service, 1, errs)
 		}
 	}
 
-	for svc, c := range countWALsByService(walPaths, start, end, environment) {
+	for svc, c := range countWALsByService(s.walCache, walPaths, start, end, environment) {
 		add(svc, c.Total, c.Errors)
 	}
 
@@ -568,7 +655,7 @@ func (s *Store) HistogramFiltered(start, end time.Time, interval time.Duration, 
 		}
 		s.addSegmentHistogram(minuteCounts, seg, start, end, filter)
 	}
-	addWALHistogram(minuteCounts, walPaths, start, end, filter)
+	addWALHistogram(s.walCache, minuteCounts, walPaths, start, end, filter)
 
 	// Pre-size the bucket slice, then assign each data point to its bucket by
 	// index — O(data points), never iterating empty minutes of the span.
@@ -595,25 +682,46 @@ func (s *Store) HistogramFiltered(start, end time.Time, interval time.Duration, 
 // addSegmentHistogram folds a sealed segment's matching rows into the minute
 // buckets, keyed by received_at like the precomputed buckets are.
 func (s *Store) addSegmentHistogram(minuteCounts map[string]HBucket, seg *LoadedSegment, start, end time.Time, filter HistogramFilter) {
-	entries, err := s.searchSegment(seg, SearchParams{
+	params := SearchParams{
 		Start:   &start,
 		End:     &end,
 		Service: filter.Service,
 		Level:   filter.Level,
 		Env:     filter.Environment,
+	}
+	err := s.scanSegment(seg, params, func(cols *chunkColumns, rows []int) error {
+		received, err := cols.deltaInt64("received_at")
+		if err != nil {
+			return err
+		}
+		levels, err := cols.dictBitpack("level")
+		if err != nil {
+			return err
+		}
+		// Rows arrive in row order, which is received_at order, so consecutive
+		// rows almost always land in the same minute — formatting the key once
+		// per minute instead of once per row is the whole cost of this loop.
+		var lastMinute int64 = -1
+		var key string
+		for _, row := range rows {
+			if row >= len(received) {
+				continue
+			}
+			if minute := received[row] / 60000; minute != lastMinute {
+				lastMinute = minute
+				key = time.UnixMilli(minute * 60000).UTC().Format("2006-01-02T15:04")
+			}
+			bucket := minuteCounts[key]
+			bucket.Total++
+			if row < len(levels) && isErrorLevel(levels[row]) {
+				bucket.Errors++
+			}
+			minuteCounts[key] = bucket
+		}
+		return nil
 	})
 	if err != nil {
 		slog.Warn("histogram: segment scan error", "segment", seg.DirName, "error", err)
-		return
-	}
-	for i := range entries {
-		key := time.UnixMilli(entries[i].ReceivedAt).UTC().Format("2006-01-02T15:04")
-		bucket := minuteCounts[key]
-		bucket.Total++
-		if isErrorLevel(entries[i].Level) {
-			bucket.Errors++
-		}
-		minuteCounts[key] = bucket
 	}
 }
 
@@ -652,20 +760,54 @@ func (s *Store) DistinctValues(column string, start, end time.Time, service, lev
 		}
 		return false
 	}
+	// Sealed segments answer from the single column asked for. Materializing an
+	// entry per row to read one string was the dominant cost of every watch
+	// rule that counts distinct fingerprints or users.
 	for _, seg := range segs {
-		entries, err := s.searchSegment(seg, params)
+		full := false
+		err := s.scanSegment(seg, params, func(cols *chunkColumns, rows []int) error {
+			values, err := cols.sparseStrings(column)
+			if err != nil {
+				return err
+			}
+			for _, row := range rows {
+				if row < len(values) && values[row] != "" {
+					seen[values[row]] = struct{}{}
+					if len(seen) >= maxDistinctValues {
+						full = true
+						return nil
+					}
+				}
+			}
+			return nil
+		})
 		if err != nil {
 			slog.Warn("distinct: segment scan error", "segment", seg.DirName, "error", err)
 			continue
 		}
-		if collect(entries) {
+		if full {
 			break
 		}
 	}
 	if len(seen) < maxDistinctValues {
-		collect(searchWALs(walPaths, params))
+		collect(searchWALs(s.walCache, walPaths, params))
 	}
 	return sortedKeys(seen)
+}
+
+// dictColumnReader returns the decoder for a dict-encoded column. level is
+// bitpacked; service, env and event_type are dict+zstd (event_type is stored
+// sparsely). Keeping this in one place stops the distinct scan from having to
+// materialize an entry just to pick the right field.
+func dictColumnReader(column string) func(*chunkColumns) ([]string, error) {
+	switch column {
+	case "level":
+		return func(c *chunkColumns) ([]string, error) { return c.dictBitpack("level") }
+	case "event_type":
+		return func(c *chunkColumns) ([]string, error) { return c.sparseStrings("event_type") }
+	default: // service, env
+		return func(c *chunkColumns) ([]string, error) { return c.dictZstd(column) }
+	}
 }
 
 // distinctDictValues resolves dict-encoded columns. Sealed segments answer from
@@ -688,19 +830,26 @@ func (s *Store) distinctDictValues(column string, segs []*LoadedSegment, walPath
 			}
 			continue
 		}
-		entries, err := s.searchSegment(seg, params)
+		read := dictColumnReader(column)
+		err := s.scanSegment(seg, params, func(cols *chunkColumns, rows []int) error {
+			values, err := read(cols)
+			if err != nil {
+				return err
+			}
+			for _, row := range rows {
+				if row < len(values) && values[row] != "" {
+					seen[values[row]] = struct{}{}
+				}
+			}
+			return nil
+		})
 		if err != nil {
 			slog.Warn("distinct: segment scan error", "segment", seg.DirName, "error", err)
 			continue
 		}
-		for i := range entries {
-			if v := dictColumnValue(&entries[i], column); v != "" {
-				seen[v] = struct{}{}
-			}
-		}
 	}
 
-	forEachWALEntry(walPaths, func(e *chunk.Entry) bool {
+	forEachWALEntry(s.walCache, walPaths, func(e *chunk.Entry) bool {
 		if !matchesParams(e, params) {
 			return true
 		}
@@ -795,20 +944,25 @@ func (s *Store) searchSegment(seg *LoadedSegment, params SearchParams) ([]chunk.
 	return allResults, nil
 }
 
-func (s *Store) searchChunk(chunkPath, idxPath string, entryCount int, params SearchParams) ([]chunk.Entry, error) {
+// openChunkRows opens a chunk, resolves the full-text query through the
+// inverted index, and applies every column-indexed filter — everything up to
+// the point where a caller decides what to do with the surviving rows.
+//
+// The returned reader is the caller's to close.
+func openChunkRows(cache *columnCache, indexes *index.Cache, chunkPath, idxPath string, params SearchParams) (*chunkpkg.Reader, *chunkColumns, []int, error) {
 	// Step 1: If full-text query, use inverted index to get candidate rows
 	var candidates map[uint32]bool
 	if params.Query != "" {
-		idx, err := index.OpenReader(idxPath)
+		idx, err := indexes.Open(idxPath)
 		if err != nil {
-			return nil, fmt.Errorf("open index: %w", err)
+			return nil, nil, nil, fmt.Errorf("open index: %w", err)
 		}
 		rowIDs, err := idx.Search(params.Query)
 		if err != nil {
-			return nil, fmt.Errorf("index search: %w", err)
+			return nil, nil, nil, fmt.Errorf("index search: %w", err)
 		}
 		if len(rowIDs) == 0 {
-			return nil, nil // no FTS matches
+			return nil, nil, nil, nil // no FTS matches
 		}
 		candidates = make(map[uint32]bool, len(rowIDs))
 		for _, id := range rowIDs {
@@ -819,17 +973,17 @@ func (s *Store) searchChunk(chunkPath, idxPath string, entryCount int, params Se
 	// Step 2: Open chunk and filter by column values
 	r, err := chunkpkg.OpenReader(chunkPath)
 	if err != nil {
-		return nil, fmt.Errorf("open chunk: %w", err)
+		return nil, nil, nil, fmt.Errorf("open chunk: %w", err)
 	}
-	defer r.Close()
 
-	// Decode each column at most once for this scan; the cache dies with the
-	// function, so nothing is retained past the query.
-	cols := newChunkColumns(r)
+	// Decode each column at most once for this scan, and reuse decodings of this
+	// immutable chunk across queries through the shared cache.
+	cols := newCachedChunkColumns(r, cache, chunkPath)
 
 	// Start with all rows (or FTS candidates)
-	matchingRows := make([]int, 0)
+	var matchingRows []int
 	if candidates != nil {
+		matchingRows = make([]int, 0, len(candidates))
 		for row := range candidates {
 			matchingRows = append(matchingRows, int(row))
 		}
@@ -843,8 +997,52 @@ func (s *Store) searchChunk(chunkPath, idxPath string, entryCount int, params Se
 
 	matchingRows, err = applyColumnFilters(cols, params, matchingRows)
 	if err != nil {
+		r.Close()
+		return nil, nil, nil, err
+	}
+	return r, cols, matchingRows, nil
+}
+
+// scanSegment applies params to a sealed segment and hands each chunk's decoded
+// columns and surviving row numbers to visit, without materializing any entry.
+//
+// This is the path for aggregates — counts, histograms, distinct values — which
+// need one or two fields per row. Materializing a full entry decodes ~45
+// columns and costs a 600-byte struct per row, so a count of a busy hour used
+// to allocate tens of megabytes to read a single string column.
+//
+// params must not carry a filter that only a materialized row can decide
+// (needsPostReadFilter); callers that need one must use searchSegment.
+func (s *Store) scanSegment(seg *LoadedSegment, params SearchParams, visit func(cols *chunkColumns, rows []int) error) error {
+	for _, cm := range seg.Meta.Chunks {
+		chunkPath := filepath.Join(seg.DirPath, fmt.Sprintf("chunk_%03d.col", cm.Index))
+		idxPath := filepath.Join(seg.DirPath, fmt.Sprintf("chunk_%03d.idx", cm.Index))
+
+		r, cols, rows, err := openChunkRows(s.columns, s.indexes, chunkPath, idxPath, params)
+		if err != nil {
+			return fmt.Errorf("scan chunk %d: %w", cm.Index, err)
+		}
+		if r == nil {
+			continue // no full-text matches in this chunk
+		}
+		err = visit(cols, rows)
+		r.Close()
+		if err != nil {
+			return fmt.Errorf("scan chunk %d: %w", cm.Index, err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) searchChunk(chunkPath, idxPath string, entryCount int, params SearchParams) ([]chunk.Entry, error) {
+	r, cols, matchingRows, err := openChunkRows(s.columns, s.indexes, chunkPath, idxPath, params)
+	if err != nil {
 		return nil, err
 	}
+	if r == nil {
+		return nil, nil // no full-text matches
+	}
+	defer r.Close()
 
 	if len(matchingRows) == 0 {
 		return nil, nil
@@ -862,16 +1060,33 @@ func (s *Store) searchChunk(chunkPath, idxPath string, entryCount int, params Se
 	// away. On an unfiltered query that meant materializing every row of every
 	// hour in range: a 24h summary over a normal day's volume ran for minutes and
 	// timed out, on a query whose answer is 2000 rows.
-	//
-	// Only safe when no post-read filter can reject a row, since those decide
-	// which rows survive and are only knowable after the read.
-	if limit := params.Offset + params.Limit; limit > 0 && len(matchingRows) > limit && !needsPostReadFilter(filterParams) {
+	limit := params.Offset + params.Limit
+	postFilter := needsPostReadFilter(filterParams)
+	if limit > 0 && len(matchingRows) > limit && !postFilter {
 		matchingRows, err = topRowsByTs(cols, matchingRows, params.SortAsc, limit)
 		if err != nil {
 			return nil, err
 		}
 	}
 
+	// A post-read filter (metadata / exclude) can only be judged once a row is
+	// materialized, so the shortcut above cannot pick winners up front. Walking
+	// the candidates in the caller's sort order and stopping at the first
+	// `limit` survivors gets the same page with the same memory bound: without
+	// it, one such query materialized every matching row of every hour in
+	// range — and Search scans up to searchConcurrency segments at once, so a
+	// busy day's worth was several gigabytes of live entries at peak.
+	if limit > 0 && postFilter && len(matchingRows) > limit {
+		matchingRows, err = rowsInTsOrder(cols, matchingRows, params.SortAsc)
+		if err != nil {
+			return nil, err
+		}
+		return materializeUntil(cols, matchingRows, filterParams, limit, chunkPath, true), nil
+	}
+
+	// Fill each entry in place at the tail of the result slice: chunk.Entry is
+	// 600 bytes, so allocating one per row and copying it in cost an allocation
+	// and a copy per matching row.
 	entries := make([]chunk.Entry, 0, len(matchingRows))
 	skipped := 0
 	var firstErr error
@@ -883,18 +1098,19 @@ func (s *Store) searchChunk(chunkPath, idxPath string, entryCount int, params Se
 		}
 	}()
 	for _, row := range matchingRows {
-		entry, err := readEntryFromChunk(cols, row)
-		if err != nil {
+		entries = entries[:len(entries)+1]
+		e := &entries[len(entries)-1]
+		if err := fillEntryFromChunkProjected(cols, row, e, !params.OmitBody); err != nil {
 			skipped++
 			if firstErr == nil {
 				firstErr = err
 			}
+			entries = entries[:len(entries)-1]
 			continue
 		}
-		if !matchesParams(entry, filterParams) {
-			continue
+		if !matchesParams(e, filterParams) {
+			entries = entries[:len(entries)-1]
 		}
-		entries = append(entries, *entry)
 	}
 
 	return entries, nil
@@ -934,7 +1150,171 @@ func applyColumnFilters(c *chunkColumns, params SearchParams, rows []int) ([]int
 			return nil, err
 		}
 	}
+	return applyScalarColumnFilters(c, params, rows)
+}
+
+// applyScalarColumnFilters applies the remaining per-row predicates that can be
+// decided from a column, without materializing an entry.
+//
+// These used to run only after a row had been read, which forced every
+// request-shaped query — the slowest-endpoints scan, the performance summary,
+// any search filtered by path or handler — to build a 600-byte entry and decode
+// ~45 columns for every candidate row, and blocked the top-N narrowing that
+// keeps an unfiltered page cheap. Only MetadataFilter and Exclude are left for
+// after the read; both need the entry body.
+func applyScalarColumnFilters(c *chunkColumns, p SearchParams, rows []int) ([]int, error) {
+	strFilters := []struct {
+		col   string
+		value string
+		match func(stored, want string) bool
+	}{
+		{"tenant_id", p.TenantID, strings.EqualFold},
+		{"source_file", p.SourceFile, strings.EqualFold},
+		// The commit is stored in the entry's version column (see the adapter's
+		// CommitHash <-> Version mapping).
+		{"version", p.CommitHash, strings.EqualFold},
+		{"method", p.Method, strings.EqualFold},
+		{"path", p.Path, containsFold},
+		{"handler", p.Handler, handlerMatches},
+	}
+	for _, f := range strFilters {
+		if f.value == "" {
+			continue
+		}
+		if !c.hasColumn(f.col) {
+			return nil, nil
+		}
+		values, err := c.sparseStrings(f.col)
+		if err != nil {
+			return nil, fmt.Errorf("read sparse column %s: %w", f.col, err)
+		}
+		rows = keepRows(rows, func(row int) bool {
+			return row < len(values) && f.match(values[row], f.value)
+		})
+		if len(rows) == 0 {
+			return nil, nil
+		}
+	}
+
+	intFilters := []struct {
+		col string
+		min int
+	}{
+		{"duration_ms", p.MinDurationMs},
+		{"db_count", p.MinSQLCount},
+	}
+	if p.PositiveDurationOnly && p.MinDurationMs <= 0 {
+		intFilters[0].min = 1
+	}
+	for _, f := range intFilters {
+		if f.min <= 0 {
+			continue
+		}
+		values, err := c.sparseInt64(f.col)
+		if err != nil {
+			return nil, fmt.Errorf("read sparse column %s: %w", f.col, err)
+		}
+		rows = keepRows(rows, func(row int) bool {
+			return row < len(values) && values[row] != nil && *values[row] >= int64(f.min)
+		})
+		if len(rows) == 0 {
+			return nil, nil
+		}
+	}
+
+	if p.NPlusOneOnly {
+		values, err := c.sparseBool("n_plus_one")
+		if err != nil {
+			return nil, fmt.Errorf("read sparse column n_plus_one: %w", err)
+		}
+		rows = keepRows(rows, func(row int) bool {
+			return row < len(values) && values[row] != nil && *values[row]
+		})
+		if len(rows) == 0 {
+			return nil, nil
+		}
+	}
+
+	if p.SinceID > 0 {
+		ids, err := c.deltaInt64("id")
+		if err != nil {
+			return nil, fmt.Errorf("read id column: %w", err)
+		}
+		rows = keepRows(rows, func(row int) bool {
+			return row < len(ids) && ids[row] > p.SinceID
+		})
+		if len(rows) == 0 {
+			return nil, nil
+		}
+	}
+
+	if p.RequestsOnly {
+		var err error
+		if rows, err = filterRequestRows(c, rows); err != nil {
+			return nil, err
+		}
+	}
 	return rows, nil
+}
+
+// filterRequestRows keeps the rows that describe an HTTP request, mirroring
+// isRequestEntry against the columns it reads.
+func filterRequestRows(c *chunkColumns, rows []int) ([]int, error) {
+	kinds, err := c.dictZstd("kind")
+	if err != nil {
+		return nil, fmt.Errorf("read kind column: %w", err)
+	}
+	eventTypes, err := c.sparseStrings("event_type")
+	if err != nil {
+		return nil, fmt.Errorf("read event_type column: %w", err)
+	}
+	durations, err := c.sparseInt64("duration_ms")
+	if err != nil {
+		return nil, fmt.Errorf("read duration_ms column: %w", err)
+	}
+	methods, err := c.sparseStrings("method")
+	if err != nil {
+		return nil, fmt.Errorf("read method column: %w", err)
+	}
+	paths, err := c.sparseStrings("path")
+	if err != nil {
+		return nil, fmt.Errorf("read path column: %w", err)
+	}
+	handlers, err := c.sparseStrings("handler")
+	if err != nil {
+		return nil, fmt.Errorf("read handler column: %w", err)
+	}
+	at := func(v []string, row int) string {
+		if row < len(v) {
+			return v[row]
+		}
+		return ""
+	}
+	return keepRows(rows, func(row int) bool {
+		if strings.EqualFold(at(kinds, row), "request") || strings.EqualFold(at(eventTypes, row), "http.request") {
+			return true
+		}
+		if row >= len(durations) || durations[row] == nil || *durations[row] <= 0 {
+			return false
+		}
+		return at(methods, row) != "" || at(paths, row) != "" || at(handlers, row) != ""
+	}), nil
+}
+
+// keepRows filters rows in place — the slice is scratch owned by the scan.
+func keepRows(rows []int, keep func(row int) bool) []int {
+	out := rows[:0]
+	for _, row := range rows {
+		if keep(row) {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// containsFold is the case-insensitive substring test the Path filter uses.
+func containsFold(stored, want string) bool {
+	return strings.Contains(strings.ToLower(stored), strings.ToLower(want))
 }
 
 // needsPostReadFilter reports whether matchesParams can still reject a row after
@@ -942,20 +1322,66 @@ func applyColumnFilters(c *chunkColumns, params SearchParams, rows []int) ([]int
 // event_type/error_class/error_fingerprint) and the time range have already been
 // applied to the row set by this point; these are the ones that have not.
 func needsPostReadFilter(p SearchParams) bool {
-	return p.Method != "" ||
-		p.Path != "" ||
-		p.Handler != "" ||
-		p.TenantID != "" ||
-		p.SourceFile != "" ||
-		p.CommitHash != "" ||
-		p.MinDurationMs > 0 ||
-		p.PositiveDurationOnly ||
-		p.MinSQLCount > 0 ||
-		p.NPlusOneOnly ||
-		p.RequestsOnly ||
-		p.SinceID > 0 ||
-		len(p.MetadataFilter) > 0 ||
-		len(p.Exclude) > 0
+	// Everything else is now decided by applyScalarColumnFilters. These two need
+	// the entry body, which only exists once the row is materialized.
+	return len(p.MetadataFilter) > 0 || len(p.Exclude) > 0
+}
+
+// rowsInTsOrder returns rows sorted by timestamp in the caller's direction, so
+// a scan that has to materialize rows to filter them still meets the newest
+// (or oldest) candidates first and can stop early.
+func rowsInTsOrder(c *chunkColumns, rows []int, asc bool) ([]int, error) {
+	tsValues, err := c.zstdInt64("ts")
+	if err != nil {
+		return nil, fmt.Errorf("read ts column for ordering: %w", err)
+	}
+	ordered := make([]int, len(rows))
+	copy(ordered, rows)
+	sort.Slice(ordered, func(i, j int) bool {
+		ti, tj := tsAt(tsValues, ordered[i]), tsAt(tsValues, ordered[j])
+		if ti != tj {
+			if asc {
+				return ti < tj
+			}
+			return ti > tj
+		}
+		if asc {
+			return ordered[i] < ordered[j]
+		}
+		return ordered[i] > ordered[j]
+	})
+	return ordered, nil
+}
+
+// materializeUntil reads rows in the given order, keeping those that survive the
+// post-read filters, and stops as soon as it has n of them. rows must already be
+// in the caller's sort order for the result to be the right page.
+func materializeUntil(cols *chunkColumns, rows []int, params SearchParams, n int, chunkPath string, includeBody bool) []chunk.Entry {
+	entries := make([]chunk.Entry, 0, n)
+	skipped := 0
+	var firstErr error
+	for _, row := range rows {
+		if len(entries) == n {
+			break
+		}
+		entries = entries[:len(entries)+1]
+		e := &entries[len(entries)-1]
+		if err := fillEntryFromChunkProjected(cols, row, e, includeBody); err != nil {
+			skipped++
+			if firstErr == nil {
+				firstErr = err
+			}
+			entries = entries[:len(entries)-1]
+			continue
+		}
+		if !matchesParams(e, params) {
+			entries = entries[:len(entries)-1]
+		}
+	}
+	if skipped > 0 {
+		slog.Warn("search: skipped unreadable rows", "chunk", filepath.Base(chunkPath), "rows", skipped, "error", firstErr)
+	}
+	return entries
 }
 
 // topRowsByTs picks the n rows that sort first by timestamp, reading only the ts
@@ -979,27 +1405,61 @@ func selectTopRows(tsValues []int64, rows []int, asc bool, n int) []int {
 		return rows
 	}
 
-	ordered := make([]int, len(rows))
-	copy(ordered, rows)
-	sort.Slice(ordered, func(i, j int) bool {
-		ti, tj := tsAt(tsValues, ordered[i]), tsAt(tsValues, ordered[j])
-		if ti != tj {
-			if asc {
-				return ti < tj
-			}
-			return ti > tj
+	// Keep only the page-sized winner set. Sorting every candidate allocated a
+	// second full row slice and cost O(rows log rows) for a 50-row answer.
+	h := &rowTopHeap{asc: asc, rows: make([]rowCandidate, 0, n)}
+	for _, row := range rows {
+		candidate := rowCandidate{row: row, ts: tsAt(tsValues, row)}
+		if h.Len() < n {
+			heap.Push(h, candidate)
+			continue
 		}
-		// Stable tiebreak on row order, mirroring the ID tiebreak the caller
-		// applies after the merge (row order is id order within a chunk).
-		if asc {
-			return ordered[i] < ordered[j]
+		if rowComesBefore(candidate, h.rows[0], asc) {
+			h.rows[0] = candidate
+			heap.Fix(h, 0)
 		}
-		return ordered[i] > ordered[j]
-	})
+	}
+	selected := make([]int, len(h.rows))
+	for i := range h.rows {
+		selected[i] = h.rows[i].row
+	}
+	sort.Ints(selected)
+	return selected
+}
 
-	ordered = ordered[:n]
-	sort.Ints(ordered)
-	return ordered
+type rowCandidate struct {
+	row int
+	ts  int64
+}
+
+func rowComesBefore(a, b rowCandidate, asc bool) bool {
+	if a.ts != b.ts {
+		if asc {
+			return a.ts < b.ts
+		}
+		return a.ts > b.ts
+	}
+	return a.row < b.row
+}
+
+// rowTopHeap keeps the worst selected row at index zero.
+type rowTopHeap struct {
+	rows []rowCandidate
+	asc  bool
+}
+
+func (h rowTopHeap) Len() int { return len(h.rows) }
+func (h rowTopHeap) Less(i, j int) bool {
+	return rowComesBefore(h.rows[j], h.rows[i], h.asc)
+}
+func (h rowTopHeap) Swap(i, j int) { h.rows[i], h.rows[j] = h.rows[j], h.rows[i] }
+func (h *rowTopHeap) Push(v any)   { h.rows = append(h.rows, v.(rowCandidate)) }
+func (h *rowTopHeap) Pop() any {
+	old := h.rows
+	n := len(old)
+	v := old[n-1]
+	h.rows = old[:n-1]
+	return v
 }
 
 // tsAt reads a row's timestamp, treating a short column as "no timestamp" rather
@@ -1013,9 +1473,36 @@ func tsAt(tsValues []int64, row int) int64 {
 
 // searchWALs scans the given WAL files (live + sealing-in-progress) for entries
 // matching params.
-func searchWALs(paths []string, params SearchParams) []chunk.Entry {
+func searchWALsTop(c *walCache, paths []string, params SearchParams, limit int) ([]chunk.Entry, int) {
+	if limit <= 0 {
+		limit = params.Limit
+	}
+	h := &entryTopHeap{asc: params.SortAsc, entries: make([]chunk.Entry, 0, limit)}
+	total := 0
+	forEachWALEntry(c, paths, func(e *chunk.Entry) bool {
+		if matchesParams(e, params) {
+			total++
+			candidate := *e
+			if params.OmitBody && !needsPostReadFilter(params) {
+				candidate.Body = nil
+			}
+			if h.Len() < limit {
+				heap.Push(h, candidate)
+			} else if entryComesBefore(&candidate, &h.entries[0], params.SortAsc) {
+				h.entries[0] = candidate
+				heap.Fix(h, 0)
+			}
+		}
+		return true
+	})
+	return h.entries, total
+}
+
+// searchWALs returns every match for internal aggregate paths that genuinely
+// need every row. Paginated Search uses searchWALsTop above.
+func searchWALs(c *walCache, paths []string, params SearchParams) []chunk.Entry {
 	var matches []chunk.Entry
-	forEachWALEntry(paths, func(e *chunk.Entry) bool {
+	forEachWALEntry(c, paths, func(e *chunk.Entry) bool {
 		if matchesParams(e, params) {
 			matches = append(matches, *e)
 		}
@@ -1024,9 +1511,29 @@ func searchWALs(paths []string, params SearchParams) []chunk.Entry {
 	return matches
 }
 
-func findInWALs(paths []string, id int64) (*chunk.Entry, error) {
+// entryTopHeap keeps the worst selected entry at index zero.
+type entryTopHeap struct {
+	entries []chunk.Entry
+	asc     bool
+}
+
+func (h entryTopHeap) Len() int { return len(h.entries) }
+func (h entryTopHeap) Less(i, j int) bool {
+	return entryComesBefore(&h.entries[j], &h.entries[i], h.asc)
+}
+func (h entryTopHeap) Swap(i, j int) { h.entries[i], h.entries[j] = h.entries[j], h.entries[i] }
+func (h *entryTopHeap) Push(v any)   { h.entries = append(h.entries, v.(chunk.Entry)) }
+func (h *entryTopHeap) Pop() any {
+	old := h.entries
+	n := len(old)
+	v := old[n-1]
+	h.entries = old[:n-1]
+	return v
+}
+
+func findInWALs(c *walCache, paths []string, id int64) (*chunk.Entry, error) {
 	var found *chunk.Entry
-	forEachWALEntry(paths, func(e *chunk.Entry) bool {
+	forEachWALEntry(c, paths, func(e *chunk.Entry) bool {
 		if e.ID == id {
 			cp := *e
 			found = &cp
@@ -1047,9 +1554,9 @@ func findInWALs(paths []string, id int64) (*chunk.Entry, error) {
 // SDK batch was counted while the hour was live and dropped from the same
 // window once the hour sealed — counts silently changed hours after the fact
 // and never reconciled with Search.
-func countWALsByLevel(paths []string, start, end time.Time, service, environment string) map[string]int {
+func countWALsByLevel(c *walCache, paths []string, start, end time.Time, service, environment string) map[string]int {
 	counts := make(map[string]int)
-	forEachWALEntry(paths, func(e *chunk.Entry) bool {
+	forEachWALEntry(c, paths, func(e *chunk.Entry) bool {
 		if !walEntryInScope(e, start, end, service, environment) {
 			return true
 		}
@@ -1059,9 +1566,9 @@ func countWALsByLevel(paths []string, start, end time.Time, service, environment
 	return counts
 }
 
-func countWALsByService(paths []string, start, end time.Time, environment string) map[string]ServiceCount {
+func countWALsByService(c *walCache, paths []string, start, end time.Time, environment string) map[string]ServiceCount {
 	counts := make(map[string]ServiceCount)
-	forEachWALEntry(paths, func(e *chunk.Entry) bool {
+	forEachWALEntry(c, paths, func(e *chunk.Entry) bool {
 		if !walEntryInScope(e, start, end, "", environment) {
 			return true
 		}
@@ -1100,10 +1607,10 @@ func envMatches(filter, entryEnv string) bool {
 
 // addWALHistogram folds unsealed entries into the minute buckets, honouring the
 // service/level/env filters the caller asked for.
-func addWALHistogram(minuteCounts map[string]HBucket, paths []string, start, end time.Time, f HistogramFilter) {
+func addWALHistogram(c *walCache, minuteCounts map[string]HBucket, paths []string, start, end time.Time, f HistogramFilter) {
 	startMs := start.UnixMilli()
 	endMs := end.UnixMilli()
-	forEachWALEntry(paths, func(e *chunk.Entry) bool {
+	forEachWALEntry(c, paths, func(e *chunk.Entry) bool {
 		if e.ReceivedAt < startMs || e.ReceivedAt > endMs {
 			return true
 		}
@@ -1228,11 +1735,80 @@ func getColumnType(name string) chunkpkg.ColumnType {
 	return 0
 }
 
+// entrySparseStrings/entrySparseInts map a sparse column to its field offset in
+// chunk.Entry. They are package-level tables rather than map literals built
+// inside readEntryFromChunk: that function runs once per matching row, so the
+// literals allocated two maps and hashed 36 strings for every row scanned —
+// the single largest allocation source in every whole-range query.
+var entrySparseStrings = [...]struct {
+	col string
+	get func(*chunk.Entry) *string
+}{
+	{"version", func(e *chunk.Entry) *string { return &e.Version }},
+	{"host", func(e *chunk.Entry) *string { return &e.Host }},
+	{"event_type", func(e *chunk.Entry) *string { return &e.EventType }},
+	{"trace_id", func(e *chunk.Entry) *string { return &e.TraceID }},
+	{"span_id", func(e *chunk.Entry) *string { return &e.SpanID }},
+	{"parent_span_id", func(e *chunk.Entry) *string { return &e.ParentSpanID }},
+	{"request_id", func(e *chunk.Entry) *string { return &e.RequestID }},
+	{"user_id", func(e *chunk.Entry) *string { return &e.UserID }},
+	{"tenant_id", func(e *chunk.Entry) *string { return &e.TenantID }},
+	{"session_id", func(e *chunk.Entry) *string { return &e.SessionID }},
+	{"method", func(e *chunk.Entry) *string { return &e.Method }},
+	{"path", func(e *chunk.Entry) *string { return &e.Path }},
+	{"route", func(e *chunk.Entry) *string { return &e.Route }},
+	{"handler", func(e *chunk.Entry) *string { return &e.Handler }},
+	{"error_class", func(e *chunk.Entry) *string { return &e.ErrorClass }},
+	{"error_message", func(e *chunk.Entry) *string { return &e.ErrorMessage }},
+	{"source_file", func(e *chunk.Entry) *string { return &e.SourceFile }},
+	{"error_fingerprint", func(e *chunk.Entry) *string { return &e.ErrorFingerprint }},
+	{"job_class", func(e *chunk.Entry) *string { return &e.JobClass }},
+	{"job_queue", func(e *chunk.Entry) *string { return &e.JobQueue }},
+	{"job_id", func(e *chunk.Entry) *string { return &e.JobID }},
+}
+
+var entrySparseInts = [...]struct {
+	col string
+	get func(*chunk.Entry) *int
+}{
+	{"duration_ms", func(e *chunk.Entry) *int { return &e.DurationMs }},
+	{"db_ms", func(e *chunk.Entry) *int { return &e.DbMs }},
+	{"db_count", func(e *chunk.Entry) *int { return &e.DbCount }},
+	{"cache_ms", func(e *chunk.Entry) *int { return &e.CacheMs }},
+	{"cache_hits", func(e *chunk.Entry) *int { return &e.CacheHits }},
+	{"cache_misses", func(e *chunk.Entry) *int { return &e.CacheMisses }},
+	{"ext_ms", func(e *chunk.Entry) *int { return &e.ExtMs }},
+	{"ext_count", func(e *chunk.Entry) *int { return &e.ExtCount }},
+	{"render_ms", func(e *chunk.Entry) *int { return &e.RenderMs }},
+	{"alloc_count", func(e *chunk.Entry) *int { return &e.AllocCount }},
+	{"mem_delta_mb", func(e *chunk.Entry) *int { return &e.MemDeltaMb }},
+	{"slow_queries", func(e *chunk.Entry) *int { return &e.SlowQueries }},
+	{"dup_queries", func(e *chunk.Entry) *int { return &e.DupQueries }},
+	{"source_line", func(e *chunk.Entry) *int { return &e.SourceLine }},
+	{"queue_ms", func(e *chunk.Entry) *int { return &e.QueueMs }},
+}
+
 // readEntryFromChunk reads all columns for a single row and assembles an Entry.
 // Any read error (other than an absent column) aborts and is returned, so a
 // corrupt chunk can never masquerade as an entry full of empty fields.
 func readEntryFromChunk(cols *chunkColumns, row int) (*chunk.Entry, error) {
 	e := &chunk.Entry{}
+	if err := fillEntryFromChunk(cols, row, e); err != nil {
+		return nil, err
+	}
+	return e, nil
+}
+
+// fillEntryFromChunk is readEntryFromChunk writing into an existing Entry.
+// chunk.Entry is 600 bytes, and the scan loop used to allocate one per row and
+// then copy it into the result slice; filling the slice element in place drops
+// both the allocation and the copy.
+func fillEntryFromChunk(cols *chunkColumns, row int, e *chunk.Entry) error {
+	return fillEntryFromChunkProjected(cols, row, e, true)
+}
+
+func fillEntryFromChunkProjected(cols *chunkColumns, row int, e *chunk.Entry, includeBody bool) error {
+	*e = chunk.Entry{}
 	c := &chunkRow{c: cols, row: row}
 
 	c.i64("id", cols.deltaInt64, &e.ID)
@@ -1247,20 +1823,8 @@ func readEntryFromChunk(cols *chunkColumns, row int) (*chunk.Entry, error) {
 	// parsed with the wrong decoder and Kind came back empty from every chunk.
 	c.str("kind", cols.dictZstd, &e.Kind)
 
-	sparseStrings := map[string]*string{
-		"version": &e.Version, "host": &e.Host,
-		"event_type": &e.EventType,
-		"trace_id":   &e.TraceID, "span_id": &e.SpanID,
-		"parent_span_id": &e.ParentSpanID, "request_id": &e.RequestID,
-		"user_id": &e.UserID, "tenant_id": &e.TenantID,
-		"session_id": &e.SessionID, "method": &e.Method,
-		"path": &e.Path, "route": &e.Route, "handler": &e.Handler,
-		"error_class": &e.ErrorClass, "error_message": &e.ErrorMessage,
-		"source_file": &e.SourceFile, "error_fingerprint": &e.ErrorFingerprint,
-		"job_class": &e.JobClass, "job_queue": &e.JobQueue, "job_id": &e.JobID,
-	}
-	for col, dest := range sparseStrings {
-		c.str(col, cols.sparseStrings, dest)
+	for _, f := range entrySparseStrings {
+		c.str(f.col, cols.sparseStrings, f.get(e))
 	}
 
 	// Status (stored as sparse dict string, needs int conversion)
@@ -1272,32 +1836,21 @@ func readEntryFromChunk(cols *chunkColumns, row int) (*chunk.Entry, error) {
 		}
 	}
 
-	sparseInts := map[string]*int{
-		"duration_ms": &e.DurationMs, "db_ms": &e.DbMs,
-		"db_count": &e.DbCount, "cache_ms": &e.CacheMs,
-		"cache_hits": &e.CacheHits, "cache_misses": &e.CacheMisses,
-		"ext_ms": &e.ExtMs, "ext_count": &e.ExtCount,
-		"render_ms": &e.RenderMs, "alloc_count": &e.AllocCount,
-		"mem_delta_mb": &e.MemDeltaMb,
-		"slow_queries": &e.SlowQueries, "dup_queries": &e.DupQueries,
-		"source_line": &e.SourceLine, "queue_ms": &e.QueueMs,
-	}
-	for col, dest := range sparseInts {
-		c.sparseInt(col, dest)
+	for _, f := range entrySparseInts {
+		c.sparseInt(f.col, f.get(e))
 	}
 
 	c.sparseBool("n_plus_one", &e.NPlusOne)
 
-	var body []byte
-	c.sparseBytes("body", &body)
-	if body != nil {
-		e.Body = body
+	if includeBody {
+		var body []byte
+		c.sparseBytes("body", &body)
+		if body != nil {
+			e.Body = body
+		}
 	}
 
-	if c.err != nil {
-		return nil, c.err
-	}
-	return e, nil
+	return c.err
 }
 
 // matchesParams checks if an entry matches search parameters (used for WAL scan).

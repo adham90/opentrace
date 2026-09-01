@@ -1,0 +1,249 @@
+package engine
+
+import (
+	"bufio"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"sync"
+	"unsafe"
+
+	"github.com/adham90/opentrace/internal/logstore/chunk"
+	"github.com/adham90/opentrace/internal/logstore/wal"
+)
+
+// WALCacheMaxEntries caps how many parsed entries one WAL file may keep cached.
+// Past it the file is parsed per query as before, so a pathologically busy hour
+// cannot pin an unbounded slice for the life of the process.
+//
+// At the default this is roughly 120 MB of entry structs plus their bodies, held
+// only for the current hour — the cache is dropped when the hour seals. Lower it
+// (or set it to 0) on a memory-constrained box; the cost is that every query
+// touching the live hour re-parses the WAL from disk, which is what it did
+// before the cache existed.
+//
+// ponytail: one flat cap across the whole cache would be better accounting, but
+// there is only ever the live WAL plus the (usually zero) in-flight seals in
+// here, so a per-file cap is the same number in practice.
+var WALCacheMaxEntries = 200_000
+
+// WALCacheBytes is the process-wide budget for parsed live WAL entries. Entry
+// count is not a memory budget: two batches with the same count can differ by
+// gigabytes when bodies and messages differ. The legacy entry cap remains as a
+// second guard and for compatibility with the existing environment variable.
+var WALCacheBytes int64 = 64 << 20
+
+// walCache holds the parsed contents of the unsealed WAL files.
+//
+// Every query that touches the live hour scans those files, and they were
+// re-opened and re-parsed from byte zero each time — a single MCP tool call
+// runs several queries, so a busy hour was parsed several times over per call.
+// WAL files are append-only, so a cached parse stays valid and only the bytes
+// appended since need reading.
+//
+// Identity is checked with os.SameFile against a retained handle rather than by
+// path: rotation renames the live WAL out from under its path, and a new file
+// that had grown past the cached offset would otherwise be read as if it were
+// the tail of the old one.
+type walCache struct {
+	mu    sync.Mutex
+	files map[string]*walCacheFile
+	used  int64
+}
+
+type walCacheFile struct {
+	f       *os.File
+	offset  int64 // bytes of f already parsed into entries
+	entries []chunk.Entry
+	bytes   int64
+	// tooBig marks a file past walCacheMaxEntries: it is parsed per query and
+	// nothing is retained.
+	tooBig bool
+}
+
+func newWALCache() *walCache {
+	return &walCache{files: make(map[string]*walCacheFile)}
+}
+
+// entries returns the parsed contents of the WAL at path. The returned slice is
+// shared with the cache and with concurrent callers: it must be treated as
+// read-only. A missing or unreadable file yields nil, matching the previous
+// behaviour of skipping it.
+func (c *walCache) entries(path string) []chunk.Entry {
+	if c == nil || WALCacheMaxEntries <= 0 || WALCacheBytes <= 0 {
+		return readWALFile(path)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	cf := c.files[path]
+	if cf != nil && !cf.sameFileAs(path) {
+		c.removeLocked(path)
+		cf = nil
+	}
+	if cf == nil {
+		f, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
+		cf = &walCacheFile{f: f}
+		c.files[path] = cf
+		c.evictDeletedLocked(path)
+	}
+	if cf.tooBig {
+		return readWALFile(path)
+	}
+
+	// Parse only what was appended since the last read.
+	if _, err := cf.f.Seek(cf.offset, io.SeekStart); err != nil {
+		c.removeLocked(path)
+		return readWALFile(path)
+	}
+	added, consumed, err := wal.ReadEntriesFrom(bufio.NewReaderSize(cf.f, walReadBufferBytes))
+	if err != nil {
+		slog.Warn("query: WAL had a torn tail; using parsed entries",
+			"error", err, "wal", filepath.Base(path), "parsed", len(cf.entries)+len(added))
+	}
+	cf.offset += consumed
+	cf.entries = append(cf.entries, added...)
+	addedBytes := entriesMemoryBytes(added)
+	cf.bytes += addedBytes
+	c.used += addedBytes
+
+	if WALCacheMaxEntries <= 0 || WALCacheBytes <= 0 ||
+		len(cf.entries) > WALCacheMaxEntries || c.used > WALCacheBytes {
+		out := cf.entries
+		cf.tooBig = true
+		c.removeLocked(path)
+		return out
+	}
+	return cf.entries
+}
+
+// forget drops the cached parse of path, releasing its entries and handle. The
+// store calls it when a WAL is sealed away, so a rotated hour's entries are not
+// retained behind a path nothing will query again.
+func (c *walCache) forget(path string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.files[path]; ok {
+		c.removeLocked(path)
+	}
+}
+
+// close releases every cached handle.
+func (c *walCache) close() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for path := range c.files {
+		c.removeLocked(path)
+	}
+}
+
+// evictDeletedLocked drops cache entries whose file no longer exists. The cache
+// only ever holds the live WAL plus in-flight seals, but a failed seal that is
+// eventually cleaned up would otherwise leave its entries pinned forever.
+func (c *walCache) evictDeletedLocked(keep string) {
+	for path := range c.files {
+		if path == keep {
+			continue
+		}
+		if _, err := os.Stat(path); err != nil {
+			c.removeLocked(path)
+		}
+	}
+}
+
+// sameFileAs reports whether path still names the file this cache entry holds
+// open.
+func (cf *walCacheFile) sameFileAs(path string) bool {
+	if cf.f == nil {
+		return false
+	}
+	byName, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	byHandle, err := cf.f.Stat()
+	if err != nil {
+		return false
+	}
+	// A truncated (rather than replaced) file has the same identity but can no
+	// longer contain the prefix already parsed.
+	if byHandle.Size() < cf.offset {
+		return false
+	}
+	return os.SameFile(byName, byHandle)
+}
+
+func (cf *walCacheFile) close() {
+	if cf.f != nil {
+		cf.f.Close()
+		cf.f = nil
+	}
+	cf.entries = nil
+}
+
+// removeLocked removes one file and releases its accounted memory. Caller
+// holds c.mu.
+func (c *walCache) removeLocked(path string) {
+	cf, ok := c.files[path]
+	if !ok {
+		return
+	}
+	c.used -= cf.bytes
+	if c.used < 0 {
+		c.used = 0
+	}
+	cf.close()
+	delete(c.files, path)
+}
+
+func entriesMemoryBytes(entries []chunk.Entry) int64 {
+	var total int64
+	for i := range entries {
+		total += entryMemoryBytes(&entries[i])
+	}
+	return total
+}
+
+// entryMemoryBytes accounts for the fixed struct plus heap data retained by
+// its strings/body. It intentionally slightly over-counts shared string
+// backing storage: a conservative budget is safer than pinning the process.
+func entryMemoryBytes(e *chunk.Entry) int64 {
+	total := int64(unsafe.Sizeof(*e)) + int64(len(e.Body))
+	for _, value := range [...]string{
+		e.Level, e.Service, e.Message, e.Env, e.Version, e.Host, e.Kind,
+		e.EventType, e.TraceID, e.SpanID, e.ParentSpanID, e.RequestID,
+		e.UserID, e.TenantID, e.SessionID, e.Method, e.Path, e.Route,
+		e.Handler, e.ErrorClass, e.ErrorMessage, e.SourceFile,
+		e.ErrorFingerprint, e.JobClass, e.JobQueue, e.JobID,
+	} {
+		total += int64(len(value))
+	}
+	return total
+}
+
+// readWALFile parses a WAL file without caching — the fallback for files that
+// are too large to retain, and for callers with no cache.
+func readWALFile(path string) []chunk.Entry {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	entries, err := wal.ReadEntries(bufio.NewReaderSize(f, walReadBufferBytes))
+	if err != nil {
+		slog.Warn("query: WAL had a torn tail; using parsed entries",
+			"error", err, "wal", filepath.Base(path), "parsed", len(entries))
+	}
+	return entries
+}

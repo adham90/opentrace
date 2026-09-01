@@ -14,12 +14,10 @@ import (
 // NOTE: Log retention is handled by the segmented log store engine (engine.Store.Prune).
 // This config only covers SQLite-resident tables.
 type RetentionConfig struct {
-	Logs          string `json:"logs"` // used by engine.Store.Prune, not SQLite
-	ErrorGroups   string `json:"error_groups"`
-	MetricBuckets string `json:"metric_buckets"`
-	DeployMarkers string `json:"deploy_markers"`
-	WatchRuns     string `json:"watch_runs"`
-	WatchAlerts   string `json:"watch_alerts"`
+	Logs        string `json:"logs"` // used by engine.Store.Prune, not SQLite
+	ErrorGroups string `json:"error_groups"`
+	WatchRuns   string `json:"watch_runs"`
+	WatchAlerts string `json:"watch_alerts"`
 }
 
 // DefaultRetentionConfig returns sensible defaults matching the migration seed.
@@ -28,12 +26,10 @@ type RetentionConfig struct {
 // metadata database without limit.
 func DefaultRetentionConfig() RetentionConfig {
 	return RetentionConfig{
-		Logs:          "30d",
-		ErrorGroups:   "never",
-		MetricBuckets: "180d",
-		DeployMarkers: "never",
-		WatchRuns:     defaultWatchRetention,
-		WatchAlerts:   defaultWatchRetention,
+		Logs:        "30d",
+		ErrorGroups: "never",
+		WatchRuns:   defaultWatchRetention,
+		WatchAlerts: defaultWatchRetention,
 	}
 }
 
@@ -111,9 +107,7 @@ func cleanupRetentionTables(ctx context.Context, db *sql.DB) (int, error) {
 		ttl     string
 		timeCol string
 	}{
-		{"metric_buckets", cfg.MetricBuckets, "created_at"},
 		{"error_groups", cfg.ErrorGroups, "last_seen_at"},
-		{"deploy_markers", cfg.DeployMarkers, "first_seen_at"},
 		{"watch_alerts", cfg.WatchAlerts, "created_at"},
 		{"watch_runs", cfg.WatchRuns, "started_at"},
 	}

@@ -8,21 +8,47 @@ import (
 	"strings"
 	"time"
 
-	"github.com/adham90/opentrace/internal/mcp/envscope"
 	"github.com/adham90/opentrace/pkg/store"
 )
 
-// DeepCaptureDeps holds the database connection for deep capture queries.
-// These tables have no formal store interface — we query SQLite directly.
+// Deep capture reads the per-request detail the SDKs pack into the log `body`
+// blob, which the ingest path stores whole as LogEntry.Metadata. There are no
+// `*_captures` tables — an earlier version of this tool queried five of them
+// and every one of those actions failed at runtime because the DDL never
+// existed. The body blob is the only place this data has ever lived.
+//
+// Wire keys (opentrace_ruby's payload_builder): body.sql, body.http,
+// body.email, body.file, body.audit, plus the request_*/response_* pairs.
+const (
+	// captureScanLogs caps how many log entries a cross-log search decodes.
+	// These searches have no index — they scan recent requests and filter the
+	// embedded arrays in Go.
+	// ponytail: linear scan over a bounded window. If this gets slow, promote
+	// the searched fields to sparse columns rather than adding child tables.
+	captureScanLogs = 2000
+	// captureMaxResults caps rows returned by a cross-log search.
+	captureMaxResults = 100
+	// captureDefaultWindow is the lookback when no `last` is supplied.
+	captureDefaultWindow = 24 * time.Hour
+)
+
+// bodyKeys maps a per-request action to the body blob key it reads and the
+// name of the array in the response.
+var bodyKeys = map[string]struct{ key, out string }{
+	"sql_captures":   {"sql", "queries"},
+	"http_captures":  {"http", "calls"},
+	"email_captures": {"email", "emails"},
+	"file_captures":  {"file", "files"},
+}
+
+// DeepCaptureDeps holds what the deep capture actions need.
 type DeepCaptureDeps struct {
-	DB *sql.DB
-	// LogStore resolves the environment of the log entry a capture belongs to.
-	// Capture rows carry no environment column of their own, so this is the
-	// only way to enforce the caller's env scope on request/response bodies,
-	// cookies, session data and SQL bind values. When a scope is attached to
-	// the request and LogStore is nil the read is denied — we fail closed
-	// rather than serve cross-env data we cannot classify.
+	// LogStore is the source of every capture: the SDK detail lives in the
+	// log entry's body blob. It also carries the environment used to enforce
+	// the caller's env scope.
 	LogStore store.LogStore
+	// DB backs the PII/retention config actions only (app_config).
+	DB *sql.DB
 	// IsAdmin reports whether the MCP server this tool is registered on serves
 	// an admin token. The config-mutating actions (update_pii_config,
 	// update_retention) require it — a member must not be able to disable PII
@@ -46,31 +72,32 @@ func DeepCaptureHandler(deps DeepCaptureDeps) ToolHandlerFunc {
 		args := GetArguments(request)
 		action := ArgString(args, "action")
 
+		if spec, ok := bodyKeys[action]; ok {
+			// email_captures alone may be asked for a time window instead of
+			// a single request.
+			if action == "email_captures" && ArgInt(args, "log_id", 0, 1<<31) == 0 {
+				return handleRecentEmails(ctx, deps, args)
+			}
+			return handleBodyCaptures(ctx, deps, args, spec.key, spec.out)
+		}
+
 		switch action {
 		case "request_capture":
-			return handleGetRequestCapture(ctx, deps, args)
-		case "sql_captures":
-			return handleGetSQLCaptures(ctx, deps, args)
-		case "http_captures":
-			return handleGetHTTPCaptures(ctx, deps, args)
-		case "email_captures":
-			return handleGetEmailCaptures(ctx, deps, args)
+			return handleRequestCapture(ctx, deps, args)
 		case "audit_trail":
-			return handleGetAuditTrail(ctx, deps, args)
+			return handleAuditTrail(ctx, deps, args)
 		case "search_audit":
 			return handleSearchAudit(ctx, deps, args)
 		case "search_sql":
 			return handleSearchSQL(ctx, deps, args)
-		case "file_captures":
-			return handleGetFileCaptures(ctx, deps, args)
 		case "get_pii_config":
-			return handleGetPIIConfig(ctx, deps)
+			return handleGetConfig(ctx, deps, "pii_scrubbing")
 		case "update_pii_config":
-			return handleUpdatePIIConfig(ctx, deps, args)
+			return handleUpdateConfig(ctx, deps, args, "update_pii_config", "pii_scrubbing")
 		case "get_retention":
-			return handleGetRetention(ctx, deps)
+			return handleGetConfig(ctx, deps, "retention_policy")
 		case "update_retention":
-			return handleUpdateRetention(ctx, deps, args)
+			return handleUpdateConfig(ctx, deps, args, "update_retention", "retention_policy")
 		default:
 			return NewToolResultError(
 				"action is required and must be one of: request_capture, sql_captures, http_captures, " +
@@ -82,156 +109,122 @@ func DeepCaptureHandler(deps DeepCaptureDeps) ToolHandlerFunc {
 }
 
 // ---------------------------------------------------------------------------
-// Env-scope authorization
+// Body blob access
 // ---------------------------------------------------------------------------
 
-// captureEnvGuard decides whether the caller's environment scope permits
-// reading captures attached to a given log entry. Capture rows are keyed by
-// log_id only, so the environment comes from the log entry itself; results are
-// memoized because a single search can span many rows.
-type captureEnvGuard struct {
-	// enforced is false when no scope is attached to the context (unit tests
-	// and non-MCP callers), mirroring scopeAllowsEnv's fallback.
-	enforced bool
-	logStore store.LogStore
-	envByLog map[int64]string
+// loadCaptureLog fetches a log entry for capture reading and enforces the
+// caller's env scope. A log the caller may not read is reported as missing so
+// a cross-env log_id cannot be probed for existence.
+func loadCaptureLog(ctx context.Context, deps DeepCaptureDeps, logID int64) (*store.LogEntry, *CallToolResult) {
+	if deps.LogStore == nil {
+		return nil, NewToolResultError("log store not available")
+	}
+	entry, err := deps.LogStore.GetByID(ctx, logID)
+	if err != nil || entry == nil || !scopeAllowsEnv(ctx, entry.Environment) {
+		res, _ := EmptyResult(fmt.Sprintf("No capture found for log_id %d", logID))
+		return nil, res
+	}
+	return entry, nil
 }
 
-func newCaptureEnvGuard(ctx context.Context, deps DeepCaptureDeps) *captureEnvGuard {
-	_, scoped := envscope.FromOK(ctx)
-	return &captureEnvGuard{
-		enforced: scoped,
-		logStore: deps.LogStore,
-		envByLog: make(map[int64]string),
+// bodyRows returns the body blob array under key as a slice of objects,
+// skipping anything that is not an object. A missing key yields nil.
+func bodyRows(entry *store.LogEntry, key string) []map[string]any {
+	arr, _ := entry.Metadata[key].([]any)
+	if len(arr) == 0 {
+		return nil
 	}
-}
-
-// allows reports whether captures belonging to logID are readable by the
-// caller. A log entry that cannot be resolved (missing store, lookup failure,
-// or no log_id at all) is treated as unknown-env and only readable by a
-// wildcard / unscoped token — the same policy scopeAllowsEnv applies to rows
-// with an empty environment.
-func (g *captureEnvGuard) allows(ctx context.Context, logID int64) bool {
-	if !g.enforced {
-		return true
-	}
-	if g.logStore == nil {
-		return false
-	}
-	env, cached := g.envByLog[logID]
-	if !cached {
-		if logID > 0 {
-			entry, err := g.logStore.GetByID(ctx, logID)
-			if err != nil || entry == nil {
-				return false
-			}
-			env = entry.Environment
-		}
-		g.envByLog[logID] = env
-	}
-	return scopeAllowsEnv(ctx, env)
-}
-
-// filter drops every capture row the caller's env scope does not permit.
-func (g *captureEnvGuard) filter(ctx context.Context, captures []map[string]any) []map[string]any {
-	if !g.enforced {
-		return captures
-	}
-	kept := make([]map[string]any, 0, len(captures))
-	for _, c := range captures {
-		if g.allows(ctx, captureLogID(c)) {
-			kept = append(kept, c)
+	rows := make([]map[string]any, 0, len(arr))
+	for _, v := range arr {
+		if m, ok := v.(map[string]any); ok {
+			rows = append(rows, m)
 		}
 	}
-	return kept
+	return rows
 }
 
-// captureLogID extracts the log_id from a capture row, returning 0 when it is
-// absent or NULL.
-func captureLogID(c map[string]any) int64 {
-	switch v := c["log_id"].(type) {
-	case int64:
-		return v
-	case int:
-		return int64(v)
-	default:
-		return 0
+// withSource copies a capture row and stamps it with the log it came from, so
+// a row pulled out of a cross-log search can be traced back.
+func withSource(row map[string]any, entry *store.LogEntry) map[string]any {
+	out := make(map[string]any, len(row)+3)
+	for k, v := range row {
+		out[k] = v
 	}
-}
-
-// captureNotFound is the response for a capture the caller is not authorized to
-// read. It is deliberately identical to the genuinely-missing case so a
-// cross-env log_id cannot be probed for existence.
-func captureNotFound(logID int64) (*CallToolResult, error) {
-	return EmptyResult(fmt.Sprintf("No capture found for log_id %d", logID))
-}
-
-// handleGetRequestCapture returns full request/response details for a log entry.
-func handleGetRequestCapture(ctx context.Context, deps DeepCaptureDeps, args map[string]any) (*CallToolResult, error) {
-	if deps.DB == nil {
-		return NewToolResultError("database connection not available"), nil
+	out["log_id"] = entry.ID
+	out["timestamp"] = entry.Timestamp.Format(time.RFC3339)
+	if entry.RequestID != "" {
+		out["request_id"] = entry.RequestID
 	}
+	return out
+}
+
+// handleBodyCaptures returns one capture array for a single request.
+func handleBodyCaptures(ctx context.Context, deps DeepCaptureDeps, args map[string]any, key, out string) (*CallToolResult, error) {
 	logID := ArgInt(args, "log_id", 0, 1<<31)
 	if logID == 0 {
 		return NewToolResultError("log_id is required"), nil
 	}
-	if !newCaptureEnvGuard(ctx, deps).allows(ctx, int64(logID)) {
-		return captureNotFound(int64(logID))
+	entry, errRes := loadCaptureLog(ctx, deps, int64(logID))
+	if errRes != nil {
+		return errRes, nil
 	}
 
-	row := deps.DB.QueryRowContext(ctx,
-		`SELECT id, log_id, request_headers, request_body, request_size,
-		        content_type, ip_address, user_agent, referer, cookies, session_data,
-		        response_headers, response_body, response_size, created_at
-		 FROM request_captures WHERE log_id = ?`, logID)
-
-	var rc struct {
-		ID              int64          `json:"id"`
-		LogID           int64          `json:"log_id"`
-		RequestHeaders  sql.NullString `json:"-"`
-		RequestBody     sql.NullString `json:"-"`
-		RequestSize     sql.NullInt64  `json:"-"`
-		ContentType     sql.NullString `json:"-"`
-		IPAddress       sql.NullString `json:"-"`
-		UserAgent       sql.NullString `json:"-"`
-		Referer         sql.NullString `json:"-"`
-		Cookies         sql.NullString `json:"-"`
-		SessionData     sql.NullString `json:"-"`
-		ResponseHeaders sql.NullString `json:"-"`
-		ResponseBody    sql.NullString `json:"-"`
-		ResponseSize    sql.NullInt64  `json:"-"`
-		CreatedAt       string         `json:"created_at"`
+	rows := bodyRows(entry, key)
+	if len(rows) == 0 {
+		return EmptyResult(fmt.Sprintf("No %s captures found for log_id %d", key, logID))
 	}
+	return JSONResult(map[string]any{
+		"log_id": logID,
+		"total":  len(rows),
+		out:      rows,
+	})
+}
 
-	err := row.Scan(
-		&rc.ID, &rc.LogID, &rc.RequestHeaders, &rc.RequestBody, &rc.RequestSize,
-		&rc.ContentType, &rc.IPAddress, &rc.UserAgent, &rc.Referer, &rc.Cookies,
-		&rc.SessionData, &rc.ResponseHeaders, &rc.ResponseBody, &rc.ResponseSize,
-		&rc.CreatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return EmptyResult("No request capture found for log_id " + fmt.Sprintf("%d", logID))
+// requestCaptureKeys are the body blob fields that describe the inbound
+// request and its response.
+var requestCaptureKeys = []string{
+	"request_headers", "request_params", "request_body",
+	"response_headers", "response_body",
+	"performance", "timeline", "context", "params",
+}
+
+// handleRequestCapture returns the inbound request/response detail for a log.
+func handleRequestCapture(ctx context.Context, deps DeepCaptureDeps, args map[string]any) (*CallToolResult, error) {
+	logID := ArgInt(args, "log_id", 0, 1<<31)
+	if logID == 0 {
+		return NewToolResultError("log_id is required"), nil
 	}
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
+	entry, errRes := loadCaptureLog(ctx, deps, int64(logID))
+	if errRes != nil {
+		return errRes, nil
 	}
 
 	result := map[string]any{
-		"id":               rc.ID,
-		"log_id":           rc.LogID,
-		"request_headers":  nullStringToAny(rc.RequestHeaders),
-		"request_body":     nullStringToAny(rc.RequestBody),
-		"request_size":     nullInt64ToAny(rc.RequestSize),
-		"content_type":     nullStringToAny(rc.ContentType),
-		"ip_address":       nullStringToAny(rc.IPAddress),
-		"user_agent":       nullStringToAny(rc.UserAgent),
-		"referer":          nullStringToAny(rc.Referer),
-		"cookies":          nullStringToAny(rc.Cookies),
-		"session_data":     nullStringToAny(rc.SessionData),
-		"response_headers": nullStringToAny(rc.ResponseHeaders),
-		"response_body":    nullStringToAny(rc.ResponseBody),
-		"response_size":    nullInt64ToAny(rc.ResponseSize),
-		"created_at":       rc.CreatedAt,
+		"log_id":     entry.ID,
+		"timestamp":  entry.Timestamp.Format(time.RFC3339),
+		"method":     "",
+		"path":       entry.Route,
+		"status":     entry.Status,
+		"user_id":    entry.UserID,
+		"request_id": entry.RequestID,
+	}
+	if s := entry.RequestSummary; s != nil {
+		result["method"] = s.Method
+		result["path"] = s.Path
+		result["status"] = s.Status
+		result["duration_ms"] = s.DurationMs
+		result["controller"] = s.Controller
+		result["action"] = s.Action
+	}
+	found := false
+	for _, k := range requestCaptureKeys {
+		if v, ok := entry.Metadata[k]; ok && v != nil {
+			result[k] = v
+			found = true
+		}
+	}
+	if !found && entry.RequestSummary == nil {
+		return EmptyResult(fmt.Sprintf("No request capture found for log_id %d", logID))
 	}
 
 	return JSONResult(result,
@@ -244,785 +237,214 @@ func handleGetRequestCapture(ctx context.Context, deps DeepCaptureDeps, args map
 	)
 }
 
-// handleGetSQLCaptures returns all SQL queries for a request.
-func handleGetSQLCaptures(ctx context.Context, deps DeepCaptureDeps, args map[string]any) (*CallToolResult, error) {
-	if deps.DB == nil {
-		return NewToolResultError("database connection not available"), nil
-	}
-	logID := ArgInt(args, "log_id", 0, 1<<31)
-	if logID == 0 {
-		return NewToolResultError("log_id is required"), nil
-	}
+// ---------------------------------------------------------------------------
+// Cross-log search
+// ---------------------------------------------------------------------------
 
-	if !newCaptureEnvGuard(ctx, deps).allows(ctx, int64(logID)) {
-		return captureNotFound(int64(logID))
+// scanCaptures walks recent logs in the caller's env scope and applies keep to
+// every row of the named body array, collecting matches until limit is hit.
+func scanCaptures(ctx context.Context, deps DeepCaptureDeps, args map[string]any, key string, limit int, keep func(map[string]any) bool) ([]map[string]any, error) {
+	if deps.LogStore == nil {
+		return nil, fmt.Errorf("log store not available")
 	}
-
-	rows, err := deps.DB.QueryContext(ctx,
-		`SELECT id, log_id, raw_sql, normalized_sql, bind_values, row_count,
-		        duration_ms, cached, in_transaction, explain_plan, pool_size,
-		        pool_busy, pool_waiting, caller_location, fingerprint, table_name, created_at
-		 FROM sql_captures WHERE log_id = ? ORDER BY id`, logID)
+	env, err := ResolveEnv(ctx, args)
 	if err != nil {
-		return NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
+		return nil, err
 	}
-	defer rows.Close()
+	since := ParseSinceOr(ArgString(args, "last"), captureDefaultWindow)
+	entries, err := deps.LogStore.Search(ctx, store.LogSearchParams{
+		Environment: env,
+		Start:       &since,
+		Limit:       captureScanLogs,
+	})
+	if err != nil {
+		return nil, err
+	}
 
-	var captures []map[string]any
-	for rows.Next() {
-		var (
-			id             int64
-			lID            int64
-			rawSQL         sql.NullString
-			normalizedSQL  sql.NullString
-			bindValues     sql.NullString
-			rowCount       sql.NullInt64
-			durationMs     sql.NullFloat64
-			cached         sql.NullInt64
-			inTransaction  sql.NullInt64
-			explainPlan    sql.NullString
-			poolSize       sql.NullInt64
-			poolBusy       sql.NullInt64
-			poolWaiting    sql.NullInt64
-			callerLocation sql.NullString
-			fingerprint    sql.NullString
-			tableName      sql.NullString
-			createdAt      string
-		)
-		if err := rows.Scan(&id, &lID, &rawSQL, &normalizedSQL, &bindValues, &rowCount,
-			&durationMs, &cached, &inTransaction, &explainPlan, &poolSize,
-			&poolBusy, &poolWaiting, &callerLocation, &fingerprint, &tableName, &createdAt); err != nil {
-			return NewToolResultError(fmt.Sprintf("scan failed: %v", err)), nil
+	var matches []map[string]any
+	for i := range entries {
+		e := &entries[i]
+		if !scopeAllowsEnv(ctx, e.Environment) {
+			continue
 		}
-		captures = append(captures, map[string]any{
-			"id":              id,
-			"log_id":          lID,
-			"raw_sql":         nullStringToAny(rawSQL),
-			"normalized_sql":  nullStringToAny(normalizedSQL),
-			"bind_values":     nullStringToAny(bindValues),
-			"row_count":       nullInt64ToAny(rowCount),
-			"duration_ms":     nullFloat64ToAny(durationMs),
-			"cached":          nullInt64ToBool(cached),
-			"in_transaction":  nullInt64ToBool(inTransaction),
-			"explain_plan":    nullStringToAny(explainPlan),
-			"pool_size":       nullInt64ToAny(poolSize),
-			"pool_busy":       nullInt64ToAny(poolBusy),
-			"pool_waiting":    nullInt64ToAny(poolWaiting),
-			"caller_location": nullStringToAny(callerLocation),
-			"fingerprint":     nullStringToAny(fingerprint),
-			"table_name":      nullStringToAny(tableName),
-			"created_at":      createdAt,
-		})
+		for _, row := range bodyRows(e, key) {
+			if !keep(row) {
+				continue
+			}
+			matches = append(matches, withSource(row, e))
+			if len(matches) >= limit {
+				return matches, nil
+			}
+		}
 	}
-	if err := rows.Err(); err != nil {
-		return NewToolResultError(fmt.Sprintf("iteration failed: %v", err)), nil
-	}
-
-	if len(captures) == 0 {
-		return EmptyResult("No SQL captures found for log_id " + fmt.Sprintf("%d", logID))
-	}
-
-	result := map[string]any{
-		"log_id":  logID,
-		"total":   len(captures),
-		"queries": captures,
-	}
-	return JSONResult(result)
+	return matches, nil
 }
 
-// handleGetHTTPCaptures returns external HTTP calls for a request.
-func handleGetHTTPCaptures(ctx context.Context, deps DeepCaptureDeps, args map[string]any) (*CallToolResult, error) {
-	if deps.DB == nil {
-		return NewToolResultError("database connection not available"), nil
+// rowString reads a string field from a capture row, tolerating the numeric
+// ids JSON decoding produces.
+func rowString(row map[string]any, key string) string {
+	switch v := row[key].(type) {
+	case string:
+		return v
+	case float64:
+		return fmt.Sprintf("%.0f", v)
+	case nil:
+		return ""
+	default:
+		return fmt.Sprint(v)
 	}
-	logID := ArgInt(args, "log_id", 0, 1<<31)
-	if logID == 0 {
-		return NewToolResultError("log_id is required"), nil
-	}
-
-	if !newCaptureEnvGuard(ctx, deps).allows(ctx, int64(logID)) {
-		return captureNotFound(int64(logID))
-	}
-
-	rows, err := deps.DB.QueryContext(ctx,
-		`SELECT id, log_id, method, url, host, vendor, status, duration_ms,
-		        request_headers, request_body, response_headers, response_body,
-		        response_size, retry_attempt, error_class, created_at
-		 FROM http_captures WHERE log_id = ? ORDER BY id`, logID)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
-	}
-	defer rows.Close()
-
-	var captures []map[string]any
-	for rows.Next() {
-		var (
-			id              int64
-			lID             int64
-			method          sql.NullString
-			url             sql.NullString
-			host            sql.NullString
-			vendor          sql.NullString
-			status          sql.NullInt64
-			durationMs      sql.NullFloat64
-			requestHeaders  sql.NullString
-			requestBody     sql.NullString
-			responseHeaders sql.NullString
-			responseBody    sql.NullString
-			responseSize    sql.NullInt64
-			retryAttempt    sql.NullInt64
-			errorClass      sql.NullString
-			createdAt       string
-		)
-		if err := rows.Scan(&id, &lID, &method, &url, &host, &vendor, &status, &durationMs,
-			&requestHeaders, &requestBody, &responseHeaders, &responseBody,
-			&responseSize, &retryAttempt, &errorClass, &createdAt); err != nil {
-			return NewToolResultError(fmt.Sprintf("scan failed: %v", err)), nil
-		}
-		captures = append(captures, map[string]any{
-			"id":               id,
-			"log_id":           lID,
-			"method":           nullStringToAny(method),
-			"url":              nullStringToAny(url),
-			"host":             nullStringToAny(host),
-			"vendor":           nullStringToAny(vendor),
-			"status":           nullInt64ToAny(status),
-			"duration_ms":      nullFloat64ToAny(durationMs),
-			"request_headers":  nullStringToAny(requestHeaders),
-			"request_body":     nullStringToAny(requestBody),
-			"response_headers": nullStringToAny(responseHeaders),
-			"response_body":    nullStringToAny(responseBody),
-			"response_size":    nullInt64ToAny(responseSize),
-			"retry_attempt":    nullInt64ToAny(retryAttempt),
-			"error_class":      nullStringToAny(errorClass),
-			"created_at":       createdAt,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return NewToolResultError(fmt.Sprintf("iteration failed: %v", err)), nil
-	}
-
-	if len(captures) == 0 {
-		return EmptyResult("No HTTP captures found for log_id " + fmt.Sprintf("%d", logID))
-	}
-
-	result := map[string]any{
-		"log_id": logID,
-		"total":  len(captures),
-		"calls":  captures,
-	}
-	return JSONResult(result)
 }
 
-// handleGetEmailCaptures returns emails sent during a request or time range.
-func handleGetEmailCaptures(ctx context.Context, deps DeepCaptureDeps, args map[string]any) (*CallToolResult, error) {
-	if deps.DB == nil {
-		return NewToolResultError("database connection not available"), nil
-	}
-
-	logID := ArgInt(args, "log_id", 0, 1<<31)
-	last := ArgString(args, "last")
-
-	if logID == 0 && last == "" {
-		return NewToolResultError("log_id or last is required"), nil
-	}
-
-	guard := newCaptureEnvGuard(ctx, deps)
-	if logID > 0 && !guard.allows(ctx, int64(logID)) {
-		return captureNotFound(int64(logID))
-	}
-
-	var (
-		query    string
-		sqlArgs  []any
-		joinLogs bool
-	)
-
-	if logID > 0 {
-		query = `SELECT id, log_id, mailer_class, mailer_action, from_address,
-		                to_addresses, cc_addresses, bcc_addresses, subject, body_html,
-		                body_text, template_name, template_vars, attachments,
-		                delivery_status, smtp_response, duration_ms, created_at
-		         FROM email_captures WHERE log_id = ? ORDER BY id`
-		sqlArgs = []any{logID}
-	} else {
-		since := ParseSinceOr(last, 24*time.Hour)
-		query = `SELECT ec.id, ec.log_id, ec.mailer_class, ec.mailer_action, ec.from_address,
-		                ec.to_addresses, ec.cc_addresses, ec.bcc_addresses, ec.subject, ec.body_html,
-		                ec.body_text, ec.template_name, ec.template_vars, ec.attachments,
-		                ec.delivery_status, ec.smtp_response, ec.duration_ms, ec.created_at,
-		                l.request_id
-		         FROM email_captures ec
-		         JOIN logs l ON ec.log_id = l.id
-		         WHERE ec.created_at > ?
-		         ORDER BY ec.created_at DESC LIMIT 50`
-		sqlArgs = []any{since.Format(time.RFC3339)}
-		joinLogs = true
-	}
-
-	rows, err := deps.DB.QueryContext(ctx, query, sqlArgs...)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
-	}
-	defer rows.Close()
-
-	var captures []map[string]any
-	for rows.Next() {
-		var (
-			id             int64
-			lID            sql.NullInt64
-			mailerClass    sql.NullString
-			mailerAction   sql.NullString
-			fromAddr       sql.NullString
-			toAddrs        sql.NullString
-			ccAddrs        sql.NullString
-			bccAddrs       sql.NullString
-			subject        sql.NullString
-			bodyHTML       sql.NullString
-			bodyText       sql.NullString
-			templateName   sql.NullString
-			templateVars   sql.NullString
-			attachments    sql.NullString
-			deliveryStatus sql.NullString
-			smtpResponse   sql.NullString
-			durationMs     sql.NullFloat64
-			createdAt      string
-			requestID      sql.NullString
-		)
-
-		var scanDest []any
-		scanDest = append(scanDest, &id, &lID, &mailerClass, &mailerAction, &fromAddr,
-			&toAddrs, &ccAddrs, &bccAddrs, &subject, &bodyHTML,
-			&bodyText, &templateName, &templateVars, &attachments,
-			&deliveryStatus, &smtpResponse, &durationMs, &createdAt)
-		if joinLogs {
-			scanDest = append(scanDest, &requestID)
-		}
-
-		if err := rows.Scan(scanDest...); err != nil {
-			return NewToolResultError(fmt.Sprintf("scan failed: %v", err)), nil
-		}
-
-		entry := map[string]any{
-			"id":              id,
-			"log_id":          nullInt64ToAny(lID),
-			"mailer_class":    nullStringToAny(mailerClass),
-			"mailer_action":   nullStringToAny(mailerAction),
-			"from_address":    nullStringToAny(fromAddr),
-			"to_addresses":    nullStringToAny(toAddrs),
-			"cc_addresses":    nullStringToAny(ccAddrs),
-			"bcc_addresses":   nullStringToAny(bccAddrs),
-			"subject":         nullStringToAny(subject),
-			"body_html":       nullStringToAny(bodyHTML),
-			"body_text":       nullStringToAny(bodyText),
-			"template_name":   nullStringToAny(templateName),
-			"template_vars":   nullStringToAny(templateVars),
-			"attachments":     nullStringToAny(attachments),
-			"delivery_status": nullStringToAny(deliveryStatus),
-			"smtp_response":   nullStringToAny(smtpResponse),
-			"duration_ms":     nullFloat64ToAny(durationMs),
-			"created_at":      createdAt,
-		}
-		if joinLogs {
-			entry["request_id"] = nullStringToAny(requestID)
-		}
-		captures = append(captures, entry)
-	}
-	if err := rows.Err(); err != nil {
-		return NewToolResultError(fmt.Sprintf("iteration failed: %v", err)), nil
-	}
-
-	// Drop rows whose log entry belongs to an environment the caller's token
-	// does not cover (the time-window path is not otherwise env-filtered).
-	captures = guard.filter(ctx, captures)
-
-	if len(captures) == 0 {
-		return EmptyResult("No email captures found")
-	}
-
-	result := map[string]any{
-		"total":  len(captures),
-		"emails": captures,
-	}
-	return JSONResult(result)
+// rowFloat reads a numeric field from a capture row.
+func rowFloat(row map[string]any, key string) float64 {
+	f, _ := row[key].(float64)
+	return f
 }
 
-// handleGetAuditTrail returns audit history for a specific record.
-func handleGetAuditTrail(ctx context.Context, deps DeepCaptureDeps, args map[string]any) (*CallToolResult, error) {
-	if deps.DB == nil {
-		return NewToolResultError("database connection not available"), nil
-	}
-
+// handleAuditTrail returns audit history for one record.
+func handleAuditTrail(ctx context.Context, deps DeepCaptureDeps, args map[string]any) (*CallToolResult, error) {
 	recordType := ArgString(args, "record_type")
 	recordID := ArgString(args, "record_id")
 	if recordType == "" || recordID == "" {
 		return NewToolResultError("record_type and record_id are required"), nil
 	}
 
-	rows, err := deps.DB.QueryContext(ctx,
-		`SELECT id, log_id, record_type, record_id, action, actor_id, actor_type,
-		        changed_fields, full_before, full_after, request_id, ip_address, created_at
-		 FROM audit_captures
-		 WHERE record_type = ? AND record_id = ?
-		 ORDER BY created_at DESC LIMIT 100`, recordType, recordID)
+	entries, err := scanCaptures(ctx, deps, args, "audit", captureMaxResults, func(row map[string]any) bool {
+		return rowString(row, "record_type") == recordType && rowString(row, "record_id") == recordID
+	})
 	if err != nil {
-		return NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
+		return NewToolResultError(err.Error()), nil
 	}
-	defer rows.Close()
-
-	captures := scanAuditRows(rows)
-	if err := rows.Err(); err != nil {
-		return NewToolResultError(fmt.Sprintf("iteration failed: %v", err)), nil
-	}
-	captures = newCaptureEnvGuard(ctx, deps).filter(ctx, captures)
-
-	if len(captures) == 0 {
+	if len(entries) == 0 {
 		return EmptyResult(fmt.Sprintf("No audit captures found for %s/%s", recordType, recordID))
 	}
-
-	result := map[string]any{
+	return JSONResult(map[string]any{
 		"record_type": recordType,
 		"record_id":   recordID,
-		"total":       len(captures),
-		"entries":     captures,
-	}
-	return JSONResult(result)
+		"total":       len(entries),
+		"entries":     entries,
+	})
 }
 
-// handleSearchAudit searches audit trail across all records.
+// handleSearchAudit searches the audit trail across records.
 func handleSearchAudit(ctx context.Context, deps DeepCaptureDeps, args map[string]any) (*CallToolResult, error) {
-	if deps.DB == nil {
-		return NewToolResultError("database connection not available"), nil
-	}
-
 	actorID := ArgString(args, "actor_id")
-	action := ArgString(args, "action")
+	// `action` is the tool's own dispatch key, so the audit action filter is
+	// read from audit_action to avoid colliding with it.
+	auditAction := ArgString(args, "audit_action")
 	last := ArgString(args, "last")
-
-	if actorID == "" && action == "" && last == "" {
-		return NewToolResultError("at least one filter is required: actor_id, action, or last"), nil
+	if actorID == "" && auditAction == "" && last == "" {
+		return NewToolResultError("at least one filter is required: actor_id, audit_action, or last"), nil
 	}
 
-	var conditions []string
-	var sqlArgs []any
-
-	if actorID != "" {
-		conditions = append(conditions, "actor_id = ?")
-		sqlArgs = append(sqlArgs, actorID)
-	}
-	if action != "" {
-		conditions = append(conditions, "action = ?")
-		sqlArgs = append(sqlArgs, action)
-	}
-	if last != "" {
-		since := ParseSinceOr(last, 24*time.Hour)
-		conditions = append(conditions, "created_at > ?")
-		sqlArgs = append(sqlArgs, since.Format(time.RFC3339))
-	}
-
-	query := `SELECT id, log_id, record_type, record_id, action, actor_id, actor_type,
-	                 changed_fields, full_before, full_after, request_id, ip_address, created_at
-	          FROM audit_captures
-	          WHERE ` + strings.Join(conditions, " AND ") + `
-	          ORDER BY created_at DESC LIMIT 100`
-
-	rows, err := deps.DB.QueryContext(ctx, query, sqlArgs...)
+	entries, err := scanCaptures(ctx, deps, args, "audit", captureMaxResults, func(row map[string]any) bool {
+		if actorID != "" && rowString(row, "actor_id") != actorID {
+			return false
+		}
+		if auditAction != "" && rowString(row, "action") != auditAction {
+			return false
+		}
+		return true
+	})
 	if err != nil {
-		return NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
+		return NewToolResultError(err.Error()), nil
 	}
-	defer rows.Close()
-
-	captures := scanAuditRows(rows)
-	if err := rows.Err(); err != nil {
-		return NewToolResultError(fmt.Sprintf("iteration failed: %v", err)), nil
-	}
-	captures = newCaptureEnvGuard(ctx, deps).filter(ctx, captures)
-
-	if len(captures) == 0 {
+	if len(entries) == 0 {
 		return EmptyResult("No audit captures found matching filters")
 	}
-
-	result := map[string]any{
-		"total":   len(captures),
-		"entries": captures,
-	}
-	return JSONResult(result)
+	return JSONResult(map[string]any{"total": len(entries), "entries": entries})
 }
 
 // handleSearchSQL searches SQL captures by fingerprint, table, or duration.
 func handleSearchSQL(ctx context.Context, deps DeepCaptureDeps, args map[string]any) (*CallToolResult, error) {
-	if deps.DB == nil {
-		return NewToolResultError("database connection not available"), nil
-	}
-
 	fingerprint := ArgString(args, "fingerprint")
 	tableName := ArgString(args, "table_name")
 	minDurationMs := ArgFloat(args, "min_duration_ms", 0)
 	last := ArgString(args, "last")
-	limit := ArgInt(args, "limit", 50, 500)
-
 	if fingerprint == "" && tableName == "" && minDurationMs == 0 && last == "" {
 		return NewToolResultError("at least one filter is required: fingerprint, table_name, min_duration_ms, or last"), nil
 	}
+	limit := ArgInt(args, "limit", 50, captureMaxResults)
 
-	var conditions []string
-	var sqlArgs []any
-
-	if fingerprint != "" {
-		conditions = append(conditions, "fingerprint = ?")
-		sqlArgs = append(sqlArgs, fingerprint)
-	}
-	if tableName != "" {
-		conditions = append(conditions, "table_name = ?")
-		sqlArgs = append(sqlArgs, tableName)
-	}
-	if minDurationMs > 0 {
-		conditions = append(conditions, "duration_ms >= ?")
-		sqlArgs = append(sqlArgs, minDurationMs)
-	}
-	if last != "" {
-		since := ParseSinceOr(last, 24*time.Hour)
-		conditions = append(conditions, "created_at > ?")
-		sqlArgs = append(sqlArgs, since.Format(time.RFC3339))
-	}
-
-	whereClause := ""
-	if len(conditions) > 0 {
-		whereClause = "WHERE " + strings.Join(conditions, " AND ")
-	}
-
-	query := fmt.Sprintf(
-		`SELECT id, log_id, raw_sql, normalized_sql, bind_values, row_count,
-		        duration_ms, cached, in_transaction, explain_plan, pool_size,
-		        pool_busy, pool_waiting, caller_location, fingerprint, table_name, created_at
-		 FROM sql_captures %s
-		 ORDER BY duration_ms DESC LIMIT ?`, whereClause)
-	sqlArgs = append(sqlArgs, limit)
-
-	rows, err := deps.DB.QueryContext(ctx, query, sqlArgs...)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
-	}
-	defer rows.Close()
-
-	var captures []map[string]any
-	for rows.Next() {
-		var (
-			id             int64
-			lID            int64
-			rawSQL         sql.NullString
-			normalizedSQL  sql.NullString
-			bindValues     sql.NullString
-			rowCount       sql.NullInt64
-			durationMs     sql.NullFloat64
-			cached         sql.NullInt64
-			inTransaction  sql.NullInt64
-			explainPlan    sql.NullString
-			poolSize       sql.NullInt64
-			poolBusy       sql.NullInt64
-			poolWaiting    sql.NullInt64
-			callerLocation sql.NullString
-			fp             sql.NullString
-			tn             sql.NullString
-			createdAt      string
-		)
-		if err := rows.Scan(&id, &lID, &rawSQL, &normalizedSQL, &bindValues, &rowCount,
-			&durationMs, &cached, &inTransaction, &explainPlan, &poolSize,
-			&poolBusy, &poolWaiting, &callerLocation, &fp, &tn, &createdAt); err != nil {
-			return NewToolResultError(fmt.Sprintf("scan failed: %v", err)), nil
+	queries, err := scanCaptures(ctx, deps, args, "sql", limit, func(row map[string]any) bool {
+		if fingerprint != "" && rowString(row, "fingerprint") != fingerprint {
+			return false
 		}
-		captures = append(captures, map[string]any{
-			"id":              id,
-			"log_id":          lID,
-			"raw_sql":         nullStringToAny(rawSQL),
-			"normalized_sql":  nullStringToAny(normalizedSQL),
-			"bind_values":     nullStringToAny(bindValues),
-			"row_count":       nullInt64ToAny(rowCount),
-			"duration_ms":     nullFloat64ToAny(durationMs),
-			"cached":          nullInt64ToBool(cached),
-			"in_transaction":  nullInt64ToBool(inTransaction),
-			"explain_plan":    nullStringToAny(explainPlan),
-			"pool_size":       nullInt64ToAny(poolSize),
-			"pool_busy":       nullInt64ToAny(poolBusy),
-			"pool_waiting":    nullInt64ToAny(poolWaiting),
-			"caller_location": nullStringToAny(callerLocation),
-			"fingerprint":     nullStringToAny(fp),
-			"table_name":      nullStringToAny(tn),
-			"created_at":      createdAt,
-		})
+		// The SDK wire key is `table`; the tool param stays `table_name`.
+		if tableName != "" && rowString(row, "table") != tableName {
+			return false
+		}
+		return rowFloat(row, "duration_ms") >= minDurationMs
+	})
+	if err != nil {
+		return NewToolResultError(err.Error()), nil
 	}
-	if err := rows.Err(); err != nil {
-		return NewToolResultError(fmt.Sprintf("iteration failed: %v", err)), nil
-	}
-
-	captures = newCaptureEnvGuard(ctx, deps).filter(ctx, captures)
-
-	if len(captures) == 0 {
+	if len(queries) == 0 {
 		return EmptyResult("No SQL captures found matching filters")
 	}
-
-	result := map[string]any{
-		"total":   len(captures),
-		"queries": captures,
-	}
-	return JSONResult(result)
+	return JSONResult(map[string]any{"total": len(queries), "queries": queries})
 }
 
-// handleGetFileCaptures returns file operations for a request.
-func handleGetFileCaptures(ctx context.Context, deps DeepCaptureDeps, args map[string]any) (*CallToolResult, error) {
-	if deps.DB == nil {
-		return NewToolResultError("database connection not available"), nil
+// handleRecentEmails returns emails sent across a time window.
+func handleRecentEmails(ctx context.Context, deps DeepCaptureDeps, args map[string]any) (*CallToolResult, error) {
+	if ArgString(args, "last") == "" {
+		return NewToolResultError("log_id or last is required"), nil
 	}
-	logID := ArgInt(args, "log_id", 0, 1<<31)
-	if logID == 0 {
-		return NewToolResultError("log_id is required"), nil
-	}
-
-	if !newCaptureEnvGuard(ctx, deps).allows(ctx, int64(logID)) {
-		return captureNotFound(int64(logID))
-	}
-
-	rows, err := deps.DB.QueryContext(ctx,
-		`SELECT id, log_id, action, filename, size_bytes, content_type,
-		        storage_service, key, duration_ms, created_at
-		 FROM file_captures WHERE log_id = ?`, logID)
+	emails, err := scanCaptures(ctx, deps, args, "email", captureMaxResults, func(map[string]any) bool { return true })
 	if err != nil {
-		return NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
+		return NewToolResultError(err.Error()), nil
 	}
-	defer rows.Close()
-
-	var captures []map[string]any
-	for rows.Next() {
-		var (
-			id             int64
-			lID            int64
-			action         sql.NullString
-			filename       sql.NullString
-			sizeBytes      sql.NullInt64
-			contentType    sql.NullString
-			storageService sql.NullString
-			key            sql.NullString
-			durationMs     sql.NullFloat64
-			createdAt      string
-		)
-		if err := rows.Scan(&id, &lID, &action, &filename, &sizeBytes, &contentType,
-			&storageService, &key, &durationMs, &createdAt); err != nil {
-			return NewToolResultError(fmt.Sprintf("scan failed: %v", err)), nil
-		}
-		captures = append(captures, map[string]any{
-			"id":              id,
-			"log_id":          lID,
-			"action":          nullStringToAny(action),
-			"filename":        nullStringToAny(filename),
-			"size_bytes":      nullInt64ToAny(sizeBytes),
-			"content_type":    nullStringToAny(contentType),
-			"storage_service": nullStringToAny(storageService),
-			"key":             nullStringToAny(key),
-			"duration_ms":     nullFloat64ToAny(durationMs),
-			"created_at":      createdAt,
-		})
+	if len(emails) == 0 {
+		return EmptyResult("No email captures found")
 	}
-	if err := rows.Err(); err != nil {
-		return NewToolResultError(fmt.Sprintf("iteration failed: %v", err)), nil
-	}
-
-	if len(captures) == 0 {
-		return EmptyResult("No file captures found for log_id " + fmt.Sprintf("%d", logID))
-	}
-
-	result := map[string]any{
-		"log_id": logID,
-		"total":  len(captures),
-		"files":  captures,
-	}
-	return JSONResult(result)
+	return JSONResult(map[string]any{"total": len(emails), "emails": emails})
 }
 
-// handleGetPIIConfig reads the PII scrubbing configuration from app_config.
-func handleGetPIIConfig(ctx context.Context, deps DeepCaptureDeps) (*CallToolResult, error) {
+// ---------------------------------------------------------------------------
+// PII / retention config (app_config)
+// ---------------------------------------------------------------------------
+
+// handleGetConfig reads a JSON config blob out of app_config.
+func handleGetConfig(ctx context.Context, deps DeepCaptureDeps, key string) (*CallToolResult, error) {
 	if deps.DB == nil {
 		return NewToolResultError("database connection not available"), nil
 	}
-
 	var value string
-	err := deps.DB.QueryRowContext(ctx, "SELECT value FROM app_config WHERE key = ?", "pii_scrubbing").Scan(&value)
+	err := deps.DB.QueryRowContext(ctx, "SELECT value FROM app_config WHERE key = ?", key).Scan(&value)
 	if err == sql.ErrNoRows {
-		return EmptyResult("No PII scrubbing configuration found")
+		return EmptyResult("No " + strings.ReplaceAll(key, "_", " ") + " configuration found")
 	}
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
 	}
-
 	var config map[string]any
 	if err := json.Unmarshal([]byte(value), &config); err != nil {
-		return NewToolResultError(fmt.Sprintf("invalid JSON in pii_scrubbing config: %v", err)), nil
+		return NewToolResultError(fmt.Sprintf("invalid JSON in %s config: %v", key, err)), nil
 	}
-
 	return JSONResult(config)
 }
 
-// handleUpdatePIIConfig writes the PII scrubbing configuration to app_config.
-func handleUpdatePIIConfig(ctx context.Context, deps DeepCaptureDeps, args map[string]any) (*CallToolResult, error) {
-	if errResult := requireDeepCaptureAdmin(deps, "update_pii_config"); errResult != nil {
+// handleUpdateConfig writes a JSON config blob into app_config. Admin only.
+func handleUpdateConfig(ctx context.Context, deps DeepCaptureDeps, args map[string]any, action, key string) (*CallToolResult, error) {
+	if errResult := requireDeepCaptureAdmin(deps, action); errResult != nil {
 		return errResult, nil
 	}
 	if deps.DB == nil {
 		return NewToolResultError("database connection not available"), nil
 	}
-
 	config, ok := args["config"]
 	if !ok {
-		return NewToolResultError("config is required (JSON object with PII scrubbing settings)"), nil
+		return NewToolResultError("config is required (JSON object)"), nil
 	}
-
 	data, err := json.Marshal(config)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("invalid config: %v", err)), nil
 	}
-
 	_, err = deps.DB.ExecContext(ctx,
 		"INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-		"pii_scrubbing", string(data))
+		key, string(data))
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("update failed: %v", err)), nil
 	}
-
-	return JSONResult(map[string]any{
-		"status": "updated",
-		"config": config,
-	})
-}
-
-// handleGetRetention reads the retention policy configuration from app_config.
-func handleGetRetention(ctx context.Context, deps DeepCaptureDeps) (*CallToolResult, error) {
-	if deps.DB == nil {
-		return NewToolResultError("database connection not available"), nil
-	}
-
-	var value string
-	err := deps.DB.QueryRowContext(ctx, "SELECT value FROM app_config WHERE key = ?", "retention_policy").Scan(&value)
-	if err == sql.ErrNoRows {
-		return EmptyResult("No retention policy configuration found")
-	}
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
-	}
-
-	var config map[string]any
-	if err := json.Unmarshal([]byte(value), &config); err != nil {
-		return NewToolResultError(fmt.Sprintf("invalid JSON in retention_policy config: %v", err)), nil
-	}
-
-	return JSONResult(config)
-}
-
-// handleUpdateRetention writes the retention policy configuration to app_config.
-func handleUpdateRetention(ctx context.Context, deps DeepCaptureDeps, args map[string]any) (*CallToolResult, error) {
-	if errResult := requireDeepCaptureAdmin(deps, "update_retention"); errResult != nil {
-		return errResult, nil
-	}
-	if deps.DB == nil {
-		return NewToolResultError("database connection not available"), nil
-	}
-
-	config, ok := args["config"]
-	if !ok {
-		return NewToolResultError("config is required (JSON object with retention TTLs)"), nil
-	}
-
-	data, err := json.Marshal(config)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("invalid config: %v", err)), nil
-	}
-
-	_, err = deps.DB.ExecContext(ctx,
-		"INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-		"retention_policy", string(data))
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("update failed: %v", err)), nil
-	}
-
-	return JSONResult(map[string]any{
-		"status": "updated",
-		"config": config,
-	})
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-// scanAuditRows scans audit_captures rows into a slice of maps.
-// The caller must check rows.Err() after this returns.
-func scanAuditRows(rows *sql.Rows) []map[string]any {
-	var captures []map[string]any
-	for rows.Next() {
-		var (
-			id            int64
-			logID         sql.NullInt64
-			recordType    sql.NullString
-			recordID      sql.NullString
-			action        sql.NullString
-			actorID       sql.NullString
-			actorType     sql.NullString
-			changedFields sql.NullString
-			fullBefore    sql.NullString
-			fullAfter     sql.NullString
-			requestID     sql.NullString
-			ipAddress     sql.NullString
-			createdAt     string
-		)
-		if err := rows.Scan(&id, &logID, &recordType, &recordID, &action, &actorID, &actorType,
-			&changedFields, &fullBefore, &fullAfter, &requestID, &ipAddress, &createdAt); err != nil {
-			continue
-		}
-		captures = append(captures, map[string]any{
-			"id":             id,
-			"log_id":         nullInt64ToAny(logID),
-			"record_type":    nullStringToAny(recordType),
-			"record_id":      nullStringToAny(recordID),
-			"action":         nullStringToAny(action),
-			"actor_id":       nullStringToAny(actorID),
-			"actor_type":     nullStringToAny(actorType),
-			"changed_fields": nullStringToAny(changedFields),
-			"full_before":    nullStringToAny(fullBefore),
-			"full_after":     nullStringToAny(fullAfter),
-			"request_id":     nullStringToAny(requestID),
-			"ip_address":     nullStringToAny(ipAddress),
-			"created_at":     createdAt,
-		})
-	}
-	return captures
-}
-
-// nullStringToAny converts a sql.NullString to a JSON-friendly value.
-func nullStringToAny(ns sql.NullString) any {
-	if ns.Valid {
-		return ns.String
-	}
-	return nil
-}
-
-// nullInt64ToAny converts a sql.NullInt64 to a JSON-friendly value.
-func nullInt64ToAny(ni sql.NullInt64) any {
-	if ni.Valid {
-		return ni.Int64
-	}
-	return nil
-}
-
-// nullFloat64ToAny converts a sql.NullFloat64 to a JSON-friendly value.
-func nullFloat64ToAny(nf sql.NullFloat64) any {
-	if nf.Valid {
-		return nf.Float64
-	}
-	return nil
-}
-
-// nullInt64ToBool converts a sql.NullInt64 (0/1) to a boolean.
-func nullInt64ToBool(ni sql.NullInt64) any {
-	if ni.Valid {
-		return ni.Int64 != 0
-	}
-	return false
+	return JSONResult(map[string]any{"status": "updated", "config": config})
 }

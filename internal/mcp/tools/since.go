@@ -177,3 +177,28 @@ func SinceLabel(t time.Time, ok bool) string {
 	}
 	return t.Format(time.RFC3339)
 }
+
+// ParseTimeRange converts strings like "1h", "30m", "24h", "7d" to a duration.
+// An empty string means one hour. It lived in the analytics tool until that
+// tool was removed; logs, errors and ParseSince all depend on it.
+func ParseTimeRange(s string) (time.Duration, error) {
+	if s == "" {
+		return time.Hour, nil
+	}
+
+	// Try standard Go duration first.
+	d, err := time.ParseDuration(s)
+	if err == nil {
+		return d, nil
+	}
+
+	// Handle "d" suffix, which Go's parser does not accept.
+	if strings.HasSuffix(s, "d") {
+		var days int
+		if _, err := fmt.Sscanf(strings.TrimSuffix(s, "d"), "%d", &days); err == nil {
+			return time.Duration(days) * 24 * time.Hour, nil
+		}
+	}
+
+	return 0, fmt.Errorf("invalid duration: %s", s)
+}

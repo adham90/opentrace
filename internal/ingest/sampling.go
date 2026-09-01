@@ -11,28 +11,40 @@ import (
 // Entries whose service matches a rule are randomly kept based on the rule's rate.
 // Error/warn/fatal logs are always kept when KeepErrors is true for the matching rule.
 func ApplySamplingRules(entries []store.LogEntry, rules []store.SamplingRule) []store.LogEntry {
-	// Build a map of service -> rule for fast lookup
-	ruleMap := make(map[string]*store.SamplingRule, len(rules))
-	var defaultRule *store.SamplingRule
+	return compileSamplingRules(rules).apply(entries)
+}
+
+type compiledSamplingRules struct {
+	byService   map[string]store.SamplingRule
+	defaultRule *store.SamplingRule
+}
+
+func compileSamplingRules(rules []store.SamplingRule) *compiledSamplingRules {
+	compiled := &compiledSamplingRules{byService: make(map[string]store.SamplingRule, len(rules))}
 	for i := range rules {
 		if rules[i].Service == "*" {
-			defaultRule = &rules[i]
+			rule := rules[i]
+			compiled.defaultRule = &rule
 		} else {
-			ruleMap[rules[i].Service] = &rules[i]
+			compiled.byService[rules[i].Service] = rules[i]
 		}
 	}
+	return compiled
+}
 
-	if defaultRule == nil && len(ruleMap) == 0 {
+func (r *compiledSamplingRules) apply(entries []store.LogEntry) []store.LogEntry {
+	if r == nil || (r.defaultRule == nil && len(r.byService) == 0) {
 		return entries
 	}
 
 	filtered := make([]store.LogEntry, 0, len(entries))
 	for _, e := range entries {
-		rule := ruleMap[e.Service]
-		if rule == nil {
-			rule = defaultRule
+		rule, ok := r.byService[e.Service]
+		if !ok && r.defaultRule != nil {
+			rule = *r.defaultRule
+			ok = true
 		}
-		if rule == nil {
+		if !ok {
 			// No rule for this service, keep all
 			filtered = append(filtered, e)
 			continue

@@ -43,8 +43,6 @@ func newGatewayEnv() *gatewayEnv {
 	agentNoteStore := mocks.NewAgentNoteStore()
 	userStore := mocks.NewUserStore()
 	metricStore := mocks.NewMetricStore()
-	analyticsStore := mocks.NewAnalyticsStore()
-	trendStore := mocks.NewTrendStore()
 	errorImpactStore := mocks.NewErrorImpactStore()
 	auditStore := mocks.NewAuditStore()
 	mcpActivityStore := mocks.NewMCPActivityStore()
@@ -88,10 +86,6 @@ func newGatewayEnv() *gatewayEnv {
 			DSStore:  dsStore,
 			Registry: registry,
 			LogStore: logStore,
-		}),
-		"analytics": AnalyticsHandler(AnalyticsDeps{
-			AnalyticsStore: analyticsStore,
-			TrendStore:     trendStore,
 		}),
 		"setup": SetupHandler(SetupDeps{
 			LogStore:      logStore,
@@ -182,10 +176,6 @@ func TestE2E_HappyPath(t *testing.T) {
 
 		// connectors
 		{"connectors", "list", nil},
-
-		// analytics
-		{"analytics", "traffic", nil},
-		{"analytics", "endpoints", nil},
 
 		// setup
 		{"setup", "status", nil},
@@ -416,7 +406,7 @@ func TestE2E_UnknownActions(t *testing.T) {
 
 	toolNames := []string{
 		"overview", "logs", "errors", "watches", "healthchecks",
-		"servers", "connectors", "analytics", "setup", "admin",
+		"servers", "connectors", "setup", "admin",
 	}
 
 	for _, tool := range toolNames {
@@ -453,7 +443,7 @@ func TestE2E_MissingAction(t *testing.T) {
 	// action is empty.
 	toolNames := []string{
 		"logs", "errors", "watches", "healthchecks",
-		"servers", "connectors", "analytics", "setup", "admin",
+		"servers", "connectors", "setup", "admin",
 	}
 
 	for _, tool := range toolNames {
@@ -497,7 +487,6 @@ func TestE2E_ResponsesAreValidJSON(t *testing.T) {
 		{"logs", "stats", map[string]any{"time_range": "1h", "group_by": "level"}},
 		{"logs", "summary", map[string]any{"time_range": "1h"}},
 		{"watches", "status", nil},
-		{"analytics", "traffic", nil},
 		{"setup", "status", nil},
 		{"admin", "settings", nil},
 	}
@@ -581,7 +570,6 @@ func TestE2E_ConcurrentDispatch(t *testing.T) {
 		{"healthchecks", "list", nil},
 		{"servers", "list", nil},
 		{"connectors", "list", nil},
-		{"analytics", "traffic", nil},
 		{"setup", "status", nil},
 		{"admin", "settings", nil},
 		{"admin", "users", nil},
@@ -848,55 +836,6 @@ func TestE2E_SetupDetect_WithFiles(t *testing.T) {
 	}
 	if fw, _ := data["detected_framework"].(string); fw != "Ruby on Rails" {
 		t.Errorf("expected detected_framework='Ruby on Rails', got %q", fw)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Analytics heatmap
-// ---------------------------------------------------------------------------
-
-func TestE2E_AnalyticsHeatmap(t *testing.T) {
-	env := newGatewayEnv()
-	ctx := context.Background()
-
-	result, err := env.dispatch(ctx, "analytics", "heatmap", nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result == nil {
-		t.Fatal("expected non-nil result")
-	}
-	// Empty analytics store may return either success (empty data) or text.
-	// We just verify no panics and valid response.
-	if len(result.Content) == 0 {
-		t.Fatal("expected at least one content item")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Analytics trends and movers
-// ---------------------------------------------------------------------------
-
-func TestE2E_AnalyticsTrendsAndMovers(t *testing.T) {
-	env := newGatewayEnv()
-	ctx := context.Background()
-
-	for _, action := range []string{"trends", "movers"} {
-		t.Run(action, func(t *testing.T) {
-			result, err := env.dispatch(ctx, "analytics", action, map[string]any{
-				"since":  "24h",
-				"metric": "error_rate",
-			})
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if result == nil {
-				t.Fatal("expected non-nil result")
-			}
-			if len(result.Content) == 0 {
-				t.Fatal("expected at least one content item")
-			}
-		})
 	}
 }
 

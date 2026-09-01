@@ -2,13 +2,18 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/adham90/opentrace/internal/config"
 	"github.com/adham90/opentrace/internal/jobs"
+	"github.com/adham90/opentrace/internal/mcp/tools"
+	"github.com/adham90/opentrace/internal/watcher"
 	"github.com/adham90/opentrace/pkg/server"
 	"github.com/adham90/opentrace/pkg/store"
 	"golang.org/x/sync/errgroup"
@@ -149,31 +154,7 @@ func pruneStore(ctx context.Context, name string, s prunable, retention time.Dur
 // concurrently via errgroup.
 func aggregationHandler(deps *server.Deps) jobs.HandlerFunc {
 	return func(ctx context.Context, _ json.RawMessage) error {
-		since := time.Now().UTC().Add(-10 * time.Minute)
-
 		g, gctx := errgroup.WithContext(ctx)
-		if deps.TrendStore != nil {
-			g.Go(func() error {
-				if err := deps.TrendStore.AggregateBuckets(gctx, "1h", since); err != nil {
-					slog.Warn("trend aggregation failed", "error", err)
-				}
-				return nil
-			})
-		}
-		if deps.AnalyticsStore != nil {
-			g.Go(func() error {
-				if err := deps.AnalyticsStore.AggregateEndpointStats(gctx, "1h", since); err != nil {
-					slog.Warn("endpoint stats aggregation failed", "error", err)
-				}
-				return nil
-			})
-			g.Go(func() error {
-				if err := deps.AnalyticsStore.UpdateTrafficHeatmap(gctx, since); err != nil {
-					slog.Warn("traffic heatmap update failed", "error", err)
-				}
-				return nil
-			})
-		}
 		if deps.ErrorImpactStore != nil {
 			g.Go(func() error {
 				if err := deps.ErrorImpactStore.ComputeImpactScores(gctx); err != nil {
@@ -194,3 +175,153 @@ func aggregationHandler(deps *server.Deps) jobs.HandlerFunc {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Proactive reporting: post-deploy check-ins and the scheduled catch-up brief.
+// ---------------------------------------------------------------------------
+
+const (
+	// deployReportJob delivers the 1h/24h check-in the auto-watcher schedules
+	// when it first sees a commit.
+	deployReportJob = "deploy:report"
+
+	// catchupPushJob delivers overview.catchup to chat on a timer, so the
+	// morning brief arrives whether or not anyone opened an agent.
+	catchupPushJob = "catchup:push"
+
+	// catchupPushIntervalEnv overrides the brief's cadence. "off" or "0"
+	// disables it.
+	catchupPushIntervalEnv = "OPENTRACE_CATCHUP_PUSH_INTERVAL"
+
+	// defaultCatchupPushInterval is one brief a day.
+	defaultCatchupPushInterval = 24 * time.Hour
+
+	// maxBriefItems caps the chat message. A brief nobody reads to the end is
+	// not a brief; the full list stays one overview.catchup call away.
+	maxBriefItems = 10
+)
+
+// catchupPushInterval resolves the brief's cadence from the environment.
+// A zero return disables the schedule entirely.
+func catchupPushInterval() time.Duration {
+	v := os.Getenv(catchupPushIntervalEnv)
+	switch v {
+	case "":
+		return defaultCatchupPushInterval
+	case "off", "0":
+		return 0
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		slog.Warn("invalid catch-up push interval, using default", catchupPushIntervalEnv, v)
+		return defaultCatchupPushInterval
+	}
+	return d
+}
+
+// deployReportHandler delivers one scheduled post-deploy check-in.
+func deployReportHandler(auto *watcher.AutoWatcher, senders []messageSender) jobs.HandlerFunc {
+	return func(ctx context.Context, payload json.RawMessage) error {
+		var r watcher.DeployReport
+		if err := json.Unmarshal(payload, &r); err != nil {
+			return fmt.Errorf("decoding deploy report: %w", err)
+		}
+		text, err := auto.Report(ctx, r)
+		if err != nil {
+			return fmt.Errorf("building deploy report: %w", err)
+		}
+		if text == "" {
+			// The watch is gone — deleted, or aged out with its data. Nothing
+			// to say and nothing to retry.
+			return nil
+		}
+		slog.Info("post-deploy report", "commit", r.Commit, "after", r.After, "service", r.Service)
+		return broadcast(ctx, senders, "📦 "+text)
+	}
+}
+
+// catchupPushHandler delivers the same payload overview.catchup returns, on a
+// timer instead of on an agent's request.
+//
+// The window is the interval, anchored on the previous successful push. The
+// jobs table is the cursor: no new store, and it is already the record of when
+// this ran.
+func catchupPushHandler(deps *server.Deps, senders []messageSender, interval time.Duration) jobs.HandlerFunc {
+	return func(ctx context.Context, _ json.RawMessage) error {
+		last := lastCompletedJobAt(ctx, deps.DB, catchupPushJob)
+
+		// The scheduler fires once at startup so a frequently-restarted process
+		// still reaches its schedules. For a daily brief that would mean a
+		// brief per deploy, so a recent one suppresses this run.
+		if !last.IsZero() && time.Since(last) < interval/2 {
+			return nil
+		}
+
+		since := time.Now().UTC().Add(-interval)
+		if last.After(since) {
+			since = last
+		}
+
+		items, truncated := tools.CollectCatchup(ctx, tools.OverviewDeps{
+			LogStore:        deps.LogStore,
+			ErrorGroupStore: deps.ErrorGroupStore,
+			WatchStore:      deps.WatchStore,
+			DeployStore:     deps.DeployStore,
+			CriticalPaths:   criticalPathsFor(deps.Cfg),
+		}, "", since)
+		if len(items) == 0 {
+			// Silence is the correct output for a quiet night. A daily "nothing
+			// happened" is how a channel gets muted.
+			return nil
+		}
+		return broadcast(ctx, senders, formatCatchupBrief(items, since, truncated))
+	}
+}
+
+func criticalPathsFor(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	return cfg.CriticalPaths
+}
+
+// formatCatchupBrief renders catch-up items as a chat message.
+func formatCatchupBrief(items []tools.TriageEntry, since time.Time, truncated bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "☀️ <b>Since %s</b> — %d event(s)\n", since.Format("Jan 2 15:04 MST"), len(items))
+
+	shown := items
+	if len(shown) > maxBriefItems {
+		shown = shown[:maxBriefItems]
+	}
+	for _, it := range shown {
+		marker := "•"
+		if it.Critical {
+			marker = "💰"
+		} else if it.Severity == "critical" {
+			marker = "🔴"
+		}
+		fmt.Fprintf(&b, "\n%s %s — %s", marker, it.Title, it.Detail)
+	}
+	if len(items) > len(shown) || truncated {
+		fmt.Fprintf(&b, "\n\n… and more. Ask your agent for overview.catchup for the full list.")
+	}
+	return b.String()
+}
+
+// lastCompletedJobAt returns when a job type last completed, or the zero time
+// when it never has (or the row has since been pruned).
+func lastCompletedJobAt(ctx context.Context, db *sql.DB, jobType string) time.Time {
+	var raw sql.NullString
+	err := db.QueryRowContext(ctx,
+		`SELECT MAX(completed_at) FROM jobs WHERE job_type = ? AND status = 'completed'`,
+		jobType,
+	).Scan(&raw)
+	if err != nil || !raw.Valid {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, raw.String)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
+}

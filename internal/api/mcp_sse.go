@@ -152,8 +152,6 @@ func (s *Server) mcpDeps() mcpserver.Deps {
 			ErrorGroupStore:  s.errorGroupStore,
 			HealthCheckStore: s.healthCheckStore,
 			AgentNoteStore:   s.agentNoteStore,
-			TrendStore:       s.trendStore,
-			AnalyticsStore:   s.analyticsStore,
 			ErrorImpactStore: s.errorImpactStore,
 			TraceStore:       s.traceStore,
 			CodeEntityStore:  s.codeEntityStore,

@@ -52,6 +52,22 @@ type WALWriter struct {
 	// can't be framed after orphan bytes.
 	fileSize int64
 
+	// writtenBytes mirrors fileSize for readers that cannot take mu — namely a
+	// goroutine in the fsync phase of a group commit, which needs to know how
+	// much has been written without blocking the writers behind it.
+	writtenBytes int64
+
+	// syncMu serializes the fsync phase of Append, and guards syncedBytes.
+	// Lock order is always mu → syncMu; nothing takes them the other way round.
+	syncMu sync.Mutex
+	// syncedBytes is the file offset durably on disk. An appender whose bytes
+	// are already below it has nothing to do: another appender's fsync covered
+	// them. That is the whole of group commit.
+	syncedBytes int64
+
+	// batchBuf is the reusable serialization buffer for Append (guarded by mu).
+	batchBuf []byte
+
 	// now returns the current UTC time. Overridable in tests to exercise
 	// hour-boundary rotation deterministically.
 	now func() time.Time
@@ -112,8 +128,9 @@ func (w *WALWriter) Append(entries []chunk.Entry) ([]chunk.Entry, error) {
 		return nil, nil
 	}
 
+	// Unlocked explicitly rather than deferred: the fsync at the end runs
+	// outside mu so concurrent appends can share it (see syncThrough).
 	w.mu.Lock()
-	defer w.mu.Unlock()
 
 	now := w.now()
 
@@ -133,6 +150,7 @@ func (w *WALWriter) Append(entries []chunk.Entry) ([]chunk.Entry, error) {
 	// Refuse to encode IDs that would overflow the chunk field into the
 	// segment-hour bits. The Store turns this into a forced seal + retry.
 	if !SegmentHasRoom(startIdx, len(entries)) {
+		w.mu.Unlock()
 		return nil, ErrSegmentFull
 	}
 
@@ -141,44 +159,89 @@ func (w *WALWriter) Append(entries []chunk.Entry) ([]chunk.Entry, error) {
 		entries[i].ReceivedAt = receivedAt
 	}
 
-	// Serialize and write. A short or failed write leaves partial bytes at the
-	// end of the file; O_APPEND would then frame the next record after that
-	// garbage and mis-frame every record from there on, so roll the file back
-	// to the last-known-good offset before returning the error.
+	// Serialize the whole batch into one buffer and issue a single write. A
+	// write per entry cost a syscall per log line, which dominated ingest for
+	// the batch sizes SDKs actually send.
+	//
+	// A short or failed write leaves partial bytes at the end of the file;
+	// O_APPEND would then frame the next record after that garbage and mis-frame
+	// every record from there on, so roll the file back to the last-known-good
+	// offset before returning the error.
 	lastGood := w.fileSize
-	written := int64(0)
+	w.batchBuf = w.batchBuf[:0]
 	for i := range entries {
-		data := wal.MarshalEntry(&entries[i])
-		normalizeForRing(&entries[i], data)
-		n, err := w.walFile.Write(data)
-		written += int64(n)
-		if err != nil {
-			w.rollback(lastGood)
-			return nil, fmt.Errorf("write WAL entry: %w", err)
-		}
+		start := len(w.batchBuf)
+		w.batchBuf = wal.AppendEntry(w.batchBuf, &entries[i])
+		normalizeForRing(&entries[i], w.batchBuf[start:])
 	}
-
-	// Fsync the batch
-	if err := w.walFile.Sync(); err != nil {
+	written, err := w.walFile.Write(w.batchBuf)
+	if err != nil {
 		w.rollback(lastGood)
-		return nil, fmt.Errorf("fsync WAL: %w", err)
+		w.mu.Unlock()
+		return nil, fmt.Errorf("write WAL entry: %w", err)
 	}
-	w.fileSize = lastGood + written
+	w.fileSize = lastGood + int64(written)
+	atomic.StoreInt64(&w.writtenBytes, w.fileSize)
+	durableAt := w.fileSize
 
 	// Update counters
 	newCount := int64(startIdx + len(entries))
 	atomic.StoreInt64(&w.entryCount, newCount)
 
-	// Update valid bytes for concurrent readers. Use the tracked offset rather
-	// than Stat(): Stat would report any orphan bytes left by a failed write as
-	// valid.
-	atomic.StoreInt64(&w.validBytes, w.fileSize)
-
-	// Push to ring buffer (outside lock is fine — ring has its own sync)
+	// Push to ring buffer under the lock so the live tail sees entries in the
+	// order they were assigned IDs.
 	w.ring.Push(entries)
 
+	// Don't let one outsized batch pin its buffer for the life of the process.
+	if cap(w.batchBuf) > maxRetainedBatchBuf {
+		w.batchBuf = nil
+	}
+
+	// Release the writer lock before the fsync. Holding it across the sync made
+	// every concurrent SDK request queue behind one ~4ms F_FULLFSYNC, which
+	// pinned ingest at a flat few thousand entries/second no matter how many
+	// writers or cores were available.
+	w.mu.Unlock()
+
+	if err := w.syncThrough(durableAt); err != nil {
+		return nil, err
+	}
 	return entries, nil
 }
+
+// syncThrough makes the WAL durable at least up to offset target.
+//
+// This is group commit: appends write their bytes under mu and then arrive
+// here. The first one to get syncMu fsyncs everything written so far; the
+// others queue, and by the time they get the lock their bytes are already
+// covered, so they return without a second syscall. N concurrent batches cost
+// about one fsync instead of N, with no weakening of the durability contract —
+// Append still does not return until the caller's own bytes are on disk.
+func (w *WALWriter) syncThrough(target int64) error {
+	w.syncMu.Lock()
+	defer w.syncMu.Unlock()
+
+	if w.syncedBytes >= target {
+		return nil // another appender's fsync already covered us
+	}
+
+	// Snapshot before the syscall: everything written by the time the fsync
+	// starts is durable when it returns, so later arrivals can skip it too.
+	covered := atomic.LoadInt64(&w.writtenBytes)
+	if err := w.walFile.Sync(); err != nil {
+		return fmt.Errorf("fsync WAL: %w", err)
+	}
+	if covered > w.syncedBytes {
+		w.syncedBytes = covered
+		// Readers bound their scan by this, so it must never claim more than
+		// was actually fsynced.
+		atomic.StoreInt64(&w.validBytes, covered)
+	}
+	return nil
+}
+
+// maxRetainedBatchBuf caps the serialization buffer kept between appends.
+const maxRetainedBatchBuf = 4 << 20
 
 // SegmentHour returns the current segment hour.
 func (w *WALWriter) SegmentHour() int64 {
@@ -252,9 +315,19 @@ func (w *WALWriter) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.walFile != nil {
+		w.flushBeforeHandoff()
 		return w.walFile.Close()
 	}
 	return nil
+}
+
+// flushBeforeHandoff fsyncs whatever a group commit has not reached yet, for
+// the two moments the current file stops being the one Append writes to:
+// rotation and close. Caller holds mu.
+func (w *WALWriter) flushBeforeHandoff() {
+	if err := w.syncThrough(atomic.LoadInt64(&w.writtenBytes)); err != nil {
+		slog.Error("wal: final fsync before handoff failed", "error", err)
+	}
 }
 
 // --- internal ---
@@ -288,7 +361,13 @@ func normalizeForRing(e *chunk.Entry, record []byte) {
 }
 
 // rollback truncates the WAL back to a known-good offset after a failed write.
+// Caller holds mu, so no other appender can have written past offset; syncMu is
+// taken as well so a group commit in flight cannot record bytes as durable that
+// this truncation is about to remove.
 func (w *WALWriter) rollback(offset int64) {
+	w.syncMu.Lock()
+	defer w.syncMu.Unlock()
+
 	if err := w.walFile.Truncate(offset); err != nil {
 		slog.Error("wal: cannot roll back partial write", "error", err, "offset", offset)
 		return
@@ -297,7 +376,20 @@ func (w *WALWriter) rollback(offset int64) {
 		slog.Error("wal: cannot fsync after rollback", "error", err)
 	}
 	w.fileSize = offset
+	atomic.StoreInt64(&w.writtenBytes, offset)
+	if w.syncedBytes > offset {
+		w.syncedBytes = offset
+	}
 	atomic.StoreInt64(&w.validBytes, offset)
+}
+
+// setSyncOffsets resets the group-commit bookkeeping when the writer switches
+// to a different file. Caller holds mu.
+func (w *WALWriter) setSyncOffsets(offset int64) {
+	w.syncMu.Lock()
+	defer w.syncMu.Unlock()
+	atomic.StoreInt64(&w.writtenBytes, offset)
+	w.syncedBytes = offset
 }
 
 // advanceEmpty moves the writer to newHour when the current WAL holds nothing
@@ -342,10 +434,12 @@ func (w *WALWriter) ensureWAL(hour int64) error {
 		atomic.StoreInt64(&w.entryCount, int64(count))
 		atomic.StoreInt64(&w.validBytes, validBytes)
 		w.fileSize = validBytes
+		w.setSyncOffsets(validBytes)
 	} else {
 		atomic.StoreInt64(&w.entryCount, 0)
 		atomic.StoreInt64(&w.validBytes, 0)
 		w.fileSize = 0
+		w.setSyncOffsets(0)
 	}
 
 	f, err := os.OpenFile(walPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
@@ -359,8 +453,12 @@ func (w *WALWriter) ensureWAL(hour int64) error {
 }
 
 func (w *WALWriter) rotate(newHour int64) error {
-	// Close current WAL
+	// Close current WAL. Flush first: with group commit the tail of the file can
+	// be written but not yet fsynced, and this file is about to be renamed and
+	// sealed — a crash between here and the seal would otherwise lose records
+	// that Append had already reported as written.
 	if w.walFile != nil {
+		w.flushBeforeHandoff()
 		w.walFile.Close()
 	}
 

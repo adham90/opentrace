@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
@@ -377,6 +378,7 @@ func ErrorsRanking(ctx context.Context, deps ErrorsDeps, args map[string]any) (*
 		OccurrenceCount int      `json:"occurrence_count"`
 		UniqueUsers     int      `json:"unique_users"`
 		ImpactScore     float64  `json:"impact_score"`
+		Critical        bool     `json:"critical,omitempty"`
 		LastSeenAt      string   `json:"last_seen_at"`
 		TopUsers        []string `json:"top_users,omitempty"`
 	}
@@ -397,6 +399,7 @@ func ErrorsRanking(ctx context.Context, deps ErrorsDeps, args map[string]any) (*
 			OccurrenceCount: r.OccurrenceCount,
 			UniqueUsers:     r.UniqueUsers,
 			ImpactScore:     r.ImpactScore,
+			Critical:        isCriticalPath(deps.CriticalPaths, r.Service, r.Message, r.ExceptionClass),
 			LastSeenAt:      r.LastSeenAt.Format(time.RFC3339),
 		}
 		// TopAffectedUsers comes from a fingerprint-only lookup, so it mixes
@@ -408,6 +411,12 @@ func ErrorsRanking(ctx context.Context, deps ErrorsDeps, args map[string]any) (*
 		}
 		entries[i] = e
 	}
+
+	// Money path to the top. The store ranks by user count, which is exactly
+	// wrong when ten people cannot pay and a thousand cannot load an avatar.
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].Critical && !entries[j].Critical
+	})
 
 	resp := map[string]any{
 		"since":        params.Since.Format(time.RFC3339),
