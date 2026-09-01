@@ -204,20 +204,45 @@ func (s *traceStore) ListRecentTraces(ctx context.Context, limit, offset int) ([
 	return traces, total, nil
 }
 
+// staleTraceBatchSize is how many rows one UPDATE statement may touch, matching
+// the retention sweep's batching for the same reason.
+const staleTraceBatchSize = 1000
+
 // MarkStaleTraces marks partial traces as 'timeout' if their last_updated_at
 // is older than the given threshold.
+//
+// The update is batched because the driver is pure Go: SQLite's page churn for
+// a statement is Go heap, not memory outside the runtime, so one UPDATE across
+// every stale row is a heap spike proportional to the table. A backlogged sweep
+// over 740k rows was enough on its own to push a 256MB container into the OOM
+// killer, and the rows it walks are exactly the ones an unbounded trace_status
+// accumulates.
 func (s *traceStore) MarkStaleTraces(ctx context.Context, olderThan time.Duration) (int, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
-	res, err := s.db.NewUpdate().Model((*store.TraceStatus)(nil)).
-		Set("status = ?", "timeout").
-		Where("status = ?", "partial").
-		Where("last_updated_at < ?", cutoff).
-		Exec(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("mark stale traces: %w", err)
+	total := 0
+	for {
+		res, err := s.db.NewRaw(
+			`UPDATE trace_status SET status = 'timeout' WHERE rowid IN (
+				SELECT rowid FROM trace_status
+				WHERE status = 'partial' AND last_updated_at < ? LIMIT ?)`,
+			cutoff, staleTraceBatchSize,
+		).Exec(ctx)
+		if err != nil {
+			return total, fmt.Errorf("mark stale traces: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		total += int(n)
+		if n < staleTraceBatchSize {
+			return total, nil
+		}
+		// A sweep this large is maintenance, not a request: yield rather than
+		// hold the write lock for the whole backlog.
+		select {
+		case <-ctx.Done():
+			return total, ctx.Err()
+		default:
+		}
 	}
-	n, _ := res.RowsAffected()
-	return int(n), nil
 }
 
 // isErrorLevel returns true if the log level indicates an error.

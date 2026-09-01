@@ -97,9 +97,18 @@ func NewWALWriter(dataDir string, ring *RingBuffer) (*WALWriter, error) {
 }
 
 // maxSealedHourProbe bounds the search for a writable segment hour. Each step
-// is one sealed hour ahead of the clock, which only accumulates from repeated
-// forced seals inside a single hour; a full day of them is already pathological.
-const maxSealedHourProbe = 24
+// is one sealed hour ahead of the clock, accumulated by forced seals inside a
+// single hour — every restart that has data to flush burns one.
+//
+// A day's worth is not the pathological case it looks like. A service that
+// crash-loops, or a busy hour that exhausts its addressable IDs, consumes slots
+// steadily, and the drift persists on disk: at 24 the store stopped opening at
+// all, with "no unsealed segment hour in 24 hours" and a non-zero exit — a
+// restart loop turning itself into a permanent outage, on data that is entirely
+// intact. The probe is cheap (one stat per step, only at open and rotate), so
+// the bound is set where it is a backstop against a corrupt data directory
+// rather than a limit real usage can reach.
+const maxSealedHourProbe = 24 * 365
 
 // freeSegmentHour returns the first segment hour at or after start whose
 // directory has not already been sealed.

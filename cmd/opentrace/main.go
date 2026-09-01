@@ -223,6 +223,7 @@ func applyPerformanceConfig(perf config.PerformanceConfig) {
 	engine.SearchConcurrency = perf.SearchConcurrency
 	engine.MaxConcurrentQueries = perf.MaxConcurrentQueries
 	engine.SealChunkEntries = perf.SealChunkEntries
+	engine.MaxScanRows = perf.MaxScanRows
 	logwal.CompressBodies = perf.WALCompressBody
 	slog.Info("runtime resource profile configured",
 		"profile", perf.Profile,

@@ -790,7 +790,15 @@ func (s *Store) DistinctValues(column string, start, end time.Time, service, lev
 		}
 	}
 	if len(seen) < maxDistinctValues {
-		collect(searchWALs(s.walCache, walPaths, params))
+		// Fold straight off the scan: the live hour used to be collected into a
+		// slice and then walked once to fill a set bounded at maxDistinctValues.
+		forEachWALEntry(s.walCache, walPaths, func(e *chunk.Entry) bool {
+			if !matchesParams(e, params) {
+				return true
+			}
+			collect([]chunk.Entry{*e})
+			return len(seen) < maxDistinctValues
+		})
 	}
 	return sortedKeys(seen)
 }
@@ -1498,15 +1506,23 @@ func searchWALsTop(c *walCache, paths []string, params SearchParams, limit int) 
 	return h.entries, total
 }
 
-// searchWALs returns every match for internal aggregate paths that genuinely
-// need every row. Paginated Search uses searchWALsTop above.
-func searchWALs(c *walCache, paths []string, params SearchParams) []chunk.Entry {
-	var matches []chunk.Entry
+// searchWALsCapped returns matches for internal aggregate paths that walk every
+// row, stopping once limit have been collected. Paginated Search uses
+// searchWALsTop above.
+//
+// The limit is the point: the callers truncated to their row cap only after
+// collecting the whole live hour, so the allocation the cap exists to refuse
+// had already happened by the time it was applied.
+func searchWALsCapped(c *walCache, paths []string, params SearchParams, limit int) []chunk.Entry {
+	if limit <= 0 {
+		return nil
+	}
+	matches := make([]chunk.Entry, 0, min(limit, 4096))
 	forEachWALEntry(c, paths, func(e *chunk.Entry) bool {
 		if matchesParams(e, params) {
 			matches = append(matches, *e)
 		}
-		return true
+		return len(matches) < limit
 	})
 	return matches
 }

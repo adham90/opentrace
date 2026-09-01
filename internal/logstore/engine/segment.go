@@ -219,6 +219,30 @@ func (sm *SegmentManager) SegmentsInRange(start, end time.Time) []*LoadedSegment
 	return result
 }
 
+// expiredAt reports whether every entry in the segment is older than the
+// retention cutoff.
+//
+// The hour slot is not a timestamp (see SegmentsInRange), and here the drift
+// runs the other way: a segment parked in a future slot looks newer than its
+// data, so slot-based pruning kept it forever and retention silently stopped
+// applying to exactly the segments a restart loop produced.
+//
+// The direction of safety is the opposite of a query's. Including an extra
+// segment in a search costs a scan; deleting one destroys data. So the recorded
+// range decides only when it is present and unambiguous, and the slot remains
+// the fallback for segments sealed before it was written.
+func (s *LoadedSegment) expiredAt(cutoffHour int64, cutoff time.Time) bool {
+	if s == nil {
+		return false
+	}
+	if s.Meta != nil {
+		if last, err := time.Parse(time.RFC3339, s.Meta.TimeRange[1]); err == nil {
+			return last.Before(cutoff)
+		}
+	}
+	return s.Hour < cutoffHour
+}
+
 // segmentRangeBuffer widens a segment's recorded time range on both sides, for
 // the same clock skew the hour buffer allows for.
 const segmentRangeBuffer = time.Hour
@@ -271,7 +295,7 @@ func (sm *SegmentManager) Prune(retention time.Duration) (int, error) {
 	deleted := 0
 	var remaining []*LoadedSegment
 	for _, seg := range sm.segments {
-		if seg.Hour < cutoffHour {
+		if seg.expiredAt(cutoffHour, time.Now().UTC().Add(-retention)) {
 			if err := os.RemoveAll(seg.DirPath); err != nil {
 				slog.Error("segment: prune failed", "dir", seg.DirName, "error", err)
 				remaining = append(remaining, seg) // keep in list if delete failed

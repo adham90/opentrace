@@ -9,10 +9,26 @@ import (
 	"github.com/adham90/opentrace/internal/logstore/chunk"
 )
 
-// maxScanRows bounds how many matching rows a whole-range scan will hold in
+// MaxScanRows bounds how many matching rows a whole-range scan will hold in
 // memory. Sorting "slowest first" or averaging over a range is only correct if
 // the whole range is examined, but it must not be able to OOM the server.
-const maxScanRows = 500000
+// MaxScanRows caps how many rows an aggregate scan may hold at once.
+//
+// It is a memory budget expressed in rows: a chunk.Entry is ~600 bytes before
+// its body, so the old fixed 500k was a ~300MB ceiling — larger than the entire
+// heap on a small deployment, which makes it no cap at all. It is a variable so
+// a profile can size it with the other budgets.
+var MaxScanRows = 500000
+
+// walScanHeadroom is how many more rows the live-WAL leg of a scan may add.
+// Collecting the whole live hour and truncating afterwards allocated the very
+// rows the cap exists to refuse.
+func walScanHeadroom(have int) int {
+	if have >= MaxScanRows {
+		return 0
+	}
+	return MaxScanRows - have + 1 // +1 so the caller can still detect overflow
+}
 
 // RequestAggregate holds whole-range aggregates for request entries.
 type RequestAggregate struct {
@@ -21,14 +37,14 @@ type RequestAggregate struct {
 	TotalSQLCount   float64
 	CacheReads      int
 	CacheHits       int
-	// Truncated reports that the scan hit maxScanRows and the aggregate covers
+	// Truncated reports that the scan hit MaxScanRows and the aggregate covers
 	// only part of the range.
 	Truncated bool
 }
 
 // collectMatching returns every entry matching params across sealed segments
 // and unsealed WALs, ignoring Limit/Offset. The second result reports that the
-// scan was truncated at maxScanRows.
+// scan was truncated at MaxScanRows.
 func (s *Store) collectMatching(params SearchParams) ([]chunk.Entry, bool, error) {
 	params = params.withDefaultRange()
 	// A per-segment cap would defeat the point: the answer depends on rows from
@@ -41,7 +57,7 @@ func (s *Store) collectMatching(params SearchParams) ([]chunk.Entry, bool, error
 	var out []chunk.Entry
 	truncated := false
 	for _, seg := range segs {
-		if len(out) >= maxScanRows {
+		if len(out) >= MaxScanRows {
 			truncated = true
 			break
 		}
@@ -53,14 +69,14 @@ func (s *Store) collectMatching(params SearchParams) ([]chunk.Entry, bool, error
 		out = append(out, entries...)
 	}
 	if !truncated {
-		out = append(out, searchWALs(s.walCache, walPaths, params)...)
+		out = append(out, searchWALsCapped(s.walCache, walPaths, params, walScanHeadroom(len(out)))...)
 	}
-	if len(out) > maxScanRows {
-		out = out[:maxScanRows]
+	if len(out) > MaxScanRows {
+		out = out[:MaxScanRows]
 		truncated = true
 	}
 	if truncated {
-		slog.Warn("scan: result truncated", "max_rows", maxScanRows)
+		slog.Warn("scan: result truncated", "max_rows", MaxScanRows)
 	}
 	return out, truncated, nil
 }
@@ -125,7 +141,7 @@ func (s *Store) collectMatchingTop(params SearchParams, column string, n int) ([
 	var out []chunk.Entry
 	truncated := false
 	for _, seg := range segs {
-		if len(out) >= maxScanRows {
+		if len(out) >= MaxScanRows {
 			truncated = true
 			break
 		}
@@ -142,14 +158,14 @@ func (s *Store) collectMatchingTop(params SearchParams, column string, n int) ([
 		}
 	}
 	if !truncated {
-		out = append(out, searchWALs(s.walCache, walPaths, scan)...)
+		out = append(out, searchWALsCapped(s.walCache, walPaths, scan, walScanHeadroom(len(out)))...)
 	}
-	if len(out) > maxScanRows {
-		out = out[:maxScanRows]
+	if len(out) > MaxScanRows {
+		out = out[:MaxScanRows]
 		truncated = true
 	}
 	if truncated {
-		slog.Warn("scan: result truncated", "max_rows", maxScanRows)
+		slog.Warn("scan: result truncated", "max_rows", MaxScanRows)
 	}
 	return out, truncated, nil
 }
@@ -243,7 +259,7 @@ func (s *Store) AggregateRequests(params SearchParams) (RequestAggregate, error)
 	scanned := 0
 
 	for _, seg := range segs {
-		if scanned >= maxScanRows {
+		if scanned >= MaxScanRows {
 			agg.Truncated = true
 			break
 		}
@@ -290,19 +306,22 @@ func (s *Store) AggregateRequests(params SearchParams) (RequestAggregate, error)
 	}
 
 	if !agg.Truncated {
-		for _, e := range searchWALs(s.walCache, walPaths, scan) {
-			if e.DurationMs <= 0 {
-				continue
+		// A pure fold: stream it rather than building a slice of the live hour
+		// only to walk it once and drop it.
+		forEachWALEntry(s.walCache, walPaths, func(e *chunk.Entry) bool {
+			if !matchesParams(e, scan) || e.DurationMs <= 0 {
+				return true
 			}
 			agg.Count++
 			agg.TotalDurationMs += float64(e.DurationMs)
 			agg.TotalSQLCount += float64(e.DbCount)
 			agg.CacheHits += e.CacheHits
 			agg.CacheReads += e.CacheHits + e.CacheMisses
-		}
+			return true
+		})
 	}
 	if agg.Truncated {
-		slog.Warn("scan: result truncated", "max_rows", maxScanRows)
+		slog.Warn("scan: result truncated", "max_rows", MaxScanRows)
 	}
 	return agg, nil
 }

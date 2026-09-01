@@ -27,6 +27,7 @@ type PerformanceConfig struct {
 	SearchConcurrency    int
 	MaxConcurrentQueries int
 	SealChunkEntries     int
+	MaxScanRows          int
 	IngestRatePerMinute  int
 	IngestInFlightMB     int
 	PostprocessWorkers   int
@@ -46,6 +47,7 @@ func balancedPerformanceConfig(devMode bool) PerformanceConfig {
 		SearchConcurrency:    8,
 		MaxConcurrentQueries: 8,
 		SealChunkEntries:     50000,
+		MaxScanRows:          500000,
 		IngestRatePerMinute:  600000,
 		IngestInFlightMB:     64,
 		PostprocessWorkers:   2,
@@ -80,6 +82,7 @@ func tinyPerformanceConfig(devMode bool) PerformanceConfig {
 		SearchConcurrency:    1,
 		MaxConcurrentQueries: 2,
 		SealChunkEntries:     8192,
+		MaxScanRows:          50000,
 		IngestRatePerMinute:  600000,
 		IngestInFlightMB:     16,
 		PostprocessWorkers:   1,
@@ -119,6 +122,7 @@ func loadPerformanceConfig(devMode bool) (PerformanceConfig, error) {
 		{"OPENTRACE_SEARCH_CONCURRENCY", &cfg.SearchConcurrency, 1, 1024},
 		{"OPENTRACE_MAX_CONCURRENT_QUERIES", &cfg.MaxConcurrentQueries, 1, 1024},
 		{"OPENTRACE_SEAL_CHUNK_ENTRIES", &cfg.SealChunkEntries, 512, 50000},
+		{"OPENTRACE_MAX_SCAN_ROWS", &cfg.MaxScanRows, 1000, 10000000},
 		{"OPENTRACE_INGEST_RATE_LIMIT_PER_MINUTE", &cfg.IngestRatePerMinute, 1, 1 << 30},
 		{"OPENTRACE_INGEST_INFLIGHT_MB", &cfg.IngestInFlightMB, 10, 1 << 20},
 		{"OPENTRACE_POSTPROCESS_WORKERS", &cfg.PostprocessWorkers, 1, 1024},

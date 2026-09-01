@@ -42,6 +42,16 @@ func setupRetentionTestDB(t *testing.T) *sql.DB {
 			started_at TEXT NOT NULL
 		);
 
+		CREATE TABLE trace_status (
+			trace_id        TEXT PRIMARY KEY,
+			span_count      INTEGER NOT NULL DEFAULT 0,
+			services        TEXT NOT NULL DEFAULT '[]',
+			first_seen_at   TEXT NOT NULL,
+			last_updated_at TEXT NOT NULL,
+			status          TEXT NOT NULL DEFAULT 'partial',
+			has_errors      INTEGER NOT NULL DEFAULT 0
+		);
+
 		CREATE TABLE watch_alerts (
 			id         TEXT PRIMARY KEY,
 			watch_id   TEXT NOT NULL,
@@ -221,5 +231,43 @@ func TestParseTTL(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("parseTTL(%q) = %v, want %v", tt.input, got, tt.want)
 		}
+	}
+}
+
+// TestCleanupRetentionTables_PrunesTraceStatus covers trace_status being added
+// to retention. It holds one row per trace id and had no TTL at all, so it grew
+// for the life of the deployment — a stress run put 740k rows in it in five
+// minutes, and the periodic stale-trace sweep over that backlog was enough on
+// its own to OOM-kill a 256MB container.
+func TestCleanupRetentionTables_PrunesTraceStatus(t *testing.T) {
+	db := setupRetentionTestDB(t)
+	ctx := context.Background()
+
+	old := time.Now().UTC().Add(-90 * 24 * time.Hour).Format(time.RFC3339)
+	recent := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
+	for _, r := range []struct{ id, ts string }{{"t-old", old}, {"t-recent", recent}} {
+		if _, err := db.Exec(
+			`INSERT INTO trace_status (trace_id, span_count, services, first_seen_at, last_updated_at, status, has_errors)
+			 VALUES (?, 1, '[]', ?, ?, 'partial', 0)`, r.id, r.ts, r.ts,
+		); err != nil {
+			t.Fatalf("insert %s: %v", r.id, err)
+		}
+	}
+
+	// No explicit policy: the default TTL has to be bounded, or the table is
+	// never pruned on a deployment nobody configured.
+	if _, err := cleanupRetentionTables(ctx, db); err != nil {
+		t.Fatalf("cleanupRetentionTables: %v", err)
+	}
+
+	if got := countRows(t, db, "trace_status"); got != 1 {
+		t.Errorf("trace_status: want 1 remaining (the recent trace), got %d", got)
+	}
+	var survivor string
+	if err := db.QueryRow(`SELECT trace_id FROM trace_status`).Scan(&survivor); err != nil {
+		t.Fatalf("read survivor: %v", err)
+	}
+	if survivor != "t-recent" {
+		t.Errorf("kept %q, want t-recent", survivor)
 	}
 }

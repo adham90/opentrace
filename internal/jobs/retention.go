@@ -18,18 +18,25 @@ type RetentionConfig struct {
 	ErrorGroups string `json:"error_groups"`
 	WatchRuns   string `json:"watch_runs"`
 	WatchAlerts string `json:"watch_alerts"`
+	// Traces bounds trace_status, which holds one row per trace id. A busy
+	// service emits roughly one trace per request, so "never" here is an
+	// unbounded table: a stress run put 740k rows in it in five minutes, and
+	// the periodic stale-trace sweep then had to update all of them at once.
+	Traces string `json:"traces"`
 }
 
 // DefaultRetentionConfig returns sensible defaults matching the migration seed.
-// watch_runs/watch_alerts default to a bounded TTL because the watcher engine
-// writes one run row per watch per check interval; "never" would grow the
-// metadata database without limit.
+// watch_runs/watch_alerts/traces default to a bounded TTL because each is
+// written per event rather than per entity — one run row per watch per check
+// interval, one trace row per request — so "never" would grow the metadata
+// database without limit.
 func DefaultRetentionConfig() RetentionConfig {
 	return RetentionConfig{
 		Logs:        "30d",
 		ErrorGroups: "never",
 		WatchRuns:   defaultWatchRetention,
 		WatchAlerts: defaultWatchRetention,
+		Traces:      defaultWatchRetention,
 	}
 }
 
@@ -110,6 +117,7 @@ func cleanupRetentionTables(ctx context.Context, db *sql.DB) (int, error) {
 		{"error_groups", cfg.ErrorGroups, "last_seen_at"},
 		{"watch_alerts", cfg.WatchAlerts, "created_at"},
 		{"watch_runs", cfg.WatchRuns, "started_at"},
+		{"trace_status", cfg.Traces, "last_updated_at"},
 	}
 
 	totalDeleted := 0
