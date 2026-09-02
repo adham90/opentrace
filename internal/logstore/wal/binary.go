@@ -74,7 +74,17 @@ const (
 	// framed strings with a bare uint16 length, so they are decoded with
 	// enc.LenUint16 and keep reading correctly.
 	FlagExtendedStrings uint64 = 1 << 63
+
+	// FlagRawBody marks a body stored without the transient WAL zstd pass. The
+	// sealed body column is compressed later, so a tiny deployment can avoid
+	// compressing at ingest only to decompress and recompress during sealing.
+	FlagRawBody uint64 = 1 << 62
 )
+
+// CompressBodies controls the representation of bodies in newly written WAL
+// records. Configure it before opening a writer. Both representations are
+// self-describing and readable by this version.
+var CompressBodies = true
 
 // Level enum values (1 byte in binary format).
 var levelToEnum = map[string]byte{
@@ -124,7 +134,15 @@ const (
 // legacy uint16 framing, so WAL files written by older builds still replay.
 // Individual fields are capped at MaxFieldBytes.
 func MarshalEntry(e *chunk.Entry) []byte {
-	buf := make([]byte, 0, 256)
+	return AppendEntry(make([]byte, 0, 256), e)
+}
+
+// AppendEntry marshals e onto buf and returns the extended slice, so a batch can
+// be serialized into one buffer and written with a single syscall.
+func AppendEntry(buf []byte, e *chunk.Entry) []byte {
+	// Where this record starts, so the length prefix is patched in the right
+	// place when buf already holds earlier records.
+	recStart := len(buf)
 
 	// Placeholder for total length (filled at end)
 	buf = append(buf, 0, 0, 0, 0)
@@ -197,7 +215,12 @@ func MarshalEntry(e *chunk.Entry) []byte {
 	setInt(FlagQueueMs, e.QueueMs)
 	var body []byte
 	if len(e.Body) > 0 {
-		body = enc.Compress(e.Body)
+		if CompressBodies {
+			body = enc.Compress(e.Body)
+		} else {
+			body = e.Body
+			flags |= FlagRawBody
+		}
 		if len(body) > maxCompressedBodyBytes {
 			slog.Warn("wal: dropping oversized entry body",
 				"id", e.ID, "compressed_bytes", len(body), "max", maxCompressedBodyBytes)
@@ -284,17 +307,32 @@ func MarshalEntry(e *chunk.Entry) []byte {
 		buf = append(buf, body...)
 	}
 
-	binary.LittleEndian.PutUint32(buf[:4], uint32(len(buf)-4))
+	binary.LittleEndian.PutUint32(buf[recStart:recStart+4], uint32(len(buf)-recStart-4))
 	return buf
 }
 
 // UnmarshalEntry deserializes a chunk.Entry from compact binary format.
 func UnmarshalEntry(data []byte) (*chunk.Entry, error) {
+	e := &chunk.Entry{}
+	if err := UnmarshalEntryInto(data, e); err != nil {
+		return nil, err
+	}
+	return e, nil
+}
+
+// UnmarshalEntryInto is UnmarshalEntry writing into an existing Entry, so a
+// scan can fill a preallocated slice instead of allocating a 600-byte struct
+// per record.
+//
+// Nothing in the decoded entry aliases data: strings are copied by
+// LenFormat.ReadString and the body comes back from Decompress as its own
+// slice. That is what lets a caller reuse one record buffer for a whole file.
+func UnmarshalEntryInto(data []byte, e *chunk.Entry) error {
 	if len(data) < minRecordBytes {
-		return nil, fmt.Errorf("entry data too short: %d bytes", len(data))
+		return fmt.Errorf("entry data too short: %d bytes", len(data))
 	}
 
-	e := &chunk.Entry{}
+	*e = chunk.Entry{}
 	off := 0
 
 	e.ID = int64(binary.LittleEndian.Uint64(data[off:]))
@@ -324,7 +362,7 @@ func UnmarshalEntry(data []byte) (*chunk.Entry, error) {
 	case lvlEnum == levelEnumCustom && flags&FlagExtendedStrings != 0:
 		e.Level, off, err = readString(data, off)
 		if err != nil {
-			return nil, fmt.Errorf("read level: %w", err)
+			return fmt.Errorf("read level: %w", err)
 		}
 	case int(lvlEnum) < len(enumToLevel):
 		e.Level = enumToLevel[lvlEnum]
@@ -334,11 +372,11 @@ func UnmarshalEntry(data []byte) (*chunk.Entry, error) {
 
 	e.Service, off, err = readString(data, off)
 	if err != nil {
-		return nil, fmt.Errorf("read service: %w", err)
+		return fmt.Errorf("read service: %w", err)
 	}
 	e.Message, off, err = readString(data, off)
 	if err != nil {
-		return nil, fmt.Errorf("read message: %w", err)
+		return fmt.Errorf("read message: %w", err)
 	}
 
 	// String reader helper
@@ -370,99 +408,99 @@ func UnmarshalEntry(data []byte) (*chunk.Entry, error) {
 	}
 
 	if err = rStr(FlagEnv, &e.Env, "env"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagVersion, &e.Version, "version"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagHost, &e.Host, "host"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagKind, &e.Kind, "kind"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagEventType, &e.EventType, "event_type"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagTraceID, &e.TraceID, "trace_id"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagSpanID, &e.SpanID, "span_id"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagParentSpanID, &e.ParentSpanID, "parent_span_id"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagRequestID, &e.RequestID, "request_id"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagUserID, &e.UserID, "user_id"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagTenantID, &e.TenantID, "tenant_id"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagSessionID, &e.SessionID, "session_id"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagMethod, &e.Method, "method"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagPath, &e.Path, "path"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagRoute, &e.Route, "route"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagHandler, &e.Handler, "handler"); err != nil {
-		return nil, err
+		return err
 	}
 
 	if flags&FlagStatus != 0 {
 		if off+2 > len(data) {
-			return nil, fmt.Errorf("read status: truncated")
+			return fmt.Errorf("read status: truncated")
 		}
 		e.Status = int(binary.LittleEndian.Uint16(data[off:]))
 		off += 2
 	}
 
 	if err = rUvar(FlagDurationMs, &e.DurationMs, "duration_ms"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rUvar(FlagDbMs, &e.DbMs, "db_ms"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rUvar(FlagDbCount, &e.DbCount, "db_count"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rUvar(FlagCacheMs, &e.CacheMs, "cache_ms"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rUvar(FlagCacheHits, &e.CacheHits, "cache_hits"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rUvar(FlagCacheMisses, &e.CacheMisses, "cache_misses"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rUvar(FlagExtMs, &e.ExtMs, "ext_ms"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rUvar(FlagExtCount, &e.ExtCount, "ext_count"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rUvar(FlagRenderMs, &e.RenderMs, "render_ms"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rUvar(FlagAllocCount, &e.AllocCount, "alloc_count"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rUvar(FlagMemDeltaMb, &e.MemDeltaMb, "mem_delta_mb"); err != nil {
-		return nil, err
+		return err
 	}
 
 	if flags&FlagNPlusOne != 0 {
 		if off >= len(data) {
-			return nil, fmt.Errorf("read n_plus_one: truncated")
+			return fmt.Errorf("read n_plus_one: truncated")
 		}
 		v := data[off] != 0
 		e.NPlusOne = &v
@@ -470,53 +508,58 @@ func UnmarshalEntry(data []byte) (*chunk.Entry, error) {
 	}
 
 	if err = rUvar(FlagSlowQueries, &e.SlowQueries, "slow_queries"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rUvar(FlagDupQueries, &e.DupQueries, "dup_queries"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagErrorClass, &e.ErrorClass, "error_class"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagErrorMessage, &e.ErrorMessage, "error_message"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagSourceFile, &e.SourceFile, "source_file"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rUvar(FlagSourceLine, &e.SourceLine, "source_line"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagErrFingerprint, &e.ErrorFingerprint, "error_fingerprint"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagJobClass, &e.JobClass, "job_class"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagJobQueue, &e.JobQueue, "job_queue"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rStr(FlagJobID, &e.JobID, "job_id"); err != nil {
-		return nil, err
+		return err
 	}
 	if err = rUvar(FlagQueueMs, &e.QueueMs, "queue_ms"); err != nil {
-		return nil, err
+		return err
 	}
 
 	if flags&FlagBody != 0 {
 		if off+4 > len(data) {
-			return nil, fmt.Errorf("read body length: truncated")
+			return fmt.Errorf("read body length: truncated")
 		}
 		bodyLen := int(binary.LittleEndian.Uint32(data[off:]))
 		off += 4
 		if off+bodyLen > len(data) {
-			return nil, fmt.Errorf("read body: truncated")
+			return fmt.Errorf("read body: truncated")
 		}
-		decompressed, err := enc.Decompress(data[off : off+bodyLen])
-		if err != nil {
-			return nil, fmt.Errorf("decompress body: %w", err)
+		encodedBody := data[off : off+bodyLen]
+		if flags&FlagRawBody != 0 {
+			e.Body = append(e.Body[:0], encodedBody...)
+		} else {
+			decompressed, err := enc.Decompress(encodedBody)
+			if err != nil {
+				return fmt.Errorf("decompress body: %w", err)
+			}
+			e.Body = decompressed
 		}
-		e.Body = decompressed
 		off += bodyLen
 	}
 
@@ -524,43 +567,33 @@ func UnmarshalEntry(data []byte) (*chunk.Entry, error) {
 	// pre-fix uint16 length wrap) could parse into silently garbled fields
 	// instead of reporting corruption.
 	if off != len(data) {
-		return nil, fmt.Errorf("entry has %d trailing bytes after %d parsed", len(data)-off, off)
+		return fmt.Errorf("entry has %d trailing bytes after %d parsed", len(data)-off, off)
 	}
-	return e, nil
+	return nil
 }
 
 // ReadEntries reads all entries from a WAL file (reader positioned at start).
 func ReadEntries(r io.Reader) ([]chunk.Entry, error) {
-	var entries []chunk.Entry
-	lenBuf := make([]byte, 4)
+	entries, _, err := ReadEntriesFrom(r)
+	return entries, err
+}
 
+// ReadEntriesFrom is ReadEntries that also reports how many bytes were consumed
+// by fully-parsed records. A WAL is append-only, so a caller that remembers the
+// offset can re-read only what was appended since instead of re-parsing the
+// whole file. A torn trailing record does not advance the offset, so it is
+// re-read (and completed) on the next pass rather than skipped.
+func ReadEntriesFrom(r io.Reader) ([]chunk.Entry, int64, error) {
+	var entries []chunk.Entry
+	sc := NewScanner(r)
 	for {
-		_, err := io.ReadFull(r, lenBuf)
-		if err == io.EOF {
+		var e chunk.Entry
+		if !sc.Next(&e) {
 			break
 		}
-		if err != nil {
-			return entries, fmt.Errorf("read entry length: %w", err)
-		}
-
-		entryLen := int(binary.LittleEndian.Uint32(lenBuf))
-		if entryLen < minRecordBytes || entryLen > maxRecordBytes {
-			return entries, fmt.Errorf("invalid entry length: %d", entryLen)
-		}
-
-		entryData := make([]byte, entryLen)
-		if _, err = io.ReadFull(r, entryData); err != nil {
-			return entries, fmt.Errorf("read entry data: %w", err)
-		}
-
-		entry, err := UnmarshalEntry(entryData)
-		if err != nil {
-			return entries, fmt.Errorf("unmarshal entry: %w", err)
-		}
-		entries = append(entries, *entry)
+		entries = append(entries, e)
 	}
-
-	return entries, nil
+	return entries, sc.Consumed(), sc.Err()
 }
 
 // appendString writes s with the extended length framing, capped at

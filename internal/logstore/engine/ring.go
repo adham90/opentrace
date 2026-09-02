@@ -31,8 +31,21 @@ func NewRingBuffer() *RingBuffer {
 
 // Push adds entries to the ring buffer and notifies subscribers.
 func (rb *RingBuffer) Push(entries []chunk.Entry) {
+	// Tail is a summary stream. Retaining opaque bodies in the ring and in every
+	// subscriber channel made one large SDK batch pin tens of megabytes even
+	// though details are addressable by ID. A push larger than the ring can only
+	// leave its newest ringSize entries visible, so project exactly that suffix.
+	if len(entries) > ringSize {
+		entries = entries[len(entries)-ringSize:]
+	}
+	projected := make([]chunk.Entry, len(entries))
+	for i := range entries {
+		projected[i] = entries[i]
+		projected[i].Body = nil
+	}
+
 	rb.mu.Lock()
-	for _, e := range entries {
+	for _, e := range projected {
 		rb.entries[rb.head%ringSize] = e
 		rb.head++
 		rb.count++
@@ -43,7 +56,7 @@ func (rb *RingBuffer) Push(entries []chunk.Entry) {
 	rb.subMu.Lock()
 	for _, ch := range rb.subs {
 		select {
-		case ch <- entries:
+		case ch <- projected:
 		default:
 			// Subscriber is slow, drop the batch (they'll catch up via Snapshot)
 		}

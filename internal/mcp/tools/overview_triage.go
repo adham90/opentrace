@@ -11,13 +11,16 @@ import (
 
 // --- triage action ---
 
-type triageEntry struct {
-	Type        string `json:"type"`
-	Severity    string `json:"severity"`
-	Title       string `json:"title"`
-	Detail      string `json:"detail"`
-	Time        string `json:"time"`
-	ID          string `json:"id"`
+type TriageEntry struct {
+	Type     string `json:"type"`
+	Severity string `json:"severity"`
+	Title    string `json:"title"`
+	Detail   string `json:"detail"`
+	Time     string `json:"time"`
+	ID       string `json:"id"`
+	// Critical marks the money path — a checkout, billing or signup item, or an
+	// alert from a watch tagged critical. Catch-up sorts these first.
+	Critical    bool   `json:"critical,omitempty"`
 	Environment string `json:"environment,omitempty"`
 }
 
@@ -32,7 +35,7 @@ func HandleTriage(ctx context.Context, d OverviewDeps, args map[string]any) (*Ca
 		return NewToolResultError(err.Error()), nil
 	}
 
-	var items []triageEntry
+	var items []TriageEntry
 
 	// Unresolved error groups (highest priority)
 	if d.ErrorGroupStore != nil {
@@ -58,7 +61,7 @@ func HandleTriage(ctx context.Context, d OverviewDeps, args map[string]any) (*Ca
 				if env == "" && eg.Environment != "" {
 					detail += " [" + eg.Environment + "]"
 				}
-				items = append(items, triageEntry{
+				items = append(items, TriageEntry{
 					Type:        "error_group",
 					Severity:    "critical",
 					Title:       title,
@@ -80,7 +83,7 @@ func HandleTriage(ctx context.Context, d OverviewDeps, args map[string]any) (*Ca
 				if env != "" && a.Environment != env {
 					continue
 				}
-				items = append(items, triageEntry{
+				items = append(items, TriageEntry{
 					Type:        "watch_alert",
 					Severity:    "warning",
 					Title:       a.Summary,
@@ -99,7 +102,7 @@ func HandleTriage(ctx context.Context, d OverviewDeps, args map[string]any) (*Ca
 		if err == nil {
 			for _, s := range summaries {
 				if store.HealthCheckStatus(s.CurrentStatus) == store.HealthCheckDown {
-					items = append(items, triageEntry{
+					items = append(items, TriageEntry{
 						Type:     "healthcheck",
 						Severity: "critical",
 						Title:    fmt.Sprintf("Endpoint '%s' is DOWN", s.Name),
@@ -125,7 +128,7 @@ func HandleTriage(ctx context.Context, d OverviewDeps, args map[string]any) (*Ca
 							detail = detail[:100]
 						}
 					}
-					items = append(items, triageEntry{
+					items = append(items, TriageEntry{
 						Type:     "connector",
 						Severity: "warning",
 						Title:    "Connector '" + c.Name + "' error",
@@ -148,7 +151,7 @@ func HandleTriage(ctx context.Context, d OverviewDeps, args map[string]any) (*Ca
 					if srv.LastSeenAt != nil {
 						detail = "last seen " + srv.LastSeenAt.Format(time.RFC3339)
 					}
-					items = append(items, triageEntry{
+					items = append(items, TriageEntry{
 						Type:     "server",
 						Severity: "info",
 						Title:    "Server '" + srv.Hostname + "' offline",

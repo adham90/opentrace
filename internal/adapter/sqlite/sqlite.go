@@ -18,14 +18,34 @@ import (
 
 // SQLite tuning constants — extracted from pragmas and DSN parameters.
 const (
-	sqliteBusyTimeoutMs = 5000      // milliseconds to wait for a locked table
-	sqliteCacheSizeKB   = -64000    // negative = KB; 64 MB page cache (default ~2 MB)
-	sqliteMmapSize      = 30000000  // 30 MB memory-mapped I/O window
+	sqliteBusyTimeoutMs = 5000     // milliseconds to wait for a locked table
+	sqliteCacheSizeKB   = -64000   // negative = KB; 64 MB page cache (default ~2 MB)
+	sqliteMmapSize      = 30000000 // 30 MB memory-mapped I/O window
 )
+
+// SQLiteOptions controls the per-process SQLite memory budget. SQLite's page
+// cache and mmap window live alongside the Go heap, so they must be part of the
+// same resource profile rather than fixed, independent reservations.
+type SQLiteOptions struct {
+	CacheSizeKB int
+	MmapSize    int64
+}
+
+// DefaultSQLiteOptions preserves the balanced profile for existing callers.
+func DefaultSQLiteOptions() SQLiteOptions {
+	return SQLiteOptions{CacheSizeKB: sqliteCacheSizeKB, MmapSize: sqliteMmapSize}
+}
 
 // OpenSQLite opens a SQLite database with recommended settings.
 // Returns a *bun.DB wrapping the underlying *sql.DB. Use db.DB to access the raw *sql.DB.
 func OpenSQLite(path string) (*bun.DB, error) {
+	return OpenSQLiteWithOptions(path, DefaultSQLiteOptions())
+}
+
+// OpenSQLiteWithOptions opens SQLite with an explicit page-cache and mmap
+// budget. A zero cache size asks SQLite to use its own small default; a zero
+// mmap size disables mmap.
+func OpenSQLiteWithOptions(path string, opts SQLiteOptions) (*bun.DB, error) {
 	// modernc.org/sqlite ignores mattn-style params (_journal_mode/_busy_timeout);
 	// it honors _pragma=NAME(VALUE), applied on every connection open. WAL + a real
 	// busy_timeout are required for the file-WAL durability model and for
@@ -40,7 +60,7 @@ func OpenSQLite(path string) (*bun.DB, error) {
 	db := bun.NewDB(sqldb, sqlitedialect.New())
 
 	// Performance PRAGMAs — safe with WAL mode
-	if err := applySQLitePragmas(db.DB); err != nil {
+	if err := applySQLitePragmasWithOptions(db.DB, opts); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("applying pragmas: %w", err)
 	}
@@ -51,13 +71,25 @@ func OpenSQLite(path string) (*bun.DB, error) {
 // applySQLitePragmas sets performance-critical PRAGMAs on the database.
 // These are safe to use with WAL journal mode.
 func applySQLitePragmas(db *sql.DB) error {
+	return applySQLitePragmasWithOptions(db, DefaultSQLiteOptions())
+}
+
+func applySQLitePragmasWithOptions(db *sql.DB, opts SQLiteOptions) error {
+	cacheSize := opts.CacheSizeKB
+	if cacheSize > 0 {
+		// Positive cache_size is pages; callers express a byte budget in KiB.
+		cacheSize = -cacheSize
+	}
+	if opts.MmapSize < 0 {
+		opts.MmapSize = 0
+	}
 	pragmas := []string{
 		"PRAGMA journal_mode = WAL",                                  // required; DSN _pragma also sets this, kept here as the visible source of truth
 		fmt.Sprintf("PRAGMA busy_timeout = %d", sqliteBusyTimeoutMs), // wait on a locked DB instead of failing immediately
 		"PRAGMA foreign_keys = ON",                                   // enforce FK constraints (mattn DSN param not supported by modernc driver)
-		fmt.Sprintf("PRAGMA cache_size = %d", sqliteCacheSizeKB),     // 64MB page cache (default: 2MB)
+		fmt.Sprintf("PRAGMA cache_size = %d", cacheSize),             // negative value is a KiB budget
 		"PRAGMA synchronous = NORMAL",                                // safe with WAL, skips fsync per write
-		fmt.Sprintf("PRAGMA mmap_size = %d", sqliteMmapSize),         // 30MB memory-mapped I/O
+		fmt.Sprintf("PRAGMA mmap_size = %d", opts.MmapSize),          // explicit process memory budget
 		"PRAGMA temp_store = MEMORY",                                 // temp tables in RAM
 	}
 	for _, p := range pragmas {

@@ -26,6 +26,14 @@ type Config struct {
 	// TrustedProxies lists IP addresses trusted to set X-Forwarded-For headers.
 	TrustedProxies []string
 
+	// CriticalPaths marks the money path: routes, services or error text that
+	// pay the bills (checkout, billing, signup). Anything matching one of these
+	// substrings sorts to the top of catch-up and error rankings, so a $0 day
+	// is never buried under a noisy debug endpoint. Set via
+	// OPENTRACE_CRITICAL_PATHS as a comma-separated list; unset means every
+	// path ranks the same.
+	CriticalPaths []string
+
 	// CORSAllowedOrigins lists origins allowed for CORS requests.
 	CORSAllowedOrigins []string
 
@@ -49,6 +57,10 @@ type Config struct {
 	// rerun those UPDATEs by hand, or history and new rows land in different
 	// environments.
 	DefaultEnv string
+
+	// Performance contains the process-wide resource budgets selected by
+	// OPENTRACE_RESOURCE_PROFILE and any explicit per-budget overrides.
+	Performance PerformanceConfig
 }
 
 // LoadEnvFile reads a .env file and sets any variables not already in the environment.
@@ -191,6 +203,12 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	devMode := os.Getenv("OPENTRACE_DEV") == "true"
+	performance, err := loadPerformanceConfig(devMode)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Config{
 		DataDir:            dataDir,
 		ListenAddr:         envOrDefault("OPENTRACE_LISTEN_ADDR", "127.0.0.1:8080"),
@@ -198,10 +216,12 @@ func Load() (*Config, error) {
 		MaxQueryRows:       maxQueryRows,
 		StatementTimeoutMS: stmtTimeout,
 		TrustedProxies:     parseCommaSeparated(os.Getenv("OPENTRACE_TRUSTED_PROXIES")),
+		CriticalPaths:      parseCommaSeparated(os.Getenv("OPENTRACE_CRITICAL_PATHS")),
 		CORSAllowedOrigins: parseCommaSeparated(os.Getenv("OPENTRACE_CORS_ORIGINS")),
-		DevMode:            os.Getenv("OPENTRACE_DEV") == "true",
+		DevMode:            devMode,
 		SocketPath:         os.Getenv("OPENTRACE_SOCKET_PATH"),
 		DefaultEnv:         envOrDefault("OPENTRACE_DEFAULT_ENV", "production"),
+		Performance:        performance,
 	}, nil
 }
 

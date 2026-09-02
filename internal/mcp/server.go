@@ -16,7 +16,7 @@ import (
 
 // mcpInstructions is sent to the client during the MCP initialize handshake.
 // It tells the agent how to use OpenTrace tools effectively.
-const mcpInstructions = `OpenTrace is a self-hosted observability engine. You have tools for logs, errors, database introspection, alerts, code intelligence, deep capture, analytics, and more.
+const mcpInstructions = `OpenTrace is a self-hosted observability engine. You have tools for logs, errors, database introspection, alerts, code intelligence, deep capture, and more.
 
 ## Where to start
 
@@ -27,7 +27,7 @@ const mcpInstructions = `OpenTrace is a self-hosted observability engine. You ha
 - What happened since you last looked → overview(action: "catchup")
 - Search logs → logs(action: "search", query: "...")
 - Check errors → errors(action: "list")
-- Before modifying a file → code(action: "annotate_file", path: "the/file.rb")
+- Before modifying a file → code(action: "risk", files: ["the/file.rb"])
 - Set up SDK for a project → setup(action: "detect") then setup(action: "guide")
 
 ## Tools
@@ -38,13 +38,14 @@ const mcpInstructions = `OpenTrace is a self-hosted observability engine. You ha
 - errors: list, detail, investigate, impact, user_errors, ranking, resolve, ignore, reopen, new
 - database: queries, explain, tables, activity, locks, connections, indexes, schema, storage, kill_query, long_transactions
 - watches: status, create, delete, alerts, dismiss, acknowledge, investigate
-- analytics: traffic, endpoints, heatmap, trends, movers
-- code: risk, fragile, annotate_file, annotate_function, hotspots, gen_context, gen_suggest, deps_service, deps_blast, deps_risk
+- code: risk, fragile
 - healthchecks: list, uptime, create, delete
 - connectors: list, get, create, test, update, delete
 - servers: list, query, health
 - setup: status, detect, guide, verify
 - deep_capture: request_capture, sql_captures, http_captures, email_captures, audit_trail, search_audit, search_sql, file_captures, get_pii_config, get_retention (update_pii_config, update_retention are admin only)
+
+Request performance comes from logs(action: "performance"), measured from the logs themselves.
 - admin: update_retention, users, update_role, toggle_active, delete_user, audit (admin only)
 
 Tools and actions are registered per token role — call opentrace(tool="discover") to see exactly what this token can use.

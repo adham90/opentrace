@@ -31,6 +31,21 @@ func NewDeployStore(db *bun.DB) store.DeployStore {
 // same (service, environment). It runs on the ingest path, so the write is a
 // single statement with no read-modify-write and no transaction.
 func (s *deployStore) Record(ctx context.Context, d store.Deploy) error {
+	return recordDeploy(ctx, s.db, d)
+}
+
+func (s *deployStore) RecordBatch(ctx context.Context, deploys []store.Deploy) error {
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		for i := range deploys {
+			if err := recordDeploy(ctx, tx, deploys[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func recordDeploy(ctx context.Context, db bun.IDB, d store.Deploy) error {
 	if d.CommitHash == "" {
 		return nil
 	}
@@ -38,7 +53,7 @@ func (s *deployStore) Record(ctx context.Context, d store.Deploy) error {
 	if at.IsZero() {
 		at = time.Now()
 	}
-	_, err := s.db.NewRaw(`
+	_, err := db.NewRaw(`
 		INSERT OR IGNORE INTO deploys (commit_hash, service, environment, first_seen_at)
 		VALUES (?, ?, ?, ?)`,
 		d.CommitHash, d.Service, d.Environment, at.UTC().Format(time.RFC3339),

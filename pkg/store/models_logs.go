@@ -145,6 +145,7 @@ type LogSearchParams struct {
 	MetadataFilter   map[string]string `json:"metadata_filter,omitempty"` // key-value filters on metadata JSON
 	Exclude          map[string]string `json:"exclude,omitempty"`         // field -> comma-separated values to exclude (NOT IN)
 	SortAsc          bool              `json:"sort_asc,omitempty"`        // true for oldest-first (default: newest-first)
+	OmitBody         bool              `json:"omit_body,omitempty"`       // skip metadata/body decoding for summary-only callers
 }
 
 // LogCountParams defines filters for log aggregation queries.

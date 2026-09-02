@@ -412,3 +412,57 @@ func TestTraceStore_Upsert_FatalIsError(t *testing.T) {
 		t.Error("HasErrors should be true for FATAL level")
 	}
 }
+
+// TestTraceStore_MarkStaleTracesSpansBatches covers the batching added after a
+// backlogged sweep over 740k rows OOM-killed a 256MB container: the update is
+// issued in fixed-size statements, so a backlog larger than one batch must
+// still be fully marked rather than stopping at the first batch boundary.
+func TestTraceStore_MarkStaleTracesSpansBatches(t *testing.T) {
+	if testing.Short() {
+		t.Skip("inserts more rows than one update batch")
+	}
+	db := setupTestDB(t)
+	s := NewTraceStore(db)
+	ctx := context.Background()
+
+	// Straddle the batch boundary so a single-statement implementation and a
+	// looping one give visibly different answers.
+	const stale = staleTraceBatchSize + 137
+	backdated := time.Now().UTC().Add(-2 * time.Minute).Format(time.RFC3339)
+	for i := range stale {
+		id := fmt.Sprintf("bulk-trace-%d", i)
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO trace_status (trace_id, span_count, services, first_seen_at, last_updated_at, status, has_errors)
+			 VALUES (?, 1, '[]', ?, ?, 'partial', 0)`,
+			id, backdated, backdated,
+		); err != nil {
+			t.Fatalf("insert %s: %v", id, err)
+		}
+	}
+	// One recent trace that must survive untouched.
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO trace_status (trace_id, span_count, services, first_seen_at, last_updated_at, status, has_errors)
+		 VALUES ('bulk-trace-recent', 1, '[]', ?, ?, 'partial', 0)`,
+		now, now,
+	); err != nil {
+		t.Fatalf("insert recent: %v", err)
+	}
+
+	n, err := s.MarkStaleTraces(ctx, 30*time.Second)
+	if err != nil {
+		t.Fatalf("MarkStaleTraces: %v", err)
+	}
+	if n != stale {
+		t.Errorf("marked %d traces, want %d — the sweep stopped at a batch boundary", n, stale)
+	}
+
+	var remaining int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM trace_status WHERE status = 'partial'`).Scan(&remaining); err != nil {
+		t.Fatalf("count partial: %v", err)
+	}
+	if remaining != 1 {
+		t.Errorf("%d traces left partial, want 1 (only the recent one)", remaining)
+	}
+}

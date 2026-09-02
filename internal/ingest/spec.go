@@ -153,7 +153,14 @@ const specExample = `[
     "dup_queries": 18,
     "body": {
       "params": {"cart_id": "c_991"},
-      "queries": [{"sql": "SELECT * FROM line_items WHERE cart_id = ?", "ms": 4, "count": 18}]
+      "queries": [{"sql": "SELECT * FROM line_items WHERE cart_id = ?", "ms": 4, "count": 18}],
+      "http": [
+        {"method": "POST", "url": "https://api.stripe.com/v1/charges", "host": "api.stripe.com",
+         "vendor": "stripe", "status": 200, "duration_ms": 61},
+        {"method": "POST", "url": "https://api.openai.com/v1/chat/completions", "host": "api.openai.com",
+         "vendor": "openai", "status": 200, "duration_ms": 34,
+         "ai_model": "gpt-4o", "ai_input_tokens": 820, "ai_output_tokens": 145}
+      ]
     }
   },
   {
@@ -283,6 +290,40 @@ This loop is the supported way to bring up a new client.
 Unknown fields are ignored rather than rejected, so a typo costs you the data
 silently — this is exactly what validate mode is for. Anything the columns below
 do not cover belongs in `+"`body`"+`, which is stored whole and searchable.
+
+## The body blob
+
+`+"`body`"+` is free-form, but these keys are a contract: the MCP tools read them
+by name, so an SDK that spells one differently ships data nothing can find.
+Every one of them is optional and each is an array of objects unless noted.
+
+| key | shape | read by |
+|---|---|---|
+| `+"`backtrace`"+` | string | error grouping, `+"`errors`"+` |
+| `+"`source_context`"+` | object, line number → source line | `+"`errors`"+` |
+| `+"`handled`"+` | boolean | `+"`errors`"+` |
+| `+"`params`"+` / `+"`request_params`"+` | object | `+"`deep_capture(request_capture)`"+` |
+| `+"`request_headers`"+`, `+"`request_body`"+`, `+"`response_headers`"+`, `+"`response_body`"+` | string or object | `+"`deep_capture(request_capture)`"+` |
+| `+"`sql`"+` | `+"`{raw_sql, normalized_sql, binds, duration_ms, name, cached, row_count, in_transaction, fingerprint, table, caller_location}`"+` | `+"`deep_capture(sql_captures, search_sql)`"+` |
+| `+"`http`"+` | `+"`{method, url, host, vendor, status, duration_ms, request_body, response_body, response_size, retry_attempt, error_class, ai_model, ai_input_tokens, ai_output_tokens}`"+` | `+"`deep_capture(http_captures)`"+` |
+| `+"`email`"+` | `+"`{mailer_class, mailer_action, from, to, subject, body_html, body_text, template, delivery_status, duration_ms}`"+` | `+"`deep_capture(email_captures)`"+` |
+| `+"`file`"+` | `+"`{action, filename, size_bytes, content_type, service, key, duration_ms}`"+` | `+"`deep_capture(file_captures)`"+` |
+| `+"`audit`"+` | `+"`{action, record_type, record_id, actor_id, actor_type, changed_fields, full_before, full_after}`"+` | `+"`deep_capture(audit_trail, search_audit)`"+` |
+| `+"`timeline`"+` | `+"`{type, name, offset_ms, duration_ms}`"+` | `+"`deep_capture(request_capture)`"+` |
+| `+"`performance`"+` | object | `+"`deep_capture(request_capture)`"+` |
+
+### Per-call external HTTP
+
+The `+"`ext_count`"+` / `+"`ext_ms`"+` columns answer *how much* time went to other
+people's servers. `+"`body.http`"+` answers *whose*: one row per outbound call, with
+the host and an inferred `+"`vendor`"+` label. Send it and per-host latency
+attribution, third-party error rates and egress questions all become answerable
+from data already on the row.
+
+When the call was to an LLM provider, add the three `+"`ai_*`"+` fields to that same
+row — token counts belong on the call that spent them, so cost is attributed to
+a request, an endpoint and a user for free. `+"`ai_model`"+` is the model string the
+provider echoed back; the token counts are integers.
 
 `, base, base)
 

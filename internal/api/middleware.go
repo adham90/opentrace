@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/adham90/opentrace/pkg/store"
+	"golang.org/x/sync/semaphore"
 )
 
 // MaxBodySize limits the request body to the given number of bytes.
@@ -20,6 +21,32 @@ func MaxBodySize(maxBytes int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// InFlightBodyLimit bounds the aggregate request-body bytes admitted to a
+// handler. It complements the per-request MaxBodySize limit: many concurrent
+// valid 10MB requests must not collectively exhaust a small VM.
+func InFlightBodyLimit(maxInFlightBytes, maxRequestBytes int64) func(http.Handler) http.Handler {
+	if maxInFlightBytes < maxRequestBytes {
+		maxInFlightBytes = maxRequestBytes
+	}
+	sem := semaphore.NewWeighted(maxInFlightBytes)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			weight := r.ContentLength
+			if weight <= 0 || weight > maxRequestBytes {
+				// Chunked and decompressed requests have no reliable length. Reserve
+				// the maximum; unused capacity is released when decoding finishes.
+				weight = maxRequestBytes
+			}
+			if err := sem.Acquire(r.Context(), weight); err != nil {
+				writeError(w, http.StatusServiceUnavailable, "server is shutting down")
+				return
+			}
+			defer sem.Release(weight)
 			next.ServeHTTP(w, r)
 		})
 	}

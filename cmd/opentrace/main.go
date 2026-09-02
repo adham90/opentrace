@@ -15,6 +15,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"syscall"
@@ -32,6 +34,7 @@ import (
 	logadapter "github.com/adham90/opentrace/internal/logstore/adapter"
 	"github.com/adham90/opentrace/internal/logstore/engine"
 	logsingest "github.com/adham90/opentrace/internal/logstore/ingest"
+	logwal "github.com/adham90/opentrace/internal/logstore/wal"
 	mcpserver "github.com/adham90/opentrace/internal/mcp"
 	"github.com/adham90/opentrace/internal/notify"
 	"github.com/adham90/opentrace/internal/oncall"
@@ -147,6 +150,7 @@ func initApp(ctx context.Context) (*server.Deps, *engine.Store, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("loading config: %w", err)
 	}
+	applyPerformanceConfig(cfg.Performance)
 
 	// Ensure data directory exists
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
@@ -154,7 +158,10 @@ func initApp(ctx context.Context) (*server.Deps, *engine.Store, error) {
 	}
 
 	// Open SQLite database
-	bunDB, err := dbstore.OpenSQLite(cfg.DatabasePath())
+	bunDB, err := dbstore.OpenSQLiteWithOptions(cfg.DatabasePath(), dbstore.SQLiteOptions{
+		CacheSizeKB: cfg.Performance.SQLiteCacheMB * 1024,
+		MmapSize:    int64(cfg.Performance.SQLiteMmapMB) << 20,
+	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("opening database: %w", err)
 	}
@@ -172,7 +179,13 @@ func initApp(ctx context.Context) (*server.Deps, *engine.Store, error) {
 	}
 	slog.Info("database ready")
 
-	// Initialize segmented log store engine
+	// The live hour's parsed WAL is cached too, so repeated queries in the same
+	// hour don't re-read it. It is dropped when the hour seals; this caps how
+	// much it may hold until then.
+	if n, err := strconv.Atoi(os.Getenv("OPENTRACE_WAL_CACHE_ENTRIES")); err == nil && n >= 0 {
+		engine.WALCacheMaxEntries = n
+		slog.Info("log store WAL cache configured", "max_entries", n)
+	}
 	logDataDir := filepath.Join(cfg.DataDir, "logs")
 	logEngine, err := engine.NewStore(logDataDir, nil, logsingest.DefaultPIIConfig())
 	if err != nil {
@@ -195,6 +208,34 @@ func initApp(ctx context.Context) (*server.Deps, *engine.Store, error) {
 		Registry:  registry,
 		StartedAt: time.Now(),
 	}, logEngine, nil
+}
+
+func applyPerformanceConfig(perf config.PerformanceConfig) {
+	if perf.GOMAXPROCS > 0 {
+		runtime.GOMAXPROCS(perf.GOMAXPROCS)
+	}
+	if perf.MemoryLimitMB > 0 {
+		debug.SetMemoryLimit(int64(perf.MemoryLimitMB) << 20)
+	}
+	engine.ColumnCacheBytes = int64(perf.ColumnCacheMB) << 20
+	engine.WALCacheBytes = int64(perf.WALCacheMB) << 20
+	engine.IndexCacheBytes = int64(perf.IndexCacheMB) << 20
+	engine.SearchConcurrency = perf.SearchConcurrency
+	engine.MaxConcurrentQueries = perf.MaxConcurrentQueries
+	engine.SealChunkEntries = perf.SealChunkEntries
+	engine.MaxScanRows = perf.MaxScanRows
+	logwal.CompressBodies = perf.WALCompressBody
+	slog.Info("runtime resource profile configured",
+		"profile", perf.Profile,
+		"gomaxprocs", runtime.GOMAXPROCS(0),
+		"memory_limit_mb", perf.MemoryLimitMB,
+		"column_cache_mb", perf.ColumnCacheMB,
+		"wal_cache_mb", perf.WALCacheMB,
+		"index_cache_mb", perf.IndexCacheMB,
+		"search_concurrency", perf.SearchConcurrency,
+		"max_concurrent_queries", perf.MaxConcurrentQueries,
+		"seal_chunk_entries", perf.SealChunkEntries,
+	)
 }
 
 // teardownApp shuts an initApp-built process down in dependency order:
@@ -366,7 +407,8 @@ func run() error {
 	// The on-call agent runs last in the notifier list: the chat and webhook
 	// channels have already delivered the raw alert by then, so a slow or
 	// failing agent delays a diagnosis, never the alert itself.
-	onCall, err := buildOnCallRunner([]messageSender{telegramSender, slackSender}, deps.ErrorGroupStore)
+	chatSenders := []messageSender{telegramSender, slackSender}
+	onCall, err := buildOnCallRunner(chatSenders, deps.ErrorGroupStore)
 	if err != nil {
 		return err
 	}
@@ -387,6 +429,20 @@ func run() error {
 	jobQueue := jobs.NewQueue(deps.DB)
 	deps.Queue = jobQueue
 
+	// Automatic watches. A service that has never been watched gets baseline
+	// coverage the first time it reports, and every new commit gets a 24h
+	// window plus the 1h/24h check-ins the job queue delivers.
+	autoWatcher := &watcher.AutoWatcher{
+		Watches: deps.WatchStore,
+		Logs:    deps.LogStore,
+		Groups:  deps.ErrorGroupStore,
+		Metrics: watchMetrics,
+		ScheduleReport: func(ctx context.Context, at time.Time, r watcher.DeployReport) error {
+			_, err := jobQueue.EnqueueAt(ctx, deployReportJob, r, at)
+			return err
+		},
+	}
+
 	// Create server
 	// Nil means "not configured", which overview.status reports as absent
 	// rather than as a broken agent.
@@ -405,6 +461,7 @@ func run() error {
 		WatchMetrics:         watchMetrics,
 		OnCallStatus:         onCallStatus,
 		ReliabilityProvider:  hcSched,
+		AutoWatcher:          autoWatcher,
 		SharedDeps:           deps,
 		Modules:              modules,
 	})
@@ -436,7 +493,7 @@ func run() error {
 	// Start health check scheduler (created above for injection into web server)
 	hcSched.Start(ctx)
 
-	jobWorker, jobScheduler := startJobQueue(ctx, deps, jobQueue)
+	jobWorker, jobScheduler := startJobQueue(ctx, deps, jobQueue, autoWatcher, chatSenders)
 
 	fatal := make(chan error, 1)
 	startHTTPServer(ctx, httpServer, deps, fatal)
@@ -481,7 +538,7 @@ func run() error {
 // startJobQueue registers the background job handlers and recurring schedules,
 // reclaims jobs orphaned by a previous crash, and starts the worker and
 // scheduler. Returns both so shutdown can stop them.
-func startJobQueue(ctx context.Context, deps *server.Deps, jobQueue *jobs.Queue) (*jobs.Worker, *jobs.Scheduler) {
+func startJobQueue(ctx context.Context, deps *server.Deps, jobQueue *jobs.Queue, autoWatcher *watcher.AutoWatcher, senders []messageSender) (*jobs.Worker, *jobs.Scheduler) {
 	jobWorker := jobs.NewWorker(jobQueue)
 	jobScheduler := jobs.NewScheduler(jobQueue)
 	registerBackgroundJobs(jobWorker, deps)
@@ -502,6 +559,17 @@ func startJobQueue(ctx context.Context, deps *server.Deps, jobQueue *jobs.Queue)
 	jobScheduler.Add(jobs.Schedule{Name: "data-retention", JobType: "retention:prune", Interval: 1 * time.Hour})
 	jobScheduler.Add(jobs.Schedule{Name: "jobs-retention", JobType: "retention:jobs", Interval: 6 * time.Hour})
 	jobScheduler.Add(jobs.Schedule{Name: "aggregation", JobType: "aggregate:all", Interval: 5 * time.Minute})
+
+	// Post-deploy check-ins. Always registered: the enqueue side is what
+	// decides whether any exist, and an unregistered type would strand them.
+	jobWorker.Register(deployReportJob, deployReportHandler(autoWatcher, senders))
+
+	// The morning brief. Chat senders no-op until a channel is configured, so
+	// this costs one query a day on an instance that has none.
+	if interval := catchupPushInterval(); interval > 0 {
+		jobWorker.Register(catchupPushJob, catchupPushHandler(deps, senders, interval))
+		jobScheduler.Add(jobs.Schedule{Name: "catchup-push", JobType: catchupPushJob, Interval: interval})
+	}
 
 	// Dead man's switch. Only registered when configured, so an unset URL costs
 	// nothing rather than enqueueing a job that always fails.

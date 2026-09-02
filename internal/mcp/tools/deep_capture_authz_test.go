@@ -2,40 +2,26 @@ package tools
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/adham90/opentrace/internal/mcp/envscope"
-	"github.com/adham90/opentrace/internal/testutil/mocks"
-	"github.com/adham90/opentrace/pkg/store"
 )
 
 // --- Admin gate on the config-mutating actions ---
 
 func TestDeepCapture_WriteActionsRequireAdmin(t *testing.T) {
 	deps := setupDeepCaptureDB(t) // IsAdmin defaults to false — a member.
-	handler := DeepCaptureHandler(deps)
 
-	cases := []struct {
-		action string
-		key    string
-	}{
+	for _, tc := range []struct{ action, key string }{
 		{"update_pii_config", "pii_scrubbing"},
 		{"update_retention", "retention_policy"},
-	}
-
-	for _, tc := range cases {
+	} {
 		t.Run(tc.action, func(t *testing.T) {
-			req := MakeCallToolRequest("deep_capture", map[string]any{
+			result := callDeepCapture(t, deps, map[string]any{
 				"action": tc.action,
 				"config": map[string]any{"enabled": false},
 			})
-			result, err := handler(context.Background(), req)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
 			if !result.IsError {
 				t.Fatalf("expected a member to be denied %s", tc.action)
 			}
@@ -60,12 +46,10 @@ func TestDeepCapture_AdminMayUpdatePIIConfig(t *testing.T) {
 	deps := setupDeepCaptureDB(t)
 	deps.IsAdmin = true
 
-	result, err := handleUpdatePIIConfig(context.Background(), deps, map[string]any{
+	result := callDeepCapture(t, deps, map[string]any{
+		"action": "update_pii_config",
 		"config": map[string]any{"enabled": true},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if result.IsError {
 		t.Fatalf("admin update should succeed: %s", extractText(t, result))
 	}
@@ -73,149 +57,114 @@ func TestDeepCapture_AdminMayUpdatePIIConfig(t *testing.T) {
 
 // --- Env-scope authorization ---
 
-// seedEnvCapture inserts a log row plus a request/sql/audit capture and returns
-// the log id. The env lives on the LogStore mock, mirroring production where
-// capture tables carry no environment column.
-func seedEnvCapture(t *testing.T, db *sql.DB, logs *mocks.LogStore, env string) int64 {
-	t.Helper()
-	logID := seedTestLog(t, db)
-
-	logs.Entries = append(logs.Entries, store.LogEntry{
-		ID:          logID,
-		Environment: env,
-		Timestamp:   time.Now(),
-	})
-
-	if _, err := db.Exec(
-		`INSERT INTO request_captures (log_id, cookies, session_data, ip_address)
-		 VALUES (?, 'session=secret', '{"user_id":1}', '10.0.0.1')`, logID); err != nil {
-		t.Fatalf("insert request_capture: %v", err)
+// secretBody is a body blob whose every array carries a value a cross-env
+// caller must never see.
+func secretBody() map[string]any {
+	return map[string]any{
+		"request_body": "session=secret from 10.0.0.1",
+		"sql": []any{
+			map[string]any{
+				"raw_sql": "SELECT * FROM users WHERE id = $1",
+				"binds":   []any{float64(1)}, "fingerprint": "fp-1", "duration_ms": 5.0,
+			},
+		},
+		"audit": []any{
+			map[string]any{"record_type": "User", "record_id": "1", "action": "update", "actor_id": "actor-1"},
+		},
+		"email": []any{map[string]any{"subject": "secret receipt"}},
 	}
-	if _, err := db.Exec(
-		`INSERT INTO sql_captures (log_id, raw_sql, bind_values, fingerprint, duration_ms)
-		 VALUES (?, 'SELECT * FROM users WHERE id = $1', '[1]', 'fp-1', 5.0)`, logID); err != nil {
-		t.Fatalf("insert sql_capture: %v", err)
-	}
-	if _, err := db.Exec(
-		`INSERT INTO audit_captures (log_id, record_type, record_id, action, actor_id)
-		 VALUES (?, 'User', '1', 'update', 'actor-1')`, logID); err != nil {
-		t.Fatalf("insert audit_capture: %v", err)
-	}
-	return logID
 }
 
 func stagingCtx() context.Context {
 	return envscope.With(context.Background(), envscope.EnvScope{Allowed: []string{"staging"}})
 }
 
-func TestDeepCapture_RequestCaptureDeniesCrossEnv(t *testing.T) {
-	deps := setupDeepCaptureDB(t)
-	logs := mocks.NewLogStore()
-	deps.LogStore = logs
-	prodLog := seedEnvCapture(t, deps.DB, logs, "production")
-
-	result, err := handleGetRequestCapture(stagingCtx(), deps, map[string]any{
-		"log_id": float64(prodLog),
-	})
+// callScoped dispatches an action under the given context.
+func callScoped(t *testing.T, ctx context.Context, deps DeepCaptureDeps, args map[string]any) *CallToolResult {
+	t.Helper()
+	result, err := DeepCaptureHandler(deps)(ctx, MakeCallToolRequest("deep_capture", args))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	text := extractText(t, result)
-	if strings.Contains(text, "session=secret") || strings.Contains(text, "10.0.0.1") {
-		t.Fatalf("staging token read production capture data:\n%s", text)
+	return result
+}
+
+// Every per-request read resolves the log's environment before returning body
+// data. A staging token asking for a production log_id gets the same
+// not-found answer as for a log that does not exist.
+func TestDeepCapture_PerRequestReadsDenyCrossEnv(t *testing.T) {
+	deps := setupDeepCaptureDB(t)
+	prodLog := seedCaptureLog(t, deps, "production", secretBody())
+
+	for _, action := range []string{"request_capture", "sql_captures", "email_captures"} {
+		t.Run(action, func(t *testing.T) {
+			text := extractText(t, callScoped(t, stagingCtx(), deps, map[string]any{
+				"action": action, "log_id": float64(prodLog),
+			}))
+			for _, secret := range []string{"session=secret", "FROM users", "secret receipt"} {
+				if strings.Contains(text, secret) {
+					t.Fatalf("staging token read production data via %s:\n%s", action, text)
+				}
+			}
+		})
 	}
 }
 
 func TestDeepCapture_RequestCaptureAllowsInScope(t *testing.T) {
 	deps := setupDeepCaptureDB(t)
-	logs := mocks.NewLogStore()
-	deps.LogStore = logs
-	stagingLog := seedEnvCapture(t, deps.DB, logs, "staging")
+	stagingLog := seedCaptureLog(t, deps, "staging", secretBody())
 
-	result, err := handleGetRequestCapture(stagingCtx(), deps, map[string]any{
-		"log_id": float64(stagingLog),
+	result := callScoped(t, stagingCtx(), deps, map[string]any{
+		"action": "request_capture", "log_id": float64(stagingLog),
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if result.IsError {
 		t.Fatalf("in-scope read should succeed: %s", extractText(t, result))
 	}
-	if !strings.Contains(extractText(t, result), "10.0.0.1") {
+	if !strings.Contains(extractText(t, result), "session=secret") {
 		t.Errorf("expected the in-scope capture to be returned, got: %s", extractText(t, result))
 	}
 }
 
-func TestDeepCapture_SQLCapturesDenyCrossEnv(t *testing.T) {
-	deps := setupDeepCaptureDB(t)
-	logs := mocks.NewLogStore()
-	deps.LogStore = logs
-	prodLog := seedEnvCapture(t, deps.DB, logs, "production")
-
-	result, err := handleGetSQLCaptures(stagingCtx(), deps, map[string]any{
-		"log_id": float64(prodLog),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if strings.Contains(extractText(t, result), "FROM users") {
-		t.Fatalf("staging token read production SQL captures:\n%s", extractText(t, result))
-	}
-}
-
+// Cross-log searches filter every row by the environment of the log it came
+// from, not just by the store-level env filter.
 func TestDeepCapture_SearchSQLFiltersCrossEnv(t *testing.T) {
 	deps := setupDeepCaptureDB(t)
-	logs := mocks.NewLogStore()
-	deps.LogStore = logs
-	seedEnvCapture(t, deps.DB, logs, "production")
-	seedEnvCapture(t, deps.DB, logs, "staging")
+	seedCaptureLog(t, deps, "production", secretBody())
+	seedCaptureLog(t, deps, "staging", secretBody())
 
-	result, err := handleSearchSQL(stagingCtx(), deps, map[string]any{
-		"fingerprint": "fp-1",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	text := extractText(t, result)
+	text := extractText(t, callScoped(t, stagingCtx(), deps, map[string]any{
+		"action": "search_sql", "fingerprint": "fp-1",
+	}))
 	// Exactly one of the two matching rows (the staging one) may come back.
-	if strings.Count(text, `"fingerprint": "fp-1"`)+strings.Count(text, `"fingerprint":"fp-1"`) != 1 {
-		t.Fatalf("expected only the staging row to survive filtering:\n%s", text)
+	if got := strings.Count(text, `"fp-1"`); got != 1 {
+		t.Fatalf("expected only the staging row to survive filtering (got %d):\n%s", got, text)
 	}
 }
 
 func TestDeepCapture_SearchAuditFiltersCrossEnv(t *testing.T) {
 	deps := setupDeepCaptureDB(t)
-	logs := mocks.NewLogStore()
-	deps.LogStore = logs
-	seedEnvCapture(t, deps.DB, logs, "production")
+	seedCaptureLog(t, deps, "production", secretBody())
 
-	result, err := handleSearchAudit(stagingCtx(), deps, map[string]any{
-		"actor_id": "actor-1",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if strings.Contains(extractText(t, result), "actor-1") {
-		t.Fatalf("staging token read a production audit row:\n%s", extractText(t, result))
+	text := extractText(t, callScoped(t, stagingCtx(), deps, map[string]any{
+		"action": "search_audit", "actor_id": "actor-1",
+	}))
+	if strings.Contains(text, "actor-1") {
+		t.Fatalf("staging token read a production audit row:\n%s", text)
 	}
 }
 
-// Without a LogStore the environment of a capture cannot be established, so a
-// scoped token must be denied rather than served unclassified data.
+// Without a LogStore there is no capture data at all, and nothing may be
+// served from an unverified source.
 func TestDeepCapture_FailsClosedWithoutLogStore(t *testing.T) {
 	deps := setupDeepCaptureDB(t)
-	logs := mocks.NewLogStore()
-	logID := seedEnvCapture(t, deps.DB, logs, "staging")
+	logID := seedCaptureLog(t, deps, "staging", secretBody())
 	deps.LogStore = nil
 
-	result, err := handleGetRequestCapture(stagingCtx(), deps, map[string]any{
-		"log_id": float64(logID),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if strings.Contains(extractText(t, result), "10.0.0.1") {
-		t.Fatalf("capture served without any way to verify its environment:\n%s", extractText(t, result))
+	text := extractText(t, callScoped(t, stagingCtx(), deps, map[string]any{
+		"action": "request_capture", "log_id": float64(logID),
+	}))
+	if strings.Contains(text, "session=secret") {
+		t.Fatalf("capture served without any way to verify its environment:\n%s", text)
 	}
 }
 
@@ -223,17 +172,12 @@ func TestDeepCapture_FailsClosedWithoutLogStore(t *testing.T) {
 // — the same fallback scopeAllowsEnv and ResolveEnv use.
 func TestDeepCapture_UnscopedContextUnaffected(t *testing.T) {
 	deps := setupDeepCaptureDB(t)
-	logs := mocks.NewLogStore()
-	deps.LogStore = logs
-	logID := seedEnvCapture(t, deps.DB, logs, "production")
+	logID := seedCaptureLog(t, deps, "production", secretBody())
 
-	result, err := handleGetRequestCapture(context.Background(), deps, map[string]any{
-		"log_id": float64(logID),
+	result := callScoped(t, context.Background(), deps, map[string]any{
+		"action": "request_capture", "log_id": float64(logID),
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(extractText(t, result), "10.0.0.1") {
+	if !strings.Contains(extractText(t, result), "session=secret") {
 		t.Errorf("unscoped caller should still read captures, got: %s", extractText(t, result))
 	}
 }

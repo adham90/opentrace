@@ -53,24 +53,7 @@ func HandleCatchup(ctx context.Context, d OverviewDeps, args map[string]any) (*C
 	since, firstRun := catchupSince(ctx, d, userID)
 	now := time.Now().UTC()
 
-	var items []triageEntry
-	items = append(items, catchupErrorGroups(ctx, d, env, since)...)
-	items = append(items, catchupAlerts(ctx, d, env, since)...)
-	items = append(items, catchupDeploys(ctx, d, env, since)...)
-
-	sort.Slice(items, func(i, j int) bool {
-		si, sj := sevOrder(items[i].Severity), sevOrder(items[j].Severity)
-		if si != sj {
-			return si < sj
-		}
-		return items[i].Time > items[j].Time
-	})
-
-	truncated := false
-	if len(items) > maxCatchupItems {
-		items = items[:maxCatchupItems]
-		truncated = true
-	}
+	items, truncated := CollectCatchup(ctx, d, env, since)
 
 	// Advance last, and only when asked to. A caller re-reading after a context
 	// compaction needs to see the same window again, not an empty one.
@@ -91,7 +74,42 @@ func HandleCatchup(ctx context.Context, d OverviewDeps, args map[string]any) (*C
 	return JSONResult(resp, catchupSuggestions(items)...)
 }
 
-func catchupResponse(items []triageEntry, since, now time.Time, firstRun, truncated, advanced bool) map[string]any {
+// CollectCatchup gathers everything that happened in an explicit window and
+// orders it: money path first, then severity, then recency. It owns no cursor —
+// the MCP tool keeps a per-user one, the scheduled push keeps its own clock —
+// so both callers produce the same payload from the same rules.
+func CollectCatchup(ctx context.Context, d OverviewDeps, env string, since time.Time) (items []TriageEntry, truncated bool) {
+	items = append(items, catchupErrorGroups(ctx, d, env, since)...)
+	items = append(items, catchupAlerts(ctx, d, env, since)...)
+	items = append(items, catchupDeploys(ctx, d, env, since)...)
+
+	for i := range items {
+		if isCriticalPath(d.CriticalPaths, items[i].Title, items[i].Detail, items[i].ID) {
+			items[i].Critical = true
+		}
+	}
+
+	sort.SliceStable(items, func(i, j int) bool {
+		// The money path outranks severity: a warning on checkout is worth more
+		// of the reader's first glance than a critical on a debug endpoint.
+		if items[i].Critical != items[j].Critical {
+			return items[i].Critical
+		}
+		si, sj := sevOrder(items[i].Severity), sevOrder(items[j].Severity)
+		if si != sj {
+			return si < sj
+		}
+		return items[i].Time > items[j].Time
+	})
+
+	if len(items) > maxCatchupItems {
+		items = items[:maxCatchupItems]
+		truncated = true
+	}
+	return items, truncated
+}
+
+func catchupResponse(items []TriageEntry, since, now time.Time, firstRun, truncated, advanced bool) map[string]any {
 	resp := map[string]any{
 		"since":           since.Format(time.RFC3339),
 		"until":           now.Format(time.RFC3339),
@@ -135,7 +153,7 @@ func catchupSince(ctx context.Context, d OverviewDeps, userID string) (time.Time
 // catchupErrorGroups returns error groups first seen since the cursor. Groups
 // that merely recurred are excluded on purpose: an ongoing error is triage's
 // job, and repeating it every morning is what makes a queue get ignored.
-func catchupErrorGroups(ctx context.Context, d OverviewDeps, env string, since time.Time) []triageEntry {
+func catchupErrorGroups(ctx context.Context, d OverviewDeps, env string, since time.Time) []TriageEntry {
 	if d.ErrorGroupStore == nil {
 		return nil
 	}
@@ -150,7 +168,7 @@ func catchupErrorGroups(ctx context.Context, d OverviewDeps, env string, since t
 		return nil
 	}
 
-	items := make([]triageEntry, 0, len(groups))
+	items := make([]TriageEntry, 0, len(groups))
 	for _, eg := range groups {
 		msg := eg.Message
 		if len(msg) > 80 {
@@ -164,7 +182,7 @@ func catchupErrorGroups(ctx context.Context, d OverviewDeps, env string, since t
 		if env == "" && eg.Environment != "" {
 			detail += " [" + eg.Environment + "]"
 		}
-		items = append(items, triageEntry{
+		items = append(items, TriageEntry{
 			Type:        "error_group",
 			Severity:    "critical",
 			Title:       title,
@@ -177,7 +195,7 @@ func catchupErrorGroups(ctx context.Context, d OverviewDeps, env string, since t
 	return items
 }
 
-func catchupAlerts(ctx context.Context, d OverviewDeps, env string, since time.Time) []triageEntry {
+func catchupAlerts(ctx context.Context, d OverviewDeps, env string, since time.Time) []TriageEntry {
 	if d.WatchStore == nil {
 		return nil
 	}
@@ -189,7 +207,7 @@ func catchupAlerts(ctx context.Context, d OverviewDeps, env string, since time.T
 		return nil
 	}
 
-	var items []triageEntry
+	var items []TriageEntry
 	for _, a := range alerts {
 		if !a.CreatedAt.After(since) {
 			continue
@@ -201,7 +219,10 @@ func catchupAlerts(ctx context.Context, d OverviewDeps, env string, since time.T
 		if a.Status == "pending" {
 			severity = "critical"
 		}
-		items = append(items, triageEntry{
+		items = append(items, TriageEntry{
+			// A watch someone tagged critical is a money path by declaration —
+			// that is what the urgency was for.
+			Critical:    a.Urgency == store.WatchUrgencyCritical,
 			Type:        "watch_alert",
 			Severity:    severity,
 			Title:       a.Summary,
@@ -214,7 +235,7 @@ func catchupAlerts(ctx context.Context, d OverviewDeps, env string, since time.T
 	return items
 }
 
-func catchupDeploys(ctx context.Context, d OverviewDeps, env string, since time.Time) []triageEntry {
+func catchupDeploys(ctx context.Context, d OverviewDeps, env string, since time.Time) []TriageEntry {
 	if d.DeployStore == nil {
 		return nil
 	}
@@ -227,7 +248,7 @@ func catchupDeploys(ctx context.Context, d OverviewDeps, env string, since time.
 		return nil
 	}
 
-	items := make([]triageEntry, 0, len(deploys))
+	items := make([]TriageEntry, 0, len(deploys))
 	for _, dep := range deploys {
 		short := dep.CommitHash
 		if len(short) > 7 {
@@ -237,7 +258,7 @@ func catchupDeploys(ctx context.Context, d OverviewDeps, env string, since time.
 		if dep.Service != "" {
 			detail = "deployed to " + dep.Service
 		}
-		items = append(items, triageEntry{
+		items = append(items, TriageEntry{
 			Type:        "deploy",
 			Severity:    "info",
 			Title:       "Deploy " + short,
@@ -252,7 +273,7 @@ func catchupDeploys(ctx context.Context, d OverviewDeps, env string, since time.
 
 // catchupSuggestions points at the top item and, when a deploy is in the
 // window, at the comparison that explains the rest of it.
-func catchupSuggestions(items []triageEntry) []ToolSuggestion {
+func catchupSuggestions(items []TriageEntry) []ToolSuggestion {
 	var suggestions []ToolSuggestion
 	top := items[0]
 

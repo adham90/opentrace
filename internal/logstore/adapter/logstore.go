@@ -108,6 +108,7 @@ func (a *LogStore) Search(ctx context.Context, params store.LogSearchParams) ([]
 		// narrowed search returned every row and read as the answer.
 		MetadataFilter: params.MetadataFilter,
 		Exclude:        params.Exclude,
+		OmitBody:       params.OmitBody,
 	}
 
 	result, err := a.engine.Search(sp)
@@ -410,8 +411,13 @@ func oldToNew(e store.LogEntry) chunk.Entry {
 		QueueMs:    e.QueueMs,
 	}
 
-	// Convert metadata to body if present
-	if len(e.Metadata) > 0 {
+	// Prefer the original wire JSON. Flat ingest carries both a parsed map for
+	// post-processing and this raw form for storage; marshaling the map first
+	// both wasted work and changed {"key":...} into
+	// {"metadata":{"key":...}}.
+	if e.MetadataJSON != "" {
+		ne.Body = json.RawMessage(e.MetadataJSON)
+	} else if len(e.Metadata) > 0 {
 		if body, err := json.Marshal(map[string]any{"metadata": e.Metadata}); err == nil {
 			ne.Body = body
 		}
@@ -447,11 +453,6 @@ func oldToNew(e store.LogEntry) chunk.Entry {
 		setIfZero(&ne.ExtMs, int(rs.HTTPExternalTotalMs))
 		setIfZero(&ne.ExtCount, rs.HTTPExternalCount)
 		setIfZero(&ne.MemDeltaMb, int(rs.MemoryDeltaMb*memDeltaScale))
-	}
-
-	// Handle MetadataJSON carrier field (pre-marshaled metadata)
-	if ne.Body == nil && e.MetadataJSON != "" {
-		ne.Body = json.RawMessage(e.MetadataJSON)
 	}
 
 	return ne

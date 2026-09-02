@@ -28,6 +28,24 @@ func NewErrorGroupStore(db *bun.DB) store.ErrorGroupStore {
 // Fast path: a single INSERT ON CONFLICT handles new + existing (non-resolved)
 // without a transaction. Only the rare reopen case needs a second statement.
 func (s *errorGroupStore) Upsert(ctx context.Context, entry store.LogEntry) error {
+	return upsertErrorGroup(ctx, s.db, entry)
+}
+
+// UpsertBatch executes all group updates in one SQLite transaction. The SQL
+// work is unchanged, but one SDK batch no longer pays an autocommit boundary
+// for every error row.
+func (s *errorGroupStore) UpsertBatch(ctx context.Context, entries []store.LogEntry) error {
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		for i := range entries {
+			if err := upsertErrorGroup(ctx, tx, entries[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func upsertErrorGroup(ctx context.Context, db bun.IDB, entry store.LogEntry) error {
 	if entry.ErrorFingerprint == "" {
 		return nil
 	}
@@ -45,7 +63,7 @@ func (s *errorGroupStore) Upsert(ctx context.Context, entry store.LogEntry) erro
 
 	// Fast path: single statement per (fingerprint, environment) row.
 	// Inserts a new group or increments an existing one scoped to this env.
-	_, err := s.db.NewRaw(`
+	_, err := db.NewRaw(`
 		INSERT INTO error_groups (fingerprint, service, environment, exception_class, message,
 			source_file, source_line, first_seen_at, last_seen_at, last_log_id, occurrence_count,
 			seen_in_envs)
@@ -67,7 +85,7 @@ func (s *errorGroupStore) Upsert(ctx context.Context, entry store.LogEntry) erro
 	// list the full set of envs the fingerprint has ever appeared in. Cheap
 	// aggregation since rows are keyed by (fingerprint, env) and the count
 	// per fingerprint is typically small (one row per env).
-	_, err = s.db.NewRaw(`
+	_, err = db.NewRaw(`
 		UPDATE error_groups SET seen_in_envs = (
 			SELECT COALESCE(json_group_array(env), '[]') FROM (
 				SELECT DISTINCT environment AS env FROM error_groups WHERE fingerprint = ?
@@ -82,7 +100,7 @@ func (s *errorGroupStore) Upsert(ctx context.Context, entry store.LogEntry) erro
 
 	// Slow path: reopen resolved errors scoped to this (fp, env). Only fires
 	// when the specific env's row is currently resolved — rare.
-	res, err := s.db.NewRaw(`
+	res, err := db.NewRaw(`
 		UPDATE error_groups SET status = 'unresolved', reopened_count = reopened_count + 1
 		WHERE fingerprint = ? AND environment = ? AND status = 'resolved'`,
 		entry.ErrorFingerprint, entry.Environment,
@@ -93,7 +111,7 @@ func (s *errorGroupStore) Upsert(ctx context.Context, entry store.LogEntry) erro
 	reopened, _ := res.RowsAffected()
 	if reopened > 0 {
 		now := rfc3339(time.Now().UTC())
-		_, err = s.db.NewRaw(`
+		_, err = db.NewRaw(`
 			INSERT INTO error_group_events (fingerprint, environment, action, reason, created_at)
 			VALUES (?, ?, ?, ?, ?)`,
 			entry.ErrorFingerprint, entry.Environment,

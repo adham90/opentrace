@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"bytes"
 	"encoding/json"
 	"math/rand"
 	"regexp"
@@ -15,14 +16,21 @@ import (
 type Pipeline struct {
 	samplingRules []SamplingRule
 	piiConfig     PIIConfig
+	ruleMap       map[string]*SamplingRule
+	defaultRule   *SamplingRule
+	scrubPatterns []*regexp.Regexp
+	sensitive     map[string]bool
 }
 
 // NewPipeline creates a new ingest pipeline.
 func NewPipeline(samplingRules []SamplingRule, piiConfig PIIConfig) *Pipeline {
-	return &Pipeline{
-		samplingRules: samplingRules,
+	p := &Pipeline{
+		samplingRules: append([]SamplingRule(nil), samplingRules...),
 		piiConfig:     piiConfig,
 	}
+	p.compileSamplingRules()
+	p.scrubPatterns, p.sensitive = p.buildScrubbers()
+	return p
 }
 
 // Process runs the full ingest pipeline on a batch of entries.
@@ -33,7 +41,14 @@ func (p *Pipeline) Process(entries []chunk.Entry) []chunk.Entry {
 	entries = p.applySampling(entries)
 
 	// Steps 2-4: For each entry, fingerprint, scrub PII (message + body), expand.
-	var result []chunk.Entry
+	// Every input that survives sampling produces at least one output. Reserve
+	// that space up front so a normal, non-expanded SDK batch never grows and
+	// repeatedly copies a slice of ~600-byte structs.
+	result := make([]chunk.Entry, 0, min(len(entries), maxProcessedEntries))
+	expansionBudget := maxProcessedEntries - len(entries)
+	if expansionBudget < 0 {
+		expansionBudget = 0
+	}
 	for i := range entries {
 		e := &entries[i]
 
@@ -48,8 +63,13 @@ func (p *Pipeline) Process(entries []chunk.Entry) []chunk.Entry {
 		result = append(result, *e)
 
 		// Step 4: Expand in-request logs (from the already-scrubbed body).
-		if len(e.Body) > 0 {
-			result = append(result, expandInRequestLogs(e)...)
+		if len(e.Body) > 0 && expansionBudget > 0 {
+			expanded := expandInRequestLogs(e)
+			if len(expanded) > expansionBudget {
+				expanded = expanded[:expansionBudget]
+			}
+			result = append(result, expanded...)
+			expansionBudget -= len(expanded)
 		}
 	}
 
@@ -70,21 +90,11 @@ func (p *Pipeline) applySampling(entries []chunk.Entry) []chunk.Entry {
 		return entries
 	}
 
-	ruleMap := make(map[string]*SamplingRule, len(p.samplingRules))
-	var defaultRule *SamplingRule
-	for i := range p.samplingRules {
-		if p.samplingRules[i].Service == "*" {
-			defaultRule = &p.samplingRules[i]
-		} else {
-			ruleMap[p.samplingRules[i].Service] = &p.samplingRules[i]
-		}
-	}
-
 	filtered := make([]chunk.Entry, 0, len(entries))
 	for _, e := range entries {
-		rule := ruleMap[e.Service]
+		rule := p.ruleMap[e.Service]
 		if rule == nil {
-			rule = defaultRule
+			rule = p.defaultRule
 		}
 		if rule == nil {
 			filtered = append(filtered, e)
@@ -101,6 +111,24 @@ func (p *Pipeline) applySampling(entries []chunk.Entry) []chunk.Entry {
 		}
 	}
 	return filtered
+}
+
+// compileSamplingRules builds the immutable lookup once. Process is called for
+// every batch; rebuilding the map there turned static configuration into an
+// allocation on the hottest path.
+func (p *Pipeline) compileSamplingRules() {
+	if len(p.samplingRules) == 0 {
+		return
+	}
+	p.ruleMap = make(map[string]*SamplingRule, len(p.samplingRules))
+	for i := range p.samplingRules {
+		rule := &p.samplingRules[i]
+		if rule.Service == "*" {
+			p.defaultRule = rule
+		} else {
+			p.ruleMap[rule.Service] = rule
+		}
+	}
 }
 
 // --- PII Scrubbing ---
@@ -166,14 +194,13 @@ func (p *Pipeline) scrubEntry(e *chunk.Entry) {
 	if !p.piiConfig.Enabled {
 		return
 	}
-	patterns, sensitiveFields := p.buildScrubbers()
-	if len(patterns) == 0 && len(sensitiveFields) == 0 {
+	if len(p.scrubPatterns) == 0 && len(p.sensitive) == 0 {
 		return
 	}
-	e.Message = scrubString(e.Message, patterns)
-	e.ErrorMessage = scrubString(e.ErrorMessage, patterns)
+	e.Message = scrubString(e.Message, p.scrubPatterns)
+	e.ErrorMessage = scrubString(e.ErrorMessage, p.scrubPatterns)
 	if len(e.Body) > 0 {
-		e.Body = scrubBodyWith(e.Body, patterns, sensitiveFields)
+		e.Body = scrubBodyWith(e.Body, p.scrubPatterns, p.sensitive)
 	}
 }
 
@@ -205,8 +232,7 @@ func (p *Pipeline) scrubBody(body json.RawMessage) json.RawMessage {
 	if !p.piiConfig.Enabled || len(body) == 0 {
 		return body
 	}
-	patterns, sensitiveFields := p.buildScrubbers()
-	return scrubBodyWith(body, patterns, sensitiveFields)
+	return scrubBodyWith(body, p.scrubPatterns, p.sensitive)
 }
 
 // maxScrubDepth bounds recursion into nested body JSON. json.Unmarshal already
@@ -267,9 +293,26 @@ func computeErrorFingerprint(e *chunk.Entry) {
 // into, so one crafted request can't amplify into unbounded WAL entries.
 const maxExpandedLogs = 1000
 
+// maxProcessedEntries bounds amplification across the entire request. A
+// per-parent cap alone still allowed a large input batch to expand into
+// millions of entries before the WAL writer saw it.
+const maxProcessedEntries = 10000
+
 // expandInRequestLogs extracts body.logs entries into separate log entries.
+// inRequestLogsKey is the JSON key expandInRequestLogs looks for.
+var inRequestLogsKey = []byte(`"logs"`)
+
 func expandInRequestLogs(parent *chunk.Entry) []chunk.Entry {
 	if len(parent.Body) == 0 {
+		return nil
+	}
+	// Almost no body carries a "logs" array, but this ran a full json.Unmarshal
+	// on every one to find that out — the single largest CPU cost on the ingest
+	// path. A substring probe for the key is enough to skip it: a false positive
+	// just falls through to the unmarshal below (which is what always happened),
+	// and only a body that escaped the key name (`"\u006cogs"`, which no real
+	// encoder emits) could false-negative.
+	if !bytes.Contains(parent.Body, inRequestLogsKey) {
 		return nil
 	}
 

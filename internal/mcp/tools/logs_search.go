@@ -93,6 +93,10 @@ func LogsSearch(ctx context.Context, args map[string]any, deps LogsDeps) (*CallT
 		SortAsc:          sortAsc,
 		MetadataFilter:   metadataFilter,
 	}
+	// An explicit field projection that excludes metadata can stay entirely on
+	// indexed columns; the default response still includes metadata and therefore
+	// preserves the existing wire contract.
+	params.OmitBody = fields != nil && !fields["metadata"] && len(metadataFilter) == 0
 
 	// Window. Read through the shared helper so "since" works here too — this
 	// tool only ever looked at "time_range", so since=7d was accepted, dropped,

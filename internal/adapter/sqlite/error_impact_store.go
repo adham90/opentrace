@@ -29,6 +29,22 @@ func NewErrorImpactStore(db *bun.DB) store.ErrorImpactStore {
 // scoped to (fingerprint, environment). A user who hits the same fingerprint
 // in both staging and production will have two distinct rows.
 func (s *errorImpactStore) TrackImpact(ctx context.Context, fingerprint, environment, userID string, contextData map[string]any, logID int64, service string) error {
+	return trackErrorImpact(ctx, s.db, fingerprint, environment, userID, contextData, logID, service)
+}
+
+func (s *errorImpactStore) TrackImpactBatch(ctx context.Context, entries []store.LogEntry) error {
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		for i := range entries {
+			e := &entries[i]
+			if err := trackErrorImpact(ctx, tx, e.ErrorFingerprint, e.Environment, e.UserID, e.Metadata, e.ID, e.Service); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func trackErrorImpact(ctx context.Context, db bun.IDB, fingerprint, environment, userID string, contextData map[string]any, logID int64, service string) error {
 	if fingerprint == "" || userID == "" {
 		return nil // silently skip if no fingerprint or user
 	}
@@ -36,7 +52,7 @@ func (s *errorImpactStore) TrackImpact(ctx context.Context, fingerprint, environ
 	ctxJSON, _ := json.Marshal(contextData)
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	_, err := s.db.NewRaw(`
+	_, err := db.NewRaw(`
 		INSERT INTO error_impacts (error_fingerprint, environment, user_id, service, first_seen_at, last_seen_at,
 			last_context, last_log_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)

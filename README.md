@@ -57,7 +57,7 @@ Your App                                Your Server
 Your Laptop                            │    Binary WAL → hourly seal →    │
 ┌──────────────────────┐               │    columnar chunks + FTS index   │
 │                      │               │    45 columns, 6 encoding types  │
-│  Claude Code / Cursor│◄── MCP ──────│    ~260KB runtime memory          │
+│  Claude Code / Cursor│◄── MCP ──────│    + 64MB query cache (tunable)  │
 │                      │  over HTTPS   │                                  │
 │  Reads .mcp.json     │               │  SQLite (platform data)          │
 │  Auto-connects       │               │    Users, watches, error groups  │
@@ -266,6 +266,16 @@ Optionally it files each diagnosis as a GitHub **issue**, one per error fingerpr
 
 Off by default — turning it on sends log excerpts to a model provider. See [`.env.example`](.env.example).
 
+### Monitoring You Didn't Have To Set Up
+The first time a service reports, it gets two watches nobody asked for: an error-rate spike (>5% over 5 minutes, twice running) and a heartbeat (15 minutes of silence). If you already made watches for that service, these stay out of the way.
+
+Every new commit hash gets its own 24h watch plus a check-in **1 hour and 24 hours after the deploy** — error rate and response time against the baseline captured when it landed, plus any error group that is new since. Delivered to whichever chat channel you configured.
+
+### The Morning Brief
+`overview.catchup` only answers when an agent asks. The same payload is also pushed to Telegram/Slack once a day (`OPENTRACE_CATCHUP_PUSH_INTERVAL`), so the night you did not open an agent is not a night you missed.
+
+Set `OPENTRACE_CRITICAL_PATHS=/checkout,billing` and anything matching — a route, a service, an error message, or a watch you tagged `critical` — sorts to the top of the brief and of the error impact ranking. Ten people who cannot pay outrank a thousand who cannot load an avatar.
+
 ### Notice When OpenTrace Itself Dies
 Set `OPENTRACE_HEARTBEAT_URL` and the server pings it every minute. If the box dies, the pings stop and your external monitor tells you. Without it, a dead OpenTrace looks exactly like an OpenTrace with nothing to report.
 
@@ -283,9 +293,8 @@ OpenTrace exposes 14 tools with 90+ actions via MCP. Each tool returns `suggeste
 | **watches** | status, create, delete, alerts, dismiss, acknowledge, investigate | Threshold alerts on error rate, latency, request volume |
 | **overview** | status, triage, catchup, diagnose, timeline, investigate, changes, settings, notes, delete_note | System health, what you missed since last visit, incident timeline, settings, agent memory |
 | **users** | timeline, errors, impact | What one customer hit, which errors they saw, who an error affects |
-| **analytics** | traffic, endpoints, heatmap, trends, movers | Traffic patterns, endpoint performance, time-series analysis |
-| **code** | risk, fragile, annotate_file, annotate_function, hotspots, gen_context, gen_suggest, deps_service, deps_blast, deps_risk | Code risk scores, test generation, blast radius, production annotations |
-| **deep_capture** | request_capture, sql_captures, http_captures, email_captures, audit_trail, search_audit, search_sql, file_captures, get_pii_config, update_pii_config, get_retention, update_retention | Per-request deep capture: SQL, HTTP, emails, audit trail, file ops, PII config |
+| **code** | risk, fragile | Risk scores for a set of files, and the riskiest code entities overall |
+| **deep_capture** | request_capture, sql_captures, http_captures, email_captures, audit_trail, search_audit, search_sql, file_captures, get_pii_config, update_pii_config, get_retention, update_retention | Per-request detail read from the log body blob: SQL, external HTTP calls, emails, audit trail, file ops, PII config |
 | **healthchecks** | list, uptime, create, delete | HTTP endpoint monitoring with uptime tracking |
 | **servers** | list, query, health | Server and process metrics (CPU, memory, GC) |
 | **connectors** | list, get, create, test, update, delete | Manage database connectors (Postgres, MySQL, etc.) |
@@ -327,6 +336,8 @@ Server-side environment variables (`.env` file):
 | `OPENTRACE_ONCALL_ENABLED` | `false` | Run your own agent CLI against alerts and deliver a diagnosis |
 | `OPENTRACE_ONCALL_CMD` | `claude -p --permission-mode dontAsk` | The agent command; prompt on stdin, diagnosis on stdout |
 | `OPENTRACE_ONCALL_GITHUB_REPO` | _(empty)_ | `owner/name` — file each diagnosis as a deduped GitHub issue |
+| `OPENTRACE_CATCHUP_PUSH_INTERVAL` | `24h` | Push the catch-up brief to Telegram/Slack on this cadence; `off` disables |
+| `OPENTRACE_CRITICAL_PATHS` | _(empty)_ | Comma-separated money-path patterns (`/checkout,billing`) — matches sort first |
 
 See [`.env.example`](.env.example) for all options.
 

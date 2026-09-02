@@ -26,6 +26,10 @@ type OverviewDeps struct {
 	UserStore        store.UserStore
 	SessionSummary   SessionSummaryCallback
 
+	// CriticalPaths are the money-path patterns from config. Empty means every
+	// item ranks on severity alone.
+	CriticalPaths []string
+
 	// OnCallStatus reports the on-call agent's health. A function rather than
 	// the runner itself: the tools package has no business importing the agent,
 	// and this is the only thing it needs from it. Nil when not configured.

@@ -70,7 +70,7 @@ func TestMarshalUnmarshalRichRequest(t *testing.T) {
 		Path:             "/api/orders",
 		Status:           201,
 		DurationMs:       1243,
-		Handler:       "Api::OrdersController#create",
+		Handler:          "Api::OrdersController#create",
 		DbMs:             312,
 		DbCount:          8,
 		SlowQueries:      1,
@@ -105,7 +105,7 @@ func TestMarshalUnmarshalErrorEntry(t *testing.T) {
 		Message:          "NoMethodError: undefined method 'name' for nil",
 		TraceID:          "trace-xyz789",
 		RequestID:        "req-abc123",
-		ErrorClass:   "NoMethodError",
+		ErrorClass:       "NoMethodError",
 		SourceFile:       "app/models/order.rb",
 		SourceLine:       42,
 		ErrorFingerprint: "a8f3c2d1",
@@ -184,7 +184,7 @@ func TestSizeComparison(t *testing.T) {
 			Version: "a1b2c3d", Message: "POST /api/orders 201 1243ms",
 			EventType: "http.request", TraceID: "trace-xyz789",
 			RequestID: "req-abc123", Method: "POST", Path: "/api/orders",
-			Status: 201, DurationMs: 1243, Handler:       "Api::OrdersController#create",
+			Status: 201, DurationMs: 1243, Handler: "Api::OrdersController#create",
 			Body: body,
 		},
 	}
@@ -195,6 +195,27 @@ func TestSizeComparison(t *testing.T) {
 		ratio := float64(len(jsonData)) / float64(len(binaryData))
 		t.Logf("entry %d: binary=%d bytes, json=%d bytes (%.1fx smaller)",
 			e.ID, len(binaryData), len(jsonData), ratio)
+	}
+}
+
+func TestRawAndCompressedBodiesRoundTrip(t *testing.T) {
+	originalMode := CompressBodies
+	t.Cleanup(func() { CompressBodies = originalMode })
+
+	want := &chunk.Entry{
+		ID: 1, Ts: 2, ReceivedAt: 3, Level: "info", Service: "api",
+		Message: "body modes", Body: json.RawMessage(`{"token":"value","n":42}`),
+	}
+	for _, compressed := range []bool{true, false} {
+		CompressBodies = compressed
+		encoded := MarshalEntry(want)
+		got, err := UnmarshalEntry(encoded[4:])
+		if err != nil {
+			t.Fatalf("compressed=%v: %v", compressed, err)
+		}
+		if !bytes.Equal(got.Body, want.Body) {
+			t.Fatalf("compressed=%v: body = %s, want %s", compressed, got.Body, want.Body)
+		}
 	}
 }
 

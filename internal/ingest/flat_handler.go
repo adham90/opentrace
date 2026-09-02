@@ -170,7 +170,7 @@ type flatEntry struct {
 	JobQueue     string          `json:"job_queue,omitempty" doc:"Name of the queue the job ran on."`
 	JobID        string          `json:"job_id,omitempty" doc:"Unique id of this job execution."`
 	QueueMs      jsonInt         `json:"queue_ms,omitempty" doc:"Milliseconds the job spent waiting in the queue before it started running."`
-	Body         json.RawMessage `json:"body,omitempty" doc:"Free-form JSON object for everything the columns do not cover. Stored whole and searchable. Well-known keys the MCP tools read: backtrace (string), exception_causes, handled (boolean), source_context (source lines around source_line), params, queries."`
+	Body         json.RawMessage `json:"body,omitempty" doc:"Free-form JSON object for everything the columns do not cover. Stored whole and searchable. Well-known keys the MCP tools read: backtrace (string), exception_causes, handled (boolean), source_context (source lines around source_line), params, queries, and the deep-capture arrays sql / http / email / file / audit / timeline. body.http carries one row per outbound call (method, url, host, vendor, status, duration_ms) plus ai_model / ai_input_tokens / ai_output_tokens when the call was to an LLM provider. See GET /api/v2/logs/spec."`
 }
 
 // HandleFlatIngest is the HTTP handler for POST /api/v2/logs. It accepts the
@@ -179,23 +179,16 @@ type flatEntry struct {
 // evaluation) so the flat-format SDKs get identical treatment. Previously this
 // endpoint was never even mounted, so those SDKs' logs were dropped entirely.
 func (h *Handler) HandleFlatIngest(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		server.WriteError(w, http.StatusBadRequest, "failed to read request body")
-		return
-	}
-
 	// Dry run: report what this payload would become and store nothing. Checked
 	// after the body is read so validate mode sees exactly the same bytes the
 	// real path would. See validate.go.
 	if isValidateRequest(r) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			server.WriteError(w, http.StatusBadRequest, "failed to read request body")
+			return
+		}
 		h.handleValidate(w, body)
-		return
-	}
-
-	raw, err := splitEntries(body)
-	if err != nil {
-		server.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -204,13 +197,14 @@ func (h *Handler) HandleFlatIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logEntries := make([]store.LogEntry, 0, len(raw))
-	for i, rm := range raw {
-		var fe flatEntry
-		if err := json.Unmarshal(rm, &fe); err != nil {
-			server.WriteError(w, http.StatusBadRequest, fmt.Sprintf("entry %d: %v", i, err))
-			return
-		}
+	entries, err := decodeJSONOneOrMany[flatEntry](r.Body)
+	if err != nil {
+		server.WriteError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	logEntries := make([]store.LogEntry, 0, len(entries))
+	for i, fe := range entries {
 		if fe.Level == "" || fe.Message == "" {
 			server.WriteError(w, http.StatusBadRequest, fmt.Sprintf("entry %d: level and message are required", i))
 			return

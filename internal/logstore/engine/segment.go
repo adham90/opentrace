@@ -185,8 +185,24 @@ func (sm *SegmentManager) Register(hour int64, meta *SegmentMeta) {
 	sm.segments[idx] = seg
 }
 
-// SegmentsInRange returns sealed segments that may contain data for the given time range.
-// Includes ±1 hour buffer for clock skew (received_at vs ts).
+// SegmentsInRange returns sealed segments that may contain data for the given
+// time range: those whose hour slot is in range, plus those whose recorded time
+// range overlaps it.
+//
+// The hour slot alone is not enough, because a slot is not a timestamp. Sealing
+// twice in one wall-clock hour parks the second segment in the next free slot
+// (see freeSegmentHour), so a process that seals repeatedly — a restart loop, a
+// run of deploys, an hour that exhausts its IDs — pushes later segments further
+// and further ahead of the data they hold. Past the ±1 buffer those segments
+// stopped matching any query: the entries were durably on disk, ingest had
+// returned 201, and nothing could ever read them again.
+//
+// The two checks are a union rather than a replacement. TimeRange is built from
+// received_at, so a backfilled batch of old events carries a recent range and
+// would be missed by an overlap test alone; the slot check keeps covering the
+// ordinary case. Both are coarse filters — rows are still filtered exactly by
+// timestamp downstream — so including a segment that turns out to hold nothing
+// costs a scan, while excluding one loses data.
 func (sm *SegmentManager) SegmentsInRange(start, end time.Time) []*LoadedSegment {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -196,11 +212,60 @@ func (sm *SegmentManager) SegmentsInRange(start, end time.Time) []*LoadedSegment
 
 	var result []*LoadedSegment
 	for _, seg := range sm.segments {
-		if seg.Hour >= startHour && seg.Hour <= endHour {
+		if (seg.Hour >= startHour && seg.Hour <= endHour) || seg.overlaps(start, end) {
 			result = append(result, seg)
 		}
 	}
 	return result
+}
+
+// expiredAt reports whether every entry in the segment is older than the
+// retention cutoff.
+//
+// The hour slot is not a timestamp (see SegmentsInRange), and here the drift
+// runs the other way: a segment parked in a future slot looks newer than its
+// data, so slot-based pruning kept it forever and retention silently stopped
+// applying to exactly the segments a restart loop produced.
+//
+// The direction of safety is the opposite of a query's. Including an extra
+// segment in a search costs a scan; deleting one destroys data. So the recorded
+// range decides only when it is present and unambiguous, and the slot remains
+// the fallback for segments sealed before it was written.
+func (s *LoadedSegment) expiredAt(cutoffHour int64, cutoff time.Time) bool {
+	if s == nil {
+		return false
+	}
+	if s.Meta != nil {
+		if last, err := time.Parse(time.RFC3339, s.Meta.TimeRange[1]); err == nil {
+			return last.Before(cutoff)
+		}
+	}
+	return s.Hour < cutoffHour
+}
+
+// segmentRangeBuffer widens a segment's recorded time range on both sides, for
+// the same clock skew the hour buffer allows for.
+const segmentRangeBuffer = time.Hour
+
+// overlaps reports whether the segment's recorded time range intersects
+// [start, end]. A segment with no usable range reports false and is left to the
+// hour-slot check.
+func (s *LoadedSegment) overlaps(start, end time.Time) bool {
+	if s == nil || s.Meta == nil {
+		return false
+	}
+	first, err := time.Parse(time.RFC3339, s.Meta.TimeRange[0])
+	if err != nil {
+		return false
+	}
+	last, err := time.Parse(time.RFC3339, s.Meta.TimeRange[1])
+	if err != nil {
+		return false
+	}
+	if last.Before(first) {
+		first, last = last, first
+	}
+	return !first.Add(-segmentRangeBuffer).After(end) && !last.Add(segmentRangeBuffer).Before(start)
 }
 
 // AllSegments returns all loaded segments (for operations that need all data).
@@ -230,7 +295,7 @@ func (sm *SegmentManager) Prune(retention time.Duration) (int, error) {
 	deleted := 0
 	var remaining []*LoadedSegment
 	for _, seg := range sm.segments {
-		if seg.Hour < cutoffHour {
+		if seg.expiredAt(cutoffHour, time.Now().UTC().Add(-retention)) {
 			if err := os.RemoveAll(seg.DirPath); err != nil {
 				slog.Error("segment: prune failed", "dir", seg.DirName, "error", err)
 				remaining = append(remaining, seg) // keep in list if delete failed

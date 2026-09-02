@@ -18,6 +18,7 @@ var ErrColumnMissing = errors.New("column not found in chunk")
 // Reader reads columns from a sealed chunk file.
 type Reader struct {
 	f          *os.File
+	size       int64
 	EntryCount int
 	Version    int
 	lenFormat  enc.LenFormat
@@ -95,6 +96,7 @@ func OpenReader(path string) (*Reader, error) {
 
 	return &Reader{
 		f:          f,
+		size:       fi.Size(),
 		EntryCount: entryCount,
 		Version:    version,
 		lenFormat:  readerLenFormat(version),
@@ -138,9 +140,11 @@ func (r *Reader) readColumnRaw(name string) ([]byte, ColumnType, error) {
 		return nil, 0, fmt.Errorf("%w: %q", ErrColumnMissing, name)
 	}
 
-	// Guard against a corrupt directory entry claiming an absurd size.
-	if fi, err := r.f.Stat(); err == nil && int64(entry.CompressedSize) > fi.Size() {
-		return nil, 0, fmt.Errorf("corrupt chunk: column %q size %d exceeds file size %d", name, entry.CompressedSize, fi.Size())
+	// Guard against a corrupt directory entry claiming an absurd size. The size
+	// is the one taken at open: a sealed chunk is immutable, and re-stat'ing per
+	// column cost a syscall on every column of every scan.
+	if int64(entry.CompressedSize) > r.size {
+		return nil, 0, fmt.Errorf("corrupt chunk: column %q size %d exceeds file size %d", name, entry.CompressedSize, r.size)
 	}
 	data := make([]byte, entry.CompressedSize)
 	if _, err := r.f.ReadAt(data, int64(entry.Offset)); err != nil {
